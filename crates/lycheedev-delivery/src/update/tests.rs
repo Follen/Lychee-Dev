@@ -82,21 +82,8 @@ fn remembered_removed_skill_is_not_reinstalled_but_explicit_target_is() {
     let f = Fixture::new();
     let targets = f.targets();
     managed(&f.old, VERSION, &f.state, &targets, false).unwrap();
-    let inv = Invocation {
-        command: "skill remove".into(),
-        positional: None,
-        flags: std::collections::BTreeMap::from([
-            ("--path".into(), f.target.to_string_lossy().into_owned()),
-            (
-                "--output".into(),
-                f.root.join("removed").to_string_lossy().into_owned(),
-            ),
-        ]),
-        home: f.root.join("home"),
-        cwd: f.root.clone(),
-        control: OperationControl::default(),
-    };
-    crate::dispatch(&inv).unwrap();
+    let ctx = RequestContext { home: f.root.join("home"), cwd: f.root.clone(), control: OperationControl::default() };
+    crate::dispatch(&ctx, &crate::Request::SkillRemove { path: f.target.clone(), archive: f.root.join("removed") }).unwrap();
     assert!(!f.target.exists());
     let control = OperationControl::default();
     let remembered = read_targets(&f.state, &control).unwrap();

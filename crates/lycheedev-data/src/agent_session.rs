@@ -6,7 +6,6 @@ mod domain;
 mod navigation;
 #[path = "agent_tasks.rs"]
 pub mod tasks;
-mod transport;
 
 use crate::{
     engine::{
@@ -16,22 +15,15 @@ use crate::{
     fault,
 };
 use handles::Handles;
-use lycheedev_core::{Invocation, Result, control::OperationControl};
+use crate::request::{DataContext, SessionConfig};
+use lycheedev_core::{Result, control::OperationControl};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use transport::serve_stdio_observed;
-#[derive(Clone, Copy)]
-pub enum ReceiptEvent {
-    Ready,
-    Completed(u64),
-}
-pub type ReceiptObserver = std::sync::Arc<dyn Fn(ReceiptEvent) -> Result<()> + Send + Sync>;
 pub const PROTOCOL: &str = "lycheedev.data-agent.v1";
 const MAX_HANDLES: usize = 32;
 const MAX_HANDLE_BYTES: usize = 512 << 20;
-const HANDLE_TTL: Duration = Duration::from_secs(300);
 const MAX_PAGE_ROWS: usize = 1000;
 
 #[derive(Debug, Deserialize)]
@@ -222,21 +214,14 @@ pub struct Session {
     handles: Handles<ResultOwner>,
 }
 impl Session {
-    pub fn new(invocation: Invocation) -> Result<Self> {
+    pub fn new(context: DataContext, config: SessionConfig) -> Result<Self> {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| fault("data.session.clock", 3, "System clock precedes the epoch"))?
             .as_nanos();
         let epoch = format!("{}-{stamp:x}", std::process::id());
-        let max_handles = invocation.usize_flag("--max-objects", MAX_HANDLES, 1, 1024)?;
-        let max_bytes =
-            invocation.usize_flag("--max-bytes", MAX_HANDLE_BYTES, 1 << 20, 2usize << 30)?;
-        let ttl = invocation.usize_flag(
-            "--result-ttl-seconds",
-            HANDLE_TTL.as_secs() as usize,
-            1,
-            3600,
-        )?;
+        let max_handles = config.max_handles;
+        let max_bytes = config.retained_bytes;
         let limits = EngineLimits {
             session_retained_bytes: max_bytes,
             operator_bytes: (max_bytes / 4).min(128 << 20),
@@ -245,12 +230,12 @@ impl Session {
             ..EngineLimits::default()
         };
         Ok(Self {
-            engine: Engine::new(invocation, limits)?,
+            engine: Engine::new(context, limits)?,
             handles: Handles::new(
                 epoch,
                 max_handles,
                 max_bytes,
-                Duration::from_secs(ttl as u64),
+                Duration::from_secs(config.result_ttl_seconds),
             )?,
         })
     }

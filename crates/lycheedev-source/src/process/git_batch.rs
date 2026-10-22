@@ -134,7 +134,7 @@ impl GitBatchProcess {
                 // that boundary without exhausting real system thread limits.
                 drop(work);
                 return Err(map_process_error(ToolkitError::new(
-                    "luals.unavailable",
+                    "source.process_unavailable",
                     "fixture duplex worker could not start",
                     3,
                 )));
@@ -502,10 +502,10 @@ fn io_failed(error: std::io::Error) -> ToolkitError {
 
 fn map_process_error(mut error: ToolkitError) -> ToolkitError {
     error.code = match error.code.as_str() {
-        "luals.unavailable" => "codebase.source_not_ready",
-        "luals.input_budget" => "codebase.source_budget",
+        "source.process_unavailable" => "codebase.source_not_ready",
+        "source.process_input_budget" => "codebase.source_budget",
         "process.cancelled" => "command.cancelled",
-        "luals.check_failed" | "external.io" => "codebase.git_failed",
+        "source.process_check_failed" | "external.io" => "codebase.git_failed",
         _ => return error,
     }
     .into();

@@ -1,37 +1,59 @@
 //! Bounded original-source snippets. Structural candidate sites are not runtime binding proof.
-use crate::{SourceTools, index, relations};
-use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, evidence, selection, storage};
+use crate::{
+    SourceTools, index, relations,
+    request::{ContextRequest, ResearchMode, ResearchSelection, SourceContext},
+};
+use lycheedev_core::{Outcome, Result, ToolkitError, evidence, selection, storage};
 use serde_json::json;
-use std::{borrow::Cow, collections::{BTreeMap, BTreeSet}, sync::Arc};
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    dispatch_with_tools(inv, SourceTools::default())
-}
-pub fn dispatch_with_tools(inv: &Invocation, tools: SourceTools<'_>) -> Result<Outcome> {
-    dispatch_with_services(inv, tools, None)
-}
-pub fn dispatch_with_services(
-    inv: &Invocation,
-    tools: SourceTools<'_>,
-    broker: Option<&crate::session::BrokerIdentity>,
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
+pub fn dispatch(
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
+    request: &ContextRequest,
+    mode: ResearchMode,
 ) -> Result<Outcome> {
-    let reading = evaluate(inv, &tools, broker, None, None, &mut BTreeMap::new())?;
+    dispatch_with_tools(ctx, selection, request, mode, SourceTools::default())
+}
+pub fn dispatch_with_tools(
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
+    request: &ContextRequest,
+    mode: ResearchMode,
+    tools: SourceTools<'_>,
+) -> Result<Outcome> {
+    let reading = evaluate(
+        ctx,
+        selection,
+        request,
+        mode,
+        &tools,
+        None,
+        None,
+        &mut BTreeMap::new(),
+    )?;
     let source = reading.pin.source.as_ref().expect("resolved source");
     let complete = reading.data["complete"] == true;
     let bytes = crate::research_material::measured("source.context.serialize_capture", || {
         Ok(serde_json::to_vec(&reading.data)?)
     })?;
-    let capture = crate::research_material::measured("source.context.commit_capture", || evidence::commit_capture_bounded(
-        &inv.home,
-        lycheedev_core::evidence::CaptureInput {
-            bytes: &bytes,
-            maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
-            media_type: "application/json",
-            provenance: json!({"kind":"source-context","locator":inv.flag("--symbol-id").or(inv.flag("--symbol")).unwrap(),"snapshot":reading.pin.id,"sourceCommit":source.exact_commit}),
-            complete: complete,
-            truncated: reading.data["truncated"] == true,
-        },
-        &inv.control,
-    ))?;
+    let capture = crate::research_material::measured("source.context.commit_capture", || {
+        evidence::commit_capture_bounded(
+            &ctx.home,
+            lycheedev_core::evidence::CaptureInput {
+                bytes: &bytes,
+                maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                media_type: "application/json",
+                provenance: json!({"kind":"source-context","locator":request.selector.value(),"snapshot":reading.pin.id,"sourceCommit":source.exact_commit}),
+                complete: complete,
+                truncated: reading.data["truncated"] == true,
+            },
+            &ctx.control,
+        )
+    })?;
     drop(bytes);
     let mut result = Outcome::new(reading.data);
     result.complete = complete;
@@ -42,51 +64,41 @@ pub fn dispatch_with_services(
 }
 /// Capture-free evaluator used by a batch's single evidence transaction.
 pub(crate) fn evaluate(
-    inv: &Invocation,
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
+    request: &ContextRequest,
+    mode: ResearchMode,
     tools: &SourceTools<'_>,
-    broker: Option<&crate::session::BrokerIdentity>,
     prepared: Option<&relations::PreparedResearch>,
     native_response: Option<serde_json::Value>,
     documents: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<relations::Reading> {
-    let limit = inv.usize_flag("--limit", 50, 1, 200)?;
-    let max_lines = inv
-        .usize_flag("--max-lines", 120, 1, 2000)
-        .map_err(|_| ToolkitError::arguments("--max-lines must be between 1 and 2000"))?;
-    let max_bytes = inv
-        .usize_flag("--max-bytes", 16 << 10, 1, 1 << 20)
-        .map_err(|_| {
-            ToolkitError::arguments("source context --max-bytes must be between 1 and 1048576")
-        })?;
-    let depth = inv
-        .usize_flag("--depth", 1, 0, 4)
-        .map_err(|_| ToolkitError::arguments("--depth must be between 0 and 4"))?;
-    let pin = match prepared { Some(shared) => shared.pin.clone(), None => relations::resolve_research_pin(inv)? };
-    let source = pin.source.as_ref().ok_or_else(|| {
-        ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
-    })?;
-    let hash = cursor_key(inv, tools, source, limit, max_bytes, max_lines, depth);
+    let limit = request.limit;
+    let max_lines = request.max_lines;
+    let max_bytes = request.max_bytes;
+    let depth = request.depth;
+    let source = selection.source()?;
+    let hash = cursor_key(request, mode, tools, selection, source);
     let key = &hash[..16];
-    let cursor = Cursor::decode(inv.flag("--cursor").unwrap_or(""), key)?;
-    let mut related_inv = inv.clone();
-    related_inv.flags.remove("--cursor");
-    related_inv
-        .flags
-        .insert("--direction".into(), "both".into());
-    if !cursor.relation.is_empty() {
-        related_inv
-            .flags
-            .insert("--cursor".into(), cursor.relation.clone());
-    }
-    let mut reading = if inv.flag_bool("--flow") {
-        related_inv.flags.remove("--flow");related_inv.flags.remove("--release");related_inv.flags.remove("--session-reuse");
-        related_inv.flags.insert("--static-only".into(),"true".into());
-        if let Some(shared) = prepared {
-            relations::with_prepared(&related_inv, tools, shared, None)?
-        } else { relations::with_selected_pin(&related_inv, tools, None, pin)? }
-    } else if let Some(shared) = prepared {
-        relations::with_prepared(&related_inv, tools, shared, native_response)?
-    } else {relations::with_selected_pin(&related_inv, tools, broker, pin)?};
+    let cursor = Cursor::decode(&request.cursor, key)?;
+    let relation = request.relations(cursor.relation.clone());
+    let relation_mode = if request.flow {
+        ResearchMode::Static
+    } else {
+        mode
+    };
+    let mut reading = if let Some(shared) = prepared {
+        relations::with_prepared(
+            ctx,
+            &relation,
+            relation_mode,
+            tools,
+            shared,
+            native_response,
+        )?
+    } else {
+        relations::with_tools(ctx, selection, &relation, relation_mode, tools)?
+    };
     let source = reading.pin.source.as_ref().unwrap();
     let relation_next = reading.data["nextCursor"].as_str().unwrap_or("").to_owned();
     reading.data.as_object_mut().unwrap().remove("nextCursor");
@@ -188,7 +200,7 @@ pub(crate) fn evaluate(
         for level in 2..=depth {
             let mut next = BTreeSet::new();
             for symbol in &reading.index.symbols {
-                inv.control.check()?;
+                ctx.control.check()?;
                 if symbol.kind != "relationship"
                     || !(frontier.contains(&symbol.name) || frontier.contains(&symbol.target))
                 {
@@ -237,83 +249,94 @@ pub(crate) fn evaluate(
     // within the context request; the batch's existing map owns warm reads.
     let mut borrowed_documents = BTreeMap::<&str, &[u8]>::new();
     let snippets_result = crate::research_material::measured("source.context.snippets", || {
-    for (i, (path, first, last, basis)) in sites.iter().enumerate().skip(cursor.site) {
-        inv.control.check()?;
-        let start = if i == cursor.site && cursor.line > 0 {
-            cursor.line
-        } else {
-            *first
-        };
-        let start_byte = if i == cursor.site { cursor.byte } else { 0 };
-        if snippets.len() == limit || lines == max_lines {
-            truncated = true;
-            next_cursor = Some(
-                Cursor {
-                    relation: cursor.relation.clone(),
-                    site: i,
-                    line: start,
-                    byte: start_byte,
-                }
-                .encode(key),
-            );
-            break;
-        }
-        if !documents.contains_key(path) && !borrowed_documents.contains_key(path.as_str()) {
-            let document = reading.index.documents.iter().find(|document| document.path == *path)
-                .expect("site admitted from shared immutable index");
-            match originals.read(document, &inv.control)? {
-                Cow::Borrowed(raw) => { borrowed_documents.insert(&document.path, raw); }
-                Cow::Owned(raw) => { documents.insert(path.clone(), raw); }
-            }
-        }
-        let raw = borrowed_documents.get(path.as_str()).copied().unwrap_or_else(|| documents[path].as_slice());
-        let excerpt = context_excerpt(
-            raw,
-            start,
-            *last,
-            start_byte,
-            max_bytes - bytes,
-            max_lines - lines,
-        )?;
-        if excerpt.text.is_empty() {
-            continue;
-        }
-        bytes += excerpt.text.len();
-        lines += excerpt.last - start + 1;
-        snippets.push(json!({"path":path,"firstLine":start,"lastLine":excerpt.last,"contentHash":storage::sha256(&raw),"text":excerpt.text,"basis":basis}));
-        if !excerpt.done {
-            truncated = true;
-            next_cursor = Some(
-                Cursor {
-                    relation: cursor.relation.clone(),
-                    site: i,
-                    line: excerpt.next_line,
-                    byte: excerpt.next_byte,
-                }
-                .encode(key),
-            );
-            break;
-        }
-        if lines == max_lines || bytes >= max_bytes {
-            if i + 1 < sites.len() {
+        for (i, (path, first, last, basis)) in sites.iter().enumerate().skip(cursor.site) {
+            ctx.control.check()?;
+            let start = if i == cursor.site && cursor.line > 0 {
+                cursor.line
+            } else {
+                *first
+            };
+            let start_byte = if i == cursor.site { cursor.byte } else { 0 };
+            if snippets.len() == limit || lines == max_lines {
                 truncated = true;
                 next_cursor = Some(
                     Cursor {
                         relation: cursor.relation.clone(),
-                        site: i + 1,
-                        line: 0,
-                        byte: 0,
+                        site: i,
+                        line: start,
+                        byte: start_byte,
                     }
                     .encode(key),
                 );
+                break;
             }
-            break;
+            if !documents.contains_key(path) && !borrowed_documents.contains_key(path.as_str()) {
+                let document = reading
+                    .index
+                    .documents
+                    .iter()
+                    .find(|document| document.path == *path)
+                    .expect("site admitted from shared immutable index");
+                match originals.read(document, &ctx.control)? {
+                    Cow::Borrowed(raw) => {
+                        borrowed_documents.insert(&document.path, raw);
+                    }
+                    Cow::Owned(raw) => {
+                        documents.insert(path.clone(), raw);
+                    }
+                }
+            }
+            let raw = borrowed_documents
+                .get(path.as_str())
+                .copied()
+                .unwrap_or_else(|| documents[path].as_slice());
+            let excerpt = context_excerpt(
+                raw,
+                start,
+                *last,
+                start_byte,
+                max_bytes - bytes,
+                max_lines - lines,
+            )?;
+            if excerpt.text.is_empty() {
+                continue;
+            }
+            bytes += excerpt.text.len();
+            lines += excerpt.last - start + 1;
+            snippets.push(json!({"path":path,"firstLine":start,"lastLine":excerpt.last,"contentHash":storage::sha256(&raw),"text":excerpt.text,"basis":basis}));
+            if !excerpt.done {
+                truncated = true;
+                next_cursor = Some(
+                    Cursor {
+                        relation: cursor.relation.clone(),
+                        site: i,
+                        line: excerpt.next_line,
+                        byte: excerpt.next_byte,
+                    }
+                    .encode(key),
+                );
+                break;
+            }
+            if lines == max_lines || bytes >= max_bytes {
+                if i + 1 < sites.len() {
+                    truncated = true;
+                    next_cursor = Some(
+                        Cursor {
+                            relation: cursor.relation.clone(),
+                            site: i + 1,
+                            line: 0,
+                            byte: 0,
+                        }
+                        .encode(key),
+                    );
+                }
+                break;
+            }
         }
-    }
-    Ok(())
+        Ok(())
     });
     drop(borrowed_documents);
-    originals.finish(snippets_result, &inv.control)?;
+    originals.finish(snippets_result, &ctx.control)?;
     if next_cursor.is_none() && !relation_next.is_empty() {
         next_cursor = Some(
             Cursor {
@@ -330,14 +353,14 @@ pub(crate) fn evaluate(
     }
     reading.data["snippets"] = json!(snippets);
     let mut load_evidence = Vec::new();
-    let load_facts=crate::research_material::measured("source.context.load_facts", || {
+    let load_facts = crate::research_material::measured("source.context.load_facts", || {
         match reading.load_facts.take() {
-            Some(facts)=>Ok(facts),
-            None=>index::load_facts_with_control(&inv.home, source, &reading.index, &inv.control).map(Arc::new),
+            Some(facts) => Ok(facts),
+            None => index::load_facts_with_control(&ctx.home, source, &reading.index, &ctx.control)
+                .map(Arc::new),
         }
     })?;
     if let Some(target) = reading.data["symbol"]["path"].as_str() {
-        let limit = inv.usize_flag("--limit", 50, 1, 200)?;
         for fact in load_facts.iter() {
             if resolve_load(&fact.path, &fact.target).as_deref() != Some(target) {
                 continue;
@@ -350,20 +373,30 @@ pub(crate) fn evaluate(
         }
     }
     reading.data["loadEvidence"] = json!(load_evidence);
-    if inv.flag_bool("--flow") {
-        #[cfg(feature="emmy-prototype")]
+    if request.flow {
         {
-            if let Some(reason) = prepared.and_then(|shared| shared.native_unavailable.as_ref()).filter(|_| tools.luac.is_none()) {
+            if let Some(reason) = prepared
+                .and_then(|shared| shared.native_unavailable.as_ref())
+                .filter(|_| tools.luac.is_none())
+            {
                 reading.data["flow"] = json!({"rules_version":crate::native::FLOW_RULES,"findings":{"rows":[],"has_more":false},"guarded":[],
                     "gaps":[{"code":"flow.compiler_unavailable","detail":reason}],"complete":false,"input_complete":false,"analysis_complete":false,"output_complete":true,"truncated":false});
                 reading.data["coverage"]["flow"] = json!("unavailable");
-            } else { reading.data["flow"]=crate::flow::public::context_flow(inv,&reading,tools,&load_facts)?; }
+            } else {
+                reading.data["flow"] = crate::flow::public::context_flow(
+                    ctx,
+                    &reading,
+                    tools,
+                    &load_facts,
+                    mode.reuses_session(),
+                )?;
+            }
         }
-        #[cfg(not(feature="emmy-prototype"))]
-        {return Err(ToolkitError::new("flow.unavailable","this build does not contain the native Source engine",3));}
     }
     reading.data["truncated"] = json!(truncated);
-    let complete = reading.data["complete"] == true && !truncated && (!inv.flag_bool("--flow")||reading.data["flow"]["complete"]==true);
+    let complete = reading.data["complete"] == true
+        && !truncated
+        && (!request.flow || reading.data["flow"]["complete"] == true);
     reading.data["complete"] = json!(complete);
     if truncated {
         reading.data["coverage"]["state"] = json!("partial");
@@ -380,40 +413,85 @@ pub(crate) fn evaluate(
     Ok(reading)
 }
 
-fn cursor_key(inv: &Invocation, tools: &SourceTools<'_>, source: &selection::SourcePin, limit: usize, max_bytes: usize, max_lines: usize, depth: usize) -> String {
-    let mode = if tools.luac.is_some()&&!inv.flag_bool("--static-only"){crate::native_research::RESEARCH_RULES}else{"static"};
+fn cursor_key(
+    request: &ContextRequest,
+    mode: ResearchMode,
+    tools: &SourceTools<'_>,
+    selection: &ResearchSelection,
+    source: &selection::SourcePin,
+) -> String {
+    let mode = if tools.luac.is_some() && mode.uses_native() {
+        crate::native_research::RESEARCH_RULES
+    } else {
+        "static"
+    };
+    let ContextRequest {
+        limit,
+        max_bytes,
+        max_lines,
+        depth,
+        ..
+    } = request;
     let identity = format!(
         "{}\0{}\0{}\0{}\0{}\0{limit}\0{max_bytes}\0{max_lines}\0{depth}\0{}\0{}\0{mode}",
         source.repository,
         source.product,
         source.exact_commit,
-        inv.flag("--symbol-id").unwrap_or(""),
-        inv.flag("--symbol").unwrap_or(""),
-        inv.flag("--environment").unwrap_or(""),
-        inv.flag_bool("--flow")
+        request.selector.id().unwrap_or(""),
+        request.selector.name().unwrap_or(""),
+        selection
+            .environment
+            .as_ref()
+            .map(|pin| pin.id.as_str())
+            .unwrap_or(""),
+        request.flow
     );
     storage::sha256(identity.as_bytes())
 }
-pub(crate) fn validate_prepared_cursor(inv: &Invocation, tools: &SourceTools<'_>, prepared: &relations::PreparedResearch) -> Result<()> {
-    let key = cursor_key(inv, tools, prepared.pin.source.as_ref().expect("prepared source pin"),
-        inv.usize_flag("--limit",50,1,200)?, inv.usize_flag("--max-bytes",16<<10,1,1<<20)?,
-        inv.usize_flag("--max-lines",120,1,2000)?, inv.usize_flag("--depth",1,0,4)?);
-    let cursor = Cursor::decode(inv.flag("--cursor").unwrap_or(""), &key[..16])?;
-    let mut relation = inv.clone(); relation.flags.remove("--cursor"); relation.flags.remove("--flow");
-    relation.flags.insert("--direction".into(),"both".into());
-    if inv.flag_bool("--flow") { relation.flags.insert("--static-only".into(),"true".into()); }
-    if !cursor.relation.is_empty() { relation.flags.insert("--cursor".into(),cursor.relation); }
-    relations::validate_prepared_cursor(&relation,tools,prepared)
+pub(crate) fn validate_prepared_cursor(
+    request: &ContextRequest,
+    mode: ResearchMode,
+    tools: &SourceTools<'_>,
+    prepared: &relations::PreparedResearch,
+) -> Result<()> {
+    let key = cursor_key(
+        request,
+        mode,
+        tools,
+        &prepared.selection,
+        prepared.selection.source()?,
+    );
+    let cursor = Cursor::decode(&request.cursor, &key[..16])?;
+    let relation = request.relations(cursor.relation);
+    let relation_mode = if request.flow {
+        ResearchMode::Static
+    } else {
+        mode
+    };
+    relations::validate_prepared_cursor(&relation, relation_mode, tools, prepared)
 }
 pub(crate) fn validate_cursor_shape(raw: &str) -> Result<()> {
-    if raw.is_empty() { return Ok(()); }
+    if raw.is_empty() {
+        return Ok(());
+    }
     let key = raw.split(':').next().ok_or_else(invalid_cursor)?;
-    if key.len() != 16 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) { return Err(invalid_cursor()); }
+    if key.len() != 16 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(invalid_cursor());
+    }
     let cursor = Cursor::decode(raw, key)?;
     if !cursor.relation.is_empty() {
-        let Some((key, offset)) = cursor.relation.split_once(':') else { return Err(invalid_cursor()); };
-        if key.len() != 16 || !key.bytes().all(|byte| byte.is_ascii_hexdigit())
-            || offset.parse::<usize>().ok().is_none_or(|value| value > 10000) { return Err(invalid_cursor()); }
+        let Some((key, offset)) = cursor.relation.split_once(':') else {
+            return Err(invalid_cursor());
+        };
+        if key.len() != 16
+            || !key.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || offset
+                .parse::<usize>()
+                .ok()
+                .is_none_or(|value| value > 10000)
+        {
+            return Err(invalid_cursor());
+        }
     }
     Ok(())
 }
@@ -518,9 +596,10 @@ fn context_excerpt(
     max_bytes: usize,
     max_lines: usize,
 ) -> Result<Excerpt> {
-    let text = std::str::from_utf8(raw)
-        .map_err(|_| ToolkitError::invalid("source context is not UTF-8"))?
-        .replace("\r\n", "\n");
+    // The cursor's byte offsets address this same display view. Invalid bytes
+    // become U+FFFD, so query/inspect/context show the identical line text; the
+    // archived bytes and their hash are untouched.
+    let text = crate::encoding::display(raw).replace("\r\n", "\n");
     let rows = text.split('\n').collect::<Vec<_>>();
     if first == 0 {
         return Err(invalid_cursor());
@@ -592,4 +671,34 @@ fn resolve_load(path: &str, target: &str) -> Option<String> {
         }
     }
     Some(parts.join("/"))
+}
+
+#[cfg(test)]
+mod context_encoding_tests {
+    use super::*;
+    #[test]
+    fn context_display_uses_fffd_and_keeps_crlf_line_positions() {
+        let raw = b"-- Night Web\x92s Hollow\r\nnext line\r\n";
+        let excerpt = context_excerpt(raw, 1, 2, 0, 4096, 10).unwrap();
+        assert_eq!(
+            excerpt.text,
+            "1: -- Night Web\u{fffd}s Hollow\n2: next line"
+        );
+        assert_eq!(excerpt.last, 2);
+        assert!(excerpt.done);
+        // Cursor bytes address the same display view; a continuation never
+        // needs the original invalid byte to be a char boundary.
+        let partial = context_excerpt(raw, 1, 2, 0, 20, 10).unwrap();
+        assert_eq!(partial.text, "1: -- Night Web\u{fffd}s ");
+        assert_eq!(partial.next_line, 1);
+        assert_eq!(partial.next_byte, 20);
+    }
+    #[test]
+    fn context_cursor_byte_is_stable_across_calls() {
+        let raw = b"-- a\x92b\r\nline two";
+        let first = context_excerpt(raw, 1, 2, 0, 8, 10).unwrap();
+        let second = context_excerpt(raw, 1, 2, 0, usize::MAX, 10).unwrap();
+        assert!(second.text.starts_with(&first.text));
+        assert!(second.text.contains('\u{fffd}'));
+    }
 }

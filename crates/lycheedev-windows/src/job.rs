@@ -7,7 +7,7 @@ pub struct JobGuard {
     handle: HANDLE,
 }
 /// Opt-in broker aggregate committed-memory ceiling, inherited by descendants.
-/// Source must join Git/LuaLS workers before disarm; this is not an RSS claim.
+/// Source must join its Git and Lua child workers before disarm; this is not an RSS claim.
 pub struct BrokerJob {
     handle: HANDLE,
     limit: usize,

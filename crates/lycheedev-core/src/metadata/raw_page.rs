@@ -4,7 +4,7 @@ use super::*;
 use crate::control::OperationControl;
 use std::{cell::RefCell, time::Duration};
 impl Metadata {
-    pub(crate) fn require_historical_schema_with_check(
+    pub(crate) fn require_current_schema_with_check(
         &self,
         control: &OperationControl,
         mut check: impl FnMut() -> Result<()>,
@@ -27,7 +27,7 @@ impl Metadata {
                     ))
                 }
             });
-        let result = historical_write::finish_historical(
+        let result = owned_write::finish_owned(
             result,
             self.connection
                 .busy_timeout(Duration::from_secs(5))
@@ -216,12 +216,12 @@ fn visit_owned_raw_page(
             },
         )
         .and_then(|result| result);
-        historical_write::finish_historical(
+        owned_write::finish_owned(
             result,
             statement.finalize().map_err(ToolkitError::from),
         )
     })();
-    let result = historical_write::finish_historical(
+    let result = owned_write::finish_owned(
         result,
         connection
             .busy_timeout(restore_timeout)

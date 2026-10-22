@@ -5,7 +5,6 @@ import {join, resolve, dirname, delimiter} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {homedir} from 'node:os';
 import {stageLuac} from './luac.mjs';
-import {stageLuaLS} from './luals.mjs';
 import {buildRust, verifyArtifact, sourceDigest} from './rust-build.mjs';
 import {beginScratch, contained} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
@@ -17,20 +16,40 @@ export function parsePackageOptions(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { positional.push(arg); continue; }
-    if (!['--artifact', '--profile', '--home', '--pin', '--luals-archive', '--assembly-only'].includes(arg)) throw new Error(`candidate.unknown_option: ${arg}`);
+    if (!['--artifact', '--profile', '--home', '--pin', '--assembly-only', '--dependency-closure'].includes(arg)) throw new Error(`candidate.unknown_option: ${arg}`);
     if (seen.has(arg)) throw new Error(`candidate.duplicate_option: ${arg}`);
     seen.add(arg);
     if (arg === '--assembly-only') values[arg] = true;
     else { const value = argv[++i]; if (!value || value.startsWith('--')) throw new Error(`candidate.option_value_missing: ${arg}`); values[arg] = value; }
   }
-  if (!positional[0] || !positional[1] || positional.length > 5) throw new Error('usage: node tools/rust-package-smoke.mjs <new-directory> <verified-luac-build> [fixed-home fixed-pin [verified-LuaLS-zip]] [--artifact <artifact.json>] [--profile debug|release] [--assembly-only]');
-  for (const [index, flag] of [[2, '--home'], [3, '--pin'], [4, '--luals-archive']]) if (positional[index] && values[flag]) throw new Error(`candidate.duplicate_option: ${flag}`);
+  if (!positional[0] || !positional[1] || positional.length > 4) throw new Error('usage: node tools/rust-package-smoke.mjs <new-directory> <verified-luac-build> [fixed-home fixed-pin] [--artifact <artifact.json>] [--profile debug|release] [--assembly-only] [--dependency-closure <directory>]');
+  for (const [index, flag] of [[2, '--home'], [3, '--pin']]) if (positional[index] && values[flag]) throw new Error(`candidate.duplicate_option: ${flag}`);
   const homeArg = positional[2] ?? values['--home'], pinArg = positional[3] ?? values['--pin'];
   if (Boolean(homeArg) !== Boolean(pinArg)) throw new Error('candidate.home_pin_pair_required');
   const profile = values['--profile'] ?? 'debug';
   if (!['debug', 'release'].includes(profile)) throw new Error('candidate.invalid_profile');
   if (values['--assembly-only'] && homeArg) throw new Error('candidate.assembly_only_does_not_validate');
-  return {outArg: positional[0], luacArg: positional[1], homeArg, pinArg, lualsArg: positional[4] ?? values['--luals-archive'], artifactPath: values['--artifact'], profile, assemblyOnly: values['--assembly-only'] === true};
+  return {outArg: positional[0], luacArg: positional[1], homeArg, pinArg, artifactPath: values['--artifact'], dependencyClosurePath: values['--dependency-closure'], profile, assemblyOnly: values['--assembly-only'] === true};
+}
+
+// Explicit CI inputs contain all license text; never consult Cargo or its cache.
+// The build manifest authenticates file hashes before CI supplies this directory.
+export function prepareDependencyClosure(root, output, inputDirectory, generate) {
+  let source;
+  if (inputDirectory) source = resolve(root, inputDirectory);
+  else { generate(output); source = output; }
+  const bytes = readFileSync(join(source, 'dependency-closure.json'));
+  const notices = readFileSync(join(source, 'THIRD_PARTY_NOTICES'));
+  const closure = JSON.parse(bytes);
+  if (closure.schema !== 'lycheedev.rust-dependencies.v1') throw new Error('candidate.dependency_closure_schema');
+  if (closure.target !== 'x86_64-pc-windows-msvc') throw new Error('candidate.dependency_closure_target');
+  if (closure.cargoLockSHA256 !== hash(readFileSync(join(root, 'Cargo.lock')))) throw new Error('candidate.stale_dependency_closure');
+  if (inputDirectory) {
+    mkdirSync(output);
+    writeFileSync(join(output, 'dependency-closure.json'), bytes);
+    writeFileSync(join(output, 'THIRD_PARTY_NOTICES'), notices);
+  }
+  return closure;
 }
 
 export function assertArtifactSource(artifact, currentSourceDigest, profile) {
@@ -61,7 +80,7 @@ export function packageSmokeEnvironment(scratch, parent = process.env) {
 }
 
 export async function packageSmoke(argv, root = process.cwd()) {
-  const {outArg, luacArg, homeArg, pinArg, lualsArg, artifactPath, profile, assemblyOnly} = parsePackageOptions(argv);
+  const {outArg, luacArg, homeArg, pinArg, artifactPath, dependencyClosurePath, profile, assemblyOnly} = parsePackageOptions(argv);
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('candidate.windows_amd64_required');
   root = resolve(root);
   const out = contained(root, resolve(outArg)), luacRoot = resolve(luacArg);
@@ -86,7 +105,7 @@ export async function packageSmoke(argv, root = process.cwd()) {
     // Explicit sealed artifacts are reusable only against their exact current
     // build inputs. Never relabel a historical EXE with today's tree/luac pin.
     const recordPath = artifactPath ? resolve(artifactPath) : join(out, 'native-artifact/artifact.json');
-    const artifact = artifactPath ? verifyArtifact(root, recordPath) : buildRust(root, join(out, 'native-artifact'), {profile: profile === 'debug' ? 'dev' : 'release', oneShot: true, owner: 'rust-package-smoke'});
+    const artifact = artifactPath ? verifyArtifact(root, recordPath) : buildRust(root, join(out, 'native-artifact'), {profile: profile === 'debug' ? 'dev' : 'release', oneShot: false, isolateUser: true, owner: 'rust-package-smoke'});
     const currentSourceDigest = sourceDigest(root);
     assertArtifactSource(artifact, currentSourceDigest, profile);
     const artifactRecordSHA256 = hash(readFileSync(recordPath));
@@ -96,11 +115,10 @@ export async function packageSmoke(argv, root = process.cwd()) {
     writeJson(join(pkgRoot, 'package.json'), pkg);
     for (const name of ['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES']) copyFileSync(join(root, 'packages/npm/lycheedev', name), join(pkgRoot, name));
     const closureRoot = join(out, 'license-closure');
-    run(process.execPath, [join(root, 'tools/rust-dependencies.mjs'), closureRoot]);
-    const closure = JSON.parse(readFileSync(join(closureRoot, 'dependency-closure.json')));
-    if (closure.cargoLockSHA256 !== hash(readFileSync(join(root, 'Cargo.lock')))) throw new Error('candidate.stale_dependency_closure');
+    prepareDependencyClosure(root, closureRoot, dependencyClosurePath,
+      directory => run(process.execPath, [join(root, 'tools/rust-dependencies.mjs'), directory]));
     writeFileSync(join(pkgRoot, 'THIRD_PARTY_NOTICES'), readFileSync(join(pkgRoot, 'THIRD_PARTY_NOTICES'), 'utf8') + '\n\nRust dependency closure\n\n' + readFileSync(join(closureRoot, 'THIRD_PARTY_NOTICES'), 'utf8') + '\n\nLua 5.1.5 compiler/runtime\n\n' + readFileSync(join(luacRoot, 'LICENSE'), 'utf8'));
-    mkdirSync(join(pkgRoot, 'bin')); copyFileSync(join(root, 'packages/npm/lycheedev/bin/lycheedev-rust.mjs'), join(pkgRoot, 'bin/lycheedev.mjs'));
+    mkdirSync(join(pkgRoot, 'bin')); copyFileSync(join(root, 'packages/npm/lycheedev/bin/lycheedev.mjs'), join(pkgRoot, 'bin/lycheedev.mjs'));
     const resources = [];
     function copyTree(source, prefix) {
       for (const entry of readdirSync(source, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -115,11 +133,6 @@ export async function packageSmoke(argv, root = process.cwd()) {
       }
     }
     copyTree(join(root, 'addon'), 'addon'); copyTree(join(root, 'skills/lycheedev'), 'skill'); stageLuac(pkgRoot, resources, luacRoot);
-    if (lualsArg) {
-      await stageLuaLS(pkgRoot, resources, {archivePath: resolve(lualsArg)});
-      const licenses = resources.filter(resource => resource.path.startsWith('tool/luals/') && /(^|\/)(license|copying|notice)([-_.]|$)/i.test(resource.path));
-      writeFileSync(join(pkgRoot, 'THIRD_PARTY_NOTICES'), readFileSync(join(pkgRoot, 'THIRD_PARTY_NOTICES'), 'utf8') + '\n\nPinned legacy LuaLS runtime\n\n' + licenses.map(resource => `${resource.path}\n${readFileSync(join(pkgRoot, 'payload', resource.path), 'utf8')}`).join('\n\n'));
-    }
     resources.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
     const binary = readFileSync(artifact.sourceBinary);
     if (hash(binary) !== artifact.binarySHA256) throw new Error('candidate.artifact_changed');
@@ -134,8 +147,8 @@ export async function packageSmoke(argv, root = process.cwd()) {
       commit, workspaceDirty, sourceTreeSHA256: currentSourceDigest, artifactRecordSHA256, binarySHA256: artifact.binarySHA256,
       releaseManifestSHA256: hash(readFileSync(join(pkgRoot, 'release.json'))), resourceInventorySHA256: hash(Buffer.from(JSON.stringify(resources))),
       compilerSHA256: hash(readFileSync(join(pkgRoot, 'payload/tool/luac/luac.exe'))), licenseClosureSHA256: hash(readFileSync(join(closureRoot, 'dependency-closure.json'))),
-      npmSmoke: 'not_run', validation: {state: 'not_run'}, semanticRuntime: {engine: 'native-common-source', luac: 'pinned_inventory', legacyLuaLS: lualsArg ? 'included' : 'not_included', publicValidation: 'not_run'},
-      limitations: [`${profile} unpublished candidate only`, 'full fixed Go 3.2.0 business parity and semantic/session acceptance remain unverified', 'official corresponding-source rebuild and publication gates not run'],
+      npmSmoke: 'not_run', validation: {state: 'not_run'}, semanticRuntime: {engine: 'emmy-native', luac: 'pinned_inventory', publicValidation: 'not_run'},
+      limitations: [`${profile} unpublished candidate only`, 'business and performance acceptance are separate from package assembly', 'official corresponding-source rebuild and publication gates not run'],
     };
     if (!assemblyOnly) {
       const packed = JSON.parse(npm(['pack', '--ignore-scripts', '--json', '--pack-destination', out], pkgRoot))[0];

@@ -16,7 +16,7 @@ fn actual_session_aliases_hash_each_candidate_and_share_one_authenticated_body()
     let mut reports = Vec::new();
     session
         .read_batches(&[7, 7], &mut |files| {
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             assert!(Arc::ptr_eq(
                 &files[0].materialized.content,
                 &files[1].materialized.content
@@ -53,7 +53,7 @@ fn actual_session_aliases_hash_each_candidate_and_share_one_authenticated_body()
     session
         .read_batches(&[7], &mut |files| {
             let stats = &files[0].reading["decodedCache"];
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             assert_eq!(stats["contentHashCalls"], 2);
             assert_eq!(stats["contentDecodeCalls"], 0);
             assert_eq!(stats["hits"], 2);
@@ -86,7 +86,7 @@ fn actual_session_missing_decoded_blob_is_a_miss_but_corruption_is_terminal() {
         let mut reference = None;
         session
             .read_batches(&[7], &mut |files| {
-                reference = Some(files[0].reference().clone());
+                reference = Some(files[0].materialized.blob.clone());
                 Ok(Vec::new())
             })
             .unwrap();
@@ -113,7 +113,7 @@ fn actual_session_missing_decoded_blob_is_a_miss_but_corruption_is_terminal() {
         let mut callbacks = 0;
         let result = session.read_batches(&[7], &mut |files| {
             callbacks += 1;
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             assert_eq!(files[0].reading["decodedCache"]["contentDecodeCalls"], 1);
             Ok(Vec::new())
         });

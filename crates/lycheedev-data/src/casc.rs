@@ -6,7 +6,11 @@ use crate::{
     blte, fault,
     resource::{Budget, Cost},
 };
-use lycheedev_core::{Result, ToolkitError, control::OperationControl, storage};
+use lycheedev_core::{
+    Result, ToolkitError,
+    control::{OperationControl, TrackedCancellation},
+    storage,
+};
 mod controlled;
 use controlled::Scope;
 use md5::{Digest, Md5};
@@ -16,7 +20,7 @@ use std::{
     fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::Ordering,
     sync::{Mutex, atomic::AtomicU64},
     time::{Duration, Instant},
 };
@@ -38,7 +42,7 @@ pub struct LocalReader<'a> {
     limits: Limits,
     io_bytes: AtomicU64,
     io_reads: AtomicU64,
-    cancel: Option<&'a AtomicBool>,
+    cancel: Option<&'a TrackedCancellation>,
     budget: Option<&'a Budget>,
     control: Option<&'a OperationControl>,
 }
@@ -146,7 +150,7 @@ pub fn open_local_reader<'a>(
     encoding_key: &str,
     encoded_bytes: usize,
     limits: Limits,
-    cancel: Option<&'a AtomicBool>,
+    cancel: Option<&'a TrackedCancellation>,
 ) -> Result<LocalReader<'a>> {
     open_local_reader_budgeted(root, encoding_key, encoded_bytes, limits, cancel, None)
 }
@@ -155,7 +159,7 @@ pub fn open_local_reader_budgeted<'a>(
     encoding_key: &str,
     encoded_bytes: usize,
     limits: Limits,
-    cancel: Option<&'a AtomicBool>,
+    cancel: Option<&'a TrackedCancellation>,
     budget: Option<&'a Budget>,
 ) -> Result<LocalReader<'a>> {
     open_reader(
@@ -387,8 +391,8 @@ impl Default for Limits {
         }
     }
 }
-fn check(limits: Limits, cancel: Option<&AtomicBool>) -> Result<()> {
-    if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
+fn check(limits: Limits, cancel: Option<&TrackedCancellation>) -> Result<()> {
+    if cancel.is_some_and(|c| c.is_cancelled()) {
         return Err(fault("operation.cancelled", 7, "CASC operation cancelled"));
     }
     if Instant::now() >= limits.deadline {
@@ -479,7 +483,7 @@ impl<'a> Index<'a> {
         raw: &'a [u8],
         bucket: u8,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
     ) -> Result<Self> {
         Self::open_with_check(raw, bucket, limits, cancel, || Ok(()))
     }
@@ -487,7 +491,7 @@ impl<'a> Index<'a> {
         raw: &'a [u8],
         bucket: u8,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
         mut supplemental: impl FnMut() -> Result<()>,
     ) -> Result<Self> {
         supplemental()?;
@@ -553,7 +557,7 @@ impl<'a> Index<'a> {
         &self,
         key: &[u8; 16],
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
     ) -> Result<Vec<Span>> {
         self.find_with_check(key, limits, cancel, || Ok(()))
     }
@@ -561,7 +565,7 @@ impl<'a> Index<'a> {
         &self,
         key: &[u8; 16],
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
         mut supplemental: impl FnMut() -> Result<()>,
     ) -> Result<Vec<Span>> {
         supplemental()?;
@@ -652,7 +656,7 @@ fn bounded_read_budgeted(
     root: &Path,
     max: usize,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     budget: Option<&Budget>,
 ) -> Result<Vec<u8>> {
     bounded_read_with_check(path, root, max, limits, cancel, budget, || Ok(()))
@@ -662,7 +666,7 @@ fn bounded_read_with_check(
     root: &Path,
     max: usize,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     budget: Option<&Budget>,
     mut supplemental: impl FnMut() -> Result<()>,
 ) -> Result<Vec<u8>> {
@@ -725,7 +729,7 @@ pub fn open_local(
     encoding_key: &str,
     encoded_bytes: usize,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
 ) -> Result<LocalObject> {
     open_local_budgeted(root, encoding_key, encoded_bytes, limits, cancel, None)
 }
@@ -734,7 +738,7 @@ pub fn open_local_budgeted(
     encoding_key: &str,
     encoded_bytes: usize,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     budget: Option<&Budget>,
 ) -> Result<LocalObject> {
     check(limits, cancel)?;
@@ -838,14 +842,14 @@ pub fn authenticate_span<'a>(raw: &'a [u8], key: &[u8; 16], max: usize) -> Resul
 fn select_indices(
     root: &Path,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
 ) -> Result<BTreeMap<u8, (u32, String)>> {
     select_indices_with_check(root, limits, cancel, || Ok(()))
 }
 fn select_indices_with_check(
     root: &Path,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     mut supplemental: impl FnMut() -> Result<()>,
 ) -> Result<BTreeMap<u8, (u32, String)>> {
     supplemental()?;

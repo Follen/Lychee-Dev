@@ -903,12 +903,12 @@ pub(super) fn worker(args: &[String]) -> Result<()> {
             record,
         );
         let response = match result {
-            Ok(value) => Response {
+            Ok(value) => ResponseWrite {
                 value: Some(value),
                 error: None,
                 terminal: None,
             },
-            Err(error) => Response {
+            Err(error) => ResponseWrite {
                 value: None,
                 error: Some(error),
                 terminal: None,

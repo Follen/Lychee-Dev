@@ -20,7 +20,9 @@ pub(crate) fn take_read_observations() -> Vec<(String, bool)> {
 }
 
 fn matches(raw: &[u8], doc: &Document, control: &OperationControl) -> Result<bool> {
-    if raw.len() != doc.bytes || std::str::from_utf8(raw).is_err() {
+    // Original bytes are authenticated byte-for-byte: invalid UTF-8 in a comment
+    // or string is not content corruption.
+    if raw.len() != doc.bytes {
         return Ok(false);
     }
     let mut hash = Sha256::new();

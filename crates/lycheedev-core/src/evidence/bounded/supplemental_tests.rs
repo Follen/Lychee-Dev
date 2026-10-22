@@ -352,11 +352,11 @@ fn supplemental_publication_and_close_failures_keep_original_causes() {
         .with_details(serde_json::json!({"owner":"independent"}));
     let discard = ToolkitError::new("external.io", "discard failed", 5);
     let close = ToolkitError::new("external.io", "lock close failed", 5);
-    let result = crate::metadata::historical_write::finish_historical::<()>(
+    let result = crate::metadata::owned_write::finish_owned::<()>(
         Err(stop.clone()),
         Err(discard.clone()),
     );
-    let error = crate::metadata::historical_write::finish_historical(result, Err(close.clone()))
+    let error = crate::metadata::owned_write::finish_owned(result, Err(close.clone()))
         .unwrap_err();
     assert_eq!(error.code, "command.cancelled");
     assert_eq!(
@@ -435,7 +435,7 @@ fn supplemental_blob_contention_waits_for_original_stop_and_preserves_existing_o
 #[test]
 fn supplemental_publication_does_not_deduplicate_identical_distinct_discard_failure() {
     let same = ToolkitError::new("external.io", "same failure text", 5);
-    let error = crate::metadata::historical_write::finish_historical::<()>(
+    let error = crate::metadata::owned_write::finish_owned::<()>(
         Err(same.clone()),
         Err(same.clone()),
     )

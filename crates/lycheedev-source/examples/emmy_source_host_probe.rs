@@ -5,9 +5,9 @@ use lycheedev_core::control::OperationControl;
 use lycheedev_source::native::*;
 use serde_json::{json,Value};
 type Result<T> = std::result::Result<T,String>;
-const DATA:&str=include_str!("../../../tests/rust-source-engine/host-facts-materials.json");
-const SOURCE:&str=include_str!("../../../tests/rust-source-engine/wow/native/host-direct.lua");
-fn control()->OperationControl{OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(false)))}
+const DATA:&str=include_str!("../../../tests/fixtures/source-native/host-facts-materials.json");
+const SOURCE:&str=include_str!("../../../tests/fixtures/source-native/wow/native/host-direct.lua");
+fn control()->OperationControl{OperationControl::uncancelable(Instant::now()+Duration::from_secs(30))}
 fn reference(value:&Value)->HostMaterialRef{HostMaterialRef{material:value["material"].as_str().expect("fixed material").into(),pointer:value["pointer"].as_str().expect("fixed pointer").into()}}
 fn inputs(data:&Value,open:bool)->Vec<HostBindingInput>{data["bindings"].as_array().expect("fixed bindings").iter().map(|row|{let mut declaration=reference(&row["declaration"]);if open{declaration.material="fixed-host-open-arity-v1".into();}match row["kind"].as_str().expect("fixed binding kind"){
  "callable"=>HostBindingInput::Callable{declaration,rules:Some(reference(&row["rules"]))},"predicate"=>HostBindingInput::Predicate{declaration},"empty_object"=>HostBindingInput::EmptyObject{declaration},_=>unreachable!(),}}).collect()}
@@ -22,7 +22,7 @@ impl Output{
  fn reject<T>(&mut self,name:&str,result:lycheedev_core::Result<T>,exit:i32)->Result<()>{let error=result.err();self.check(name,json!(exit),json!(error.as_ref().map(|e|e.exit_code)))?;self.emit(json!({"event":"rejection","name":name,"code":error.as_ref().map(|e|&e.code),"error":error.map(|e|e.to_string())}))}
 }
 fn run(out:&mut Output)->Result<()>{let data:Value=serde_json::from_str(DATA).map_err(|e|e.to_string())?;
- out.emit(json!({"event":"build_identity","compiledPatchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")}))?;
+ out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}))?;
  for row in data["materials"].as_array().ok_or("fixed material array")?{out.emit(json!({"event":"material_identity","name":row["name"],"sha256":hash(row["bytes"].as_str().ok_or("fixed material bytes")?.as_bytes()),"bytes":row["bytes"].as_str().ok_or("fixed bytes")?.len()}))?;}
  for(open,label)in [(false,"exact"),(true,"open")]{let c=control();let host=environment(&data,open,&c).map_err(|e|e.to_string())?;let bindings=serde_json::to_value(host.bindings()).map_err(|e|e.to_string())?;let admitted=SourceInputs::admit(spec(host),&c).map_err(|e|e.to_string())?;
   out.check(&format!("host:{label}:seven_bindings"),json!(7),json!(bindings.as_array().ok_or("admitted binding array")?.len()))?;
@@ -44,10 +44,10 @@ fn run(out:&mut Output)->Result<()>{let data:Value=serde_json::from_str(DATA).ma
  let c=control();let host=TrustedHostEnvironment::from_host_material("wrong-rule-probe".into(),false,materials(&data),vec![],&c).map_err(|e|e.to_string())?;out.reject("host:wrong_rule_record",host.with_bindings(vec![HostBindingInput::Callable{declaration:HostMaterialRef{material:"fixed-host-v2".into(),pointer:"/callables/2".into()},rules:Some(HostMaterialRef{material:"original-flow-rules-v1".into(),pointer:"/calls/Use".into()})}],&c),4)?;
  for(label,bytes)in [("duplicate_json_keys","{\"callables\":[],\"callables\":[],\"sourceExecution\":false,\"configExecution\":false}"),("malformed_json","{not-json")]{let c=control();let host=TrustedHostEnvironment::from_host_material("invalid-json-probe".into(),false,vec![HostMaterialInput{name:"invalid".into(),bytes:bytes.as_bytes().to_vec(),expected_sha256:hash(bytes.as_bytes())}],vec![],&c).map_err(|e|e.to_string())?;out.reject(&format!("host:{label}"),host.with_bindings(vec![HostBindingInput::Callable{declaration:HostMaterialRef{material:"invalid".into(),pointer:"/callables/0".into()},rules:None}],&c),4)?;}
  let c=control();let host=environment(&data,false,&c).map_err(|e|e.to_string())?;out.reject("host:second_binding_admission",host.with_bindings(vec![],&c),4)?;
- let c=control();let foreign=OperationControl::new(c.deadline(),Arc::new(AtomicBool::new(false)));let host=TrustedHostEnvironment::from_host_material("foreign-control-probe".into(),false,materials(&data),vec![],&c).map_err(|e|e.to_string())?;out.reject("host:foreign_binding_control",host.with_bindings(inputs(&data,false),&foreign),4)?;
- let c=control();let foreign=OperationControl::new(c.deadline(),Arc::new(AtomicBool::new(false)));let host=environment(&data,false,&c).map_err(|e|e.to_string())?;out.reject("host:foreign_input_control",SourceInputs::admit(spec(host),&foreign),4)?;
- let c=control();c.cancel_handle().store(true,Ordering::Release);out.reject("host:cancelled",environment(&data,false,&c),7)?;
- let c=OperationControl::new(Instant::now(),Arc::new(AtomicBool::new(false)));out.reject("host:deadline",environment(&data,false,&c),5)?;
+ let c=control();let foreign=OperationControl::uncancelable(c.deadline());let host=TrustedHostEnvironment::from_host_material("foreign-control-probe".into(),false,materials(&data),vec![],&c).map_err(|e|e.to_string())?;out.reject("host:foreign_binding_control",host.with_bindings(inputs(&data,false),&foreign),4)?;
+ let c=control();let foreign=OperationControl::uncancelable(c.deadline());let host=environment(&data,false,&c).map_err(|e|e.to_string())?;out.reject("host:foreign_input_control",SourceInputs::admit(spec(host),&foreign),4)?;
+ let c=control();c.tracked_cancel_handle().unwrap().cancel();out.reject("host:cancelled",environment(&data,false,&c),7)?;
+ let c=OperationControl::uncancelable(Instant::now());out.reject("host:deadline",environment(&data,false,&c),5)?;
  let c=control();let host=environment(&data,false,&c).map_err(|e|e.to_string())?;let origin=ValueOrigin::Environment{environment:host.bindings()[0].declaration().clone()};out.emit(json!({"event":"environment_origin","origin":origin}))?;
  out.check("host:source_origin_compatible",json!({"file":"host-direct.lua","start":0,"end":5}),serde_json::to_value(ValueOrigin::Source(Site{file:"host-direct.lua".into(),start:0,end:5})).map_err(|e|e.to_string())?)?;
  Ok(())

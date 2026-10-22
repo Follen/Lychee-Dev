@@ -10,30 +10,34 @@ use std::collections::{BTreeMap, BTreeSet};
 mod local;
 pub mod remote;
 mod scan;
-pub(crate) fn dispatch(
-    inv: &lycheedev_core::Invocation,
-) -> lycheedev_core::Result<lycheedev_core::Outcome> {
-    if inv.flag_bool("--scan") {
-        scan::dispatch(inv)
-    } else {
-        local::dispatch(inv)
-    }
+use crate::request::DataContext;
+use std::path::PathBuf;
+
+#[derive(Clone, Debug)]
+pub enum LocalInput { File(PathBuf), Capture(String) }
+#[derive(Clone, Debug)]
+pub struct LocalRequest {
+    pub snapshot: String,
+    pub input: LocalInput,
+    pub table: Option<String>,
+    pub filter: CacheFilter,
+    pub max_bytes: usize,
+    pub offline: bool,
 }
-// The CLI contract accepts exactly eight unprefixed hexadecimal digits.
-// Keep this separate from decimal record/region/index parsing.
-pub(super) fn parse_table_hash(value: &str) -> lycheedev_core::Result<u32> {
-    if value.len() != 8 {
-        return Err(lycheedev_core::ToolkitError::arguments(
-            "--table-hash requires eight hexadecimal digits",
-        ));
+#[derive(Clone, Debug)]
+pub struct ScanRequest {
+    pub page: LocalRequest,
+    pub cursor: String,
+    pub max_pages: usize,
+}
+#[derive(Clone, Debug)]
+pub enum Request { Local(LocalRequest), Scan(ScanRequest), Remote(remote::Request) }
+pub fn dispatch(ctx: &DataContext, request: &Request) -> lycheedev_core::Result<lycheedev_core::Outcome> {
+    match request {
+        Request::Local(request) => local::dispatch(ctx, request),
+        Request::Scan(request) => scan::dispatch(ctx, request),
+        Request::Remote(request) => remote::dispatch(ctx, request),
     }
-    if !value.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(lycheedev_core::ToolkitError::arguments(
-            "invalid --table-hash",
-        ));
-    }
-    u32::from_str_radix(value, 16)
-        .map_err(|_| lycheedev_core::ToolkitError::arguments("invalid --table-hash"))
 }
 use lycheedev_core::Result;
 use serde::{Deserialize, Serialize};
@@ -103,15 +107,6 @@ fn malformed<T>() -> Result<T> {
 }
 fn u32le(raw: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(raw[offset..offset + 4].try_into().unwrap())
-}
-pub(crate) fn walk<F: FnMut(CacheEntry) -> Result<()>>(
-    raw: &[u8],
-    start: usize,
-    layout: u32,
-    budget: Option<&Budget>,
-    yield_entry: F,
-) -> Result<()> {
-    walk_with_check(raw, start, layout, budget, || Ok(()), yield_entry)
 }
 pub(crate) fn walk_with_check<F: FnMut(CacheEntry) -> Result<()>>(
     raw: &[u8],
@@ -324,15 +319,6 @@ pub(crate) fn inspect_budgeted_with_check(
     Ok(page)
 }
 
-/// Shared framing validation for page inspection and immutable SQL snapshots.
-/// Version 8 is accepted only when exactly one historical record layout fits.
-pub(crate) fn cache_layout(
-    raw: &[u8],
-    expected_build: u32,
-    budget: Option<&Budget>,
-) -> Result<(u32, u32, usize)> {
-    cache_layout_with_check(raw, expected_build, budget, || Ok(()))
-}
 pub(crate) fn cache_layout_with_check(
     raw: &[u8],
     expected_build: u32,
@@ -676,7 +662,7 @@ impl serde_json::ser::Formatter for GoFieldsFormatter {
         fragment: &str,
     ) -> std::io::Result<()> {
         serde_json::ser::Formatter::write_string_fragment(
-            &mut crate::capture::GoCaptureFormatter,
+            &mut crate::capture::EvidenceFormatter,
             writer,
             fragment,
         )
@@ -954,7 +940,7 @@ mod fields_number_tests {
     }
 
     #[test]
-    fn go_json_float_digits_and_exponent_thresholds() {
+    fn wire_json_float_digits_and_exponent_thresholds() {
         for (number, expected) in [
             (0.0, "0"),
             (1.0, "1"),
@@ -991,7 +977,7 @@ mod fields_number_tests {
     }
 
     #[test]
-    fn go_fields_count_matches_bounded_bytes_without_rounding_integers() {
+    fn fields_count_matches_bounded_bytes_without_rounding_integers() {
         let fields = BTreeMap::from([
             (
                 "Array".into(),

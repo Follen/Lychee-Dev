@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 #[test]
 fn every_unicode_scalar_matches_frozen_go17_simple_case() {
-    let raw = include_bytes!("../../../tests/rust-source-data/unicode-simple-go17.json");
+    let raw = include_bytes!("../tests/fixtures/unicode-simple.json");
     let expected: serde_json::Value =
         serde_json::from_slice(raw.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(raw)).unwrap();
     assert_eq!(expected["version"], "17.0.0");

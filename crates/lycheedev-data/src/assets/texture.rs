@@ -442,9 +442,7 @@ mod tests {
                 .code,
             "texture.invalid_format"
         );
-        control
-            .token()
-            .store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(decode(&raw, 0, 2, &control).err().unwrap().exit_code, 7);
     }
 }

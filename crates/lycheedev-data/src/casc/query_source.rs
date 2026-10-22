@@ -102,7 +102,7 @@ impl<'a> QuerySource<'a> {
     pub(super) fn open_file(&self, name: &str) -> Result<fs::File> {
         let mut scope = self.scope;
         self.directory
-            .open_file_controlled(OsStr::new(name), &mut scope)
+            .open_shared_file_controlled(OsStr::new(name), &mut scope)
             .map_err(|mut error| {
                 error.message = format!(
                     "Open local CASC file '{}': {}",

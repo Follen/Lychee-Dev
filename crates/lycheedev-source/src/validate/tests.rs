@@ -1,4 +1,4 @@
-//! Fixed Go 3.2.3 check/usage/compat contract regressions. These tests do not
+//! Fixed external reference 3.2.3 check/usage/compat contract regressions. These tests do not
 //! replace the real luac/native XML integration suites.
 use super::*;
 use crate::{
@@ -82,7 +82,7 @@ fn pairs(usages: &[Usage]) -> Vec<(&str, &str)> {
 }
 
 #[test]
-fn single_check_keeps_reference_coverage_separate_like_go_check_test() {
+fn single_check_keeps_reference_coverage_separate_like_external_reference_check() {
     let closure = closure(
         "C_Good.Do()\nframe:RegisterEvent('GOOD_TICK')\nhandlers[key]()\nLocalExtension()\n",
         "## Interface: 120100\n",
@@ -366,7 +366,7 @@ fn single_reference_budget_counts_duplicates_and_does_not_hide_them() {
     assert_eq!(error.code, "codebase.reference_budget");
 }
 #[test]
-fn matrix_usage_preserves_go_order_kinds_and_dynamic_reasons() {
+fn matrix_usage_preserves_reference_order_kinds_and_dynamic_reasons() {
     let raw=b"local alias=C_Missing.Do\nalias()\nframe:RegisterEvent('GOOD_TICK')\nframe:RegisterEvent(eventName)\nCreateFrame('Frame',nil,nil,' BaseTemplate, Other ')\nCreateFromMixins(Mixins.A,Compute())\nhandlers[GetName()]()\nobject[C_Key()] = C_Good.Do()\n";
     let (usages, unresolved) = usage::lua("Main.lua", raw, &Default::default()).unwrap();
     assert_eq!(
@@ -400,7 +400,7 @@ fn matrix_usage_preserves_go_order_kinds_and_dynamic_reasons() {
     assert_eq!(unresolved[2]["expression"], "<dynamic call>");
 }
 #[test]
-fn matrix_labels_variable_brackets_like_go_and_keeps_candidate_calls() {
+fn matrix_labels_variable_brackets_like_reference_and_keeps_candidate_calls() {
     let (usages, unresolved) = usage::lua(
         "Main.lua",
         b"C_Test[key](); C_NoDot(); frame:Other(); C_Test.Object:Method(); (C_Test.Do)()",
@@ -435,7 +435,7 @@ fn matrix_usage_parse_failure_and_shebang_do_not_reuse_public_fact_rows() {
 }
 #[test]
 fn matrix_lua_assignment_rhs_can_start_on_the_next_line() {
-    // Fixed gopher-lua grammar: local names '=' exprlist, with newline treated
+    // Fixed external reference grammar: local names '=' exprlist, with newline treated
     // as lexical whitespace. This is not a parse-failure fixture.
     let (usages, unresolved) = usage::lua(
         "Main.lua",
@@ -447,7 +447,7 @@ fn matrix_lua_assignment_rhs_can_start_on_the_next_line() {
     assert_eq!(pairs(&usages), vec![("api", "C_Good.Do")]);
 }
 #[test]
-fn matrix_lua_comments_do_not_shift_arguments_and_lines_follow_go_newlines() {
+fn matrix_lua_comments_do_not_shift_arguments_and_lines_follow_reference_newlines() {
     let raw = b"frame:RegisterEvent(-- first\r\n ('READY'));\rC_Good.Do();\n\rCreateFrame(-- type\n 'Frame', nil, nil, -- inherits\n ('BaseTemplate'))";
     let (usages, unresolved) = usage::lua("Main.lua", raw, &Default::default()).unwrap();
     assert!(unresolved.is_empty());
@@ -582,7 +582,7 @@ fn matrix_xml_error_returns_only_usages_before_failed_token() {
     }
 }
 #[test]
-fn matrix_xml_keeps_go_attribute_normalization_and_repeated_inherits() {
+fn matrix_xml_keeps_reference_attribute_normalization_and_repeated_inherits() {
     let (usages, unresolved) = usage::xml(
         "UI.xml",
         b"<Ui><Frame inherits='A\r\nB, C&#13;D' inherits='E'/></Ui>",
@@ -878,7 +878,6 @@ fn both_validation_entries_reject_bad_source_before_addon_or_syntax_captures() {
     let root = home.join("missing-addon");
     let tools = SourceTools {
         luac: None,
-        luals: None,
     };
     let single = addon_with_environment(
         &home,

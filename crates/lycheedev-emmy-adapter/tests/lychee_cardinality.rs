@@ -141,6 +141,7 @@ fn fixture(statement: &str, return_count: usize) -> (OwnedQueryTest, FileId, Bin
     context.observations.insert(
         call,
         BindingDecision::Bound(CallObservation {
+            open_tail: false,
             callee: ObservedCallee::Source(function),
             selected_callee_identity: "selected-function".into(),
             closure_identity: "closure-identity".into(),
@@ -154,6 +155,125 @@ fn fixture(statement: &str, return_count: usize) -> (OwnedQueryTest, FileId, Bin
 
 fn exact_returns(slots: Vec<LuaType>) -> LuaType {
     LuaType::Variadic(Arc::new(VariadicType::Multi(slots)))
+}
+
+#[test]
+fn open_observed_returns_preserve_prefix_and_never_recover_raw_body_values() {
+    for statement in ["return F()", "return (F())", "local value = F()"] {
+        for count in 0..=1 {
+            let (analysis, file, call, mut context) = fixture(statement, count);
+            let BindingDecision::Bound(observation) = context.observations.get_mut(&call).unwrap()
+            else {
+                panic!("fixture observation");
+            };
+            observation.open_tail = true;
+            let session = owned_query::session(Arc::new(context));
+            owned_query::model!(model, analysis, file, session.clone());
+            let expected = if statement == "return F()" {
+                let mut prefix = if count == 1 {
+                    vec![LuaType::BooleanConst(true)]
+                } else {
+                    vec![]
+                };
+                prefix.push(LuaType::Variadic(Arc::new(VariadicType::Base(
+                    LuaType::Unknown,
+                ))));
+                exact_returns(prefix)
+            } else if count == 1 {
+                LuaType::BooleanConst(true)
+            } else {
+                LuaType::Unknown
+            };
+            assert_eq!(
+                model.type_of_expr(call.syntax),
+                expected,
+                "{statement}: {count}"
+            );
+            assert!(session.coverage().iter().any(|row| row.site == call
+                && row.operation == "call_return"
+                && row.state == "unavailable"
+                && row.reason.as_deref() == Some("host_sequence_requires_cardinality_projection")));
+        }
+    }
+}
+
+#[test]
+fn rejected_observations_cannot_authorize_a_completed_return_count() {
+    use emmylua_code_analysis::{CheckConfig, DiagnosticCode, Emmyrc};
+    for denied_permit in [false, true] {
+        let (analysis, file, call, mut context) = fixture(
+            "---@return number,number\nlocal function subject() return F() end",
+            2,
+        );
+        if denied_permit {
+            context.calls.insert(
+                call,
+                BindingDecision::Unavailable {
+                    proof: "original-denial".into(),
+                    reason: "selected-call-denied".into(),
+                },
+            );
+        } else {
+            let BindingDecision::Bound(observation) = context.observations.get_mut(&call).unwrap()
+            else {
+                panic!("fixture observation");
+            };
+            observation.selected_callee_identity = "wrong-selected-callee".into();
+        }
+        let stat = analysis
+            .semantic_model(file)
+            .syntax_tree()
+            .unwrap()
+            .get_red_root()
+            .descendants()
+            .filter_map(LuaReturnStat::cast)
+            .find(|stat| stat.syntax().text().to_string() == "return F()")
+            .unwrap();
+        let stat = BindingSite {
+            file_id: file,
+            syntax: stat.get_syntax_id(),
+        };
+        let session = owned_query::session(Arc::new(context));
+        owned_query::model!(model, analysis, file, session.clone());
+        assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown);
+        drop(model);
+        let mut config = Emmyrc::default();
+        config.diagnostics.enables.extend([
+            DiagnosticCode::MissingReturnValue,
+            DiagnosticCode::RedundantReturnValue,
+        ]);
+        analysis
+            .diagnose(file, Arc::new(CheckConfig::new(&config)), &session)
+            .unwrap();
+        let rows = session.coverage();
+        assert!(
+            rows.iter().any(|row| row.site == stat
+                && row.operation == "return_count_check"
+                && row.state == "unavailable"),
+            "{rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.site == stat
+                && row.operation == "return_count_check"
+                && row.state == "native_checked"),
+            "{rows:?}"
+        );
+        if denied_permit {
+            assert!(
+                rows.iter().any(|row| row.site == call
+                    && row.proof == "original-denial"
+                    && row.reason.as_deref() == Some("selected-call-denied")),
+                "{rows:?}"
+            );
+        } else {
+            assert!(
+                rows.iter().any(|row| row.site == call
+                    && row.proof == "observation-proof"
+                    && row.reason.as_deref() == Some("call_observation_identity_or_budget")),
+                "{rows:?}"
+            );
+        }
+    }
 }
 
 const SCALAR_STATEMENTS: &[&str] = &[

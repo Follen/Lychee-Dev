@@ -7,6 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek, SeekFrom};
 const RECEIPT_LIMIT: usize = 1 << 20;
 const PAYLOAD_LIMIT: u64 = 256 << 20;
+/// Current product payload families. LuaLS is not part of the delivered
+/// product; only the managed luac tool ships under tool/.
+const PAYLOAD_FAMILIES: &[&str] = &["addon/", "skill/", "tool/luac/"];
 fn invalid(detail: &str) -> ToolkitError {
     ToolkitError::new("delivery.invalid_installation", detail, 4)
 }
@@ -91,11 +94,7 @@ pub fn inspect_main_controlled(
     storage::finish_file(file, inspect, control)
 }
 fn resource_path(name: &str) -> bool {
-    if name.len() > 240
-        || !(name.starts_with("addon/")
-            || name.starts_with("skill/")
-            || name.starts_with("tool/luals/"))
-    {
+    if name.len() > 240 || !PAYLOAD_FAMILIES.iter().any(|family| name.starts_with(family)) {
         return false;
     }
     let parts: Vec<_> = name.split('/').collect();
@@ -324,6 +323,8 @@ mod tests {
     }
     #[test]
     fn controlled_doctor_path_grammar_and_duplicate_receipt() {
+        // Negative evidence: historical LuaLS payloads and foreign protocol
+        // paths are not current delivery families and must be rejected.
         for name in [
             "addon/../x",
             "addon/NUL.lua",
@@ -331,8 +332,19 @@ mod tests {
             "addon/x.",
             "addon/x\\y",
             "addon/.lycheedev-install.json",
+            "tool/luals/bin/lua-language-server.exe",
+            "tool/other/file",
+            "protocol/file.lua",
         ] {
             assert!(!resource_path(name), "{name}");
+        }
+        for name in [
+            "addon/Lychee Dev.toc",
+            "skill/SKILL.md",
+            "tool/luac/luac.exe",
+            "tool/luac/runtime.json",
+        ] {
+            assert!(resource_path(name), "{name}");
         }
         let f = Fixture::new();
         f.managed();

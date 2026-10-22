@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Fixed Go 3.2.0 remote_catalog.go: selected-region validation and immutable
+//! Retained remote-catalog contract: selected-region validation and immutable
 //! full-build selection, separate from the broader availability listing API.
 use super::{ambiguous, invalid, limit, unavailable};
 use lycheedev_core::Result;

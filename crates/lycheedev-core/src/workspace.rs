@@ -1,6 +1,7 @@
 //! Workspace settings, budgets, and retention.
 use crate::{
-    Invocation, Outcome, Result, ToolkitError,
+    Outcome, Result, ToolkitError,
+    request::RequestContext,
     control::OperationControl,
     selection,
     storage::{self, ExclusiveLock},
@@ -221,17 +222,13 @@ fn preserve_initialization_result(
         combined
     })
 }
-/// Use the same Go time.Time marshal form as the identity reader. Keep the
+/// Use the shared current timestamp form for the workspace identity. Keep the
 /// original instant and ID input; only newly created identities are formatted.
 fn created_identity(home: &Path, now: &chrono::DateTime<chrono::Utc>) -> Result<Value> {
-    let raw = now.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
-    let created_at = crate::evidence::parse_go_timestamp(&raw)
-        .and_then(|timestamp| timestamp.canonical().map(str::to_owned))
-        .ok_or_else(|| ToolkitError::invalid("workspace creation timestamp cannot be encoded"))?;
     Ok(json!({
         "schema":"lycheedev.workspace.v1",
         "workspaceId":storage::sha256(format!("{now:?}:{}:{}",std::process::id(),home.display()).as_bytes())[..32],
-        "createdAt":created_at,
+        "createdAt":storage::timestamp(*now),
     }))
 }
 pub(crate) fn initialize_unlocked_observed(
@@ -388,118 +385,62 @@ pub(crate) fn legacy_configuration_parsed(mut value: Value, raw: Option<&[u8]>) 
 pub fn config_controlled(home: &Path, control: &OperationControl) -> Result<WorkspaceConfig> {
     configuration::read(home, control, &mut || Ok(()))
 }
-pub fn commands() -> &'static [&'static str] {
-    &[
-        "init",
-        "doctor",
-        "config show",
-        "config set",
-        "target list",
-        "target add",
-        "target remove",
-        "target show",
-        "target resolve",
-    ]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InitMode {
+    #[default]
+    Open,
+    Plan,
+    Fresh,
+    Resume,
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    match inv.command.as_str() {
-        "doctor" => crate::doctor::inspect(inv),
-        "init" => {
-            if ["--plan", "--fresh", "--resume"]
-                .into_iter()
-                .filter(|flag| inv.flag_bool(flag))
-                .count()
-                > 1
-            {
-                return Err(ToolkitError::arguments(
-                    "init accepts at most one of --plan, --fresh, --resume",
-                ));
-            }
-            inv.control.check()?;
-            if inv.flag_bool("--plan") {
-                return Ok(Outcome::new(crate::archive::plan_controlled(
-                    &inv.home,
-                    &inv.control,
-                )?));
-            }
-            if inv.flag_bool("--fresh") {
-                return Ok(Outcome::new(crate::archive::fresh_controlled(
-                    &inv.home,
-                    &inv.control,
-                )?));
-            }
-            if inv.flag_bool("--resume") {
-                return Ok(Outcome::new(crate::archive::resume_controlled(
-                    &inv.home,
-                    &inv.control,
-                )?));
-            }
-            let identity = initialize_controlled(&inv.home, &inv.control)?;
-            let summary = json!({"root":inv.home,"identity":identity});
-            let result = (|| {
-                inv.control.check()?;
-                let root = fs::canonicalize(&inv.home)?;
-                inv.control.check()?;
-                Ok(json!({"root":root,"identity":identity}))
-            })();
-            preserve_initialization_result(
-                selection::selection_finish(result, inv.control.check()),
-                Some(summary),
-                None,
-            )
-            .map(Outcome::new)
-        }
-        "config show" => Ok(Outcome::new(config(&inv.home)?)),
-        "config set" => {
-            let _lock = ExclusiveLock::acquire(&inv.home.join("locks/config.lock"))?;
-            let mut value = config(&inv.home)?;
-            if inv.flag("--cache-max-bytes").is_some() {
-                value["cache"]["maxBytes"] =
-                    json!(inv.usize_flag("--cache-max-bytes", 0, 0, 1usize << 45)?);
-            }
-            if inv.flag("--download-workers").is_some() {
-                value["download"]["workers"] =
-                    json!(inv.usize_flag("--download-workers", 0, 0, 256)?);
-            }
-            storage::atomic_json(&inv.home.join("config.json"), &value)?;
-            Ok(Outcome::new(value))
-        }
-        command if command.starts_with("target ") => target(inv),
-        _ => Err(ToolkitError::new(
-            "core.migration_incomplete",
-            "requested workspace handler has not yet been migrated",
-            3,
-        )),
-    }
+
+#[derive(Clone, Debug, Default)]
+pub struct ConfigUpdate {
+    pub cache_max_bytes: Option<usize>,
+    pub download_workers: Option<usize>,
 }
-fn target(inv: &Invocation) -> Result<Outcome> {
-    if inv.command != "target resolve" {
-        return selection::target::dispatch(inv);
+
+pub fn initialize_request(ctx: &RequestContext, mode: InitMode) -> Result<Outcome> {
+    ctx.control.check()?;
+    match mode {
+        InitMode::Plan => return crate::archive::plan_controlled(&ctx.home, &ctx.control).map(Outcome::new),
+        InitMode::Fresh => return crate::archive::fresh_controlled(&ctx.home, &ctx.control).map(Outcome::new),
+        InitMode::Resume => return crate::archive::resume_controlled(&ctx.home, &ctx.control).map(Outcome::new),
+        InitMode::Open => {}
     }
-    if inv.command == "target resolve" {
-        if let Some(file) = inv.flag("--file") {
-            if inv.flag("--target").is_some()
-                || inv.flag("--installation").is_some()
-                || inv.flag("--product").is_some()
-            {
-                return Err(ToolkitError::arguments(
-                    "target resolve --file cannot combine with target/provider selectors",
-                ));
-            }
-            let pin = selection::resolve_selection_file_controlled(
-                &inv.home,
-                &inv.cwd.join(file),
-                &inv.control,
-            )?;
-            return Ok(Outcome::new(serde_json::to_value(pin)?));
-        }
-        return Err(ToolkitError::new(
-            "selection.provider_required",
-            "this target needs an entry-point data provider to resolve exact identities",
-            3,
-        ));
+    let identity = initialize_controlled(&ctx.home, &ctx.control)?;
+    let summary = json!({"root":ctx.home,"identity":identity});
+    let result = (|| {
+        ctx.control.check()?;
+        let root = fs::canonicalize(&ctx.home)?;
+        ctx.control.check()?;
+        Ok(json!({"root":root,"identity":identity}))
+    })();
+    preserve_initialization_result(
+        selection::selection_finish(result, ctx.control.check()),
+        Some(summary),
+        None,
+    ).map(Outcome::new)
+}
+
+pub fn set_config(ctx: &RequestContext, update: &ConfigUpdate) -> Result<Outcome> {
+    let _lock = ExclusiveLock::acquire(&ctx.home.join("locks/config.lock"))?;
+    let mut value = config(&ctx.home)?;
+    if let Some(bytes) = update.cache_max_bytes {
+        value["cache"]["maxBytes"] = json!(bytes);
     }
-    selection::target::dispatch(inv)
+    if let Some(workers) = update.download_workers {
+        value["download"]["workers"] = json!(workers);
+    }
+    storage::atomic_json(&ctx.home.join("config.json"), &value)?;
+    Ok(Outcome::new(value))
+}
+
+pub fn resolve_file(ctx: &RequestContext, path: &Path) -> Result<Outcome> {
+    let pin = selection::resolve_selection_file_controlled(
+        &ctx.home, &ctx.cwd.join(path), &ctx.control,
+    )?;
+    Ok(Outcome::new(serde_json::to_value(pin)?))
 }
 
 #[cfg(test)]
@@ -569,9 +510,9 @@ mod identity_creation_tests {
                 format!("{now:?}:{}:{}", std::process::id(), home.display()).as_bytes(),
             );
             assert_eq!(initial["workspaceId"].as_str().unwrap(), &expected_id[..32]);
-            let parsed = crate::evidence::parse_go_timestamp(expected).unwrap();
+            let parsed = storage::parse_timestamp(expected).unwrap();
             assert_eq!(
-                parsed.instant(),
+                (parsed.timestamp(), parsed.timestamp_subsec_nanos()),
                 (now.timestamp(), now.timestamp_subsec_nanos())
             );
 

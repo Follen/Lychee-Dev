@@ -195,8 +195,7 @@ enum AssignmentDestination {
     UncertainField { receiver_fact:usize },
     Unavailable,
 }
-struct ConditionalDestination { object:usize, field:Option<String>, site:Site, source_versions:Vec<usize>, reason:&'static str }
-struct Builder { inputs:Arc<SourceInputs>, control:OperationControl, native_profile:bool, graph:GraphFacts, harvest:Harvest, cells:BTreeMap<String,usize>, objects:Vec<ObjectState>, bodies:Vec<(usize,LuaClosureExpr)>, 
+struct Builder { inputs:Arc<SourceInputs>, control:OperationControl, graph:GraphFacts, harvest:Harvest, cells:BTreeMap<String,usize>, objects:Vec<ObjectState>, bodies:Vec<(usize,LuaClosureExpr)>,
     heap_observation: usize, object_versions:Vec<usize>, object_view_ids: BTreeMap<ObjectViewKey,usize>, object_slots: usize,
     field_write_observations: BTreeMap<usize,usize>,
     observation_failure: Option<String>,
@@ -216,25 +215,22 @@ impl Builder {
     }
     fn usage(&mut self,site:Site,ctx:&Context,decision:Decision,writes:Vec<usize>)->usize {
         let id=self.graph.uses.len();
-        let object_view=if self.native_profile {
+        let object_view={
             match self.object(&decision).map(|object|self.capture_object_view(object,0)) {
                 Some(Ok(view))=>Some(view),
                 Some(Err(reason))=>{self.observation_failure.get_or_insert(reason);None},
                 None=>None,
             }
-        }else{None};
-        // The primitive profile's original proof encoding remains unchanged.
-        let proof_id=if self.native_profile {digest(&(self.graph.snapshot_key.as_str(),id,&site,&ctx.name,&decision,&writes,object_view))}
-            else{digest(&(self.graph.snapshot_key.as_str(),id,&site,&ctx.name,&decision,&writes))};
+        };
+        let proof_id=digest(&(self.graph.snapshot_key.as_str(),id,&site,&ctx.name,&decision,&writes,object_view));
         self.graph.uses.push(UseFact{id,site,context:ctx.name.clone(),decision,writes,proof_id,object_view,host_return_slot:None});id
     }
     fn allocate_object(&mut self,site:&Site)->Result<usize> {
-        if self.native_profile&&self.objects.len()>=self.object_limit(){return Err("object identity budget exceeded".into())}
+        if self.objects.len()>=self.object_limit(){return Err("object identity budget exceeded".into())}
         let object=self.objects.len();self.objects.push(ObjectState::default());self.observe_heap(object,"create",site.clone(),None,None);Ok(object)
     }
     fn object_limit(&self)->usize{self.inputs.corpus.limits.object_limit()}
     fn observe_heap(&mut self,object:usize,kind:&'static str,site:Site,write:Option<usize>,reason:Option<String>) {
-        if !self.native_profile{return}
         if self.graph.object_mutations.len()>=OBJECT_MUTATION_LIMIT{self.observation_failure.get_or_insert("object mutation budget exceeded".into());return}
         self.heap_observation+=1;
         self.object_versions.resize(self.objects.len(),0);self.object_versions[object]=self.heap_observation;
@@ -260,7 +256,7 @@ impl Builder {
         // A caller cannot mutate a local object it cannot reach. Deferred body
         // execution requires a separate execution observation, not mutation of
         // the shared after-load heap while merely inspecting a function body.
-        if !self.native_profile||ctx.deferred{return Ok(())}
+        if ctx.deferred{return Ok(())}
         let mut objects=Vec::new();let mut functions=Vec::new();
         for argument in &self.graph.calls[call].arguments{
             let decision=&self.graph.uses[*argument].decision;
@@ -372,11 +368,7 @@ impl Builder {
         if let Some(branch)=ctx.conditional_branch{self.graph.branches[branch].write_versions.push(id);}
         id
     }
-    fn local_key(site:&Site,ctx:&Context)->String { format!("local:{}:load:{}",site.id(),ctx.occurrence) }
-    fn key(&self,site:&Site,ctx:&Context)->String {
-        if self.native_profile { return self.native_key(site,ctx); }
-        self.harvest.local_read(&self.inputs,&site).map(|id|format!("local:{id}:load:{}",ctx.occurrence)).unwrap_or_else(||format!("global:{}",site.text(&self.inputs).expect("admitted parser Site")))
-    }
+    fn key(&self,site:&Site,ctx:&Context)->String { self.native_key(site,ctx) }
     fn read(&self,key:&str,ctx:&Context)->(Decision,Vec<usize>) {
         if let Some(value)=ctx.parameters.get(key) {return(value.clone(),vec![])}
         if ctx.deferred && self.graph.phase=="unknown" && key.starts_with("global:") {return(Decision::Unavailable("unknown_execution_phase".into()),vec![])}
@@ -403,17 +395,17 @@ impl Builder {
         let state=&self.objects[object];
         if state.unknown_observation==0&&!state.fields.contains_key(key)&&let Some(value)=self.native.host.initial_fields.get(&(object,key.to_owned())){return(Decision::Bound(*value),vec![])}
         if let Some(reason)=&state.unknown {
-            let restored=self.native_profile&&state.fields.get(key).is_some_and(|write|self.field_write_observations.get(write).is_some_and(|observation|*observation>state.unknown_observation));
+            let restored=state.fields.get(key).is_some_and(|write|self.field_write_observations.get(write).is_some_and(|observation|*observation>state.unknown_observation));
             if !restored{return(Decision::Unavailable(reason.clone()),vec![])}
         }
         match state.fields.get(key) {Some(id)=>(self.graph.writes[*id].decision.clone(),vec![*id]),None=>(Decision::KnownAbsent("closed_empty_table_and_complete_field_write_history".into()),vec![])}
     }
     fn put_field(&mut self,object:usize,key:String,site:Site,ctx:&Context,decision:Decision,inputs:Vec<usize>)->usize {
         let cell=format!("object:{object}:field:{key}");
-        if self.native_profile {self.native.typed_cells.borrow_mut().insert(cell.clone(),StorageOwner::ObjectField{object,field:key.clone()});}
+        {self.native.typed_cells.borrow_mut().insert(cell.clone(),StorageOwner::ObjectField{object,field:key.clone()});}
         let id=self.write(cell,site,ctx,decision,inputs);
         self.objects[object].fields.insert(key,id);self.observe_heap(object,"field_write",self.graph.writes[id].site.clone(),Some(id),None);
-        if self.native_profile&&self.objects[object].fields.len()>OBJECT_FIELD_LIMIT{self.observation_failure.get_or_insert("object field count budget exceeded".into());}
+        if self.objects[object].fields.len()>OBJECT_FIELD_LIMIT{self.observation_failure.get_or_insert("object field count budget exceeded".into());}
         id
     }
     fn summarize_parameter_writes(&self,closure:&LuaClosureExpr,file:&str)->std::result::Result<FunctionEffectSummary,&'static str> {
@@ -449,272 +441,10 @@ impl Builder {
             writes.push(ParameterFieldWrite{parameter,field,receiver_site,write_site:self.inputs.site(file,index.get_range()),value});
         }
         if writes.is_empty(){return Err("effect_summary_has_no_parameter_field_writes")}
-        let id=digest(&(RULES_VERSION,self.inputs.site(file,closure.get_range()),&parameters,&writes));
+        let id=digest(&(NATIVE_RULES,self.inputs.site(file,closure.get_range()),&parameters,&writes));
         Ok(FunctionEffectSummary{id,parameters,writes,return_rule:"implicit_nil_after_straight_line_writes".into()})
     }
-    fn register_function(&mut self,name:String,declaration:Site,closure:LuaClosureExpr,ctx:&Context)->Decision {
-        if self.native_profile { return self.native_register_function(name,declaration,closure,ctx); }
-        let closure_site=self.inputs.site(&ctx.file,closure.get_range());
-        let signature=self.harvest.signatures.get(&closure_site.id()).cloned();
-        let pure_return_body=closure.get_block().map(|block| {
-            let stats:Vec<_>=block.get_stats().collect();
-            stats.len()==1 && matches!(&stats[0],LuaStat::ReturnStat(stat) if stat.get_expr_list().all(|e|matches!(e,LuaExpr::NameExpr(_)|LuaExpr::LiteralExpr(_))))
-        }).unwrap_or(false);
-        let intrinsic=self.harvest.intrinsic_declarations.get(&declaration.id()).cloned();
-        let body_check_coverage=if closure.get_block().is_some_and(|block|block.get_stats().all(|stat|matches!(stat,LuaStat::ReturnStat(_)))){"return_expressions_only"}else{"unavailable_non_return_statements"}.to_string();
-        let (effect_summary,effect_summary_unavailable_reason)=match self.summarize_parameter_writes(&closure,&ctx.file){Ok(summary)=>(Some(summary),None),Err(reason)=>(None,Some(reason.into()))};
-        let id=self.graph.functions.len();
-        self.graph.functions.push(Function{id,declaration,closure:closure_site,name,signature_reason:signature.is_none().then(||"missing_or_unsupported_explicit_primitive_signature".into()),signature,intrinsic,pure_return_body,body_check_coverage,load_occurrence:ctx.occurrence,effect_summary,effect_summary_unavailable_reason});
-        self.bodies.push((id,closure));self.value(&self.graph.functions[id].declaration.clone(),ValueKind::Function(id))
-    }
-    fn eval(&mut self,expr:LuaExpr,ctx:&Context,depth:usize)->Result<usize> {
-        if self.native_profile { return self.native_eval(expr,ctx,depth); }
-        self.budget()?;if depth>64{return Err("expression depth budget exceeded".into())}
-        let site=self.inputs.site(&ctx.file,expr.get_range());
-        let (decision,writes)=match expr {
-            LuaExpr::NameExpr(_)=>self.read(&self.key(&site,ctx),ctx),
-            LuaExpr::LiteralExpr(literal)=> {
-                let primitive=match literal.get_literal(){Some(LuaLiteralToken::Number(_))=>"number",Some(LuaLiteralToken::String(_))=>"string",Some(LuaLiteralToken::Bool(_))=>"boolean",Some(LuaLiteralToken::Nil(_))=>"nil",_=>"unsupported"};
-                if primitive=="unsupported" {(Decision::Unavailable("unsupported_literal".into()),vec![])}else{(self.value(&site,ValueKind::Primitive(primitive.into())),vec![])}
-            }
-            LuaExpr::TableExpr(table)=> {
-                let object=self.allocate_object(&site)?;
-                for field in table.get_fields() {
-                    let Some(key)=Self::static_key(field.get_field_key()) else {self.unknown_object(object,"dynamic_table_key".into(),self.inputs.site(&ctx.file,field.get_range()));continue};
-                    let Some(value)=field.get_value_expr() else {continue};
-                    let fact=self.eval(value,ctx,depth+1)?;
-                    self.put_field(object,key,self.inputs.site(&ctx.file,field.get_range()),ctx,self.graph.uses[fact].decision.clone(),vec![fact]);
-                }
-                (self.value(&site,ValueKind::Object(object)),vec![])
-            }
-            LuaExpr::IndexExpr(index)=> {
-                let base=self.eval(index.get_prefix_expr().ok_or("index base")?,ctx,depth+1)?;
-                let decision=self.graph.uses[base].decision.clone();
-                if ctx.deferred && self.graph.phase=="unknown" {(Decision::Unavailable("unknown_execution_phase".into()),vec![])}else{match (self.object(&decision),Self::static_key(index.get_index_key())) {
-                    (_,None)=>(Decision::Unavailable("dynamic_field_key".into()),vec![]),
-                    (Some(object),Some(key))=>self.field(object,&key),
-                    _=>(match decision{Decision::Unavailable(reason)=>Decision::Unavailable(reason),_=>Decision::Unavailable("index_receiver_not_known_table".into())},vec![]),
-                }}
-            }
-            LuaExpr::CallExpr(call)=> {
-                let callee=self.eval(call.get_prefix_expr().ok_or("callee")?,ctx,depth+1)?;
-                let mut args=vec![];if let Some(list)=call.get_args_list(){for arg in list.get_args(){args.push(self.eval(arg,ctx,depth+1)?);}}
-                let function=self.function(&self.graph.uses[callee].decision);
-                let intrinsic=function.and_then(|id|self.graph.functions[id].intrinsic.clone());
-                let id=self.graph.calls.len();
-                let colon=call.is_colon_call();
-                self.graph.calls.push(CallFact{id,site:site.clone(),context:ctx.name.clone(),callee,arguments:args.clone(),intrinsic:intrinsic.clone(),result_fact:None,
-                    argument_mapping_unavailable_reason:if ctx.conditional_branch.is_some(){Some("conditional_execution_unknown".into())}else{(colon && !self.native_profile).then(||"colon_call_not_supported".into())},invocation_coverage:CallCoverage::Unavailable,effect_coverage:CallCoverage::Unavailable,parameter_bindings:vec![],effect_write_versions:vec![],conditional_branch:ctx.conditional_branch});
-                let mut summarized_effects=false;
-                let result=if let Some(branch)=ctx.conditional_branch {
-                    self.graph.branches[branch].call_facts.push(id);
-                    self.conditional_call_footprint(id,ctx,colon)?;
-                    Decision::Unavailable("conditional_execution_unknown".into())
-                }
-                else if colon && !self.native_profile{Decision::Unavailable("colon_call_not_supported".into())}
-                else if let Some(intrinsic)=intrinsic {self.intrinsic(&intrinsic,id,&site,ctx,&args)?}
-                else {match function {
-                    Some(function) if (self.native_profile || self.graph.functions[function].signature.is_some()) && self.graph.functions[function].pure_return_body=>self.value(&site,ValueKind::CallResult(id)),
-                    Some(function) if self.graph.functions[function].effect_summary.is_some()=> {
-                        let result=self.apply_parameter_writes(function,id,&site,ctx,&args)?;
-                        summarized_effects=matches!(result,Decision::Bound(_));result
-                    }
-                    Some(_)=>Decision::Unavailable("ordinary_call_signature_or_effect_summary_unavailable".into()),
-                    None=>match &self.graph.uses[callee].decision {Decision::Unavailable(reason)=>Decision::Unavailable(reason.clone()),_=>Decision::Unavailable("callee_not_known_function".into())},
-                }};
-                let effect_coverage=if (colon && !self.native_profile) || ctx.conditional_branch.is_some() {CallCoverage::Unavailable}
-                else if self.graph.calls[id].intrinsic.is_some() && matches!(result,Decision::Bound(_)){CallCoverage::ProfileContract}
-                else if summarized_effects{CallCoverage::BoundedParameterFieldWrites}
-                else if self.graph.calls[id].intrinsic.is_none() && function.is_some_and(|id|self.graph.functions[id].pure_return_body){CallCoverage::BoundedProvedPureSubset}
-                else{CallCoverage::Unavailable};
-                let invocation_coverage=if matches!(result,Decision::Bound(_)){effect_coverage.clone()}else{CallCoverage::Unavailable};
-                if ctx.conditional_branch.is_none()&&matches!(effect_coverage,CallCoverage::Unavailable){self.invalidate_native_call_effects(id,function,ctx)?;}
-                let result_fact=self.usage(site,ctx,result,vec![]);
-                self.graph.calls[id].result_fact=Some(result_fact);
-                self.graph.calls[id].invocation_coverage=invocation_coverage;
-                self.graph.calls[id].effect_coverage=effect_coverage;
-                return Ok(result_fact);
-            }
-            LuaExpr::ClosureExpr(closure)=>if ctx.conditional_branch.is_some(){(Decision::Unavailable("conditional_function_value".into()),vec![])}else{(self.register_function("<anonymous>".into(),site.clone(),closure,ctx),vec![])},
-            LuaExpr::ParenExpr(paren)=> {let fact=self.eval(paren.get_expr().ok_or("paren")?,ctx,depth+1)?;(self.graph.uses[fact].decision.clone(),self.graph.uses[fact].writes.clone())}
-            _=> {
-                // An unsupported condition/RHS can still contain possible calls.
-                // Visit expression children, never a nested closure's body.
-                if ctx.conditional_branch.is_some(){for child in expr.syntax().children().filter_map(LuaExpr::cast){self.eval(child,ctx,depth+1)?;}}
-                (Decision::Unavailable("unsupported_expression".into()),vec![])
-            }
-        };
-        Ok(self.usage(site,ctx,decision,writes))
-    }
-    fn apply_parameter_writes(&mut self,function_id:usize,call:usize,call_site:&Site,caller:&Context,args:&[usize])->Result<Decision> {
-        let function=self.graph.functions[function_id].clone();
-        let summary=function.effect_summary.as_ref().ok_or("missing selected function effect summary")?;
-        let mut context=Context{file:function.declaration.file.clone(),occurrence:function.load_occurrence,name:format!("effect:call:{call}:function:{function_id}:{}",caller.name),deferred:caller.deferred,parameters:BTreeMap::new(),conditional_branch:caller.conditional_branch};
-        let mut bindings=vec![];
-        for parameter in &summary.parameters {
-            self.budget()?;
-            let argument_fact=args.get(parameter.index).copied();
-            let selected_value=argument_fact.map(|id|self.graph.uses[id].decision.clone()).unwrap_or_else(||Decision::KnownAbsent("missing_argument_is_nil".into()));
-            context.parameters.insert(Self::local_key(&parameter.declaration,&context),selected_value.clone());
-            bindings.push(ParameterBinding{parameter:parameter.clone(),argument_fact,object_id:self.object(&selected_value),selected_value});
-        }
-        self.graph.calls[call].parameter_bindings=bindings.clone();
-        // Deferred return inspection is a query at a checkpoint, not evidence
-        // that this function was invoked. It must never mutate the load graph.
-        if caller.deferred{return Ok(Decision::Unavailable("deferred_effect_application_not_analyzed".into()))}
-        // Validate all parameter receivers before applying this narrow summary.
-        // Unsupported calls still require a separate conservative invalidation
-        // policy; this batch does not pretend those effects are proved pure.
-        for write in &summary.writes {
-            let binding=&bindings[write.parameter.index];
-            let Some(object)=binding.object_id else{return Ok(Decision::Unavailable("effect_summary_parameter_not_known_table".into()))};
-            if self.objects[object].unknown.is_some(){return Ok(Decision::Unavailable("effect_summary_receiver_behavior_unavailable".into()))}
-        }
-        for write in &summary.writes {
-            self.budget()?;
-            let binding=&bindings[write.parameter.index];
-            let object=binding.object_id.ok_or("validated effect parameter lost object identity")?;
-            let receiver_fact=self.usage(write.receiver_site.clone(),&context,binding.selected_value.clone(),vec![]);
-            let (site,decision,versions)=match &write.value {
-                EffectExpression::Name{site}=>{let (decision,versions)=self.read(&self.key(site,&context),&context);(site.clone(),decision,versions)}
-                EffectExpression::Literal{site,primitive}=>(site.clone(),self.value(site,ValueKind::Primitive(primitive.clone())),vec![]),
-            };
-            let value_fact=self.usage(site,&context,decision.clone(),versions);
-            let mut inputs=vec![self.graph.calls[call].callee,receiver_fact,value_fact];
-            if let Some(argument)=binding.argument_fact{inputs.push(argument);}
-            let version=self.put_field(object,write.field.clone(),write.write_site.clone(),&context,decision,inputs);
-            self.graph.calls[call].effect_write_versions.push(version);
-        }
-        Ok(self.value(call_site,ValueKind::Primitive("nil".into())))
-    }
-    fn invalidate_conditional_target(&mut self,call:usize,ctx:&Context,target:ConditionalDestination)->Result<Value> {
-        self.budget()?;
-        let branch=ctx.conditional_branch.ok_or("conditional footprint without branch")?;
-        let mut inputs=vec![self.graph.calls[call].callee];
-        inputs.extend(self.graph.calls[call].arguments.iter().copied());
-        inputs.extend(self.graph.branches[branch].condition_facts.iter().copied());
-        let decision=Decision::Unavailable(target.reason.into());
-        let version=if let Some(field)=&target.field {
-            self.put_field(target.object,field.clone(),target.site.clone(),ctx,decision,inputs)
-        }else{
-            self.unknown_object(target.object,target.reason.into(),target.site.clone());
-            let cell=format!("object:{}:behavior",target.object);
-            if self.native_profile{self.native.typed_cells.borrow_mut().insert(cell.clone(),StorageOwner::ObjectBehavior{object:target.object});}
-            self.write(cell,target.site.clone(),ctx,decision,inputs)
-        };
-        Ok(json!({"objectId":target.object,"field":target.field,"sourceSite":target.site,"sourceWriteVersions":target.source_versions,"unavailableWriteVersion":version,"reason":target.reason}))
-    }
-    fn conditional_call_footprint(&mut self,call:usize,ctx:&Context,colon:bool)->Result<()> {
-        self.budget()?;
-        let branch=ctx.conditional_branch.ok_or("conditional call without branch")?;
-        let fact=self.graph.calls[call].clone();
-        let function=self.function(&self.graph.uses[fact.callee].decision).map(|id|self.graph.functions[id].clone());
-        let mut targets=vec![];
-        let mut gaps=vec![];
-        let mut coverage="bounded_footprint";
-        if ctx.deferred {
-            gaps.push("deferred_conditional_effects_not_applied");
-        }else if colon {
-            gaps.push("conditional_colon_argument_mapping_unavailable");
-        }else if fact.intrinsic.as_deref()==Some("CreateFromMixins") {
-            // This profile helper writes only a fresh object. Its uncertain
-            // result is not installed into any existing object here.
-            coverage="no_existing_object_writes";
-        }else if fact.intrinsic.as_deref()==Some("Mixin") {
-            let target=fact.arguments.first().and_then(|id|self.object(&self.graph.uses[*id].decision));
-            if let Some(target)=target {
-                for argument in fact.arguments.iter().skip(1) {
-                    let source=self.object(&self.graph.uses[*argument].decision);
-                    if let Some(source)=source.filter(|id|self.objects[*id].unknown.is_none()) {
-                        for (field,source_version) in self.objects[source].fields.clone() {
-                            targets.push(self.invalidate_conditional_target(call,ctx,ConditionalDestination{object:target,field:Some(field),site:fact.site.clone(),source_versions:vec![source_version],reason:"conditional_call_effect"})?);
-                        }
-                    }else{
-                        targets.push(self.invalidate_conditional_target(call,ctx,ConditionalDestination{object:target,field:None,site:fact.site.clone(),source_versions:vec![],reason:"conditional_mixin_source_fields_unavailable"})?);
-                        gaps.push("conditional_mixin_source_field_set_unavailable");
-                    }
-                }
-            }else{gaps.push("conditional_mixin_target_identity_unavailable");}
-        }else if fact.intrinsic.as_deref()==Some("setmetatable") {
-            if let Some(target)=fact.arguments.first().and_then(|id|self.object(&self.graph.uses[*id].decision)) {
-                targets.push(self.invalidate_conditional_target(call,ctx,ConditionalDestination{object:target,field:None,site:fact.site.clone(),source_versions:vec![],reason:"conditional_metatable_effect"})?);
-            }else{gaps.push("conditional_metatable_target_identity_unavailable");}
-        }else if let Some(summary)=function.as_ref().and_then(|function|function.effect_summary.as_ref()) {
-            let mut bindings=vec![];
-            for parameter in &summary.parameters {
-                self.budget()?;
-                let argument_fact=fact.arguments.get(parameter.index).copied();
-                let selected_value=argument_fact.map(|id|self.graph.uses[id].decision.clone()).unwrap_or_else(||Decision::KnownAbsent("missing_argument_is_nil".into()));
-                bindings.push(ParameterBinding{parameter:parameter.clone(),argument_fact,object_id:self.object(&selected_value),selected_value});
-            }
-            self.graph.calls[call].parameter_bindings=bindings.clone();
-            for write in &summary.writes {
-                if let Some(object)=bindings[write.parameter.index].object_id {
-                    targets.push(self.invalidate_conditional_target(call,ctx,ConditionalDestination{object,field:Some(write.field.clone()),site:write.write_site.clone(),source_versions:vec![],reason:"conditional_call_effect"})?);
-                }else{gaps.push("conditional_summary_parameter_object_unavailable");}
-            }
-        }else if function.as_ref().is_some_and(|function|function.pure_return_body) {
-            coverage="proved_no_writes";
-        }else{
-            // Explicit argument objects may be affected. Hidden captures and
-            // globals cannot be identified by this subset and remain a gap.
-            let mut objects=vec![];
-            for argument in &fact.arguments {if let Some(object)=self.object(&self.graph.uses[*argument].decision) && !objects.contains(&object){objects.push(object);}}
-            for object in objects {targets.push(self.invalidate_conditional_target(call,ctx,ConditionalDestination{object,field:None,site:fact.site.clone(),source_versions:vec![],reason:"conditional_unknown_call_argument_effect"})?);}
-            gaps.push("conditional_unknown_call_captured_and_global_effects_unavailable");
-        }
-        if !gaps.is_empty(){coverage="coverage_gap";}
-        for reason in &gaps{self.graph.branches[branch].coverage_gaps.push(json!({"sourceSite":fact.site,"callFactId":call,"reason":reason}));}
-        self.graph.branches[branch].footprints.push(json!({"callFactId":call,"sourceSite":fact.site,"execution":"conditional_possible","coverage":coverage,"targets":targets,"coverageGaps":gaps}));
-        Ok(())
-    }
-    fn conditional_if(&mut self,stat:emmylua_parser::LuaIfStat,ctx:&Context,depth:usize)->Result<()> {
-        self.budget()?;if depth>64{return Err("conditional depth budget exceeded".into())}
-        let mut conditions=vec![];let mut blocks=vec![];
-        if let Some(expr)=stat.get_condition_expr(){conditions.push(expr);}
-        if let Some(block)=stat.get_block(){blocks.push(block);}
-        for clause in stat.get_all_clause(){
-            if let Some(expr)=clause.get_condition_expr(){conditions.push(expr);}
-            if let Some(block)=clause.get_block(){blocks.push(block);}
-        }
-        let id=self.graph.branches.len();
-        self.graph.branches.push(BranchFact{id,site:self.inputs.site(&ctx.file,stat.get_range()),parent:ctx.conditional_branch,condition_sites:conditions.iter().map(|e|self.inputs.site(&ctx.file,e.get_range())).collect(),condition_facts:vec![],call_facts:vec![],write_versions:vec![],footprints:vec![],coverage_gaps:vec![]});
-        if ctx.deferred{self.graph.branches[id].coverage_gaps.push(json!({"reason":"deferred_conditional_effects_not_applied"}));return Ok(())}
-        let mut branch_ctx=ctx.clone();branch_ctx.conditional_branch=Some(id);branch_ctx.name=format!("conditional_possible:{id}:{}",ctx.name);
-        for expression in conditions{let fact=self.eval(expression,&branch_ctx,0)?;self.graph.branches[id].condition_facts.push(fact);}
-        for block in blocks{self.conditional_block(block,&branch_ctx,depth+1)?;}
-        Ok(())
-    }
-    fn conditional_block(&mut self,block:LuaBlock,ctx:&Context,depth:usize)->Result<()> {
-        self.budget()?;if depth>64{return Err("conditional depth budget exceeded".into())}
-        let branch=ctx.conditional_branch.ok_or("conditional block without branch")?;
-        for stat in block.get_stats(){
-            self.budget()?;
-            match stat {
-                LuaStat::AssignStat(stat)=> {
-                    let (vars,values)=stat.get_var_and_expr_list();let mut targets=vec![];let mut inputs=self.graph.branches[branch].condition_facts.clone();
-                    for var in vars{targets.push(self.capture_assignment_target(var.to_expr(),ctx)?);}
-                    for value in values{inputs.push(self.eval(value,ctx,0)?);}
-                    for target in targets{self.apply_assignment(target,Decision::Unavailable("conditional_write".into()),inputs.clone(),ctx);}
-                }
-                LuaStat::FuncStat(stat)=> {
-                    let target=self.capture_assignment_target(stat.get_func_name().ok_or("conditional function target")?.to_expr(),ctx)?;
-                    self.apply_assignment(target,Decision::Unavailable("conditional_function_write".into()),self.graph.branches[branch].condition_facts.clone(),ctx);
-                }
-                LuaStat::CallExprStat(stat)=>{self.eval(LuaExpr::CallExpr(stat.get_call_expr().ok_or("conditional call")?),ctx,0)?;}
-                LuaStat::IfStat(stat)=>self.conditional_if(stat,ctx,depth+1)?,
-                LuaStat::DoStat(stat)=>{if let Some(block)=stat.get_block(){self.conditional_block(block,ctx,depth+1)?;}}
-                LuaStat::ReturnStat(stat)=>{for expr in stat.get_expr_list(){self.eval(expr,ctx,0)?;}}
-                LuaStat::LocalStat(stat)=> {
-                    for expr in stat.get_value_exprs(){self.eval(expr,ctx,0)?;}
-                    self.graph.branches[branch].coverage_gaps.push(json!({"sourceSite":self.inputs.site(&ctx.file,stat.get_range()),"reason":"conditional_local_bindings_not_analyzed"}));
-                }
-                LuaStat::LocalFuncStat(stat)=>{self.graph.branches[branch].coverage_gaps.push(json!({"sourceSite":self.inputs.site(&ctx.file,stat.get_range()),"reason":"conditional_local_function_binding_not_analyzed"}));}
-                LuaStat::EmptyStat(_)=>{}
-                _=>{self.graph.branches[branch].coverage_gaps.push(json!({"sourceSite":self.inputs.site(&ctx.file,stat.get_range()),"reason":"conditional_statement_effects_not_analyzed"}));}
-            }
-        }Ok(())
-    }
+    fn eval(&mut self,expr:LuaExpr,ctx:&Context,depth:usize)->Result<usize> { self.native_eval(expr,ctx,depth) }
     fn intrinsic(&mut self,name:&str,call:usize,site:&Site,ctx:&Context,args:&[usize])->Result<Decision> {
         if ctx.deferred{return Ok(Decision::Unavailable("deferred_intrinsic_effect_not_analyzed".into()))}
         let decisions:Vec<_>=args.iter().map(|id|self.graph.uses[*id].decision.clone()).collect();
@@ -730,33 +460,18 @@ impl Builder {
             if let Some(reason)=state.unknown {self.unknown_object(target,reason.clone(),site.clone());return Ok(Decision::Unavailable(reason));}
             for (field,source_write) in state.fields {
                 let selected=self.graph.writes[source_write].decision.clone();
-                if self.native_profile {
+                {
                     let absent=matches!(&selected,Decision::KnownAbsent(_))||matches!(&selected,Decision::Bound(value) if matches!(&self.graph.values[*value].kind,ValueKind::Primitive(kind) if kind=="nil"));
                     if absent{continue}
                     let uncertain=matches!(&selected,Decision::Unavailable(_)|Decision::NotManaged)||matches!(&selected,Decision::Bound(value) if matches!(&self.graph.values[*value].kind,ValueKind::CallResult(_)|ValueKind::NativeParameter(_)|ValueKind::HostReturn{..}));
                     if uncertain{self.unknown_object(target,"mixin_source_field_presence_unavailable".into(),site.clone());return Ok(Decision::Unavailable("mixin_source_field_presence_unavailable".into()))}
                 }
                 let destination_write=self.put_field(target,field.clone(),site.clone(),ctx,selected.clone(),vec![self.graph.calls[call].callee]);
-                if self.native_profile&&self.graph.copies.len()>=OBJECT_SLOT_LIMIT{return Err("object copy edge budget exceeded".into())}
+                if self.graph.copies.len()>=OBJECT_SLOT_LIMIT{return Err("object copy edge budget exceeded".into())}
                 let id=self.graph.copies.len();self.graph.copies.push(CopyEdge{id,call,source_object:source,source_field_write:source_write,destination_object:target,destination_field_write:destination_write,field,selected_value:selected,profile_rule:format!("{PROFILE}:{name}:left-to-right-shallow-copy-assumption")});
             }
         }
         Ok(self.value(site,ValueKind::Object(target)))
-    }
-    fn capture_assignment_target(&mut self,expr:LuaExpr,ctx:&Context)->Result<AssignmentTarget> {
-        let site=self.inputs.site(&ctx.file,expr.get_range());
-        let destination=match expr {
-            LuaExpr::NameExpr(_)=>AssignmentDestination::Cell(self.key(&site,ctx)),
-            LuaExpr::IndexExpr(index)=> {
-                let base=self.eval(index.get_prefix_expr().ok_or("write base")?,ctx,0)?;
-                match self.object(&self.graph.uses[base].decision) {
-                    Some(object)=>AssignmentDestination::Field{object,key:Self::static_key(index.get_index_key()),receiver_fact:base},
-                    None=>AssignmentDestination::Unavailable,
-                }
-            }
-            _=>return Err("unsupported assignment target".into()),
-        };
-        Ok(AssignmentTarget{site,destination})
     }
     fn apply_assignment(&mut self,target:AssignmentTarget,decision:Decision,mut input:Vec<usize>,ctx:&Context) {
         match target.destination {
@@ -772,66 +487,8 @@ impl Builder {
             AssignmentDestination::Unavailable=>{if let Some(branch)=ctx.conditional_branch{self.graph.branches[branch].coverage_gaps.push(json!({"sourceSite":target.site,"reason":"conditional_assignment_target_identity_unavailable"}));}}
         }
     }
-    fn assign(&mut self,expr:LuaExpr,decision:Decision,input:Vec<usize>,ctx:&Context)->Result<()> {
-        let target=self.capture_assignment_target(expr,ctx)?;
-        self.apply_assignment(target,decision,input,ctx);Ok(())
-    }
-    fn block(&mut self,block:LuaBlock,ctx:&Context)->Result<()> {
-        if self.native_profile { let paths=self.native_block(block,ctx,0)?;
-            return self.native_load_terminals(paths); }
-        for stat in block.get_stats() {
-            self.budget()?;
-            match stat {
-                LuaStat::LocalStat(stat)=> {
-                    let mut values=vec![];for expr in stat.get_value_exprs(){values.push(self.eval(expr,ctx,0)?);}
-                    for (index,name) in stat.get_local_name_list().enumerate(){
-                        let token=name.get_name_token().ok_or("local name")?;let site=self.inputs.site(&ctx.file,token.get_range());
-                        let (decision,inputs)=match values.get(index){Some(id)=>(self.graph.uses[*id].decision.clone(),vec![*id]),None=>(Decision::Unavailable("assignment_value_slot_not_implemented".into()),vec![])};
-                        self.write(Self::local_key(&site,ctx),site,ctx,decision,inputs);
-                    }
-                }
-                LuaStat::AssignStat(stat)=> {
-                    let (vars,exprs)=stat.get_var_and_expr_list();let mut values=vec![];
-                    // Lua 5.1 section 2.4.3: evaluate assignment expressions
-                    // before performing writes. Freeze each LHS address once.
-                    let mut targets=vec![];
-                    for var in vars{targets.push(self.capture_assignment_target(var.to_expr(),ctx)?);}
-                    for expr in exprs{values.push(self.eval(expr,ctx,0)?);}
-                    for(index,target)in targets.into_iter().enumerate(){let(decision,inputs)=match values.get(index){Some(id)=>(self.graph.uses[*id].decision.clone(),vec![*id]),None=>(Decision::Unavailable("assignment_value_slot_not_implemented".into()),vec![])};self.apply_assignment(target,decision,inputs,ctx);}
-                }
-                LuaStat::FuncStat(stat)=> {
-                    let name=stat.get_func_name().ok_or("function name")?.to_expr();let site=self.inputs.site(&ctx.file,name.get_range());
-                    let value=self.register_function(site.text(&self.inputs).expect("admitted parser Site").into(),site,stat.get_closure().ok_or("closure")?,ctx);
-                    self.assign(name,value,vec![],ctx)?;
-                }
-                LuaStat::LocalFuncStat(stat)=> {
-                    let token=stat.get_local_name().and_then(|n|n.get_name_token()).ok_or("local function name")?;
-                    let site=self.inputs.site(&ctx.file,token.get_range());let value=self.register_function(site.text(&self.inputs).expect("admitted parser Site").into(),site.clone(),stat.get_closure().ok_or("closure")?,ctx);
-                    self.write(Self::local_key(&site,ctx),site,ctx,value,vec![]);
-                }
-                LuaStat::CallExprStat(stat)=>{self.eval(LuaExpr::CallExpr(stat.get_call_expr().ok_or("call statement")?),ctx,0)?;}
-                LuaStat::ReturnStat(stat)=>{for expr in stat.get_expr_list(){self.eval(expr,ctx,0)?;}}
-                LuaStat::IfStat(stat)=>self.conditional_if(stat,ctx,0)?,
-                LuaStat::EmptyStat(_)=>{}
-                _=>return Err("statement outside bounded fixture subset".into()),
-            }
-        }Ok(())
-    }
-    fn deferred_bodies(&mut self)->Result<()> {
-        if self.native_profile { return self.native_static_bodies(); }
-        for (id,closure) in self.bodies.clone() {
-            let function=self.graph.functions[id].clone();if function.intrinsic.is_some(){continue}
-            let mut ctx=Context{file:function.declaration.file.clone(),occurrence:function.load_occurrence,name:format!("function:{}:phase:{}",id,self.graph.phase),deferred:true,parameters:BTreeMap::new(),conditional_branch:None};
-            if let Some(params)=closure.get_params_list(){for param in params.get_params(){if let Some(token)=param.get_name_token(){
-                let site=self.inputs.site(&ctx.file,token.get_range());let decision=if self.native_profile { self.value(&site,ValueKind::NativeParameter(site.clone())) } else { match function.signature.as_ref().and_then(|sig|sig.parameters.iter().find(|(name,_)|name==site.text(&self.inputs).expect("admitted parser Site"))) {
-                    Some((_,kind))=>self.value(&site,ValueKind::Primitive(kind.clone())),None=>Decision::Unavailable("parameter_annotation_unavailable".into()),
-                }};ctx.parameters.insert(Self::local_key(&site,&ctx),decision);
-            }}}
-            let Some(block)=closure.get_block()else{continue};
-            // This phase records checks for return-only bodies. It does not invoke Lua.
-            for stat in block.get_stats(){if let LuaStat::ReturnStat(stat)=stat{for expr in stat.get_expr_list(){let fact=if function.body_check_coverage=="return_expressions_only"{self.eval(expr,&ctx,0)?}else{self.usage(self.inputs.site(&ctx.file,expr.get_range()),&ctx,Decision::Unavailable("function_body_statement_effects_not_analyzed".into()),vec![])};self.graph.returns.push(ReturnCheck{function:id,expression:fact,context:ctx.name.clone()});}}}
-        }Ok(())
-    }
+    fn block(&mut self,block:LuaBlock,ctx:&Context)->Result<()> { let paths=self.native_block(block,ctx,0)?; self.native_load_terminals(paths) }
+    fn deferred_bodies(&mut self)->Result<()> { self.native_static_bodies() }
 }
 
 #[cfg(test)]
@@ -899,7 +556,7 @@ impl Facade<'_> {
             "effectSummary":function.and_then(|f|f.effect_summary.as_ref()),"effectSummaryUnavailableReason":function.and_then(|f|f.effect_summary_unavailable_reason.as_ref()),
             "parameterBindings":call.parameter_bindings,"effectWriteVersions":call.effect_write_versions,
             "resultFactId":result.id,"resultProofId":result.proof_id,"resultType":result_view.get("type"),"resultCoverage":result_view["state"],"resultTypeView":result_view,
-            "returnType":signature.map(|s|&s.returns),"checkCoverage":coverage,"legacyAliases":{"returnType":"declaredReturnType; signature declaration, not the expression result","checkCoverage":"argumentCheckCoverage"},"diagnostics":diagnostics,
+            "returnType":signature.map(|s|&s.returns),"checkCoverage":coverage,"diagnostics":diagnostics,
             "unavailableReason":if coverage=="unavailable" {Some(call.argument_mapping_unavailable_reason.as_deref().unwrap_or(match &callee.decision{Decision::Unavailable(reason)=>reason.as_str(),_=>"selected_signature_or_argument_type_unavailable"}))}else{None},
             "invocationUnavailableReason":if matches!(call.invocation_coverage,CallCoverage::Unavailable){result_view.get("reason")}else{None},"intrinsic":call.intrinsic})
     }
@@ -931,7 +588,7 @@ impl Facade<'_> {
     }
 }
 
-fn build_graph(prepared:&PreparedSnapshot,name:&str,snapshot_inputs:GraphSnapshotEvidence,native_profile:bool,inputs:Arc<SourceInputs>)->Result<Graph> {
+fn build_graph(prepared:&PreparedSnapshot,name:&str,snapshot_inputs:GraphSnapshotEvidence,inputs:Arc<SourceInputs>)->Result<Graph> {
     let analysis=&prepared.analysis;let control=&prepared.control;let owner=prepared.owner.clone();
     let phase=inputs.phase.clone();let occurrence_files=inputs.ordered.clone();let ordered:Vec<&str>=occurrence_files.iter().map(String::as_str).collect();
     control.check().map_err(|e|e.to_string())?;
@@ -940,9 +597,9 @@ fn build_graph(prepared:&PreparedSnapshot,name:&str,snapshot_inputs:GraphSnapsho
     let (snapshot_inputs_json,snapshot_key)=SnapshotInputsJson::new(Arc::clone(&snapshot_inputs),control,if inputs.corpus.limits.research{32<<20}else{2097152}).map_err(|e|e.to_string())?;
     let mut harvest=harvest(analysis,&unique,&inputs,control)?;
     let graph=GraphFacts{snapshot_key,snapshot_inputs,snapshot_inputs_json,scenario:name.into(),phase,script_load_occurrences:ordered.iter().enumerate().map(|(i,n)|format!("{i}:{n}")).collect(),values:vec![],functions:vec![],writes:vec![],uses:vec![],calls:vec![],copies:vec![],returns:vec![],branches:vec![],raw_emmy:std::mem::take(&mut harvest.raw),object_views:vec![],object_mutations:vec![],native_invocations:None,host_runtime:None,xml:None};
-    let mut builder=Builder{inputs:inputs.clone(),control:control.clone(),native_profile,graph,harvest,cells:BTreeMap::new(),objects:vec![],bodies:vec![],heap_observation:0,object_versions:vec![],object_view_ids:BTreeMap::new(),object_slots:0,field_write_observations:BTreeMap::new(),observation_failure:None,native:NativeInvocationState::default(),xml_objects:BTreeMap::new()};
+    let mut builder=Builder{inputs:inputs.clone(),control:control.clone(),graph,harvest,cells:BTreeMap::new(),objects:vec![],bodies:vec![],heap_observation:0,object_versions:vec![],object_view_ids:BTreeMap::new(),object_slots:0,field_write_observations:BTreeMap::new(),observation_failure:None,native:NativeInvocationState::default(),xml_objects:BTreeMap::new()};
     builder.native.facts.global_environment_open = !inputs.host.data.closed;
-    if native_profile {builder.host_initialize()?;}
+    builder.host_initialize()?;
     if let Some(plan@LoadPlan::Unknown(_))=&inputs.load_plan{
         builder.native.facts.control.complete=false;builder.native.facts.control.coverage="unavailable_execution_plan".into();
         builder.native.facts.execution_boundaries.push(ExecutionBoundary{kind:NativeBoundaryKind::Knowledge,reason:"load_order_unknown".into(),load_plan:plan.clone()});
@@ -951,37 +608,35 @@ fn build_graph(prepared:&PreparedSnapshot,name:&str,snapshot_inputs:GraphSnapsho
         let mut result=Ok(());
         for (occurrence,file) in ordered.iter().enumerate(){
             result=builder.load_file(file,occurrence);
-            if result.is_err()||native_profile&&!builder.native.facts.control.complete{break;}
+            if result.is_err()||!builder.native.facts.control.complete{break;}
         }
         result
     };
     if let Err(reason)=load_result{
         control.check().map_err(|e|e.to_string())?;
-        if !native_profile{return Err(reason)}
         if (builder.native.facts.control.complete||reason!="native invocation stopped at explicit control boundary")&&!builder.native_recover_budget(&reason)?{return Err(reason)}
-    }    if native_profile && builder.native.facts.control.complete && let Some(request)=inputs.entry.clone()
+    }    if builder.native.facts.control.complete && let Some(request)=inputs.entry.clone()
         && let Err(reason)=builder.native_explicit_entry(prepared,request){
         control.check().map_err(|error|error.to_string())?;
         if (reason!="native invocation stopped at explicit control boundary" || builder.native.facts.control.complete)
             && !builder.native_recover_budget(&reason)?{return Err(reason)}
     }
-    if (!native_profile||builder.native.facts.control.complete)
+    if builder.native.facts.control.complete
         && let Err(reason)=builder.deferred_bodies(){control.check().map_err(|e|e.to_string())?;
-            if !native_profile || !builder.native_recover_budget(&reason)?{return Err(reason)}
+            if !builder.native_recover_budget(&reason)?{return Err(reason)}
     }
-    if native_profile {
+    {
         builder.flow_publish_contexts();
         builder.host_finish_facts()?;
         if builder.native.typed_cells.borrow().len()>8192{return Err("typed storage identity budget exceeded".into())}
         builder.native.facts.storages=builder.native.typed_cells.borrow().iter().map(|(cell,owner)|StorageFact{cell:cell.clone(),owner:owner.clone()}).collect();
     }
-    let complete=!native_profile||builder.native.facts.control.complete;
+    let complete=builder.native.facts.control.complete;
     if complete {if let Some(reason)=builder.observation_failure{return Err(reason)}
         if builder.graph.object_views.iter().any(|view|view.proof_id.is_empty()){return Err("cannot freeze an incomplete object observation".into())}
         if builder.graph.calls.iter().any(|call|call.result_fact.is_none()){return Err("cannot freeze a call without its result fact".into())}
     }
     control.check().map_err(|e|e.to_string())?;
-    if native_profile {builder.graph.native_invocations=Some(builder.native.facts);}
+    {builder.graph.native_invocations=Some(builder.native.facts);}
     Ok(Graph{facts:builder.graph,inputs,control:control.clone(),owner,research_control:Default::default()})
 }
-

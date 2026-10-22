@@ -2,8 +2,8 @@
 //! remain separate capabilities. No executable hash is invented or imported.
 #![forbid(unsafe_code)]
 use crate::{
-    locator::Layout,
-    mailbox::{Memory, Reader, Record, Selector},
+    lua_layout::Layout,
+    mailbox::lookup::{Memory, Reader, Record, Selector},
     runtime_root::{RecipeId, RootBinding, RootEvidence},
 };
 use lycheedev_core::client::{self, ClientInstallation};
@@ -45,91 +45,27 @@ pub fn runtime_budget(
 }
 
 struct CatalogProfile {
-    product: &'static str,
-    catalog_product: &'static str,
-    channel: &'static str,
-    full_build: &'static str,
     recipe: RecipeId,
     profile: &'static str,
     evidence_sha256: &'static str,
 }
 
-// These exact historical clients have complete named-path read confirmations.
-// The profile digests bind the recorded ABI, not an executable or numeric RVA.
-// Read/acceptance evidence lives beside each profile under docs/toolkit/research:
-// Retail current-final-candidate/pid60944/summary.json; Classic
-// current-candidate/core/final-summary.json; Titan current-candidate/summary.json;
-// Forever current-live-acceptance-summary.json. Their candidate profile labels
-// remain historical; none establishes new protocol or current-build acceptance.
-static PROFILES: &[CatalogProfile] = &[
-    CatalogProfile {
-        product: "retail",
-        catalog_product: "wow",
-        channel: "",
-        full_build: "12.1.0.69933",
-        recipe: RecipeId::Retail,
-        profile: "retail-lua-mailbox-root-v1-69933",
-        evidence_sha256: "1afe07213bb3979384c5939062df458ea9f26ef5d1b3e98a8cff5fa382f56406",
-    },
-    CatalogProfile {
-        product: "classic",
-        catalog_product: "wow_classic",
-        channel: "",
-        full_build: "5.5.4.70032",
-        recipe: RecipeId::Retail,
-        profile: "classic-lua-mailbox-root-v1-70032",
-        evidence_sha256: "3c7cf9920b59e62c8ab62ab296c47df50a73c8666010d38d2712650e0269d6db",
-    },
-    CatalogProfile {
-        product: "titan",
-        catalog_product: "wow_classic_titan",
-        channel: "",
-        full_build: "3.80.2.69874",
-        recipe: RecipeId::Retail,
-        profile: "titan-lua-mailbox-root-v1-69874",
-        evidence_sha256: "98e5bc40a701845af2552e13545d0800d7fd2bc86ae07b8d80e03b5e00a9ef7d",
-    },
-    CatalogProfile {
-        product: "forever",
-        catalog_product: "wow_classic_beta",
-        channel: "asia-beta",
-        full_build: "1.60.1.70124",
-        recipe: RecipeId::Forever,
-        profile: "forever-lua-mailbox-root-runscript-v1-70124",
-        evidence_sha256: "2c85b30a93ab8b4f0da884f928a02e4bf8cc051c7b67071d8c41ce15432a4db9",
-    },
-];
-
-// The fixed Go reader validates this ABI on every named path. These profiles
-// bind source-reviewed layout semantics to an observed recipe, not a build/hash
-// allowlist. The digest is the fixed Go lua_mailbox.go byte digest, not any of
-// the historical four-client runtime acceptance artifacts above.
+// Current runtime recipes share the fixed Lua ABI; client metadata and runtime
+// instruction evidence remain independently authenticated.
 const FORMAL_LAYOUT_SOURCE: &str =
     "ee1c7d473cc54257baed4622a212d29ad7f1f168a48d0a92cd0052e8931289f6";
 static FORMAL_PROFILES: &[CatalogProfile] = &[
     CatalogProfile {
-        product: "",
-        catalog_product: "",
-        channel: "",
-        full_build: "",
         recipe: RecipeId::Retail,
         profile: "go-3.2.0-lua-mailbox-rip-v1",
         evidence_sha256: FORMAL_LAYOUT_SOURCE,
     },
     CatalogProfile {
-        product: "",
-        catalog_product: "",
-        channel: "",
-        full_build: "",
         recipe: RecipeId::Forever,
         profile: "go-3.2.0-lua-mailbox-runscript-v1",
         evidence_sha256: FORMAL_LAYOUT_SOURCE,
     },
     CatalogProfile {
-        product: "",
-        catalog_product: "",
-        channel: "",
-        full_build: "",
         recipe: RecipeId::ForeverContext,
         profile: "go-3.2.0-lua-mailbox-context-v1",
         evidence_sha256: FORMAL_LAYOUT_SOURCE,
@@ -214,42 +150,6 @@ impl RuntimeLayoutAdmission {
         });
         Ok(admission)
     }
-    fn select_from(
-        client: &ClientInstallation,
-        recipe: RecipeId,
-        profiles: &'static [CatalogProfile],
-    ) -> Result<Self> {
-        Self::check_client(client)?;
-        let observed_slot = if client.catalog_product.is_empty() {
-            client.product_code.as_str()
-        } else {
-            client.catalog_product.as_str()
-        };
-        let mut matches = profiles.iter().filter(|p| {
-            p.product == client.product
-                && p.catalog_product == observed_slot
-                && p.channel == client.channel
-                && p.full_build == client.full_build
-                && p.recipe == recipe
-        });
-        let profile = matches.next().ok_or("reader.runtime_layout_unsupported")?;
-        if matches.next().is_some()
-            || profile.profile.is_empty()
-            || profile.profile.len() > 128
-            || profile.evidence_sha256.len() != 64
-            || !profile
-                .evidence_sha256
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            || !profile.evidence_sha256.bytes().any(|b| b != b'0')
-        {
-            return Err("reader.runtime_catalog_invalid".into());
-        }
-        Ok(Self {
-            profile,
-            scope: None,
-        })
-    }
     fn check_client(client: &ClientInstallation) -> Result<()> {
         // The API family may be shared, but ABI admission remains tied to the
         // exact observed delivery slot. No regional catalog evidence is borrowed.
@@ -315,7 +215,6 @@ impl RuntimeLayoutAdmission {
         // gain a separate implementation and independently admitted profile.
         Layout {
             id: self.profile.profile.into(),
-            applicable_hashes: Vec::new(),
             state_globals: 0x90,
             tag_offset: 16,
             string_length: 24,
@@ -327,7 +226,6 @@ impl RuntimeLayoutAdmission {
     }
     pub(crate) fn admits_layout(&self, layout: &Layout) -> Result<()> {
         if layout.id != self.profile.profile
-            || !layout.applicable_hashes.is_empty()
             || layout.state_globals != 0x90
             || layout.tag_offset != 16
             || layout.string_length != 24
@@ -350,7 +248,7 @@ pub struct RuntimeBindingFailure {
     /// Original ledger's last observed usage. A foreign replacement ledger
     /// never replaces the binding's retained counters.
     pub usage: RuntimeUsage,
-    pub first_read_failure: Option<crate::mailbox::ReadFailure>,
+    pub first_read_failure: Option<crate::mailbox::lookup::ReadFailure>,
 }
 impl std::fmt::Display for RuntimeBindingFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -482,9 +380,9 @@ trait Source {
         bytes: &mut [u8],
         module: bool,
         budget: &mut RuntimeBudget,
-    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+    ) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
         self.read(address, bytes, module, budget)
-            .map_err(crate::mailbox::ReadError::unknown)
+            .map_err(crate::mailbox::lookup::ReadError::unknown)
     }
 }
 struct OsSource {
@@ -546,7 +444,7 @@ impl Source for OsSource {
         bytes: &mut [u8],
         module: bool,
         budget: &mut RuntimeBudget,
-    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+    ) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
         runtime_read_diagnostic(&self.module, &self.root, address, bytes, module, budget)
     }
 }
@@ -558,10 +456,10 @@ fn runtime_read_diagnostic(
     bytes: &mut [u8],
     is_module: bool,
     budget: &mut RuntimeBudget,
-) -> std::result::Result<(), crate::mailbox::ReadError> {
+) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
     let result = if is_module {
         if address != root.root_address() || bytes.len() != 8 {
-            return Err(crate::mailbox::ReadError::unknown(
+            return Err(crate::mailbox::lookup::ReadError::unknown(
                 "reader.runtime_root_range".into(),
             ));
         }
@@ -634,13 +532,13 @@ impl Source for CandidateSource<'_> {
         bytes: &mut [u8],
         module: bool,
         budget: &mut RuntimeBudget,
-    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+    ) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
         runtime_read_diagnostic(self.module, self.root, address, bytes, module, budget)
     }
 }
 enum LookupSelector<'a> {
-    Legacy(&'a Selector),
-    Formal(&'a crate::go_mailbox_v1::Selector),
+    Named(&'a Selector),
+    Formal(&'a crate::mailbox::Selector),
 }
 fn transient_publication(cause: &str) -> bool {
     matches!(
@@ -754,11 +652,11 @@ impl<S: Source> Bound<S> {
         selector: &Selector,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
-        self.lookup_selected(LookupSelector::Legacy(selector), None, budget)
+        self.lookup_selected(LookupSelector::Named(selector), None, budget)
     }
     fn lookup_formal(
         &mut self,
-        selector: &crate::go_mailbox_v1::Selector,
+        selector: &crate::mailbox::Selector,
         accept: Option<&mut dyn FnMut(&Record) -> bool>,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
@@ -798,13 +696,12 @@ impl<S: Source> Bound<S> {
                     memory: &memory,
                     root: self.source.root(),
                     layout: self.admission.layout(),
-                    module_hash: String::new(),
                     release: self.release.clone(),
                 };
                 let read = match selector {
-                    LookupSelector::Legacy(selector) => reader
+                    LookupSelector::Named(selector) => reader
                         .lookup_runtime(selector, &self.admission)
-                        .map_err(crate::mailbox::LookupFailure::from),
+                        .map_err(crate::mailbox::lookup::LookupFailure::from),
                     LookupSelector::Formal(selector) => {
                         reader.lookup_runtime_formal(selector, &self.admission, None)
                     }
@@ -891,7 +788,7 @@ impl<S: Source> Memory for LookupMemory<'_, S> {
         address: u64,
         bytes: &mut [u8],
         module: bool,
-    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+    ) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
         self.source
             .read_diagnostic(address, bytes, module, &mut self.budget.borrow_mut())
     }
@@ -1040,11 +937,11 @@ impl RuntimeBoundMemory {
                         root,
                         latest,
                     };
-                    let selector = crate::go_mailbox_v1::Selector {
-                        kind: crate::go_mailbox_v1::Kind::Identity,
-                        nonce: crate::go_mailbox_v1::ZERO_TOKEN,
-                        runtime: crate::go_mailbox_v1::ZERO_TOKEN,
-                        ticket: crate::go_mailbox_v1::ZERO_TOKEN,
+                    let selector = crate::mailbox::Selector {
+                        kind: crate::mailbox::Kind::Identity,
+                        nonce: crate::mailbox::ZERO_TOKEN,
+                        runtime: crate::mailbox::ZERO_TOKEN,
+                        ticket: crate::mailbox::ZERO_TOKEN,
                         body: None,
                     };
                     let result = Bound::bind(source, admission, release, budget)
@@ -1146,7 +1043,7 @@ impl RuntimeBoundMemory {
     }
     pub fn lookup_formal(
         &mut self,
-        selector: &crate::go_mailbox_v1::Selector,
+        selector: &crate::mailbox::Selector,
         accept: Option<&mut dyn FnMut(&Record) -> bool>,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {

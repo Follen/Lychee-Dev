@@ -114,18 +114,7 @@ impl SelectedProjector<'_> {
                     return Ok(Some(backend.plain(LuaType::Unknown)));
                 }
                 BindingDecision::Bound(permit) => {
-                    let actual_callee = call.get_prefix_expr().map(|expr| BindingSite {
-                        file_id: site.file_id,
-                        syntax: expr.get_syntax_id(),
-                    });
-                    if actual_callee != Some(permit.callee)
-                        || !matches!(
-                            permit.capability_profile.as_str(),
-                            "typed-call-v1"
-                                | "authenticated_environment_signature_v1"
-                                | "fixture_intrinsic_value"
-                        )
-                    {
+                    if !call_permit_matches(site, call, &permit) {
                         self.query_record(
                             site,
                             "call",
@@ -167,31 +156,7 @@ impl SelectedProjector<'_> {
             BindingDecision::Bound(observation) => {
                 let selected = self.session().context().resolve(permit.callee);
                 backend.checkpoint()?;
-                let valid = match selected {
-                    BindingDecision::Bound(value)
-                        if value.identity == observation.selected_callee_identity =>
-                    {
-                        match (&value.value, &observation.callee) {
-                            (SelectedValue::Function(a), ObservedCallee::Source(b)) => a == b,
-                            (
-                                SelectedValue::EnvironmentCallable(a),
-                                ObservedCallee::Environment(b),
-                            ) => {
-                                a.origin.identity == b.origin.identity
-                                    && a.origin.material_sha256 == b.origin.material_sha256
-                                    && a.origin.pointer == b.origin.pointer
-                            }
-                            _ => false,
-                        }
-                    }
-                    _ => false,
-                };
-                if !valid
-                    || observation.returns.len() > 32
-                    || observation.invocation_identity.is_empty()
-                    || matches!(&observation.callee, ObservedCallee::Source(_))
-                        && observation.closure_identity.is_empty()
-                {
+                if !call_observation_matches(&selected, &observation) {
                     self.query_record(
                         site,
                         "call_return",
@@ -202,7 +167,8 @@ impl SelectedProjector<'_> {
                     )?;
                     return Ok(Some(backend.plain(LuaType::Unknown)));
                 }
-                if matches!(&observation.callee, ObservedCallee::Environment(callable)
+                if !observation.open_tail
+                    && matches!(&observation.callee, ObservedCallee::Environment(callable)
                     if callable.declaration.raw.get("MayReturnNothing") == Some(&serde_json::Value::Bool(true)))
                 {
                     self.query_record(
@@ -216,6 +182,24 @@ impl SelectedProjector<'_> {
                     return Ok(Some(backend.plain(LuaType::Variadic(Arc::new(
                         VariadicType::Base(LuaType::Unknown),
                     )))));
+                }
+                if observation.open_tail {
+                    self.query_record(
+                        site,
+                        "call_return",
+                        "unavailable",
+                        observation.proof.clone(),
+                        Some("host_sequence_requires_cardinality_projection".into()),
+                        backend,
+                    )?;
+                    // A real prefix takes precedence over a declaration. With
+                    // no observed prefix only explicit signature type knowledge
+                    // can be projected; it still proves no actual slot count.
+                    if observation.returns.is_empty()
+                        && let Some(value) = backend.infer_permitted_call(self, site, permit)?
+                    {
+                        return Ok(Some(value));
+                    }
                 }
                 let mut slots = Vec::with_capacity(observation.returns.len());
                 for decision in observation.returns {
@@ -236,10 +220,21 @@ impl SelectedProjector<'_> {
                         }
                     });
                 }
+                if observation.open_tail {
+                    slots.push(backend.plain(LuaType::Variadic(Arc::new(VariadicType::Base(
+                        LuaType::Unknown,
+                    )))));
+                }
                 self.query_record(site, "call", "bound", permit.proof.clone(), None, backend)?;
                 return Ok(Some(backend.result_pack(slots)));
             }
             BindingDecision::Unavailable { proof, reason } => {
+                let declared_return = matches!(
+                    reason.as_str(),
+                    "host_sequence_requires_cardinality_projection"
+                        | "conditional_return_path_candidates_require_path_projection"
+                        | "native_call_return_observation_missing"
+                );
                 self.query_record(
                     site,
                     "call_return",
@@ -248,6 +243,14 @@ impl SelectedProjector<'_> {
                     Some(reason),
                     backend,
                 )?;
+                // Actual return shape remains unavailable above. An explicit
+                // declaration can still supply type knowledge, never an actual
+                // body value or a finite observed return count.
+                if declared_return
+                    && let Some(value) = backend.infer_permitted_call(self, site, permit)?
+                {
+                    return Ok(Some(value));
+                }
                 return Ok(Some(backend.plain(LuaType::Unknown)));
             }
             BindingDecision::KnownAbsent { proof } => {
@@ -347,4 +350,47 @@ fn call_expands(call: &LuaCallExpr) -> bool {
                 .is_some_and(|last| last.get_syntax_id() == field.get_syntax_id());
     }
     false
+}
+
+// The same selected evidence boundary is used by value projection and count
+// consumers. A rejected observation must never become an exact finite count.
+pub(super) fn call_permit_matches(
+    site: BindingSite,
+    call: &LuaCallExpr,
+    permit: &super::CallPermit,
+) -> bool {
+    let actual = call.get_prefix_expr().map(|expr| BindingSite {
+        file_id: site.file_id,
+        syntax: expr.get_syntax_id(),
+    });
+    actual == Some(permit.callee)
+        && matches!(
+            permit.capability_profile.as_str(),
+            "typed-call-v1" | "authenticated_environment_signature_v1" | "fixture_intrinsic_value"
+        )
+}
+
+pub(super) fn call_observation_matches(
+    selected: &BindingDecision<super::BoundValue>,
+    observation: &super::CallObservation,
+) -> bool {
+    let valid = match selected {
+        BindingDecision::Bound(value) if value.identity == observation.selected_callee_identity => {
+            match (&value.value, &observation.callee) {
+                (SelectedValue::Function(a), ObservedCallee::Source(b)) => a == b,
+                (SelectedValue::EnvironmentCallable(a), ObservedCallee::Environment(b)) => {
+                    a.origin.identity == b.origin.identity
+                        && a.origin.material_sha256 == b.origin.material_sha256
+                        && a.origin.pointer == b.origin.pointer
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    valid
+        && observation.returns.len() <= 32
+        && !observation.invocation_identity.is_empty()
+        && (!matches!(&observation.callee, ObservedCallee::Source(_))
+            || !observation.closure_identity.is_empty())
 }

@@ -1,8 +1,8 @@
 //! Read-only discovery. Its source exposes window metadata, never a native target.
+use crate::request::{InstancesRequest, LiveContext};
 use lycheedev_core::{
-    Invocation, Result, ToolkitError, client,
+    Result, ToolkitError, client,
     control::OperationControl,
-    coordination::ClaimRegistry,
     installation_selection::{self, InvocationMetadata},
     storage,
 };
@@ -125,9 +125,9 @@ fn window_client(window: &Window, control: &OperationControl) -> Result<Client> 
     )
 }
 
-/// Default and explicit --passive are deliberately the same operation.
-pub fn discover(inv: &Invocation, source: &impl Source) -> Result<Report> {
-    discover_inner(inv, source).map_err(|mut error| {
+/// Read-only discovery never opens a native runtime or input capability.
+pub fn discover(ctx: &LiveContext, request: &InstancesRequest, source: &impl Source) -> Result<Report> {
+    discover_inner(ctx, request, source).map_err(|mut error| {
         if error.code == "command.deadline" {
             error.code = "live.deadline_pending".into();
             error.exit_code = 6;
@@ -135,8 +135,8 @@ pub fn discover(inv: &Invocation, source: &impl Source) -> Result<Report> {
         error
     })
 }
-fn discover_inner(inv: &Invocation, source: &impl Source) -> Result<Report> {
-    let control = &inv.control;
+fn discover_inner(ctx: &LiveContext, request: &InstancesRequest, source: &impl Source) -> Result<Report> {
+    let control = &ctx.control;
     control.check()?;
     let windows = source.windows(control)?;
     control.check()?;
@@ -147,7 +147,7 @@ fn discover_inner(inv: &Invocation, source: &impl Source) -> Result<Report> {
             5,
         ));
     }
-    let workspace_id = workspace_identity(&inv.home, control);
+    let workspace_id = workspace_identity(&ctx.home, control);
     control.check()?;
     let mut report = Report {
         installations: Vec::new(),
@@ -185,7 +185,7 @@ fn discover_inner(inv: &Invocation, source: &impl Source) -> Result<Report> {
                 if running.insert(path_key(Path::new(&client.directory))) {
                     running_dirs.push(PathBuf::from(&client.directory));
                 }
-                match ownership(&inv.home, &workspace_id, &client, &window, control) {
+                match ownership(&workspace_id, &client, &window, control) {
                     Ok(Some(owner)) => {
                         candidate.state = "occupied".into();
                         candidate.busy_operation_id = owner.operation;
@@ -211,7 +211,7 @@ fn discover_inner(inv: &Invocation, source: &impl Source) -> Result<Report> {
             .push(candidate);
     }
     let mut directories = Vec::new();
-    if let Some(root) = inv.flag("--installation").filter(|root| !root.is_empty()) {
+    if let Some(root) = &request.installation {
         directories.push(PathBuf::from(root));
         directories.extend(
             client::client_folders()
@@ -307,7 +307,6 @@ struct Owner {
     foreign: bool,
 }
 fn ownership(
-    home: &Path,
     workspace_id: &str,
     client: &Client,
     window: &Window,
@@ -337,9 +336,7 @@ fn ownership(
     }
     if let Some(bytes) = read_optional(&marker, 4096, control)? {
         let owner: WindowOwner = serde_json::from_slice(&bytes)?;
-        let id = ["OP-", "BTP-", "CON-"]
-            .iter()
-            .find_map(|prefix| owner.operation_id.strip_prefix(prefix));
+        let id = owner.operation_id.strip_prefix("CON-");
         if storage::identity_json(&owner)? != bytes
             || owner.schema != "lycheedev.window-owner.v1"
             || owner.resource != resource
@@ -353,40 +350,6 @@ fn ownership(
             operation: owner.operation_id,
             foreign: owner.workspace_id != workspace_id,
         }));
-    }
-    // Current Rust native sessions use installation claims. Inspect their metadata
-    // directly: acquiring InstallationGuard would create locks and mutate state.
-    if let Some(bytes) = read_optional(&parent.join(".lycheedev-claims.json"), 4 << 20, control)? {
-        let registry: ClaimRegistry = serde_json::from_slice(&bytes)?;
-        if registry.schema != "lycheedev.claims.v1" || registry.claims.len() > 1024 {
-            return Err(failure("coordination.claim_format"));
-        }
-        let resource = format!(
-            "process:{}:{}",
-            window.identity.process.pid, window.identity.process.created
-        );
-        let mut matches = registry
-            .claims
-            .iter()
-            .filter(|claim| claim.pending && claim.resource == resource);
-        if let Some(claim) = matches.next() {
-            if matches.next().is_some()
-                || claim.kind != "native-live"
-                || !hex_string(&claim.owner, 32)
-                || claim.process_id != window.identity.process.pid
-                || claim.created_at != window.identity.process.created.to_string()
-            {
-                return Err(failure("coordination.claim_format"));
-            }
-            let expected = home
-                .join("live/v2")
-                .join(format!("CON-{}.json", claim.owner));
-            return Ok(Some(Owner {
-                operation: format!("CON-{}", claim.owner),
-                foreign: workspace_id.is_empty()
-                    || path_key(Path::new(&claim.lifecycle_ref)) != path_key(&expected),
-            }));
-        }
     }
     Ok(None)
 }

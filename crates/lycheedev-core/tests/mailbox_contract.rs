@@ -1,5 +1,6 @@
 //! Direct shared-contract fixtures; no Live or Delivery dependency is required.
-//! Oracle: Go 3.2.0 bridge/slot.go at 3057a9666ab078270b63c7f06de748069b0d1f4b.
+//! External fixed wire reference: bridge/slot.go at
+//! 3057a9666ab078270b63c7f06de748069b0d1f4b.
 use lycheedev_core::mailbox::{
     ContractError, ExpectedEnvelope, MAX_EXACT_INTEGER, SCHEMA, SLOT_COUNT, SlotEnvelope,
     ZERO_TOKEN, checksum, parse_token, slot_payload,
@@ -22,7 +23,7 @@ fn envelope() -> SlotEnvelope {
 }
 
 #[test]
-fn go_mailbox_v1_shared_slot_json_omits_only_optional_zero_fields() {
+fn wire_mailbox_v1_shared_slot_json_omits_only_optional_zero_fields() {
     let value = envelope();
     let expected = concat!(
         r#"{"schema":"Lycheedev mailbox protocol v1","index":7,"runtime":"22222222222222222222222222222222","owner":"11111111111111111111111111111111","fence":1,"nonce":"33333333333333333333333333333333","ticket":"44444444444444444444444444444444","action":"prepare","guid":"g","build":"b"}"#,
@@ -39,7 +40,7 @@ fn go_mailbox_v1_shared_slot_json_omits_only_optional_zero_fields() {
 }
 
 #[test]
-fn go_mailbox_v1_shared_slot_json_preserves_all_fields_and_exact_integer() {
+fn wire_mailbox_v1_shared_slot_json_preserves_all_fields_and_exact_integer() {
     let value = SlotEnvelope {
         start_slot: 2,
         fence: MAX_EXACT_INTEGER,
@@ -64,7 +65,7 @@ fn go_mailbox_v1_shared_slot_json_preserves_all_fields_and_exact_integer() {
 }
 
 #[test]
-fn go_mailbox_v1_shared_expected_envelope_keeps_identity_and_start_fallback() {
+fn wire_mailbox_v1_shared_expected_envelope_keeps_identity_and_start_fallback() {
     let mut value = envelope();
     let expected: ExpectedEnvelope = value.expected();
     assert_eq!(
@@ -92,7 +93,7 @@ fn go_mailbox_v1_shared_expected_envelope_keeps_identity_and_start_fallback() {
 }
 
 #[test]
-fn go_mailbox_v1_shared_payload_exact_unicode_lua_bytes() {
+fn wire_mailbox_v1_shared_payload_exact_unicode_lua_bytes() {
     let value = SlotEnvelope {
         start_slot: 2,
         code: "return \"中\"\n--\\\0\u{7f}".into(),
@@ -123,7 +124,7 @@ fn go_mailbox_v1_shared_payload_exact_unicode_lua_bytes() {
 }
 
 #[test]
-fn go_mailbox_v1_shared_payload_empty_code_preserves_supplied_summary() {
+fn wire_mailbox_v1_shared_payload_empty_code_preserves_supplied_summary() {
     let value = SlotEnvelope {
         code_bytes: 18,
         code_checksum: 1_153_959_565,
@@ -150,7 +151,7 @@ fn go_mailbox_v1_shared_payload_empty_code_preserves_supplied_summary() {
 }
 
 #[test]
-fn go_mailbox_v1_shared_admission_preserves_envelope_and_token_boundaries() {
+fn wire_mailbox_v1_shared_admission_preserves_envelope_and_token_boundaries() {
     let invalid = ContractError("bridge.invalid_slot_envelope");
     let mut value = envelope();
     for index in [0, SLOT_COUNT + 1] {
@@ -211,7 +212,7 @@ fn go_mailbox_v1_shared_admission_preserves_envelope_and_token_boundaries() {
 }
 
 #[test]
-fn go_mailbox_v1_shared_token_and_checksum_primitives_keep_wire_values() {
+fn wire_mailbox_v1_shared_token_and_checksum_primitives_keep_wire_values() {
     assert_eq!(parse_token(&"0".repeat(32)).unwrap(), ZERO_TOKEN);
     assert_eq!(parse_token(&"ab".repeat(16)).unwrap(), [0xab; 16]);
     for bad in [

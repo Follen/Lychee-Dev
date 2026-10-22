@@ -166,6 +166,39 @@ impl<E> OwnedQuery<'_, '_, E> {
         {
             return Ok(Relation::Compatible);
         }
+        if source.nominal_identity().is_some() || target.nominal_identity().is_some() {
+            if let Some(members) = target.union_components() {
+                for member in members {
+                    if self.relation_at(source, &member, mode, next_relation_level!(depth))?
+                        == Relation::Compatible
+                    {
+                        return Ok(Relation::Compatible);
+                    }
+                }
+                return Ok(self.relation_mismatch(mode, s, t));
+            }
+            if let Some(members) = source.union_components() {
+                for member in members {
+                    if self.relation_at(&member, target, mode, next_relation_level!(depth))?
+                        != Relation::Compatible
+                    {
+                        return Ok(self.relation_mismatch(mode, s, t));
+                    }
+                }
+                return Ok(Relation::Compatible);
+            }
+            return Ok(
+                if matches!(s, LuaType::Unknown | LuaType::Any | LuaType::Never)
+                    || source.nominal_identity().is_some() && matches!(t, LuaType::Userdata)
+                    || source.nominal_identity().is_some()
+                        && source.nominal_identity() == target.nominal_identity()
+                {
+                    Relation::Compatible
+                } else {
+                    self.relation_mismatch(mode, s, t)
+                },
+            );
+        }
         if matches!(t, LuaType::SelfInfer) {
             return Ok(relation_from_bool!(
                 self,

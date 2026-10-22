@@ -1,6 +1,5 @@
 use super::*;
 use std::{
-    collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
@@ -23,30 +22,14 @@ impl Fixture {
             control: OperationControl::uncancelable(Instant::now() + Duration::from_secs(60)),
         }
     }
-    fn inv(&self, command: &str, name: Option<&str>) -> Invocation {
-        Invocation {
-            command: command.into(),
-            positional: name.map(str::to_owned),
-            flags: BTreeMap::new(),
-            home: self.home.clone(),
-            cwd: self.home.clone(),
-            control: self.control.clone(),
-        }
+    fn ctx(&self) -> RequestContext {
+        RequestContext { home: self.home.clone(), cwd: self.home.clone(), control: self.control.clone() }
     }
-    fn add(&self, name: &str) -> Invocation {
-        let mut inv = self.inv("target add", Some(name));
-        for (key, value) in [
-            ("--product", "retail"),
-            ("--region", "us"),
-            ("--locale", "enUS"),
-            ("--remote", "true"),
-        ] {
-            inv.flags.insert(key.into(), value.into());
-        }
-        inv
-    }
-    fn run(&self, command: &str, name: Option<&str>) -> Result<Outcome> {
-        crate::workspace::dispatch(&self.inv(command, name))
+    fn add(&self, name: &str) -> TargetRequest {
+        TargetRequest::Add { config: TargetConfig {
+            schema: "lycheedev.target.v1".into(), name: name.into(), product: "retail".into(),
+            region: "us".into(), locale: "enUS".into(), source: "remote".into(), ..Default::default()
+        }, replace: false }
     }
     fn seed(&self, rows: impl IntoIterator<Item = (String, Value)>) {
         Metadata::open(&self.home, true).unwrap().close().unwrap();
@@ -87,20 +70,20 @@ impl Fixture {
 fn empty_list_does_not_create_database_and_invalid_add_does_not_touch_workspace() {
     let f = Fixture::new();
     assert_eq!(
-        f.run("target list", None).unwrap().data,
+        execute(&f.ctx(), &TargetRequest::List).unwrap().data,
         json!({"targets":[]})
     );
     assert!(!f.home.join("state/toolkit.sqlite").exists());
     for name in ["---".to_owned(), "a".repeat(65)] {
-        let error = crate::workspace::dispatch(&f.add(&name)).unwrap_err();
+        let error = execute(&f.ctx(), &f.add(&name)).unwrap_err();
         assert_eq!(error.code, "selection.target_format");
         assert_eq!(error.exit_code, 2);
     }
     let mut bad = f.add("valid");
-    bad.flags.insert("--locale".into(), "invalid".into());
+    if let TargetRequest::Add { config, .. } = &mut bad { config.locale = "invalid".into(); }
     assert_eq!(
-        crate::workspace::dispatch(&bad).unwrap_err().code,
-        "command.invalid_arguments"
+        execute(&f.ctx(), &bad).unwrap_err().code,
+        "selection.unsupported_data_language"
     );
     assert!(!f.home.join("state/toolkit.sqlite").exists());
     f.cleanup();
@@ -118,7 +101,7 @@ fn target_list_pages_beyond_old_ten_thousand_cap_and_sorts_value_names() {
         ("target-ref/name-00000/bad".into(), json!({"wrong":true})),
         ("unrelated/bad".into(), json!({"wrong":true})),
     ]);
-    let out = f.run("target list", None).unwrap();
+    let out = execute(&f.ctx(), &TargetRequest::List).unwrap();
     let values = out.data["targets"].as_array().unwrap();
     assert_eq!(values.len(), 10003);
     assert_eq!(values[0]["name"], "name-00000");
@@ -130,26 +113,26 @@ fn add_reads_only_exact_generation_and_replace_recreate_preserve_monotonic_cas()
     let f = Fixture::new();
     f.seed([("target/unrelated".into(), json!({"malformed":true}))]);
     let mut add = f.add("name");
-    crate::workspace::dispatch(&add).unwrap();
-    let error = crate::workspace::dispatch(&add).unwrap_err();
+    execute(&f.ctx(), &add).unwrap();
+    let error = execute(&f.ctx(), &add).unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("selection.target_exists", 3)
     );
-    add.flags.insert("--replace".into(), "true".into());
-    crate::workspace::dispatch(&add).unwrap();
+    if let TargetRequest::Add { replace, .. } = &mut add { *replace = true; }
+    execute(&f.ctx(), &add).unwrap();
     // Old unrelated malformed config must block show/list, but never add.
     assert_eq!(
-        f.run("target show", Some("name")).unwrap_err().code,
+        execute(&f.ctx(), &TargetRequest::Show { key: "name".into() }).unwrap_err().code,
         "selection.target_format"
     );
     f.sql("DELETE FROM documents WHERE key='target/unrelated'");
     assert_eq!(
-        f.run("target remove", Some("name")).unwrap().data,
+        execute(&f.ctx(), &TargetRequest::Remove { key: "name".into() }).unwrap().data,
         json!({"name":"name","removedRefCount":0})
     );
-    add.flags.remove("--replace");
-    crate::workspace::dispatch(&add).unwrap();
+    if let TargetRequest::Add { replace, .. } = &mut add { *replace = false; }
+    execute(&f.ctx(), &add).unwrap();
     write(&f.home, &f.control, |w| {
         assert_eq!(w.document("target/name")?.generation, 3);
         assert_eq!(
@@ -165,7 +148,7 @@ fn add_reads_only_exact_generation_and_replace_recreate_preserve_monotonic_cas()
 #[test]
 fn removed_target_reference_recreated_by_resolution_rejects_stale_generation() {
     let f = Fixture::new();
-    crate::workspace::dispatch(&f.add("recreated")).unwrap();
+    execute(&f.ctx(), &f.add("recreated")).unwrap();
     let pin = crate::selection::pin_selection(
         &f.home,
         SelectionSpec {
@@ -207,11 +190,11 @@ fn removed_target_reference_recreated_by_resolution_rejects_stale_generation() {
         })
         .unwrap();
         if generation == 1 {
-            let removed = f.run("target remove", Some("recreated")).unwrap();
+            let removed = execute(&f.ctx(), &TargetRequest::Remove { key: "recreated".into() }).unwrap();
             assert_eq!(removed.data["removedRefCount"], 1);
             assert!(f.missing(&key));
             assert!(!f.missing(&format!("pin/{}", pin.id)));
-            crate::workspace::dispatch(&f.add("recreated")).unwrap();
+            execute(&f.ctx(), &f.add("recreated")).unwrap();
         }
     }
     f.cleanup();
@@ -220,10 +203,11 @@ fn removed_target_reference_recreated_by_resolution_rejects_stale_generation() {
 fn relative_installation_is_fixed_at_save_without_requiring_directory_to_exist() {
     let f = Fixture::new();
     let mut inv = f.add("local");
-    inv.flags.remove("--remote");
-    inv.flags
-        .insert("--installation".into(), "game/../other".into());
-    let out = crate::workspace::dispatch(&inv).unwrap();
+    if let TargetRequest::Add { config, .. } = &mut inv {
+        config.source = "installation".into();
+        config.installation = "game/../other".into();
+    }
+    let out = execute(&f.ctx(), &inv).unwrap();
     assert_eq!(
         out.data["installation"],
         f.home.join("other").to_string_lossy().as_ref()
@@ -235,28 +219,28 @@ fn relative_installation_is_fixed_at_save_without_requiring_directory_to_exist()
 fn exact_case_collision_show_and_remove_keep_other_target_and_no_empty_optional_fields() {
     let f = Fixture::new();
     for name in ["Foo", "foo"] {
-        crate::workspace::dispatch(&f.add(name)).unwrap();
+        execute(&f.ctx(), &f.add(name)).unwrap();
     }
     assert_eq!(
-        f.run("target show", Some("Foo")).unwrap().data["config"]["name"],
+        execute(&f.ctx(), &TargetRequest::Show { key: "Foo".into() }).unwrap().data["config"]["name"],
         "Foo"
     );
     assert_eq!(
-        f.run("target show", Some("FOO")).unwrap_err().code,
+        execute(&f.ctx(), &TargetRequest::Show { key: "FOO".into() }).unwrap_err().code,
         "selection.target_ambiguous"
     );
-    let shown = f.run("target show", Some("foo")).unwrap();
+    let shown = execute(&f.ctx(), &TargetRequest::Show { key: "foo".into() }).unwrap();
     assert_eq!(shown.data["references"], json!([]));
     assert!(shown.data.get("activeOperations").is_none());
     assert!(shown.data.get("resolvedPins").is_none());
-    f.run("target remove", Some("foo")).unwrap();
-    assert!(f.run("target show", Some("Foo")).is_ok());
+    execute(&f.ctx(), &TargetRequest::Remove { key: "foo".into() }).unwrap();
+    assert!(execute(&f.ctx(), &TargetRequest::Show { key: "Foo".into() }).is_ok());
     f.cleanup();
 }
 #[test]
-fn paginated_reference_output_and_removal_match_go_unknown_kind_and_kept_pin_contract() {
+fn paginated_reference_output_and_removal_match_reference_unknown_kind_and_kept_pin_contract() {
     let f = Fixture::new();
-    crate::workspace::dispatch(&f.add("many")).unwrap();
+    execute(&f.ctx(), &f.add("many")).unwrap();
     f.seed((0..1002).map(|i| {
         (
             format!("target-ref/many/pin/PIN-{i:04}"),
@@ -270,11 +254,11 @@ fn paginated_reference_output_and_removal_match_go_unknown_kind_and_kept_pin_con
         ),
         ("pin/PIN-0000".into(), json!({"immutable":"remains"})),
     ]);
-    let show = f.run("target show", Some("many")).unwrap();
+    let show = execute(&f.ctx(), &TargetRequest::Show { key: "many".into() }).unwrap();
     assert_eq!(show.data["references"].as_array().unwrap().len(), 1003);
     assert_eq!(show.data["references"][0]["kind"], "legacy");
     assert_eq!(show.data["resolvedPins"].as_array().unwrap().len(), 1002);
-    let report = f.run("target remove", Some("many")).unwrap();
+    let report = execute(&f.ctx(), &TargetRequest::Remove { key: "many".into() }).unwrap();
     assert_eq!(report.data["removedRefCount"], 1003);
     assert_eq!(report.data["removedPins"][0], "odd");
     assert!(report.data.get("keptPins").is_none());
@@ -285,7 +269,7 @@ fn paginated_reference_output_and_removal_match_go_unknown_kind_and_kept_pin_con
 #[test]
 fn active_operation_blocks_removal_before_configuration_or_reference_changes() {
     let f = Fixture::new();
-    crate::workspace::dispatch(&f.add("active")).unwrap();
+    execute(&f.ctx(), &f.add("active")).unwrap();
     f.seed([
         (
             "target-ref/active/operation/OP-b".into(),
@@ -296,9 +280,9 @@ fn active_operation_blocks_removal_before_configuration_or_reference_changes() {
             f.reference("active", "operation", "OP-a"),
         ),
     ]);
-    let show = f.run("target show", Some("active")).unwrap();
+    let show = execute(&f.ctx(), &TargetRequest::Show { key: "active".into() }).unwrap();
     assert_eq!(show.data["activeOperations"], json!(["OP-a", "OP-b"]));
-    let error = f.run("target remove", Some("active")).unwrap_err();
+    let error = execute(&f.ctx(), &TargetRequest::Remove { key: "active".into() }).unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("selection.target_in_use", 3)
@@ -308,16 +292,16 @@ fn active_operation_blocks_removal_before_configuration_or_reference_changes() {
     f.cleanup();
 }
 #[test]
-fn deletion_keeps_go_config_then_reference_order_on_historical_key_mismatch() {
+fn deletion_keeps_retained_config_then_reference_order_on_historical_key_mismatch() {
     let f = Fixture::new();
-    crate::workspace::dispatch(&f.add("broken")).unwrap();
+    execute(&f.ctx(), &f.add("broken")).unwrap();
     // The reference payload is valid, but its storage key is historical nonsense.
     f.seed([(
         "target-ref/broken/pin/actual-key".into(),
         f.reference("broken", "pin", "other-key"),
     )]);
     assert_eq!(
-        f.run("target remove", Some("broken")).unwrap_err().code,
+        execute(&f.ctx(), &TargetRequest::Remove { key: "broken".into() }).unwrap_err().code,
         "vault.record_missing"
     );
     assert!(f.missing("target/broken"));
@@ -327,7 +311,7 @@ fn deletion_keeps_go_config_then_reference_order_on_historical_key_mismatch() {
 #[test]
 fn reference_deletions_commit_in_sixty_four_key_batches_without_replaying_success() {
     let f = Fixture::new();
-    crate::workspace::dispatch(&f.add("batch")).unwrap();
+    execute(&f.ctx(), &f.add("batch")).unwrap();
     f.seed((0..129).map(|i| {
         (
             format!("target-ref/batch/pin/{i:03}"),
@@ -336,7 +320,7 @@ fn reference_deletions_commit_in_sixty_four_key_batches_without_replaying_succes
     }));
     f.sql("CREATE TRIGGER fail_second BEFORE DELETE ON documents WHEN OLD.key='target-ref/batch/pin/064' BEGIN SELECT RAISE(ABORT,'fixture-second-batch'); END;");
     assert_eq!(
-        f.run("target remove", Some("batch")).unwrap_err().code,
+        execute(&f.ctx(), &TargetRequest::Remove { key: "batch".into() }).unwrap_err().code,
         "vault.metadata"
     );
     assert!(f.missing("target/batch"));
@@ -348,50 +332,53 @@ fn reference_deletions_commit_in_sixty_four_key_batches_without_replaying_succes
 #[test]
 fn later_operation_created_after_snapshot_is_not_an_extra_global_delete_guard() {
     let f = Fixture::new();
-    crate::workspace::dispatch(&f.add("race")).unwrap();
+    execute(&f.ctx(), &f.add("race")).unwrap();
     let raw = serde_json::to_string(&f.reference("race", "operation", "OP-late")).unwrap();
     f.sql(&format!("CREATE TRIGGER late AFTER DELETE ON documents WHEN OLD.key='target/race' BEGIN INSERT INTO documents VALUES('target-ref/race/operation/OP-late',1,'{}'); END;",raw.replace('\'',"''")));
     assert_eq!(
-        f.run("target remove", Some("race")).unwrap().data["removedRefCount"],
+        execute(&f.ctx(), &TargetRequest::Remove { key: "race".into() }).unwrap().data["removedRefCount"],
         0
     );
     assert!(!f.missing("target-ref/race/operation/OP-late"));
     f.cleanup();
 }
 #[test]
-fn reference_wire_timestamp_duplicates_null_and_escape_admission_match_go() {
-    let control = OperationControl::default();
-    let raw=br#"{"schema":"lycheedev.target-ref.v1","name":"n","kind":"pin","id":"old","ID":"new","id":null,"createdAt":"2026-10-15T1:02:03,1200Z","CREATEDAT":null}"#;
-    let r: Reference = serde_json::from_slice(raw).unwrap();
-    assert_eq!(r.id, "new");
+fn reference_documents_are_current_typed_documents() {
+    let raw = br#"{"schema":"lycheedev.target-ref.v1","name":"n","kind":"pin","id":"new","createdAt":"2026-10-15T01:02:03.1200Z"}"#;
+    let mut reference: Reference = serde_json::from_slice(raw).unwrap();
+    assert_eq!(reference.id, "new");
+    let time = storage::parse_timestamp(&reference.created_at).unwrap();
+    reference.created_at = storage::timestamp_offset(time);
     assert_eq!(
-        serde_json::to_value(r).unwrap()["createdAt"],
+        serde_json::to_value(reference).unwrap()["createdAt"],
         "2026-10-15T01:02:03.12Z"
     );
     for raw in [
-        br#"{"createdAt":"2026-10-15T00:00:00\u005a"}"#.as_slice(),
-        br#"{"createdAt":"2026-10-15 00:00:00Z"}"#.as_slice(),
+        br#"{"schema":"lycheedev.target-ref.v1","name":"n","kind":"pin","id":"old","ID":"new"}"#.as_slice(),
+        br#"{"schema":"lycheedev.target-ref.v1","name":"n","kind":"pin","id":"x","unknown":true}"#.as_slice(),
     ] {
-        let normalized = crate::evidence::normalize_go_json_strings(raw, &control).unwrap();
-        assert!(serde_json::from_slice::<Reference>(&normalized).is_err());
+        assert!(serde_json::from_slice::<Reference>(raw).is_err());
     }
-    let zero: Reference = serde_json::from_slice(br#"{"createdAt":null}"#).unwrap();
-    assert_eq!(
-        serde_json::to_value(zero).unwrap()["createdAt"],
-        "0001-01-01T00:00:00Z"
-    );
+    // The typed document keeps timestamps as exact text; RFC3339 validation is
+    // a separate explicit step before publication.
+    let raw = br#"{"schema":"lycheedev.target-ref.v1","name":"n","kind":"pin","id":"x","createdAt":"2026-10-15T1:02:03,1200Z"}"#;
+    let reference: Reference = serde_json::from_slice(raw).unwrap();
+    assert!(storage::parse_timestamp(&reference.created_at).is_none());
 }
 #[test]
-fn unmarshal_only_timezone_is_legal_for_remove_but_show_reports_marshal_failure() {
+fn invalid_reference_timestamp_is_rejected_consistently_by_show_and_remove() {
     let f = Fixture::new();
-    crate::workspace::dispatch(&f.add("time")).unwrap();
+    execute(&f.ctx(), &f.add("time")).unwrap();
     let mut value = f.reference("time", "pin", "x");
     value["createdAt"] = json!("2026-10-15T00:00:00+24:00");
     f.seed([("target-ref/time/pin/x".into(), value)]);
-    assert_eq!(f.run("target show", Some("time")).unwrap_err().exit_code, 5);
     assert_eq!(
-        f.run("target remove", Some("time")).unwrap().data["removedRefCount"],
-        1
+        execute(&f.ctx(), &TargetRequest::Show { key: "time".into() }).unwrap_err().code,
+        "selection.target_format"
+    );
+    assert_eq!(
+        execute(&f.ctx(), &TargetRequest::Remove { key: "time".into() }).unwrap_err().code,
+        "selection.target_format"
     );
     f.cleanup();
 }
@@ -399,13 +386,14 @@ fn unmarshal_only_timezone_is_legal_for_remove_but_show_reports_marshal_failure(
 fn cancelled_original_scope_rejects_management_without_new_metadata_and_keeps_lineage() {
     let f = Fixture::new();
     let token = crate::control::TrackedCancellation::new();
-    let mut inv = f.add("cancelled");
-    inv.control =
+    let request = f.add("cancelled");
+    let mut ctx = f.ctx();
+    ctx.control =
         OperationControl::tracked(Instant::now() + Duration::from_secs(60), token.clone());
     token.cancel();
-    let error = crate::workspace::dispatch(&inv).unwrap_err();
+    let error = execute(&ctx, &request).unwrap_err();
     assert_eq!(error.code, "command.cancelled");
-    assert!(inv.control.stop_cause().is_ok());
+    assert!(ctx.control.stop_cause().is_ok());
     assert!(!f.home.join("state/toolkit.sqlite").exists());
     f.cleanup();
 }
@@ -416,8 +404,8 @@ fn all_named_read_routes_reject_every_non_one_metadata_version() {
     f.seed([("target/version".into(), f.config("version"))]);
     for version in [-1, 0, 2] {
         f.sql(&format!("PRAGMA user_version={version}"));
-        for command in ["target list", "target show"] {
-            let error = f.run(command, Some("version")).unwrap_err();
+        for request in [TargetRequest::List, TargetRequest::Show { key: "version".into() }] {
+            let error = execute(&f.ctx(), &request).unwrap_err();
             assert_eq!(error.code, "vault.unsupported_workspace");
         }
         assert_eq!(
@@ -437,7 +425,7 @@ fn show_rejects_unsupported_product_after_valid_target_name() {
     config["product"] = json!("not-a-wow-product");
     f.seed([("target/bad-product".into(), config)]);
     assert_eq!(
-        f.run("target show", Some("bad-product")).unwrap_err().code,
+        execute(&f.ctx(), &TargetRequest::Show { key: "bad-product".into() }).unwrap_err().code,
         "selection.unsupported_data_product"
     );
     f.cleanup();

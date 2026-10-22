@@ -1,7 +1,6 @@
 use super::*;
-use lycheedev_core::{Invocation, VERSION};
+use lycheedev_core::{VERSION, request::RequestContext};
 use std::{
-    collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -75,28 +74,14 @@ fn reverse_receipt(path: &Path) {
 #[test]
 fn public_skill_mutations_preserve_invocation_control_before_writes() {
     let f = Fixture::new();
-    for (command, upgrade) in [
-        ("skill install", false),
-        ("skill install", true),
-        ("skill remove", true),
+    for request in [
+        crate::Request::SkillInstall { path: f.target.clone(), mode: crate::InstallMode::Release { root: f.old.clone(), archive: None } },
+        crate::Request::SkillInstall { path: f.target.clone(), mode: crate::InstallMode::Release { root: f.old.clone(), archive: Some(f.archive.clone()) } },
+        crate::Request::SkillRemove { path: f.target.clone(), archive: f.archive.clone() },
     ] {
-        let mut flags = BTreeMap::from([
-            ("--path".into(), f.target.to_string_lossy().into_owned()),
-            ("--release".into(), f.old.to_string_lossy().into_owned()),
-        ]);
-        if upgrade {
-            flags.insert("--output".into(), f.archive.to_string_lossy().into_owned());
-        }
-        let inv = Invocation {
-            command: command.into(),
-            positional: None,
-            flags,
-            home: f.root.join("home"),
-            cwd: f.root.clone(),
-            control: OperationControl::default(),
-        };
-        inv.control.tracked_cancel_handle().unwrap().cancel();
-        assert_eq!(crate::dispatch(&inv).unwrap_err().code, "command.cancelled");
+        let ctx = RequestContext { home: f.root.join("home"), cwd: f.root.clone(), control: OperationControl::default() };
+        ctx.control.tracked_cancel_handle().unwrap().cancel();
+        assert_eq!(crate::dispatch(&ctx, &request).unwrap_err().code, "command.cancelled");
         assert!(!f.target.exists());
         assert!(!f.archive.exists());
     }

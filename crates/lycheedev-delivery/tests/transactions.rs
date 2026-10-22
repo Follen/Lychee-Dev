@@ -1,8 +1,4 @@
-use lycheedev_core::{
-    VERSION,
-    coordination::{Claim, InstallationGuard},
-    storage,
-};
+use lycheedev_core::{VERSION, storage};
 use lycheedev_delivery::{deploy, installation, release, slots};
 use serde_json::{Value, json};
 use std::{
@@ -159,33 +155,6 @@ fn release_rejects_unlisted_file_before_installation_write() {
     );
 }
 #[test]
-fn pending_claim_survives_process_id_reuse_and_blocks_maintenance() {
-    let temp = Temp::new();
-    let target = temp.0.join("Lychee Dev");
-    let mut guard = InstallationGuard::acquire(&target).unwrap();
-    guard
-        .claim(Claim {
-            owner: "CON-owner".into(),
-            kind: "native-live".into(),
-            resource: "installation".into(),
-            process_id: 1,
-            created_at: "2000-01-01T00:00:00Z".into(),
-            lifecycle_ref: "project/.lycheedev/live/CON-owner.json".into(),
-            pending: true,
-        })
-        .unwrap();
-    assert_eq!(guard.require_idle().err().unwrap().exit_code, 6);
-    assert!(
-        guard
-            .retire("CON-other", "project/.lycheedev/live/CON-owner.json")
-            .is_err()
-    );
-    guard
-        .retire("CON-owner", "project/.lycheedev/live/CON-owner.json")
-        .unwrap();
-    assert!(guard.require_idle().is_ok());
-}
-#[test]
 fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
     let temp = Temp::new();
     let files: Vec<_> = (1..=slots::COUNT)
@@ -215,13 +184,7 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
     candidate(&root, b"skill");
     let target = temp.0.join("Lychee Dev");
     deploy::fresh(&root, &target, "addon", VERSION).unwrap();
-    let identity = installation::verify_clean(&target, VERSION, slots::TRANSPORT, 500).unwrap();
-    let before = fs::read(temp.0.join(slots::MARKER)).unwrap();
-    let payload_before = fs::read(first.join("Payload.lua")).unwrap();
-    let error = slots::publish(&identity, 1, None, b"arbitrary historical bytes").unwrap_err();
-    assert_eq!(error.code, "live.mailbox_v1_migration_incomplete");
-    assert_eq!(fs::read(temp.0.join(slots::MARKER)).unwrap(), before);
-    assert_eq!(fs::read(first.join("Payload.lua")).unwrap(), payload_before);
+    installation::verify_clean(&target, VERSION, slots::TRANSPORT, 500).unwrap();
     let recovery = Temp::new();
     let slot_archive = recovery.0.join("addon-archive.slots");
     fs::create_dir(&slot_archive).unwrap();
@@ -255,46 +218,6 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
         lycheedev_delivery::removal::addon(&target, &archive).unwrap(),
         removed
     );
-}
-#[test]
-fn managed_200_slot_pool_migrates_to_500_and_does_not_erase_unknown_reservations() {
-    let temp = Temp::new();
-    let payload = b"LycheeDevSlotEnvelope = nil\n";
-    let mut entries = vec![];
-    for slot in 1..=200u16 {
-        let target = slots::directory(&temp.0, slot);
-        fs::create_dir(&target).unwrap();
-        let toc = format!(
-            "## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot {slot:02}\n## Version: {VERSION}\n## LoadOnDemand: 1\n## X-Lychee-Slot: {slot}\n## X-Lychee-Transport: memory-slot-v3\nPayload.lua\nLoader.lua\n"
-        );
-        let loader = format!(
-            "local envelope = LycheeDevSlotEnvelope\nLycheeDevSlotEnvelope = nil\nlocal ns = LycheeDevInternal\nif ns and ns.SlotRuntime then ns.SlotRuntime.Receive({slot}, envelope) end\n"
-        );
-        fs::write(target.join(format!("Lychee Dev Slot {slot:02}.toc")), toc).unwrap();
-        fs::write(target.join("Loader.lua"), loader).unwrap();
-        fs::write(target.join("Payload.lua"), payload).unwrap();
-        entries.push(json!({"payloadHash":storage::sha256(payload),"consumed":false}));
-    }
-    let mut pool =
-        json!({"schema":"lycheedev.slots.v3","version":VERSION,"state":"ready","files":entries});
-    pool["files"][0]["nonce"] = json!("unknown");
-    storage::atomic_json(&temp.0.join(".lycheedev-slots.json"), &pool).unwrap();
-    assert_eq!(
-        slots::install(&temp.0, VERSION).err().unwrap().code,
-        "delivery.installation_conflict"
-    );
-    assert!(!slots::directory(&temp.0, 201).exists());
-    pool["files"][0].as_object_mut().unwrap().remove("nonce");
-    storage::atomic_json(&temp.0.join(".lycheedev-slots.json"), &pool).unwrap();
-    slots::install(&temp.0, VERSION).unwrap();
-    assert_eq!(
-        slots::inspect(&temp.0, VERSION).unwrap()["files"]
-            .as_array()
-            .unwrap()
-            .len(),
-        500
-    );
-    assert!(!temp.0.join(".lycheedev-slots.migration-v4.json").exists());
 }
 
 #[test]

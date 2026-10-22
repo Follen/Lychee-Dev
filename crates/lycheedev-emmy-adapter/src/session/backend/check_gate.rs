@@ -3,7 +3,7 @@
 use super::*;
 use crate::session::{BindingCoverage, BindingDecision};
 use emmylua_code_analysis::LuaTypeNode;
-use emmylua_parser::{LuaCallExpr, LuaExpr};
+use emmylua_parser::LuaCallExpr;
 
 impl<E> OwnedQuery<'_, '_, E> {
     pub(super) fn binding_manages(&mut self, syntax: LuaSyntaxId) -> QueryResult<bool, E> {
@@ -68,16 +68,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         match self.session.context().call(self.site(syntax)) {
             BindingDecision::NotManaged => Ok(true),
             BindingDecision::Bound(permit) => {
-                let actual = call
-                    .get_prefix_expr()
-                    .map(|expr| self.site(expr.get_syntax_id()));
-                if actual != Some(permit.callee)
-                    || !matches!(
-                        permit.capability_profile.as_str(),
-                        "typed-call-v1"
-                            | "authenticated_environment_signature_v1"
-                            | "fixture_intrinsic_value"
-                    )
+                if !crate::session::query::call_permit_matches(self.site(syntax), call, &permit)
                     || !matches!(
                         self.session.context().resolve(permit.callee),
                         BindingDecision::Bound(_)
@@ -89,22 +80,6 @@ impl<E> OwnedQuery<'_, '_, E> {
                         "unavailable",
                         permit.proof,
                         Some("call_permit_or_selected_callee_unavailable".into()),
-                    )?;
-                    return Ok(false);
-                }
-                if operation == "argument_check"
-                    && let Some(last) = call.get_args_list().and_then(|args| args.get_args().last())
-                    && self
-                        .type_of_expr(last.get_syntax_id())?
-                        .structural_type()
-                        .contain_multi_return()
-                {
-                    self.record_check(
-                        syntax,
-                        operation,
-                        "unavailable",
-                        permit.proof,
-                        Some("native_multi_argument_projection_unavailable".into()),
                     )?;
                     return Ok(false);
                 }
@@ -145,36 +120,12 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(());
         };
         let value = self.type_of_expr(callee.get_syntax_id())?;
-        let mut ready = !self.binding_type_has_unknown(&value)?;
-        if operation != "callable_check" {
-            // &= is intentional: callable collection still executes when the
-            // initial unknown scan was false, preserving coverage producer order.
-            ready &= !self.callable_functions_cached(&value)?.is_empty();
-            let arguments: Vec<_> = call
-                .get_args_list()
-                .map(|args| args.get_args().collect())
-                .unwrap_or_default();
-            if operation == "argument_check" {
-                let mut all_known = true;
-                for argument in &arguments {
-                    let value = self.type_of_expr(argument.get_syntax_id())?;
-                    if self.binding_type_has_unknown(&value)? {
-                        all_known = false;
-                        break;
-                    }
-                }
-                ready &= all_known;
-            } else if let Some(last) = arguments.last() {
-                let value = self.type_of_expr(last.get_syntax_id())?;
-                ready &= match value.structural_type() {
-                    LuaType::Variadic(values) => values.get_max_len().is_some(),
-                    LuaType::Unknown | LuaType::Any if matches!(last, LuaExpr::CallExpr(_)) => {
-                        false
-                    }
-                    _ => true,
-                };
-            }
-        }
+        // A known function shape is callable even when its parameter or return
+        // value types are unavailable. Those belong to their own checkers.
+        let ready = matches!(
+            value.structural_type(),
+            LuaType::DocFunction(_) | LuaType::Function | LuaType::Signature(_)
+        ) || !self.binding_type_has_unknown(&value)?;
         self.record_check(
             syntax,
             operation,
@@ -186,6 +137,64 @@ impl<E> OwnedQuery<'_, '_, E> {
             permit.proof,
             (!ready).then(|| "native_check_inputs_or_signature_unavailable".into()),
         )
+    }
+
+    /// Actual cardinality is independent of declared type knowledge. None
+    /// retains the contract of providers that do not manage call observations.
+    pub(super) fn binding_call_return_arity(
+        &mut self,
+        call: &LuaCallExpr,
+    ) -> QueryResult<Option<super::return_pack::ReturnArity>, E> {
+        use super::return_pack::ReturnArity;
+        self.checkpoint()?;
+        let observation = self
+            .session
+            .context()
+            .call_observation(self.site(call.get_syntax_id()));
+        self.checkpoint()?;
+        let open = ReturnArity { min: 0, max: None };
+        let permit = self.session.context().call(self.site(call.get_syntax_id()));
+        self.checkpoint()?;
+        let permit = match permit {
+            BindingDecision::Bound(permit)
+                if crate::session::query::call_permit_matches(
+                    self.site(call.get_syntax_id()),
+                    call,
+                    &permit,
+                ) =>
+            {
+                permit
+            }
+            BindingDecision::NotManaged if matches!(observation, BindingDecision::NotManaged) => {
+                return Ok(None);
+            }
+            _ => return Ok(Some(open)),
+        };
+        Ok(match observation {
+            BindingDecision::Bound(observation) => {
+                let selected = self.session.context().resolve(permit.callee);
+                self.checkpoint()?;
+                if !crate::session::query::call_observation_matches(&selected, &observation) {
+                    return Ok(Some(open));
+                }
+                if !observation.open_tail
+                    && matches!(&observation.callee,
+                    crate::session::ObservedCallee::Environment(callable)
+                    if callable.declaration.raw.get("MayReturnNothing") == Some(&serde_json::Value::Bool(true)))
+                {
+                    Some(open)
+                } else if observation.open_tail {
+                    Some(ReturnArity {
+                        min: observation.returns.len(),
+                        max: None,
+                    })
+                } else {
+                    Some(ReturnArity::fixed(observation.returns.len()))
+                }
+            }
+            BindingDecision::Unavailable { .. } | BindingDecision::KnownAbsent { .. } => Some(open),
+            BindingDecision::NotManaged => None,
+        })
     }
 
     pub(super) fn binding_type_has_unknown(&mut self, value: &OwnedValue) -> QueryResult<bool, E> {

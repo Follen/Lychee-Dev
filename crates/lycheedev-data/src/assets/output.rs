@@ -1,7 +1,8 @@
 //! Stable external destinations. Existing parents are resolved once, preserving
 //! the frozen parent-alias contract; only the named output entry is replaceable.
+use crate::request::DataContext;
 use lycheedev_core::{
-    Invocation, Result, ToolkitError,
+    Result, ToolkitError,
     storage::{Destination, Directory},
 };
 use std::{
@@ -21,10 +22,7 @@ pub(crate) fn finish_closes<T>(
 ) -> Result<T> {
     if let Err(errors) = closes {
         for error in errors {
-            result = lycheedev_core::metadata::historical_write::finish_historical(
-                result,
-                Err(error.into()),
-            );
+            result = lycheedev_core::metadata::owned_write::finish_owned(result, Err(error.into()));
         }
     }
     match control.check() {
@@ -39,9 +37,7 @@ pub(crate) fn finish_closes<T>(
         {
             result
         }
-        Err(stop) => {
-            lycheedev_core::metadata::historical_write::finish_historical(result, Err(stop))
-        }
+        Err(stop) => lycheedev_core::metadata::owned_write::finish_owned(result, Err(stop)),
     }
 }
 
@@ -118,35 +114,35 @@ pub fn destination(home: &Path, output: &Path, overwrite: bool) -> Result<Destin
     Ok(destination)
 }
 pub(crate) fn destination_scoped(
-    inv: &Invocation,
+    ctx: &DataContext,
     output: &Path,
     overwrite: bool,
 ) -> Result<Destination> {
-    let destination = open_destination_scoped(inv, output, overwrite, None)?;
+    let destination = open_destination_scoped(ctx, output, overwrite, None)?;
     let result = (|| {
-        inv.control.check()?;
+        ctx.control.check()?;
         outside(
-            &inv.home,
+            &ctx.home,
             destination
                 .path()
                 .parent()
                 .expect("validated output parent"),
         )?;
-        inv.control.check()
+        ctx.control.check()
     })();
     match result {
         Ok(()) => Ok(destination),
-        Err(error) => finish_closes(Err(error), destination.close(), &inv.control),
+        Err(error) => finish_closes(Err(error), destination.close(), &ctx.control),
     }
 }
 fn open_destination_scoped(
-    inv: &Invocation,
+    ctx: &DataContext,
     output: &Path,
     overwrite: bool,
     budget: Option<&crate::resource::Budget>,
 ) -> Result<Destination> {
     use lycheedev_core::storage::FileControl;
-    let mut control = PublicationControl { inv, budget };
+    let mut control = PublicationControl { ctx, budget };
     control.check().map_err(|e| publication_error(e, output))?;
     if output.as_os_str().is_empty()
         || matches!(output.as_os_str().encode_wide().last(), Some(47 | 92))
@@ -170,71 +166,54 @@ fn open_destination_scoped(
         .map_err(|e| publication_error(e, &path));
     match result {
         Ok(()) => Ok(destination),
-        Err(error) => finish_closes(Err(error), destination.close(), &inv.control),
+        Err(error) => finish_closes(Err(error), destination.close(), &ctx.control),
     }
-}
-/// SQL CSV must check both existing entries before rejecting a managed-workspace
-/// target. Keep both original parent-handle chains until pair publication ends.
-pub(crate) fn destination_pair(
-    home: &Path,
-    data: &Path,
-    manifest: &Path,
-    overwrite: bool,
-) -> Result<(Destination, Destination)> {
-    let data = open_destination(data, overwrite)?;
-    let manifest = open_destination(manifest, overwrite)?;
-    outside(home, data.path().parent().expect("validated output parent"))?;
-    outside(
-        home,
-        manifest.path().parent().expect("validated output parent"),
-    )?;
-    Ok((data, manifest))
 }
 /// Same data/manifest preflight order as the legacy pair, with one checked
 /// parent owner per destination and original invocation/budget at every step.
 pub(crate) fn destination_pair_scoped(
-    inv: &Invocation,
+    ctx: &DataContext,
     data: &Path,
     manifest: &Path,
     overwrite: bool,
     budget: &crate::resource::Budget,
 ) -> Result<(Destination, Destination)> {
-    let data = open_destination_scoped(inv, data, overwrite, Some(budget))?;
-    let manifest = match open_destination_scoped(inv, manifest, overwrite, Some(budget)) {
+    let data = open_destination_scoped(ctx, data, overwrite, Some(budget))?;
+    let manifest = match open_destination_scoped(ctx, manifest, overwrite, Some(budget)) {
         Ok(value) => value,
         Err(error) => {
             return pair_stop(
-                finish_closes(Err(error), data.close(), &inv.control),
+                finish_closes(Err(error), data.close(), &ctx.control),
                 budget,
             );
         }
     };
     let result = (|| {
-        inv.control.check()?;
+        ctx.control.check()?;
         budget.check()?;
-        outside(&inv.home, data.path().parent().expect("validated parent"))?;
-        inv.control.check()?;
+        outside(&ctx.home, data.path().parent().expect("validated parent"))?;
+        ctx.control.check()?;
         budget.check()?;
         outside(
-            &inv.home,
+            &ctx.home,
             manifest.path().parent().expect("validated parent"),
         )?;
-        inv.control.check()?;
+        ctx.control.check()?;
         budget.check()
     })();
     match result {
         Ok(()) => Ok((data, manifest)),
-        Err(error) => finish_pair(inv, data, manifest, budget, Err(error), false),
+        Err(error) => finish_pair(ctx, data, manifest, budget, Err(error), false),
     }
 }
 pub(crate) fn check_destination_scoped(
-    inv: &Invocation,
+    ctx: &DataContext,
     destination: &Destination,
     budget: &crate::resource::Budget,
 ) -> Result<()> {
     destination
         .check_controlled(&mut PublicationControl {
-            inv,
+            ctx,
             budget: Some(budget),
         })
         .map_err(|error| publication_error(error, destination.path()))
@@ -252,15 +231,13 @@ fn pair_stop<T>(result: Result<T>, budget: &crate::resource::Budget) -> Result<T
         {
             result
         }
-        Err(stop) => {
-            lycheedev_core::metadata::historical_write::finish_historical(result, Err(stop))
-        }
+        Err(stop) => lycheedev_core::metadata::owned_write::finish_owned(result, Err(stop)),
     }
 }
 /// A pair caller consumes both owners even if encoding/capture/publication fails.
 /// Successful publishing followed by close failure retains both committed paths.
 pub(crate) fn finish_pair<T>(
-    inv: &Invocation,
+    ctx: &DataContext,
     data: Destination,
     manifest: Destination,
     budget: &crate::resource::Budget,
@@ -281,7 +258,7 @@ pub(crate) fn finish_pair<T>(
     } else {
         Err(errors)
     };
-    let result = pair_stop(finish_closes(result, closes, &inv.control), budget);
+    let result = pair_stop(finish_closes(result, closes, &ctx.control), budget);
     if let Some((data, manifest)) = paths {
         result.map_err(|error| {
             publication_context(
@@ -356,21 +333,21 @@ fn open_destination(output: &Path, overwrite: bool) -> Result<Destination> {
     Ok(destination)
 }
 pub fn publish(
-    inv: &Invocation,
+    ctx: &DataContext,
     destination: &Destination,
     raw: &[u8],
     maximum: usize,
 ) -> Result<()> {
     destination
         .publish(raw, maximum as u64, || {
-            inv.control
+            ctx.control
                 .check()
                 .map_err(|error| io::Error::new(io::ErrorKind::Interrupted, error))
         })
         .map_err(|error| publication_error(error, destination.path()))
 }
 pub fn publish_reader(
-    inv: &Invocation,
+    ctx: &DataContext,
     destination: &Destination,
     reader: &mut impl io::Read,
     length: u64,
@@ -378,7 +355,7 @@ pub fn publish_reader(
 ) -> Result<()> {
     destination
         .publish_reader(reader, length, maximum as u64, || {
-            inv.control
+            ctx.control
                 .check()
                 .map_err(|error| io::Error::new(io::ErrorKind::Interrupted, error))
         })
@@ -409,8 +386,8 @@ impl OutputDirectory {
             overwrite,
         })
     }
-    pub(crate) fn open_scoped(inv: &Invocation, output: &Path, overwrite: bool) -> Result<Self> {
-        inv.control.check()?;
+    pub(crate) fn open_scoped(ctx: &DataContext, output: &Path, overwrite: bool) -> Result<Self> {
+        ctx.control.check()?;
         let absolute = std::path::absolute(output).map_err(|e| path_error(e.to_string()))?;
         if !fs::metadata(&absolute).is_ok_and(|metadata| metadata.is_dir()) {
             return Err(path_error(format!(
@@ -418,28 +395,28 @@ impl OutputDirectory {
                 output.display()
             )));
         }
-        inv.control.check()?;
+        ctx.control.check()?;
         let canonical =
             ordinary(&fs::canonicalize(absolute).map_err(|e| path_error(e.to_string()))?);
-        inv.control.check()?;
-        outside(&inv.home, &canonical)?;
-        inv.control.check()?;
+        ctx.control.check()?;
+        outside(&ctx.home, &canonical)?;
+        ctx.control.check()?;
         let held =
-            Directory::open_controlled(&canonical, &mut PublicationControl { inv, budget: None })
+            Directory::open_controlled(&canonical, &mut PublicationControl { ctx, budget: None })
                 .map_err(|e| publication_error(e, &canonical))?;
         let owner = Self {
             path: canonical,
             held,
             overwrite,
         };
-        match inv.control.check() {
+        match ctx.control.check() {
             Ok(()) => Ok(owner),
-            Err(error) => finish_closes(Err(error), owner.close(), &inv.control),
+            Err(error) => finish_closes(Err(error), owner.close(), &ctx.control),
         }
     }
     pub(crate) fn preflight_scoped(
         &self,
-        inv: &Invocation,
+        ctx: &DataContext,
         name: &str,
         budget: Option<&crate::resource::Budget>,
     ) -> Result<()> {
@@ -447,7 +424,7 @@ impl OutputDirectory {
             .held
             .optional_metadata_controlled(
                 std::ffi::OsStr::new(name),
-                &mut PublicationControl { inv, budget },
+                &mut PublicationControl { ctx, budget },
             )
             .map_err(|e| publication_error(e, &self.path.join(name)))?;
         match found {
@@ -467,7 +444,7 @@ impl OutputDirectory {
     }
     pub(crate) fn lease(
         &self,
-        inv: &Invocation,
+        ctx: &DataContext,
         budget: Option<&crate::resource::Budget>,
     ) -> Result<lycheedev_core::storage::ExclusiveLock> {
         let scope = self
@@ -489,7 +466,7 @@ impl OutputDirectory {
         lycheedev_core::storage::ExclusiveLock::resource_wait_controlled_with_check(
             &scope,
             &resource,
-            &inv.control,
+            &ctx.control,
             || budget.map_or(Ok(()), crate::resource::Budget::check),
         )
     }
@@ -507,23 +484,23 @@ impl OutputDirectory {
             Ok(_) => Err(conflict(&self.path.join(name))),
         }
     }
-    pub fn publish(&self, inv: &Invocation, name: &str, raw: &[u8], maximum: usize) -> Result<()> {
+    pub fn publish(&self, ctx: &DataContext, name: &str, raw: &[u8], maximum: usize) -> Result<()> {
         self.preflight(name)?;
         let destination = Destination::open(&self.path.join(name), self.overwrite)
             .map_err(|error| publication_error(error, &self.path.join(name)))?;
-        let result = publish(inv, &destination, raw, maximum);
-        finish_closes(result, destination.close(), &inv.control)
+        let result = publish(ctx, &destination, raw, maximum);
+        finish_closes(result, destination.close(), &ctx.control)
     }
 }
 
 struct PublicationControl<'a> {
-    inv: &'a Invocation,
+    ctx: &'a DataContext,
     budget: Option<&'a crate::resource::Budget>,
 }
 impl lycheedev_core::storage::FileControl for PublicationControl<'_> {
     type Error = io::Error;
     fn check(&mut self) -> io::Result<()> {
-        self.inv
+        self.ctx
             .control
             .check()
             .and_then(|()| self.budget.map_or(Ok(()), crate::resource::Budget::check))
@@ -552,7 +529,7 @@ impl lycheedev_core::storage::FileControl for PublicationControl<'_> {
 /// One native stage attempt; observation cannot request or replay publication.
 /// Facts are recorded even when the original stage close subsequently failed.
 pub(crate) fn publish_reader_scoped(
-    inv: &Invocation,
+    ctx: &DataContext,
     destination: &Destination,
     reader: &mut impl io::Read,
     length: u64,
@@ -561,49 +538,50 @@ pub(crate) fn publish_reader_scoped(
     observe: &mut impl FnMut(lycheedev_core::storage::StagedPublication),
 ) -> Result<()> {
     use lycheedev_core::storage::StagedPublication;
-    let attempt = destination.publish_reader_controlled(
-        reader,
-        length,
-        maximum as u64,
-        &mut PublicationControl { inv, budget },
-    );
-    observe(attempt.publication);
-    let result = attempt
-        .result
-        .map_err(|error| publication_error(error, destination.path()));
-    let result = finish_closes(
-        result,
-        if attempt.cleanup.is_empty() {
-            Ok(())
-        } else {
-            Err(attempt.cleanup)
-        },
-        &inv.control,
-    );
-    let result = match budget.and_then(|b| b.check().err()) {
-        None => result,
-        Some(stop)
-            if result.as_ref().err().is_some_and(|error| {
-                error.code == stop.code
-                    && error.exit_code == stop.exit_code
-                    && error.message == stop.message
-                    && error.details == stop.details
-            }) =>
-        {
-            result
-        }
-        Some(stop) => {
-            lycheedev_core::metadata::historical_write::finish_historical(result, Err(stop))
-        }
-    };
+    let check = || budget.map_or(Ok(()), crate::resource::Budget::check);
+    let quota = lycheedev_core::workspace::data_disk::reserve_export_temporary_with_check(
+        &ctx.home, length, &ctx.control, &check,
+    ).map_err(|error| publication_context(error, destination.path(), StagedPublication::NotPublished))?;
+    let mut publication = StagedPublication::NotPublished;
+    let result = quota.with_external_export(|| {
+        let attempt = destination.publish_reader_controlled(
+            reader,
+            length,
+            maximum as u64,
+            &mut PublicationControl { ctx, budget },
+        );
+        publication = attempt.publication;
+        let native_closed = attempt.cleanup.is_empty();
+        observe(publication);
+        let result = attempt
+            .result
+            .map_err(|error| publication_error(error, destination.path()));
+        let result = finish_closes(
+            result,
+            if native_closed { Ok(()) } else { Err(attempt.cleanup) },
+            &ctx.control,
+        );
+        let result = match budget.and_then(|b| b.check().err()) {
+            None => result,
+            Some(stop)
+                if result.as_ref().err().is_some_and(|error| {
+                    error.code == stop.code
+                        && error.exit_code == stop.exit_code
+                        && error.message == stop.message
+                        && error.details == stop.details
+                }) => result,
+            Some(stop) => lycheedev_core::metadata::owned_write::finish_owned(result, Err(stop)),
+        };
+        (result, publication, native_closed)
+    });
     result.map_err(|mut error| {
         let primary = error.clone();
         error.details = serde_json::json!({"schema":"lycheedev.asset-publication-error.v1", "primary":primary,
-            "publication":{"state":match attempt.publication {
+            "publication":{"state":match publication {
                 StagedPublication::NotPublished=>"not_published", StagedPublication::Published=>"published", StagedPublication::Unknown=>"unknown"
             },"path":destination.path().to_string_lossy()}});
-        if attempt.publication != StagedPublication::NotPublished {
-            error.message.push_str(if attempt.publication == StagedPublication::Published { "\nasset output already published: " } else { "\nasset output publication unknown; do not replay: " });
+        if publication != StagedPublication::NotPublished {
+            error.message.push_str(if publication == StagedPublication::Published { "\nasset output already published: " } else { "\nasset output publication unknown; do not replay: " });
             error.message.push_str(&destination.path().to_string_lossy());
         }
         error
@@ -612,18 +590,18 @@ pub(crate) fn publish_reader_scoped(
 impl OutputDirectory {
     pub(crate) fn publish_scoped(
         &self,
-        inv: &Invocation,
+        ctx: &DataContext,
         name: &str,
         raw: &[u8],
         maximum: usize,
         budget: Option<&crate::resource::Budget>,
         observe: &mut impl FnMut(lycheedev_core::storage::StagedPublication),
     ) -> Result<()> {
-        self.preflight_scoped(inv, name, budget)?;
+        self.preflight_scoped(ctx, name, budget)?;
         let destination =
-            open_destination_scoped(inv, &self.path.join(name), self.overwrite, budget)?;
+            open_destination_scoped(ctx, &self.path.join(name), self.overwrite, budget)?;
         let result = publish_reader_scoped(
-            inv,
+            ctx,
             &destination,
             &mut io::Cursor::new(raw),
             raw.len() as u64,
@@ -631,7 +609,7 @@ impl OutputDirectory {
             budget,
             observe,
         );
-        finish_closes(result, destination.close(), &inv.control)
+        finish_closes(result, destination.close(), &ctx.control)
     }
 }
 

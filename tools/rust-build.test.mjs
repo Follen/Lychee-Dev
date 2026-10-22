@@ -26,6 +26,26 @@ test('Cargo runner seals exact output bytes and refuses another owner during exe
   }finally{rmSync(root,{recursive:true,force:true});}
 });
 
+test('test-created runtime locks do not invalidate the build, but source edits still do',()=>{
+  const root=sourceFixture(), crate=join(root,'crates/fixture');
+  try{
+    mkdirSync(join(crate,'src'),{recursive:true});
+    writeFileSync(join(crate,'src/lib.rs'),'pub fn original() {}');
+    const successful=()=>({status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)});
+    const result=runCargo(root,['test','--locked','--offline'],{execute(){
+      mkdirSync(join(crate,'.lycheedev-locks'));
+      writeFileSync(join(crate,'.lycheedev-locks/owner.lock'),'runtime owner');
+      return successful();
+    }});
+    assert.equal(JSON.parse(readFileSync(result.buildEvidence)).state,'retired');
+    assert.throws(()=>runCargo(root,['test','--locked','--offline'],{execute(){
+      writeFileSync(join(crate,'src/lib.rs'),'pub fn edited() {}');
+      return successful();
+    }}),/build.source_changed_during_compile/);
+    assert.equal(existsSync(join(root,'.tmp/rust-disk/channels/ordinary.lease')),false);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
 test('isolated native tests keep user and Agent writes in the owned scratch and retain offline compiler caches',()=>{
   const root=sourceFixture();
   try{
@@ -51,7 +71,7 @@ test('buildRust forwards requested user isolation while preserving its default e
       const record=buildRust(root,join(root,'artifact'),{profile:'release',...(isolateUser===undefined?{}:{isolateUser}),
         environment:{HOME:'foreign-home',USERPROFILE:'foreign-user',CODEX_HOME:'foreign-agent',CARGO_HOME:'compiler-cache',RUSTUP_HOME:'compiler-tools'},
         execute(command,args,options){
-          assert.equal(command,'cargo');assert.equal(options.timeout,600000);
+          assert.equal(command,'cargo');assert.equal(options.timeout,3600000);
           const owner=JSON.parse(readFileSync(join(options.evidence,'receipt.json')));
           if(isolateUser){
             for(const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP','LYCHEEDEV_HOME'])assert(options.env[key].startsWith(owner.directory));
@@ -147,13 +167,13 @@ test('fresh offline gate refuses a leftover cache without executing or deleting 
 });
 
 
-test('all product profiles keep the fixed ten minute deadline and only explicit one-shot disables incremental',()=>{
+test('all product profiles allow an hour for compilation and only explicit one-shot disables incremental',()=>{
   for(const profile of ['dev','release','symbols']){
     for(const oneShot of [undefined,false,true]){
     const root=sourceFixture();
     try{
       const record=buildRust(root,join(root,'artifact'),{profile,...(oneShot===undefined?{}:{oneShot}),environment:{CARGO_INCREMENTAL:'1'},execute(command,args,options){
-        assert.equal(options.timeout,600000);
+        assert.equal(options.timeout,3600000);
         assert.deepEqual(args,['build','--locked','--offline','-j','1','--profile',profile,'-p','lycheedev-cli']);
         assert.equal(options.env.CARGO_INCREMENTAL,oneShot===true?'0':'1');
         assert.equal(options.env.CARGO_TARGET_DIR,join(root,profile==='symbols'?'target-symbols':'target'));
@@ -164,16 +184,16 @@ test('all product profiles keep the fixed ten minute deadline and only explicit 
       }});
       const receipt=JSON.parse(readFileSync(record.buildEvidence));
       const command=JSON.parse(readFileSync(receipt.sealedLogs.find(row=>row.path.endsWith('command.json')).path));
-      assert.equal(command.timeoutMs,600000);assert.equal(command.oneShot,oneShot===true);assert.equal(record.profile,profile);
+      assert.equal(command.timeoutMs,3600000);assert.equal(command.oneShot,oneShot===true);assert.equal(record.profile,profile);
       assert.equal(record.sameInvocation,true);assert.equal(receipt.state,'retired');
       assert.deepEqual(verifyArtifact(root,join(root,'artifact/artifact.json')),record);
     }finally{rmSync(root,{recursive:true,force:true});}
     }
   }
-  for(const args of [['test','--release'],['check','--profile','release'],['fetch'],['build','--profile','release']]){
+  for(const args of [['test','--release'],['test','--no-run'],['check','--profile','release'],['clippy'],['fetch'],['metadata','--locked','--offline'],['build','--profile','release']]){
     const root=sourceFixture();
     try{runCargo(root,args,{timeoutMs:1800000,execute(command,received,options){
-      assert.equal(options.timeout,600000);return {status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
+      assert.equal(options.timeout,['fetch','metadata'].includes(args[0])?900000:3600000);return {status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
     }});}finally{rmSync(root,{recursive:true,force:true});}
   }
 });
@@ -193,7 +213,7 @@ test('scoped Source exporter Cargo admission keeps 5 GiB default and accepts exa
     assert.throws(() => runCargo(root, args, options), /disk.scratch_quota/); assert.equal(calls, 0);
     const limits = {...defaults, scratchBytes: 6 * 1024 ** 3}, result = runCargo(root, args, {...options, limits});
     const receipt = JSON.parse(readFileSync(result.buildEvidence)); assert.equal(receipt.state, 'retired'); assert.deepEqual(receipt.admission.limits, limits); assert.equal(receipt.admission.scratchBytes, defaults.scratchBytes + 1);
-    const command = JSON.parse(readFileSync(join(dirname(result.buildEvidence), 'command.json'))); assert.equal(command.oneShot, false); assert.equal(command.timeoutMs, 600000);
+    const command = JSON.parse(readFileSync(join(dirname(result.buildEvidence), 'command.json'))); assert.equal(command.oneShot, false); assert.equal(command.timeoutMs, 3600000);
     assert.equal(receipt.admission.cacheReserveBytes, 2 * 1024 ** 3); assert.equal(receipt.admission.requiredBytes, 2 * 1024 ** 3); assert.equal(statSync(protectedPath).size, 1); assert.equal(calls, 1);
     logicalBytes = 6 * 1024 ** 3 + 1; assert.throws(() => runCargo(root, args, {...options, limits}), /disk.scratch_quota/); assert.equal(calls, 1);
     for (const change of [{limits: {...limits, scratchBytes: 7 * 1024 ** 3}}, {limits: {...limits, freeReserveBytes: 0}}, {limits: {...limits, cacheBytes: 30 * 1024 ** 3}}, {limits: {...limits, maxEntries: 1e6}}, {limits: {...limits, unknown: 1}}, {owner: 'ordinary-build'}, {environment: {LYCHEEDEV_DISK_SCRATCH_GIB: '6'}}, {environment: {lycheedev_disk_unknown: '6'}}]) assert.throws(() => runCargo(root, args, {...options, limits, ...change}), /scoped_/);

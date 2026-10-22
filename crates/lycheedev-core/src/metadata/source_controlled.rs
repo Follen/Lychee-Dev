@@ -1,7 +1,7 @@
 //! Controlled single-document operations for Source cache and startup owners.
 //! Business validation runs once; only SQL statements retry real contention.
 use super::*;
-use crate::{control::OperationControl, metadata::historical_write::finish_historical};
+use crate::{control::OperationControl, metadata::owned_write::finish_owned};
 use std::time::Duration;
 
 impl Metadata {
@@ -27,7 +27,7 @@ impl Metadata {
                 )
                 .optional()
         });
-        let result = finish_historical(
+        let result = finish_owned(
             result,
             self.connection
                 .busy_timeout(Duration::from_secs(5))
@@ -151,9 +151,9 @@ impl Metadata {
                     Ok(())
                 };
                 transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-                finish_historical(consumed, rollback)
+                finish_owned(consumed, rollback)
             })();
-            let result = finish_historical(
+            let result = finish_owned(
                 result,
                 self.connection
                     .busy_timeout(Duration::from_secs(5))
@@ -166,7 +166,7 @@ impl Metadata {
             error
         })
         })();
-        crate::metadata::historical_write::finish_historical(
+        crate::metadata::owned_write::finish_owned(
             result,
             evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
         )

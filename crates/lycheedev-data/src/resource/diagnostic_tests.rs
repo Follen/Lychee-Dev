@@ -1,4 +1,5 @@
 use super::*;
+use lycheedev_core::control::TrackedCancellation;
 use std::time::Duration;
 
 fn budget() -> Budget {
@@ -188,7 +189,7 @@ fn safety_rejection_reports_its_ledger_and_does_not_commit_logical_charge() {
 }
 #[test]
 fn observed_network_rejection_retains_accounting_and_diagnostic_after_cancel() {
-    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled = TrackedCancellation::new();
     let b = Budget::new(
         Cost {
             network_bytes: u64::MAX,
@@ -203,7 +204,7 @@ fn observed_network_rejection_retains_accounting_and_diagnostic_after_cancel() {
     })
     .unwrap();
     let before = (b.snapshot().unwrap(), b.logical_snapshot().unwrap());
-    cancelled.store(true, Ordering::Release);
+    cancelled.cancel();
     assert_eq!(
         b.charge(Cost::retained(1)).unwrap_err().code,
         "operation.cancelled"

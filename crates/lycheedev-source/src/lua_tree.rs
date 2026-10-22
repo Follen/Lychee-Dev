@@ -39,10 +39,13 @@ impl SyntaxDocument {
         lua51_identifiers: bool,
         guard: Option<&WorkerGuard<'_>>,
     ) -> Result<Self> {
-        if std::str::from_utf8(bytes).is_err() || (lua51_identifiers && bytes.contains(&0)) {
+        // Lua source is byte-oriented: invalid UTF-8 bytes are preserved here and
+        // only the caller's display/engine views transform them. A NUL byte is
+        // still rejected where the consumer declares NUL-free input.
+        if lua51_identifiers && bytes.contains(&0) {
             return Err(ToolkitError::new(
                 "codebase.source_integrity",
-                "Lua structural input must be UTF-8 source without NUL",
+                "Lua structural input must not contain NUL",
                 4,
             ));
         }
@@ -93,7 +96,6 @@ impl SyntaxDocument {
             || edit.old_end_byte > self.bytes.len()
             || edit.new_end_byte > new_bytes.len()
             || edit.start_byte > edit.new_end_byte
-            || std::str::from_utf8(new_bytes).is_err()
             || (self.lua51_identifiers && new_bytes.contains(&0))
         {
             return Err(ToolkitError::new(
@@ -183,7 +185,7 @@ impl SyntaxDocument {
                     // Preserve the prior generic diagnostic and its binary
                     // expression origin for every other unsupported operator.
                     return Some(SyntaxNote {
-                        message: "Syntax unavailable in fixed Go Lua parser".into(),
+                        message: "Syntax unavailable in the current Lua parser".into(),
                         line: lua_line_starts(&self.bytes).partition_point(|start| {
                             *start <= node.parent().expect("binary operator parent").start_byte()
                         }),
@@ -236,7 +238,7 @@ impl SyntaxDocument {
                     .is_some_and(fixed_unsupported_binary_operator);
             if unsupported && !deferred_binary_operator {
                 return Some(SyntaxNote {
-                    message: "Syntax unavailable in fixed Go Lua parser".into(),
+                    message: "Syntax unavailable in the current Lua parser".into(),
                     line: lua_line_starts(&self.bytes)
                         .partition_point(|start| *start <= node.start_byte()),
                 });
@@ -280,6 +282,9 @@ impl SyntaxDocument {
             return None;
         }
         scopes.push("<file>".into());
+        // Doc-comment display rows use a lossy view so invalid bytes in a
+        // comment cannot erase every row of the document.
+        let display = String::from_utf8_lossy(&self.bytes);
         let mut w = Walker {
             raw: &self.bytes,
             facts: Facts::fresh(),
@@ -291,15 +296,28 @@ impl SyntaxDocument {
             work: 0,
             depth: 0,
             source_lines: lua_line_starts(&self.bytes),
-            lines: std::str::from_utf8(&self.bytes)
-                .unwrap_or("")
-                .split('\n')
-                .collect(),
+            lines: display.split('\n').collect(),
         };
         w.walk(self.tree.root_node());
         // Go rejects a malformed program as a whole, rather than publishing
         // declarations recovered by tree-sitter. The native tree stays intact.
         if self.tree.root_node().has_error() || w.rejected_syntax {
+            // Invalid bytes outside comments are a real syntax problem; a
+            // recovered declaration from a substituted token is never published.
+            if !crate::encoding::is_utf8(&self.bytes) && w.facts.diagnostics.is_empty() {
+                let warning = crate::encoding::warning(&self.bytes).expect("invalid source bytes");
+                if !worker::charge(guard, "syntax error".len()) {
+                    return None;
+                }
+                worker::push(
+                    guard,
+                    &mut w.facts.diagnostics,
+                    SyntaxNote {
+                        message: "syntax error".into(),
+                        line: warning.line,
+                    },
+                );
+            }
             w.facts.declarations.clear();
             w.facts.relationships.clear();
             if let Some(targets) = &mut w.facts.raw_relationship_targets {
@@ -313,8 +331,39 @@ impl SyntaxDocument {
         worker::check(guard).then_some(w.facts)
     }
 }
+/// True when every invalid UTF-8 byte in `raw` lies inside a Lua comment, where
+/// it has no Lua meaning. Callers may then hand the same-width analysis view to
+/// an engine that requires `&str`. Invalid bytes in a token must keep their real
+/// syntax result, and invalid bytes in a string value must be reported
+/// unavailable by the engine boundary rather than replaced into a valid value.
+pub(crate) fn invalid_bytes_are_comment_only(raw: &[u8]) -> bool {
+    if crate::encoding::is_utf8(raw) {
+        return true;
+    }
+    let Ok(document) = SyntaxDocument::new_public(raw) else {
+        return false;
+    };
+    let root = document.tree.root_node();
+    crate::encoding::invalid_offsets(raw)
+        .into_iter()
+        .all(|offset| {
+            root.descendant_for_byte_range(offset, offset + 1)
+                .is_some_and(node_inside_comment)
+        })
+}
+fn node_inside_comment(mut node: Node<'_>) -> bool {
+    loop {
+        if node.kind() == "comment" {
+            return true;
+        }
+        match node.parent() {
+            Some(parent) => node = parent,
+            None => return false,
+        }
+    }
+}
 /// Nested XML handlers share their document's owned/scratch admission. The
-/// caller keeps the original input <=64 KiB and the same observation-only guard.
+/// caller keeps the shared pure-worker input bound and the same observation-only guard.
 pub(crate) fn facts_with_worker_guard(raw: &[u8], guard: &WorkerGuard<'_>) -> Option<Facts> {
     generated_facts_with_worker_guard(raw, false, guard)
 }
@@ -323,7 +372,7 @@ pub(crate) fn generated_facts_with_worker_guard(
     generated: bool,
     guard: &WorkerGuard<'_>,
 ) -> Option<Facts> {
-    if raw.len() > 64 << 10 || !guard.check() {
+    if raw.len() > crate::facts::WORKER_SOURCE_BYTES || !guard.check() {
         guard.abandon();
         return None;
     }
@@ -1330,7 +1379,7 @@ impl<'tree> Walker<'_, 'tree> {
     fn walk_inner(&mut self, n: Node<'tree>) {
         if public_unsupported(self.raw, n) {
             if !self.rejected_syntax {
-                self.note("Syntax unavailable in fixed Go Lua parser", self.line(n));
+                self.note("Syntax unavailable in the current Lua parser", self.line(n));
                 self.rejected_syntax = true;
             }
             return;
@@ -1674,10 +1723,14 @@ mod tests {
     fn worker_facts_scratch_and_input_admission_leave_original_depth_contract() {
         on_worker_stack(|| {
             let control = OperationControl::default();
-            same_worker_facts(&vec![b'\n'; 64 << 10]);
+            same_worker_facts(&vec![b'\n'; crate::facts::WORKER_SOURCE_BYTES]);
             assert!(
-                crate::facts::lua_for_worker(&vec![b' '; (64 << 10) + 1], &control, 4 << 20)
-                    .is_none()
+                crate::facts::lua_for_worker(
+                    &vec![b' '; crate::facts::WORKER_SOURCE_BYTES + 1],
+                    &control,
+                    4 << 20,
+                )
+                .is_none()
             );
             assert!(crate::facts::lua_for_worker(b"\xff", &control, 4 << 20).is_none());
             // The large literal is inside every enclosing subtree. Real live
@@ -1931,7 +1984,7 @@ READY
         assert_eq!(string(raw, arguments[3]).unwrap(), "�");
     }
     #[test]
-    fn public_eof_diagnostics_use_fixed_go_messages_and_zero_line() {
+    fn public_eof_diagnostics_use_fixed_reference_messages_and_zero_line() {
         for (raw, message) in [
             ("function Missing()", "syntax error"),
             ("function Missing()\n Run()", "syntax error"),
@@ -1979,8 +2032,8 @@ READY
         }
     }
     #[test]
-    fn public_newline_calls_keep_fixed_go_nested_relationship_order() {
-        // Actual fixed-Go1.27.1/gopher-lua1.1.1 observations, report SHA256
+    fn public_newline_calls_keep_fixed_reference_nested_relationship_order() {
+        // Observed against the external fixed reference (Go1.27.1/gopher-lua1.1.1); report SHA256
         // 849e3b0ab76e2252e10f183bb84c281ba96452cb0f32bc0f430e8ab9680730dc.
         // These calls are accepted despite the lexer/parser PNewLine code.
         for raw in [b"f()\n()".as_slice(), b"f(1)\n(2)", b"f()\r\n()", b"f() ()"] {
@@ -2078,5 +2131,51 @@ READY
             assert!(facts.relationships.is_empty());
             assert!(!facts.diagnostics.is_empty());
         }
+    }
+
+    #[test]
+    fn invalid_utf8_comments_are_classified_inert_but_tokens_and_strings_are_not() {
+        // Comment-only invalid bytes are the only inputs a &str engine boundary
+        // may receive through the same-width analysis view.
+        let comment = b"function Before() end\n-- Night Web\x92s Hollow\nfunction After() end\n";
+
+        assert!(invalid_bytes_are_comment_only(comment));
+        let long_comment = b"--[[ a\x92b ]]\nRun()\n";
+        assert!(invalid_bytes_are_comment_only(long_comment));
+        // A real token and a string value keep their real syntax/semantic
+        // result and must not be analyzed as substituted.
+        assert!(!invalid_bytes_are_comment_only(b"function Br\x92oken() end\n"));
+        assert!(!invalid_bytes_are_comment_only(b"local s = 'a\x92b'\n"));
+        // Valid UTF-8 source (including a legal escape spelling) needs no
+        // boundary transform at all.
+        assert!(
+            invalid_bytes_are_comment_only(b"T['\\255']()\n"),
+            "legal escape spelling is valid UTF-8 source and needs no transform"
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_comment_facts_keep_declarations_and_invalid_token_never_does() {
+        let comment = b"function Before() end\n-- Night Web\x92s Hollow\nfunction After() end\n";
+        let facts = crate::facts::lua(comment, false);
+        assert!(facts.diagnostics.is_empty());
+        assert_eq!(
+            facts
+                .declarations
+                .iter()
+                .map(|declaration| declaration.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Before", "After"]
+        );
+        let token = b"function Br\x92oken() end\n";
+        let facts = crate::facts::lua(token, false);
+        assert!(facts.declarations.is_empty(), "no substituted declaration");
+        assert!(facts.relationships.is_empty());
+        assert!(
+            !facts.diagnostics.is_empty()
+                && facts.diagnostics.iter().all(|note| note.line == 1),
+            "the invalid token must remain a located syntax problem: {:?}",
+            facts.diagnostics
+        );
     }
 }

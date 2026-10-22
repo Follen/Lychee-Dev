@@ -7,14 +7,14 @@ use crate::{
 mod adaptive;
 mod opportunistic;
 pub use adaptive::MemoryBudget;
-use lycheedev_core::{Result, control::OperationControl};
+use lycheedev_core::{
+    Result,
+    control::{OperationControl, TrackedCancellation},
+};
 use serde::Serialize;
 use std::{
     collections::BTreeSet,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::Instant,
 };
 #[derive(Default, Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -78,7 +78,7 @@ pub struct Budget {
     // Diagnostics share query ownership, never accounting or cancellation state.
     phase_profile: Option<Arc<Profile>>,
     pub deadline: Instant,
-    cancel: Option<Arc<AtomicBool>>,
+    cancel: Option<TrackedCancellation>,
     control: Option<OperationControl>,
 }
 /// A temporary allocation admission. Only its exact retained-byte charge is
@@ -95,6 +95,10 @@ pub(crate) struct OwnedRetainedReservation {
     bytes: u64,
 }
 impl OwnedRetainedReservation {
+    pub(crate) fn bytes(&self) -> usize {
+        // Reservations originate from usize-sized allocations and only shrink.
+        self.bytes as usize
+    }
     /// Refund only this owner's unused admission, atomically. This never grows
     /// an allowance, changes limits, or checks an expired request deadline.
     pub(crate) fn shrink_to(&mut self, bytes: usize) -> Result<()> {
@@ -227,7 +231,7 @@ impl Drop for RetainedReservation<'_> {
     }
 }
 impl Budget {
-    pub fn new(limits: Cost, deadline: Instant, cancel: Option<Arc<AtomicBool>>) -> Self {
+    pub fn new(limits: Cost, deadline: Instant, cancel: Option<TrackedCancellation>) -> Self {
         Self {
             state: Arc::new(Mutex::new(State {
                 limits,
@@ -255,6 +259,12 @@ impl Budget {
             control: Some(control),
             ..Self::new(limits, deadline, None)
         }
+    }
+    /// Attach the existing opt-in query observer without changing fixed limits
+    /// or activating adaptive host-memory admission.
+    pub(crate) fn with_query_phase_profile(mut self) -> Self {
+        self.phase_profile = Profile::from_env();
+        self
     }
     /// Observe a business scope without adding clocks or ownership when disabled.
     pub(crate) fn phase(&self, phase: Phase) -> Span<'_> {
@@ -357,21 +367,11 @@ impl Budget {
             bytes,
         })
     }
-    pub fn token(&self) -> Option<&AtomicBool> {
-        self.control
-            .as_ref()
-            .map(OperationControl::token)
-            .or(self.cancel.as_deref())
-    }
     pub fn check(&self) -> Result<()> {
         if let Some(control) = &self.control {
             control.check()?;
         }
-        if self
-            .cancel
-            .as_ref()
-            .is_some_and(|v| v.load(Ordering::Acquire))
-        {
+        if self.cancel.as_ref().is_some_and(|v| v.is_cancelled()) {
             return Err(fault("operation.cancelled", 7, "Data query cancelled"));
         }
         if Instant::now() >= self.deadline {
@@ -718,7 +718,8 @@ mod logical_tests {
         assert!(b.charge(Cost::work(1)).is_err());
         assert!(b.safety_only().charge(Cost::work(1)).is_err());
         assert_eq!(b.logical_snapshot().unwrap().decode_work, 100_000_000);
-        let token = Arc::new(AtomicBool::new(true));
+        let token = TrackedCancellation::new();
+        token.cancel();
         let cancelled = Budget::new(
             Cost::defaults(),
             Instant::now() + Duration::from_secs(30),
@@ -769,7 +770,8 @@ mod network_observed_tests {
     }
     #[test]
     fn completed_network_read_is_charged_after_cancellation_but_overshoot_is_atomic() {
-        let token = Arc::new(AtomicBool::new(true));
+        let token = TrackedCancellation::new();
+        token.cancel();
         let b = Budget::new(
             Cost {
                 network_bytes: 3,

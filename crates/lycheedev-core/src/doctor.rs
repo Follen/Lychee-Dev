@@ -2,7 +2,7 @@
 //! afterward; an unhealthy workspace does not suppress unrelated diagnostics.
 use crate::control::OperationControl;
 use crate::{
-    Invocation, Outcome, Result, ToolkitError, cache, metadata::Metadata, storage, workspace,
+    request::RequestContext, Outcome, Result, ToolkitError, cache, metadata::Metadata, storage, workspace,
 };
 use serde_json::{Value, json};
 use std::{
@@ -45,7 +45,7 @@ fn diagnostic<T>(result: Result<T>, control: &OperationControl) -> Result<Result
     }
 }
 fn workspace_checks(
-    inv: &Invocation,
+    inv: &RequestContext,
     legacy: &[LegacyRoot],
     checks: &mut Vec<Value>,
 ) -> Result<()> {
@@ -74,7 +74,7 @@ fn workspace_checks(
     }
     inv.control.check()
 }
-fn selection_checks(inv: &Invocation, checks: &mut Vec<Value>) -> Result<()> {
+fn selection_checks(inv: &RequestContext, checks: &mut Vec<Value>) -> Result<()> {
     let baselines = &crate::client::baselines::VERIFIED_BASELINES;
     let problems = crate::client::baselines::catalog_problems(baselines);
     checks.push(if problems.is_empty() {
@@ -155,21 +155,21 @@ fn selection_checks(inv: &Invocation, checks: &mut Vec<Value>) -> Result<()> {
     });
     Ok(())
 }
-fn partial(mut error: ToolkitError, inv: &Invocation, checks: Vec<Value>) -> ToolkitError {
+fn partial(mut error: ToolkitError, inv: &RequestContext, checks: Vec<Value>) -> ToolkitError {
     let primary = error.clone();
     error.details = json!({"schema":"lycheedev.doctor-error.v1","primary":primary,"context":{"workspace":inv.home},"result":{"healthy":false,"checks":checks}});
     error
 }
-pub fn inspect(inv: &Invocation) -> Result<Outcome> {
+pub fn inspect(inv: &RequestContext) -> Result<Outcome> {
     inspect_with_provider(inv, &[], || Ok(Vec::new()))
 }
 /// Existing callers keep their provider shape contract. The actual entrypoint
 /// supplies a closure so expensive provider observations follow Core checks.
-pub fn inspect_with_checks(inv: &Invocation, providers: Vec<Value>) -> Result<Outcome> {
+pub fn inspect_with_checks(inv: &RequestContext, providers: Vec<Value>) -> Result<Outcome> {
     inspect_with_provider(inv, &[], || Ok(providers))
 }
 pub fn inspect_with_provider(
-    inv: &Invocation,
+    inv: &RequestContext,
     legacy: &[LegacyRoot],
     provider: impl FnOnce() -> Result<Vec<Value>>,
 ) -> Result<Outcome> {

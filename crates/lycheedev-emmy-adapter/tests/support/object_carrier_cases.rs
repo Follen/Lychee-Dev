@@ -146,6 +146,7 @@ pub fn observed_call(
     provider.observations.insert(
         call,
         BindingDecision::Bound(CallObservation {
+            open_tail: false,
             callee: ObservedCallee::Source(function),
             selected_callee_identity: "callee".into(),
             closure_identity: "closure".into(),

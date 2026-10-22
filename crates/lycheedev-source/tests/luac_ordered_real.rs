@@ -27,7 +27,7 @@ fn actual_ordered_luac_preserves_parent_and_reaps_compile_children() {
     ));
     fs::create_dir(&root).unwrap();
     let good = runtime
-        .check_with_ordered_control(
+        .check_with_control(
             &root,
             &BTreeMap::from([("good.lua".into(), b"local goto = 1; return goto\n".to_vec())]),
             &control,
@@ -35,7 +35,7 @@ fn actual_ordered_luac_preserves_parent_and_reaps_compile_children() {
         .unwrap();
     assert_eq!(good["passed"], true);
     let bad = runtime
-        .check_with_ordered_control(
+        .check_with_control(
             &root,
             &BTreeMap::from([("bad.lua".into(), b"local =\n".to_vec())]),
             &control,

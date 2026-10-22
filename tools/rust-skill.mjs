@@ -23,11 +23,10 @@ export function stageSkill(destination, commands) {
     seen.add(command.path);
   }
   const source = join(repository, 'skills/lycheedev');
-  const target = JSON.parse(readFileSync(join(repository, 'tests/rust-parity/go-3.2.2.manifest.json'), 'utf8'));
-  if (target.oracle?.commit !== '0bec60e4406f5d5dc155ee25cef44f9a710e37e8') throw new Error('rust-skill.invalid_target');
+  const target = JSON.parse(readFileSync(join(repository, 'crates/lycheedev-cli/src/commands.json'), 'utf8'));
   const actual = new Map(commands.map(command => [command.path, command]));
-  const missingCommands = target.commands.filter(command => !actual.has(command.path)).map(command => command.path);
-  const missingFlags = target.commands.flatMap(command => {
+  const missingCommands = target.filter(command => !actual.has(command.path)).map(command => command.path);
+  const missingFlags = target.flatMap(command => {
     const selected = actual.get(command.path);
     if (!selected) return [];
     const names = new Set(selected.flags.map(flag => flag.split(/\s+/)[0]));
@@ -49,7 +48,7 @@ export function stageSkill(destination, commands) {
   }
   writeFileSync(receipt, `${JSON.stringify({
     schema: 'lycheedev.skill-declared-contract.v1', commands,
-    targetCommit: target.oracle.commit, missingCommands, missingFlags,
+    contractSource: 'crates/lycheedev-cli/src/commands.json', missingCommands, missingFlags,
     scope: 'Declared command/flag availability only; not handler or behavior acceptance',
   }, null, 2)}\n`, {flag: 'wx'});
   return destination;

@@ -1,4 +1,4 @@
-//! The default and historical APIs share the fixed-Go generation history.
+//! The default and historical APIs share the current generation history.
 //! Use real delete/recreate operations, not hand-seeded tombstones alone.
 use super::*;
 use crate::control::{OperationControl, TrackedCancellation};
@@ -69,8 +69,8 @@ fn tables(metadata: &Metadata) -> Vec<String> {
         .collect::<rusqlite::Result<_>>()
         .unwrap()
 }
-fn change<'a>(key: &'a str, expected_generation: i64, bytes: &'a [u8]) -> HistoricalMutation<'a> {
-    HistoricalMutation {
+fn change<'a>(key: &'a str, expected_generation: i64, bytes: &'a [u8]) -> OwnedMutation<'a> {
+    OwnedMutation {
         key,
         expected_generation,
         bytes,
@@ -78,7 +78,7 @@ fn change<'a>(key: &'a str, expected_generation: i64, bytes: &'a [u8]) -> Histor
 }
 
 #[test]
-fn writable_opens_initialize_and_upgrade_fixed_go_tombstone_schema() {
+fn writable_opens_initialize_and_upgrade_retained_tombstone_schema() {
     for controlled in [false, true] {
         for legacy in [false, true] {
             let fixture = Fixture::new();
@@ -129,7 +129,7 @@ fn historical_deletion_then_every_default_creator_rejects_old_cas() {
     for creator in 0..7 {
         let fixture = Fixture::new();
         let control = OperationControl::default();
-        Metadata::with_historical_write(&fixture.0, &control, |writer| {
+        Metadata::with_owned_write(&fixture.0, &control, |writer| {
             writer.commit(&[change("key", 0, b"false")])?;
             writer.commit(&[change("key", 1, b"true")])?;
             writer.delete(&[("key".into(), 2)])
@@ -197,7 +197,7 @@ fn historical_deletion_then_every_default_creator_rejects_old_cas() {
             "vault.generation_conflict"
         );
         metadata.close().unwrap();
-        Metadata::with_historical_write(&fixture.0, &control, |writer| {
+        Metadata::with_owned_write(&fixture.0, &control, |writer| {
             assert_eq!(
                 writer
                     .commit(&[change("key", 2, b"false")])
@@ -247,7 +247,7 @@ fn every_default_removal_preserves_history_for_historical_and_default_recreation
         assert!(!metadata.delete("key").unwrap());
         assert_eq!(tombstone(&metadata, "key"), Some(2));
         metadata.close().unwrap();
-        Metadata::with_historical_write(&fixture.0, &control, |writer| {
+        Metadata::with_owned_write(&fixture.0, &control, |writer| {
             writer.commit(&[change("key", 0, b"true")])?;
             assert_eq!(writer.document("key")?.generation, 3);
             Ok(())

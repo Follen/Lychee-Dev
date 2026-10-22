@@ -1,7 +1,7 @@
 //! Disposable Source facts and original-byte caches. Authentication belongs to Source;
 //! this owner supplies bounded, atomic visibility, not evidence durability.
 use crate::{
-    Result, ToolkitError, control::OperationControl, metadata::historical_write::finish_historical,
+    Result, ToolkitError, control::OperationControl, metadata::owned_write::finish_owned,
     selection::valid_digest, storage, workspace,
 };
 use lycheedev_windows::filesystem::destination::{
@@ -72,7 +72,7 @@ fn finish_directory_with<T>(
 ) -> Result<T> {
     if let Err(errors) = close(directory) {
         for error in errors {
-            result = finish_historical(result, Err(error.into()));
+            result = finish_owned(result, Err(error.into()));
         }
     }
     result
@@ -290,7 +290,7 @@ impl SourceCache {
             }),
             None => Ok(()),
         };
-        finish_historical(finish_historical(result, closed), control.check()).map_err(|mut error| {
+        finish_owned(finish_owned(result, closed), control.check()).map_err(|mut error| {
             if let Some((temporary, state)) = publication {
                 error.details = serde_json::json!({"schema":"lycheedev.source-cache-publication.v1","path":self.directory.path().join(name),"temporary":temporary,"state":format!("{state:?}"),"durable":false,"cause":error.clone()});
             }
@@ -363,7 +363,7 @@ impl SourceCache {
         for error in measured(SourceCachePublicationPhase::StageClose, timings, || {
             stage.close()
         }) {
-            result = finish_historical(result, Err(error.into()));
+            result = finish_owned(result, Err(error.into()));
         }
         result
     }
@@ -380,7 +380,7 @@ impl SourceCache {
             Some(directory) => finish_directory_with(result, directory, &mut close),
             None => result,
         };
-        finish_historical(
+        finish_owned(
             finish_directory_with(result, self.directory, close),
             control.check(),
         )
@@ -601,9 +601,9 @@ impl<'a> SourceFactsWriter<'a> {
         let state = self.stage.publication();
         let mut result = result;
         for error in measured(SourceCachePublicationPhase::StageClose, &mut observer, || close(self.stage)) {
-            result = finish_historical(result, Err(error.into()));
+            result = finish_owned(result, Err(error.into()));
         }
-        finish_historical(result, control.check()).map_err(|mut error| {
+        finish_owned(result, control.check()).map_err(|mut error| {
             // Failure before a commit attempt leaves no public mutation. Keep
             // the caller's original parser/control error unwrapped in that case.
             if state != StagedPublication::NotPublished {
@@ -704,7 +704,7 @@ mod tests {
     fn publication_profile_failed_acquire_closes_once_without_a_success_close_phase() {
         let f = Fixture::new();
         let control = OperationControl::default();
-        let cancel = control.cancel_handle();
+        let cancel = control.tracked_cancel_handle().unwrap();
         let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
         let key = storage::sha256(b"profile stop after kernel lock");
         let mut phases = Vec::new();
@@ -717,7 +717,7 @@ mod tests {
                 Some(&mut |phase, _| {
                     phases.push(phase);
                     if phase == SourceCachePublicationPhase::LockKernelAttempt {
-                        cancel.store(true, std::sync::atomic::Ordering::Release);
+                        cancel.cancel();
                     }
                 }),
             )
@@ -800,7 +800,7 @@ mod tests {
         cache
             .publish(&storage::sha256(b"close"), b"complete", &control)
             .unwrap();
-        let token = control.cancel_handle();
+        let token = control.tracked_cancel_handle().unwrap();
         let mut closes = 0;
         let result: Result<()> = Err(ToolkitError::new("fixture.primary", "first failure", 5));
         let error = cache
@@ -810,7 +810,7 @@ mod tests {
                 errors.push(std::io::Error::other(format!(
                     "injected-directory-close-{closes}"
                 )));
-                token.store(true, std::sync::atomic::Ordering::Release);
+                token.cancel();
                 Err(errors)
             })
             .unwrap_err();
@@ -895,11 +895,11 @@ mod tests {
         let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
         let key = storage::sha256(b"full body");
         let cancelled = OperationControl::default();
-        let token = cancelled.cancel_handle();
+        let token = cancelled.tracked_cancel_handle().unwrap();
         let error = cache
             .publish_observed(&key, b"full body", &cancelled, |at| {
                 if at == "sealed" {
-                    token.store(true, std::sync::atomic::Ordering::Release);
+                    token.cancel();
                 }
                 Ok(())
             })
@@ -917,11 +917,11 @@ mod tests {
         let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
         let key = storage::sha256(b"key");
         let cancelled = OperationControl::default();
-        let token = cancelled.cancel_handle();
+        let token = cancelled.tracked_cancel_handle().unwrap();
         let error = cache
             .publish_observed(&key, b"complete", &cancelled, |at| {
                 if at == "published" {
-                    token.store(true, std::sync::atomic::Ordering::Release);
+                    token.cancel();
                 }
                 Ok(())
             })
@@ -1081,7 +1081,8 @@ mod atomic_publication_tests;
 #[cfg(test)]
 mod streaming_tests {
     use super::*;
-    use std::sync::{Arc, Barrier, atomic::{AtomicBool, Ordering}};
+    use crate::control::TrackedCancellation;
+    use std::sync::Barrier;
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
@@ -1144,7 +1145,8 @@ mod streaming_tests {
         assert_eq!(writer.abort::<()>(Err(error), &control, None).unwrap_err().code, "codebase.fact_budget");
         assert!(cache.read(&key, &control).unwrap().is_none());
         let mut writer = cache.begin_write(&key, &control, None).unwrap(); writer.write(b"private", &control, None).unwrap();
-        let stopped = OperationControl::new(Instant::now()+Duration::from_secs(60), Arc::new(AtomicBool::new(true)));
+        let cancelled = TrackedCancellation::new(); cancelled.cancel();
+        let stopped = OperationControl::tracked(Instant::now()+Duration::from_secs(60), cancelled);
         let error = writer.write(b"later", &stopped, None).unwrap_err();
         assert_eq!(writer.abort::<()>(Err(error), &stopped, None).unwrap_err().code, "command.cancelled");
         cache.finish(Ok(()), &control).unwrap();
@@ -1152,13 +1154,13 @@ mod streaming_tests {
     }
     #[test]
     fn streamed_late_stop_retains_published_identity_and_checked_close() {
-        let fixture = Fixture::new(); let token = Arc::new(AtomicBool::new(false));
-        let control = OperationControl::new(Instant::now()+Duration::from_secs(60), token.clone());
+        let fixture = Fixture::new(); let token = TrackedCancellation::new();
+        let control = OperationControl::tracked(Instant::now()+Duration::from_secs(60), token.clone());
         let cache = SourceFactsCache::open(&fixture.0, &control).unwrap(); let key = storage::sha256(b"late stop");
         let mut writer = cache.begin_write(&key, &control, None).unwrap(); writer.write(b"committed", &control, None).unwrap();
         let mut closes = 0;
         let error = writer.commit(&control, Some(&mut |phase, _| {
-            if phase == SourceCachePublicationPhase::Rename { token.store(true, Ordering::Release); }
+            if phase == SourceCachePublicationPhase::Rename { token.cancel(); }
             if phase == SourceCachePublicationPhase::StageClose { closes += 1; }
         })).unwrap_err();
         assert_eq!(error.code, "command.cancelled"); assert_eq!(error.details["state"], "Published"); assert_eq!(closes, 1);
@@ -1174,11 +1176,11 @@ mod streaming_tests {
         let key = storage::sha256(b"partial stop"); cache.publish(&key, b"old", &live).unwrap();
         let foreign = fixture.0.join("cache/source-facts-rust").join(format!(".lycheedev-cache-{key}-0"));
         fs::write(&foreign, b"unowned").unwrap();
-        let control = OperationControl::default(); let token = control.cancel_handle();
+        let control = OperationControl::default(); let token = control.tracked_cancel_handle().unwrap();
         let mut writer = cache.begin_write(&key, &control, None).unwrap();
         let mut writes = 0;
         let error = writer.write(&vec![11; 131073], &control, Some(&mut |phase, _| {
-            if phase == SourceCachePublicationPhase::Write { writes += 1; token.store(true, Ordering::Release); }
+            if phase == SourceCachePublicationPhase::Write { writes += 1; token.cancel(); }
         })).unwrap_err();
         assert_eq!(writes, 1); assert_eq!(error.code, "command.cancelled");
         assert_eq!(writer.abort::<()>(Err(error), &control, None).unwrap_err().code, "command.cancelled");
@@ -1191,14 +1193,14 @@ mod streaming_tests {
     fn streamed_abort_keeps_primary_close_and_final_control_errors() {
         let fixture = Fixture::new(); let control = OperationControl::default();
         let cache = SourceFactsCache::open(&fixture.0, &control).unwrap();
-        let key = storage::sha256(b"close causes"); let token = control.cancel_handle();
+        let key = storage::sha256(b"close causes"); let token = control.tracked_cancel_handle().unwrap();
         let mut writer = cache.begin_write(&key, &control, None).unwrap(); writer.write(b"private", &control, None).unwrap();
         let mut closes = 0;
         let error = writer.abort_with::<()>(Err(ToolkitError::new("fixture.primary", "earlier error", 5)), &control, None, |stage| {
             closes += 1;
             let mut errors = stage.close();
             errors.push(std::io::Error::other("fixture.streamed_close"));
-            token.store(true, Ordering::Release); errors
+            token.cancel(); errors
         }).unwrap_err();
         assert_eq!(closes, 1); assert_eq!(error.code, "fixture.primary");
         for cause in ["fixture.primary", "fixture.streamed_close", "command.cancelled"] {

@@ -1,21 +1,22 @@
 //! Fully authenticated CASC bytes or one bounded, stable local input. No decoder
 //! clones the retained body; frame demux borrows slices from this single buffer.
+use crate::request::DataContext;
 use super::{fault, output};
 use crate::{
-    local_query,
     phase_profile::Phase,
+    query_source,
     resource::{Budget, Cost},
 };
 use lycheedev_core::{
-    Invocation, Result, ToolkitError,
+    Result, ToolkitError,
     evidence::{self, CaptureInput},
-    selection, storage,
+    storage,
 };
 use serde_json::{Value, json};
 use std::{fs, io::Read, path::Path, sync::Arc};
 
 pub struct CascInput {
-    pub bytes: local_query::FileBytes,
+    pub bytes: query_source::FileBytes,
     pub reading: Value,
     pub capture: Value,
     pub snapshot: String,
@@ -41,45 +42,47 @@ pub(crate) struct VerifiedView<'a> {
     pub budget: &'a Arc<Budget>,
 }
 pub(crate) fn with_casc_verified<R>(
-    inv: &Invocation,
+    ctx: &DataContext,
     id: u32,
     callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
 ) -> Result<R> {
-    inv.control.check()?;
+    ctx.control.check()?;
     // Deferred Go323 query budget: sampling belongs to actual admission, not
     // this constructor. The Arc/address remains the original query identity.
     let budget = Arc::new(Budget::query_controlled(
-        inv.control.deadline(),
-        inv.control.clone(),
+        ctx.control.deadline(),
+        ctx.control.clone(),
     ));
-    with_casc_verified_budgeted(inv, id, &budget, callback)
+    with_casc_verified_budgeted(ctx, id, &budget, callback)
 }
 // Explicit budgets let focused regressions observe the actual consumer without
 // process-global environment mutation or replacing any source/capture operation.
 pub(super) fn with_casc_verified_budgeted<R>(
-    inv: &Invocation,
+    ctx: &DataContext,
     id: u32,
     budget: &Arc<Budget>,
     callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
 ) -> Result<R> {
-    with_casc_verified_budgeted_finish(inv, id, budget, callback, |scope, result| scope.finish(result))
+    with_casc_verified_budgeted_finish(ctx, id, budget, callback, |scope, result| {
+        scope.finish(result)
+    })
 }
 // Observe only after the real SQLite close. Tests can add a late diagnostic,
 // never replace the real close result or skip any production cleanup.
 #[cfg(test)]
 pub(super) fn with_casc_verified_budgeted_after_metadata_close<R>(
-    inv: &Invocation,
+    ctx: &DataContext,
     id: u32,
     budget: &Arc<Budget>,
     callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
     after_close: &mut dyn FnMut() -> Result<()>,
 ) -> Result<R> {
-    with_casc_verified_budgeted_finish(inv, id, budget, callback, |scope, result| {
+    with_casc_verified_budgeted_finish(ctx, id, budget, callback, |scope, result| {
         scope.finish_after_metadata_close(result, after_close)
     })
 }
 fn with_casc_verified_budgeted_finish<'a, R>(
-    inv: &'a Invocation,
+    ctx: &'a DataContext,
     id: u32,
     budget: &'a Arc<Budget>,
     callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
@@ -87,7 +90,7 @@ fn with_casc_verified_budgeted_finish<'a, R>(
 ) -> Result<R> {
     let (mut scope, pin) = {
         let _phase = budget.phase(Phase::Admission);
-        let opened = crate::remote::provider::OpenedScope::open(inv, budget)?;
+        let opened = crate::remote::provider::OpenedScope::open(ctx, budget)?;
         opened.admit_asset()?
     };
     let data = pin.data.as_ref().expect("asset pin admitted");
@@ -112,7 +115,7 @@ fn with_casc_verified_budgeted_finish<'a, R>(
                     complete: true,
                     truncated: false,
                 },
-                &inv.control,
+                &ctx.control,
                 &budget.safety_only(),
             )?;
             drop(capture_phase);
@@ -127,10 +130,10 @@ fn with_casc_verified_budgeted_finish<'a, R>(
             })
         };
         (|| {
-            if inv.flag_bool("--cdn") {
+            if ctx.source.cdn {
                 scope.with_verified_file(data, id, &mut consume)
             } else {
-                let mut reader = local_query::sql_reader::Reader::new(inv, data, budget)?;
+                let mut reader = query_source::reader::Reader::new(ctx, data, budget)?;
                 let result = (|| {
                     let mut file = reader.read_verified(id)?;
                     let result = (|| {
@@ -148,25 +151,25 @@ fn with_casc_verified_budgeted_finish<'a, R>(
     finish(scope, result)
 }
 pub(crate) fn with_casc_bytes<R>(
-    inv: &Invocation,
+    ctx: &DataContext,
     id: u32,
     maximum: usize,
     callback: &mut dyn FnMut(CascInput, &Arc<Budget>) -> Result<R>,
 ) -> Result<R> {
-    inv.control.check()?;
+    ctx.control.check()?;
     let budget = Arc::new(Budget::query_controlled(
-        inv.control.deadline(),
-        inv.control.clone(),
+        ctx.control.deadline(),
+        ctx.control.clone(),
     ));
     let (mut scope, pin) =
-        crate::remote::provider::OpenedScope::open(inv, &budget)?.admit_asset()?;
+        crate::remote::provider::OpenedScope::open(ctx, &budget)?.admit_asset()?;
     let data = pin.data.as_ref().expect("asset pin admitted");
-    let mut consume = |file: local_query::File| {
+    let mut consume = |file: query_source::File| {
         if file.bytes.len() > maximum {
             return Err(fault("records.demux_input_limit", 3));
         }
         let capture = evidence::commit_capture_budgeted(
-            &inv.home,
+            &ctx.home,
             CaptureInput {
                 bytes: &file.bytes,
                 maximum_bytes: maximum,
@@ -175,7 +178,7 @@ pub(crate) fn with_casc_bytes<R>(
                 complete: true,
                 truncated: false,
             },
-            &inv.control,
+            &ctx.control,
             &budget.safety_only(),
         )?;
         callback(
@@ -190,7 +193,7 @@ pub(crate) fn with_casc_bytes<R>(
         )
     };
     let result = (|| {
-        if inv.flag_bool("--cdn") {
+        if ctx.source.cdn {
             let mut result = None;
             let read = scope.read_batches(data, &[id], &mut |mut files| {
                 let file = files.pop().ok_or_else(|| fault("records.internal", 8))?;
@@ -199,7 +202,7 @@ pub(crate) fn with_casc_bytes<R>(
             });
             read.and_then(|()| result.ok_or_else(|| fault("records.internal", 8)))
         } else {
-            let mut reader = local_query::sql_reader::Reader::new(inv, data, &budget)?;
+            let mut reader = query_source::reader::Reader::new(ctx, data, &budget)?;
             let result = (|| {
                 let file = reader.read(id)?;
                 reader.verify_source()?;
@@ -211,22 +214,18 @@ pub(crate) fn with_casc_bytes<R>(
     scope.finish(result)
 }
 
-pub fn capture_casc_verified(inv: &Invocation) -> Result<VerifiedCascInput> {
-    inv.control.check()?;
-    let pin = selection::resolve_pinned(inv)?;
+pub fn capture_casc_verified(ctx: &DataContext, id: u32) -> Result<VerifiedCascInput> {
+    ctx.control.check()?;
+    let pin = ctx.resolve_pinned()?;
     let data = pin.data.as_ref().ok_or_else(|| {
         ToolkitError::new("records.data_pin_required", "records.data_pin_required", 2)
     })?;
-    let id = inv
-        .required("--file-id")?
-        .parse::<u32>()
-        .map_err(|_| ToolkitError::arguments("invalid --file-id"))?;
     let budget = Arc::new(Budget::controlled(
         Cost::defaults(),
-        inv.control.deadline(),
-        inv.control.clone(),
+        ctx.control.deadline(),
+        ctx.control.clone(),
     ));
-    let file = local_query::read_verified_file_budgeted(inv, data, id, &budget)?;
+    let file = query_source::read_verified_file_budgeted(ctx, data, id, &budget)?;
     let capture = evidence::commit_verified_capture_budgeted(
         &file.blob,
         evidence::CaptureHeader {
@@ -235,7 +234,7 @@ pub fn capture_casc_verified(inv: &Invocation) -> Result<VerifiedCascInput> {
             complete: true,
             truncated: false,
         },
-        &inv.control,
+        &ctx.control,
         budget.as_ref(),
     )?;
     Ok(VerifiedCascInput {
@@ -247,31 +246,24 @@ pub fn capture_casc_verified(inv: &Invocation) -> Result<VerifiedCascInput> {
         budget,
     })
 }
-pub fn capture_casc(inv: &Invocation, maximum: usize) -> Result<CascInput> {
-    inv.control.check()?;
-    let pin = selection::resolve_pinned(inv)?;
+pub fn capture_casc(ctx: &DataContext, id: u32, maximum: usize) -> Result<CascInput> {
+    ctx.control.check()?;
+    let pin = ctx.resolve_pinned()?;
     let data = pin.data.as_ref().ok_or_else(|| {
         ToolkitError::new("records.data_pin_required", "records.data_pin_required", 2)
     })?;
-    let id = inv
-        .required("--file-id")?
-        .parse::<u32>()
-        .map_err(|_| ToolkitError::arguments("invalid --file-id"))?;
-    if id == 0 {
-        return Err(ToolkitError::arguments("invalid --file-id"));
-    }
     let budget = Arc::new(Budget::controlled(
         Cost::defaults(),
-        inv.control.deadline(),
-        inv.control.clone(),
+        ctx.control.deadline(),
+        ctx.control.clone(),
     ));
-    let file = local_query::read_files_budgeted(inv, data, &[id], &budget)?.remove(0);
+    let file = query_source::read_files_budgeted(ctx, data, &[id], &budget)?.remove(0);
     if file.bytes.len() > maximum {
         return Err(fault("records.metadata_limit", 3));
     }
     budget.check()?;
     let capture = evidence::commit_capture_budgeted(
-        &inv.home,
+        &ctx.home,
         CaptureInput {
             bytes: &file.bytes,
             maximum_bytes: maximum,
@@ -280,7 +272,7 @@ pub fn capture_casc(inv: &Invocation, maximum: usize) -> Result<CascInput> {
             complete: true,
             truncated: false,
         },
-        &inv.control,
+        &ctx.control,
         budget.as_ref(),
     )?;
     Ok(CascInput {
@@ -291,8 +283,8 @@ pub fn capture_casc(inv: &Invocation, maximum: usize) -> Result<CascInput> {
         data_build: data.full_build.clone(),
     })
 }
-pub fn local(inv: &Invocation, path: &Path, maximum: usize) -> Result<(Vec<u8>, String)> {
-    inv.control.check()?;
+pub fn local(ctx: &DataContext, path: &Path, maximum: usize) -> Result<(Vec<u8>, String)> {
+    ctx.control.check()?;
     let canonical = output::ordinary(&fs::canonicalize(path)?);
     let parent = canonical
         .parent()
@@ -307,7 +299,7 @@ pub fn local(inv: &Invocation, path: &Path, maximum: usize) -> Result<(Vec<u8>, 
             self.0.check()
         }
     }
-    let mut check = Check(&inv.control);
+    let mut check = Check(&ctx.control);
     let directory = storage::Directory::open_controlled(parent, &mut check)?;
     let result = (|| {
         let name = canonical
@@ -332,11 +324,11 @@ pub fn local(inv: &Invocation, path: &Path, maximum: usize) -> Result<(Vec<u8>, 
                 .map_err(|_| fault("records.demux_input_limit", 3))?;
             let mut buffer = [0u8; 65536];
             loop {
-                inv.control.check()?;
+                ctx.control.check()?;
                 let remaining = maximum.saturating_sub(bytes.len()).saturating_add(1);
                 let requested = remaining.min(buffer.len());
                 let n = file.read(&mut buffer[..requested])?;
-                inv.control.check()?;
+                ctx.control.check()?;
                 if n == 0 {
                     break;
                 }
@@ -350,7 +342,7 @@ pub fn local(inv: &Invocation, path: &Path, maximum: usize) -> Result<(Vec<u8>, 
             }
             Ok((bytes, canonical.to_string_lossy().into_owned()))
         })();
-        storage::finish_file(file, read, &inv.control)
+        storage::finish_file(file, read, &ctx.control)
     })();
-    output::finish_closes(result, directory.close(), &inv.control)
+    output::finish_closes(result, directory.close(), &ctx.control)
 }

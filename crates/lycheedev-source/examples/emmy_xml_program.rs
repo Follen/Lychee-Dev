@@ -12,11 +12,11 @@ use sha2::{Digest, Sha256};
 const COMMIT: &str = "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b";
 const ENGINE: &str = "08b0873962e83bb8307e9a81052e3f41578fbc78";
 const XML_RULE_REVISION: &str = "xml-map-v8";
-const XSD: &[u8] = include_bytes!("../../../tests/rust-source-engine/xml-retail-UI.xsd");
-const COMPANION: &str = include_str!("../../../tests/rust-source-engine/xml-companion-manifest.json");
-const GOLDEN: &[u8] = include_bytes!("../../../tests/rust-source-engine/xml-golden-204.xml");
-const ORDERED: &[u8] = include_bytes!("../../../tests/rust-source-engine/xml-ordered.xml");
-const SPLIT: &[u8] = include_bytes!("../../../tests/rust-source-engine/xml-split.xml");
+const XSD: &[u8] = include_bytes!("../../../tests/fixtures/source-native/xml-retail-UI.xsd");
+const COMPANION: &str = include_str!("../../../tests/fixtures/source-native/xml-companion-manifest.json");
+const GOLDEN: &[u8] = include_bytes!("../../../tests/fixtures/source-native/xml-golden-204.xml");
+const ORDERED: &[u8] = include_bytes!("../../../tests/fixtures/source-native/xml-ordered.xml");
+const SPLIT: &[u8] = include_bytes!("../../../tests/fixtures/source-native/xml-split.xml");
 const MAX_FILE: usize = 8 << 20;
 const MAX_OUTPUT: usize = 8 << 20;
 const SOURCE_DIGEST: &str = "88d68f2c4bdb352245cbcb53cd41ec906b294e2ea599ee6374e00be169be7928";
@@ -77,17 +77,17 @@ fn golden() -> Result<Value> {
     require("entity_and_cdata_identifiers_covering",json!(["covering","covering"]),json!(split_run.iter().map(|n|n["sourceMap"]["accuracy"].clone()).collect::<Vec<_>>()),&mut checks);
     require("split_identifiers_keep_multiple_segments",json!(true),json!(split_run.iter().all(|n|n["sourceMap"]["segments"].as_array().is_some_and(|s|s.len()>1))),&mut checks);
     for (name,raw) in [
-        ("invalid_entity",include_bytes!("../../../tests/rust-source-engine/xml-invalid-entity.xml").as_slice()),
-        ("invalid_structure",include_bytes!("../../../tests/rust-source-engine/xml-invalid-structure.xml").as_slice()),
-        ("invalid_dtd",include_bytes!("../../../tests/rust-source-engine/xml-invalid-dtd.xml").as_slice()),
+        ("invalid_entity",include_bytes!("../../../tests/fixtures/source-native/xml-invalid-entity.xml").as_slice()),
+        ("invalid_structure",include_bytes!("../../../tests/fixtures/source-native/xml-invalid-structure.xml").as_slice()),
+        ("invalid_dtd",include_bytes!("../../../tests/fixtures/source-native/xml-invalid-dtd.xml").as_slice()),
     ] { require(name,json!(true),json!(extract(name,raw).is_err()),&mut checks); }
-    let bad = extract("xml-invalid-lua.xml",include_bytes!("../../../tests/rust-source-engine/xml-invalid-lua.xml"))?;
+    let bad = extract("xml-invalid-lua.xml",include_bytes!("../../../tests/fixtures/source-native/xml-invalid-lua.xml"))?;
     require("invalid_lua_no_syntax_facts",json!({"state":"invalid","names":0,"calls":0}),json!({
         "state":bad.scripts[0].syntax["state"],"names":bad.scripts[0].syntax["names"].as_array().map(Vec::len),
         "calls":bad.scripts[0].syntax["calls"].as_array().map(Vec::len)}),&mut checks);
     require("luac_input_count",json!(2),json!(golden.compiler_inputs().len()),&mut checks);
     require("luac_column_remains_unknown",json!(false),golden.scripts[0].compiler_line(2)?["columnKnown"].clone(),&mut checks);
-    let newlines=extract("xml-newline-contract.xml",include_bytes!("../../../tests/rust-source-engine/xml-newline-contract.xml"))?;
+    let newlines=extract("xml-newline-contract.xml",include_bytes!("../../../tests/fixtures/source-native/xml-newline-contract.xml"))?;
     for (index,(label,newline,line,span)) in [
         ("bare_cr","\r",2,Span::new(28,37)),
         ("bare_lf","\n",2,Span::new(70,79)),
@@ -104,9 +104,9 @@ fn golden() -> Result<Value> {
                 "columnKnown":mapping["columnKnown"],"nextLineOutside":script.compiler_line(line+1).is_err()}),&mut checks);
     }
     for (name,raw,line,span,input) in [
-        ("top",include_bytes!("../../../tests/rust-source-engine/xml-entity-cr-top.xml").as_slice(),2,Span::new(28,37),
+        ("top",include_bytes!("../../../tests/fixtures/source-native/xml-entity-cr-top.xml").as_slice(),2,Span::new(28,37),
             "local x = 1\rlocal = 2"),
-        ("handler",include_bytes!("../../../tests/rust-source-engine/xml-entity-cr-handler.xml").as_slice(),3,Span::new(44,53),
+        ("handler",include_bytes!("../../../tests/fixtures/source-native/xml-entity-cr-handler.xml").as_slice(),3,Span::new(44,53),
             "return function(...)\nlocal x = 1\rlocal = 2\nend\n"),
     ] {
         let source=extract(name,raw)?;
@@ -116,8 +116,8 @@ fn golden() -> Result<Value> {
             json!({"input":script.compiler.text,"rawCovering":mapping["sourceMap"]["covering"],
                 "columnKnown":mapping["columnKnown"]}),&mut checks);
     }
-    let empty_control=include_bytes!("../../../tests/rust-source-engine/xml-empty-control.xml").as_slice();
-    let empty_bom=include_bytes!("../../../tests/rust-source-engine/xml-empty-bom.xml").as_slice();
+    let empty_control=include_bytes!("../../../tests/fixtures/source-native/xml-empty-control.xml").as_slice();
+    let empty_bom=include_bytes!("../../../tests/fixtures/source-native/xml-empty-bom.xml").as_slice();
     require("bom_empty_fixture_exact_prefix",json!(true),json!(empty_bom.starts_with(b"\xef\xbb\xbf")
         && empty_bom.get(3..)==Some(empty_control)),&mut checks);
     for (label,raw,prefix) in [("control",empty_control,0usize),("bom",empty_bom,3usize)] {
@@ -145,7 +145,7 @@ fn golden() -> Result<Value> {
             "wrapperStart":script.compiler.segments.first().and_then(|s|s.anchor),
             "wrapperEnd":script.compiler.segments.last().and_then(|s|s.anchor)}),&mut checks);
     }
-    let catalog_fixture=extract("xml-handler-catalog.xml",include_bytes!("../../../tests/rust-source-engine/xml-handler-catalog.xml"))?;
+    let catalog_fixture=extract("xml-handler-catalog.xml",include_bytes!("../../../tests/fixtures/source-native/xml-handler-catalog.xml"))?;
     let class_counts:BTreeMap<_,_>=catalog_fixture.coverage["handlerCatalogDeclarations"].as_object().ok_or("missing handler catalog")?
         .iter().map(|(name,handlers)|(name,handlers.as_object().map_or(0,serde_json::Map::len))).collect();
     require("catalog_four_schema_classes",json!({"ScriptsType":75,"ActorScriptsType":6,"AnimScriptsType":6,"AnimGroupScriptsType":7}),
@@ -206,7 +206,7 @@ fn golden() -> Result<Value> {
     ] {
         require(&format!("xml10_actual_negative_{name}"),json!(true),json!(extract(name,input.as_bytes()).is_err()),&mut checks);
     }
-    let lexical=extract("xml-lexical-valid.xml",include_bytes!("../../../tests/rust-source-engine/xml-lexical-valid.xml"))?;
+    let lexical=extract("xml-lexical-valid.xml",include_bytes!("../../../tests/fixtures/source-native/xml-lexical-valid.xml"))?;
     require("xml10_legal_cdata_comments_escaped_close_and_spaces",json!({"scripts":1,
         "text":r#"local a = 1 < 2; local s = "]]>";local t = "]]>";"#,"parsed":true}),
         json!({"scripts":lexical.scripts.len(),"text":lexical.scripts[0].compiler.text,
@@ -237,7 +237,7 @@ fn golden() -> Result<Value> {
         json!(extract("leading-bom-whitespace",b"\xef\xbb\xbf \t\r\n<Ui/> \t\r\n").is_ok()),&mut checks);
     require("xml10_misplaced_declaration_rejected",json!(true),
         json!(extract("misplaced-declaration",b" <?xml version=\"1.0\"?><Ui/>").is_err()),&mut checks);
-    let binding_raw=include_bytes!("../../../tests/rust-source-engine/xml-bindings-394.xml");
+    let binding_raw=include_bytes!("../../../tests/fixtures/source-native/xml-bindings-394.xml");
     let bindings=extract("xml-bindings-394.xml",binding_raw)?;
     require("bindings_exact_fixture",json!({"bytes":394,"sha256":"aca963840dc4e0201609be4443c35f4985199d72556500c95e6957db18c16e96"}),
         json!({"bytes":binding_raw.len(),"sha256":hash(binding_raw)}),&mut checks);
@@ -314,7 +314,7 @@ fn golden() -> Result<Value> {
         "text":root_text.occurrences[1].source_text,"span":root_text.occurrences[1].raw,"scripts":root_text.scripts.len(),
         "extractionComplete":root_text.coverage["extractionComplete"],"profileValidationPassed":root_text.coverage["profileValidationPassed"],
         "diagnostics":root_text.diagnostics}),&mut checks);
-    let root_text_raw=include_bytes!("../../../tests/rust-source-engine/xml-bindings-root-text.xml");
+    let root_text_raw=include_bytes!("../../../tests/fixtures/source-native/xml-bindings-root-text.xml");
     let root_text=extract("xml-bindings-root-text.xml",root_text_raw)?;
     require("bindings_root_text_fixture_exact_bytes",json!({"bytes":90,"sha256":"a565f2446b7a976fd8f42b6acdc6e56808c7b2dc4d80a6d8a74f10a68e0cee5d"}),
         json!({"bytes":root_text_raw.len(),"sha256":hash(root_text_raw)}),&mut checks);
@@ -372,7 +372,7 @@ fn golden() -> Result<Value> {
         json!(attribute_separators.iter().map(|separator|extract("legal-attribute-separator",
             format!("<Ui a='甲'{separator}b = \"乙\"/>").as_bytes())
             .is_ok_and(|program|program.occurrences[0].attributes["b"].value=="乙")).collect::<Vec<_>>()),&mut checks);
-    let declaration_raw=include_bytes!("../../../tests/rust-source-engine/xml-declaration-valid.xml");
+    let declaration_raw=include_bytes!("../../../tests/fixtures/source-native/xml-declaration-valid.xml");
     let declaration=extract("xml-declaration-valid.xml",declaration_raw)?;
     require("xml10_legal_declaration_unicode_attribute_fixture",json!({"bytes":156,
         "sha256":"59b1714957341a5da89ffb260556b08cb758036bfe6f1247d8dd2d6a66a29144",

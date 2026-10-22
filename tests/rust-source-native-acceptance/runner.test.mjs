@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {ownedUserEnvironment} from '../../tools/rust-build.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertExecutionAccounting, assertFullNative, assertNestedControllerRetired, extractXmlMaps, mappingDigest, rebuildXmlInventory, semanticOperationDigest, semanticPlanDigest, assertMaterial, assertPrerequisite, assertReuse, fixturePin, groupBudget} from './assertions.mjs';
 import {corpusDigest, sha256} from '../rust-source-full-corpus/assertions.mjs';
+import {GO_CONTRACT, GO_VERSION, NATIVE_CALLSITE} from './runner-inputs.mjs';
 const commit = 'a'.repeat(40), callsite = {source: 'Caller', referenceExpression: 'Helper', caller: {kind: 'named', name: 'Caller', line: 1}, path: 'a.lua', line: 2, kind: 'call', target: 'Helper', site: {file: 'a.lua', start: 20, end: 26}};
 const source = {'a.lua': 'function Caller()\n   Helper()\nend\n', 'Interface/AddOns/Blizzard_APIDocumentationGenerated/API.lua': 'local API = {}\n', 'Main.toc': 'a.lua\nui.xml\n', 'ui.xml': '<Ui><Frame><Scripts><OnLoad>print(1)</OnLoad></Scripts></Frame></Ui>\n'};
 const files = Object.entries(source).map(([path, text]) => ({path, bytes: Buffer.byteLength(text), sha256: sha256(Buffer.from(text))}));
@@ -29,7 +30,7 @@ function sample(mode = 'session') {
 }
 function material() { return {schema: 'lycheedev.source-research-material.v3', snapshot: {source: {exactCommit: commit, repository: oracle.repository, product: oracle.product}, files: Object.fromEntries(Object.entries(source).filter(([path]) => path.endsWith('.lua'))), load_documents: {'Main.toc': source['Main.toc'], 'ui.xml': source['ui.xml']}, environment_documents: {[files[1].path]: source[files[1].path]}, environment_manifest: {documents: 1}}}; }
 test('groups are bounded and never accept unknown or combined work', () => {
-  assert.equal(groupBudget('full'), 1200000); assert.equal(groupBudget('idle'), 150000); assert.equal(groupBudget('lifetime'), 720000); assert.throws(() => groupBudget('all')); assert.throws(() => groupBudget('__proto__'));
+  assert.equal(groupBudget('full'), 900000); assert.equal(groupBudget('idle'), 150000); assert.equal(groupBudget('lifetime'), 720000); assert.throws(() => groupBudget('all')); assert.throws(() => groupBudget('__proto__'));
 });
 test('real native evidence preserves partial semantics and actual execution counts', () => {
   assertFullNative(sample(), oracle, manifest, callsite, {mode: 'session'});
@@ -104,12 +105,13 @@ test('controller admits the real owner user directories and rejects business or 
   }
 });
 
-test('current performance label takes the current workflow commit without claiming a Go measurement', () => {
+test('current performance label takes the fixed external Go identity without claiming a Go measurement', () => {
   const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
-  const workflow = JSON.parse(readFileSync(new URL('../rust-skill-usage/workflow-go324.json', import.meta.url)));
-  assert.equal(workflow.goContract, '29bdbdaff5f064ec212ff2064380b1ccac652eda');
-  assert(source.includes('goOracle: workflow.goContract'));
+  assert.equal(GO_CONTRACT, '29bdbdaff5f064ec212ff2064380b1ccac652eda');
+  assert.equal(GO_VERSION, '3.2.4');
+  assert(source.includes('goOracle: GO_CONTRACT'));
   assert(source.includes("goDifferential: 'not_run'"));
+  assert(!source.includes('rust-skill' + '-usage'));
 });
 
 function apiType() {
@@ -271,17 +273,20 @@ test('semantic hashes reconstruct declared Rust struct order and sorted nested V
   assert.notEqual(semanticPlanDigest(plan), sha256(Buffer.from(JSON.stringify(plan))));
 });
 
-test('native wrapper and controller authenticate the current workflow with all increment inputs', () => {
+test('native wrapper and controller use the self-contained current runner inputs', () => {
   const outer = readFileSync(new URL('../../tools/rust-source-native-acceptance.mjs', import.meta.url), 'utf8');
   const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
   for (const source of [outer, inner]) {
-    assert(source.includes('const workflow = loadCurrentWorkflow(runnerRoot);'));
-    assert(!source.includes("jsonFile(new URL('../rust-skill-usage/workflow.json'"));
-    assert(!source.includes("jsonFile(join(root, 'tests/rust-skill-usage/workflow.json'"));
-    assert(source.includes('goContract: workflow.goContract'));
+    assert(!source.includes('rust-skill' + '-usage'), 'retired migration workflow input must not remain');
+    assert(!source.includes('loadCurrent' + 'Workflow'));
+    assert(source.includes('GO_CONTRACT'));
   }
-  assert(outer.includes('...currentWorkflowInputs(workflow)'));
-  assert(outer.includes('verifyCandidate(root, candidatePath, artifact, workflow)'));
+  assert(inner.includes('goContract: GO_CONTRACT'));
+  assert(inner.includes('NATIVE_CALLSITE'));
+  assert.equal(NATIVE_CALLSITE.target, 'GetActionButtonForID');
+  assert.equal(NATIVE_CALLSITE.site.file, NATIVE_CALLSITE.path);
+  assert(outer.includes('verifyCandidate(root, candidatePath, artifact)'));
+  assert(outer.includes("...readdirSync(join(runnerRoot, 'tests/rust-source-native-acceptance'))"));
 });
 test('separate native runner keeps product identity and hashes every executing workflow input', () => {
   const outer = readFileSync(new URL('../../tools/rust-source-native-acceptance.mjs', import.meta.url), 'utf8');

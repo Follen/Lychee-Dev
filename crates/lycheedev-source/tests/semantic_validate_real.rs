@@ -1,7 +1,8 @@
-use lycheedev_core::{Invocation, evidence, selection};
+use lycheedev_source::request::{AddonValidationRequest, SelectedSource, SourceContext, SourceRequest};
+use lycheedev_core::{request::RequestContext, evidence, selection};
 use lycheedev_source::{SourceTools, luac};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 #[test]
 #[ignore = "explicit fixed ClientPin, bundled luac and native descriptor checker"]
 fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
@@ -33,25 +34,24 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
         serde_json::from_value(manifest["runtime"].clone()).unwrap(),
     )
     .unwrap();
-    let inv = Invocation {
-        command: "source validate".into(),
-        positional: None,
+    let ctx = SourceContext {
         home: home.clone(),
         cwd: addon.clone(),
-        flags: BTreeMap::from([
-            ("--path".into(), addon.to_string_lossy().into()),
-            ("--toc".into(), "Main.toc".into()),
-            ("--snapshot".into(), pin_id),
-            ("--semantic".into(), "true".into()),
-        ]),
         control: Default::default(),
     };
+    let request = SourceRequest::Validate(AddonValidationRequest {
+        selection: SelectedSource::new(pin.clone()).unwrap(),
+        root: addon.clone(),
+        toc: "Main.toc".into(),
+        semantic: true,
+        environment: None,
+        locator: format!("{}/Main.toc", addon.display()),
+    });
     let tools = || SourceTools {
         luac: Some(&compiler),
-        luals: None,
     };
     fs::write(addon.join("界 面.xml"),"<Ui>\n<Frame><Scripts><OnLoad>\nlocal value = UnitHealth(\"player\", true)\nself.value = value\n</OnLoad></Scripts></Frame></Ui>\n").unwrap();
-    let good = lycheedev_source::dispatch_with_tools(&inv, tools()).unwrap();
+    let good = lycheedev_source::dispatch_with_tools(&ctx, &request, tools()).unwrap();
     assert_eq!(good.data["staticValid"], true, "{}",semantic_summary(&good.data["semantic"]));
     assert_eq!(good.data["syntaxCompilation"]["passed"], true);
     assert_eq!(good.data["semantic"]["passed"], true);
@@ -71,21 +71,16 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
         .values()
     {
         assert_eq!(
-            evidence::dispatch(&Invocation {
-                command: "evidence verify".into(),
-                positional: Some(capture["id"].as_str().unwrap().into()),
-                flags: BTreeMap::new(),
-                home: home.clone(),
-                cwd: addon.clone(),
-                control: inv.control.clone()
-            })
+            evidence::dispatch(&RequestContext {
+            home: home.clone(), cwd: addon.clone(), control: ctx.control.clone(),
+        }, evidence::EvidenceRequest::Verify { id: capture["id"].as_str().unwrap().into() })
             .unwrap()
             .data["verified"],
             true
         );
     }
     fs::write(addon.join("界 面.xml"),"<Ui>\n<Frame><Scripts><OnLoad>\nlocal value = UnitHealth(\"player\", {})\nself.value = value\n</OnLoad></Scripts></Frame></Ui>\n").unwrap();
-    let bad = lycheedev_source::dispatch_with_tools(&inv, tools()).unwrap_err();
+    let bad = lycheedev_source::dispatch_with_tools(&ctx, &request, tools()).unwrap_err();
     assert_eq!(bad.exit_code, 4);
     assert_eq!(bad.details["result"]["syntaxCompilation"]["passed"], true);
     let diag = bad.details["result"]["semantic"]["diagnostics"]
@@ -102,7 +97,7 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
     assert_eq!(diag["sourceMap"]["accuracy"],"exact");
     let mapped_xml="\u{feff}<Ui>\r\n<Frame><Scripts><OnLoad>local marker = &quot;🙂&quot;; local value = UnitHe&#97;lth(&quot;player&quot;, &#123;&#125;)\r\nself.value = value\r\n</OnLoad></Scripts></Frame></Ui>";
     fs::write(addon.join("界 面.xml"),mapped_xml).unwrap();
-    let mapped_error=lycheedev_source::dispatch_with_tools(&inv,tools()).unwrap_err();
+    let mapped_error=lycheedev_source::dispatch_with_tools(&ctx, &request,tools()).unwrap_err();
     assert_eq!(mapped_error.exit_code,4);
     let mapped_diag=mapped_error.details["result"]["semantic"]["diagnostics"].as_array().unwrap().iter().find(|row|row["code"]=="param-type-mismatch").unwrap();
     let raw_start=mapped_xml.find("&#123;&#125;").unwrap();
@@ -119,7 +114,7 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
     assert!(maps["inputs"][0]["segments"][0]["raw"].is_null());
     fs::write(addon.join("Main.toc"),format!("## Interface: {}\nmain.lua\n",selection::source_interface(pin.source.as_ref().unwrap()).unwrap())).unwrap();
     fs::write(addon.join("main.lua"),"---@return string\nlocal function WrongReturn()\n return UnitHealth(\"player\", true)\nend\n").unwrap();
-    let wrong_return=lycheedev_source::dispatch_with_tools(&inv,tools()).unwrap_err();
+    let wrong_return=lycheedev_source::dispatch_with_tools(&ctx, &request,tools()).unwrap_err();
     assert_eq!(wrong_return.exit_code,4);
     assert!(wrong_return.details["result"]["semantic"]["diagnostics"].as_array().unwrap().iter().any(|row|
         row["code"]=="return-type-mismatch"&&row["path"]=="main.lua"),"{}",semantic_summary(&wrong_return.details["result"]["semantic"]));
@@ -129,16 +124,26 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
         fs::write(addon.join(format!("{name}.lua")),format!("local health = UnitHealth(\"player\", {argument})\n")).unwrap();
     }
     let matrix_path=addon.join("matrix.json");
-    // Go matrix capture completion is static compatibility completeness. The
+    // External fixed reference matrix capture completion is static compatibility completeness. The
     // approved native checker keeps its partial evidence independently: the
     // unknown UnitHealth unit argument does not become a complete type check.
     fs::write(&matrix_path,serde_json::to_vec(&json!({"targets":[
         {"id":"good","toc":"Good.toc","source":source.repository,"product":source.product,"ref":source.exact_commit}
     ]})).unwrap()).unwrap();
-    let matrix_inv=Invocation{command:"source validate".into(),positional:None,home:home.clone(),cwd:addon.clone(),flags:BTreeMap::from([
-        ("--matrix".into(),matrix_path.to_string_lossy().into_owned()),("--semantic".into(),"true".into())
-    ]),control:Default::default()};
-    let partial_semantic_matrix=lycheedev_source::dispatch_with_tools(&matrix_inv,tools()).unwrap();
+    let matrix_ctx = SourceContext {
+        home: home.clone(),
+        cwd: addon.clone(),
+        control: Default::default(),
+    };
+    let (configuration, matrix_root) = lycheedev_source::matrix::read_config(&matrix_path, &matrix_ctx.control).unwrap();
+    let admitted_matrix = lycheedev_source::request::MatrixValidationRequest {
+        configuration: matrix_path.clone(),
+        root: matrix_root,
+        targets: configuration.targets,
+        semantic: true,
+    };
+    let matrix_request = SourceRequest::Matrix(admitted_matrix);
+    let partial_semantic_matrix=lycheedev_source::dispatch_with_tools(&matrix_ctx, &matrix_request,tools()).unwrap();
     let partial_target=&partial_semantic_matrix.data["targets"][0];
     assert_eq!(partial_target["semantic"]["passed"],true);
     assert_eq!(partial_target["semantic"]["complete"],false);
@@ -152,7 +157,15 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
         {"id":"good","toc":"Good.toc","source":source.repository,"product":source.product,"ref":source.exact_commit},
         {"id":"bad","toc":"Bad.toc","source":source.repository,"product":source.product,"ref":source.exact_commit}
     ]})).unwrap()).unwrap();
-    let matrix=lycheedev_source::dispatch_with_tools(&matrix_inv,tools()).unwrap_err();
+    let (configuration, matrix_root) = lycheedev_source::matrix::read_config(&matrix_path, &matrix_ctx.control).unwrap();
+    let admitted_matrix = lycheedev_source::request::MatrixValidationRequest {
+        configuration: matrix_path.clone(),
+        root: matrix_root,
+        targets: configuration.targets,
+        semantic: true,
+    };
+    let matrix_request = SourceRequest::Matrix(admitted_matrix);
+    let matrix=lycheedev_source::dispatch_with_tools(&matrix_ctx, &matrix_request,tools()).unwrap_err();
     assert_eq!(matrix.exit_code,4);
     let targets=matrix.details["result"]["targets"].as_array().unwrap();
     assert_eq!(targets.len(),2);

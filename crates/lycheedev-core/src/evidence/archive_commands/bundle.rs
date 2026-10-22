@@ -74,8 +74,8 @@ impl Seek for Output<'_, '_> {
 struct Manifest {
     schema: &'static str,
     output: String,
-    captures: Vec<GoCaptureDecode>,
-    bytes: i64,
+    captures: Vec<CaptureRef>,
+    bytes: u64,
     complete: bool,
 }
 fn write_entry<W: Write + Seek>(
@@ -100,13 +100,13 @@ fn write_entry<W: Write + Seek>(
 }
 fn build(
     stage: &mut StagedFile<'_>,
-    inv: &Invocation,
-    ids: &[&str],
+    context: &crate::request::RequestContext,
+    ids: &[String],
     output: String,
 ) -> Result<Value> {
     let mut adapter = Output {
         stage,
-        control: &inv.control,
+        control: &context.control,
         failed: None,
     };
     let mut zip = zip::ZipWriter::new(&mut adapter);
@@ -118,56 +118,54 @@ fn build(
         complete: true,
     };
     let result: Result<()> = (|| {
-        let metadata = read_commands::read_metadata(&inv.home, &inv.control)?;
+        let metadata = read_commands::read_metadata(&context.home, &context.control)?;
         let captures = (|| {
             let mut used = BTreeSet::new();
             for id in ids {
-                inv.control.check()?;
-                let capture = read_commands::inspect(&metadata, id, &inv.control)?;
+                context.control.check()?;
+                let capture = read_commands::inspect(&metadata, id, &context.control)?;
                 let reference = serde_json::to_value(&capture)?;
-                let digest = reference["blob"]["sha256"].as_str().unwrap_or("");
-                let signed = reference["blob"]["bytes"]
-                    .as_i64()
-                    .ok_or_else(|| ToolkitError::invalid("invalid historical blob length"))?;
-                if signed > 32 << 20
-                    || !used.contains(digest)
-                        && i128::from(manifest.bytes) + i128::from(signed) > 128 << 20
+                let digest = capture.blob.sha256.clone();
+                let bytes = capture.blob.bytes;
+                if bytes > 32 << 20
+                    || !used.contains(&digest)
+                        && manifest.bytes + bytes > 128 << 20
                 {
                     return Err(fault("limit"));
                 }
-                // Go revalidates/reads duplicate objects too; only ZIP entries
-                // and manifest.Bytes are deduplicated, never input validation.
-                if signed < 0 {
+                // Every duplicate object is revalidated and reread; only ZIP
+                // entries and manifest.Bytes are deduplicated.
+                if !crate::selection::valid_digest(&digest, 64) {
                     return Err(ToolkitError::new(
                         "vault.blob_integrity",
                         "vault.blob_integrity",
                         4,
                     ));
                 }
-                let raw = read_blob_bounded(&inv.home, &reference["blob"], 32 << 20, &inv.control)?;
-                if !used.contains(digest) {
-                    write_entry(&mut zip, &format!("objects/{digest}"), &raw, &inv.control)?;
-                    used.insert(digest.to_owned());
-                    manifest.bytes += raw.len() as i64;
+                let raw = read_blob_bounded(&context.home, &reference["blob"], 32 << 20, &context.control)?;
+                if !used.contains(&digest) {
+                    write_entry(&mut zip, &format!("objects/{digest}"), &raw, &context.control)?;
+                    used.insert(digest.clone());
+                    manifest.bytes += raw.len() as u64;
                 }
-                inv.control.check()?;
+                context.control.check()?;
                 let encoded = storage::identity_json(&capture)?;
-                inv.control.check()?;
+                context.control.check()?;
                 write_entry(
                     &mut zip,
                     &format!("captures/{id}.json"),
                     &encoded,
-                    &inv.control,
+                    &context.control,
                 )?;
                 manifest.captures.push(capture);
             }
             Ok(())
         })();
-        let captures = finish_historical(captures, metadata.close());
-        crate::selection::selection_finish(captures, inv.control.check())?;
+        let captures = finish_owned(captures, metadata.close());
+        crate::selection::selection_finish(captures, context.control.check())?;
         let encoded = storage::identity_json(&manifest)?;
-        inv.control.check()?;
-        write_entry(&mut zip, "manifest.json", &encoded, &inv.control)?;
+        context.control.check()?;
+        write_entry(&mut zip, "manifest.json", &encoded, &context.control)?;
         Ok(())
     })();
     // Finalize even when body work failed, retaining its first cause and any
@@ -183,45 +181,40 @@ fn build(
         {
             result
         }
-        _ => finish_historical(result, finish),
+        _ => finish_owned(result, finish),
     };
     result?;
-    inv.control.check()?;
+    context.control.check()?;
     let result = serde_json::to_value(manifest).map_err(Into::into);
-    crate::selection::selection_finish(result, inv.control.check())
+    crate::selection::selection_finish(result, context.control.check())
 }
 fn close_directory<T>(result: Result<T>, directory: storage::Directory) -> Result<T> {
     let mut result = result;
     if let Err(errors) = directory.close() {
         for error in errors {
-            result = finish_historical(result, Err(error.into()));
+            result = finish_owned(result, Err(error.into()));
         }
     }
     result
 }
-pub(super) fn run(inv: &Invocation) -> Result<Value> {
-    let ids: Vec<_> = inv.required("--ids")?.split(',').collect();
+pub(super) fn run(
+    context: &crate::request::RequestContext,
+    ids: &[String],
+    output: &Path,
+) -> Result<Value> {
     if ids.is_empty() || ids.len() > 100 {
         return Err(fault("selection"));
     }
     let mut seen = BTreeSet::new();
-    for id in &ids {
-        if !id.starts_with("CAP-") || id.len() != 68 || !seen.insert(*id) {
+    for id in ids {
+        if !id.starts_with("CAP-") || id.len() != 68 || !seen.insert(id) {
             return Err(fault("selection"));
         }
     }
-    let output = inv.required("--output")?;
-    if output.is_empty() {
-        return Err(fault("output"));
-    }
-    inv.control.check()?;
-    let path = Path::new(output);
-    let absolute = std::path::absolute(if path.is_absolute() {
-        path.to_owned()
-    } else {
-        inv.cwd.join(path)
-    })?;
-    inv.control.check()?;
+    context.control.check()?;
+    // The CLI resolves cwd-relative output before creating the typed request.
+    let absolute = output.to_owned();
+    context.control.check()?;
     let canonical_parent = fs::canonicalize(absolute.parent().ok_or_else(|| fault("output"))?)
         .map_err(|error| {
             ToolkitError::new(
@@ -230,17 +223,17 @@ pub(super) fn run(inv: &Invocation) -> Result<Value> {
                 5,
             )
         })?;
-    inv.control.check()?;
+    context.control.check()?;
     let name = absolute.file_name().ok_or_else(|| fault("output"))?;
     let target = canonical_parent.join(name);
-    let workspace = fs::canonicalize(&inv.home)?;
-    inv.control.check()?;
+    let workspace = fs::canonicalize(&context.home)?;
+    context.control.check()?;
     if target.starts_with(&workspace) {
         return Err(fault("output"));
     }
     let mut supplemental = || Ok(());
     let mut files = PathControl {
-        control: Some(&inv.control),
+        control: Some(&context.control),
         supplemental: &mut supplemental,
     };
     let parent = storage::Directory::open_controlled(&canonical_parent, &mut files)?;
@@ -255,11 +248,11 @@ pub(super) fn run(inv: &Invocation) -> Result<Value> {
         }
         let mut stage = StagedFile::create(&parent, &mut files)?;
         let result = (|| {
-            inv.control.check()?;
-            let manifest = build(&mut stage, inv, &ids, crate::client::display_path(&target))?;
-            inv.control.check()?;
+            context.control.check()?;
+            let manifest = build(&mut stage, context, ids, crate::client::display_path(&target))?;
+            context.control.check()?;
             stage.seal()?;
-            inv.control.check()?;
+            context.control.check()?;
             match stage.publish_name(name, &mut files)? {
                 StagedPublication::Published => Ok(manifest),
                 StagedPublication::NotPublished => Err(fault("output")),
@@ -274,12 +267,12 @@ pub(super) fn run(inv: &Invocation) -> Result<Value> {
         stage_name = stage.name().to_owned();
         let mut result = result;
         for error in stage.close() {
-            result = finish_historical(result, Err(error.into()));
+            result = finish_owned(result, Err(error.into()));
         }
         result
     })();
     let result = close_directory(result, parent);
-    let result = crate::selection::selection_finish(result, inv.control.check());
+    let result = crate::selection::selection_finish(result, context.control.check());
     annotate_publication(result, publication, &target, &stage_name)
 }
 pub(super) fn annotate_publication<T>(

@@ -126,7 +126,7 @@ impl<'a, F: Formatter> TypedFormatter<'a, F> {
     }
     fn enter(&mut self) -> io::Result<()> {
         if self.pretty && self.depth >= GO_MAX_DEPTH {
-            return Err(invalid("public JSON exceeds Go nesting depth"));
+            return Err(invalid("public JSON exceeds JSON nesting depth"));
         }
         self.depth += 1;
         Ok(())
@@ -257,7 +257,7 @@ fn validate_raw(raw: &str, base: usize) -> io::Result<()> {
                 b'"' => string = true,
                 b'[' | b'{' => {
                     if depth >= GO_MAX_DEPTH {
-                        return Err(invalid("raw public JSON exceeds Go nesting depth"));
+                        return Err(invalid("raw public JSON exceeds JSON nesting depth"));
                     }
                     depth += 1;
                 }

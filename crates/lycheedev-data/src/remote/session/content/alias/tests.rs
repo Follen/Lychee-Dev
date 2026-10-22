@@ -1,7 +1,7 @@
 use super::*;
 use lycheedev_core::{
     control::OperationControl,
-    metadata::{HistoricalMutation, Metadata},
+    metadata::{Metadata, OwnedMutation},
     storage,
 };
 use std::{
@@ -81,7 +81,7 @@ impl Fixture {
                 key,
                 &Entry {
                     content_key: record.content_key.clone(),
-                    blob: CachedBlob::try_from(reference.clone()).unwrap(),
+                    blob: BlobRef::try_from(reference.clone()).unwrap(),
                     keys: Source::from(&keys.source),
                 },
                 None,
@@ -96,67 +96,6 @@ impl Fixture {
                 .unwrap();
         self.store().put(key, &raw, None).unwrap();
     }
-}
-#[test]
-fn go_alias_fields_merge_case_duplicates_and_null_with_signed_blob_size() {
-    let f = Fixture::new();
-    f.raw("decoded-v1/decoded-wire", br#"{"ContentKey":"first","contentKey":"last","CONTENTKEY":null,"blob":{"sha256":"first","bytes":-2},"Blob":{"sha256":"second"},"blob":null,"keys":{"kind":"public","state":"loaded"},"KEYS":{"sha256":"digest"},"keys":null,"ignored":[1,{"nested":true}]}"#);
-    let entry = read_entry(&f.store(), "decoded-v1/decoded-wire")
-        .unwrap()
-        .unwrap();
-    assert_eq!(entry.content_key, "last");
-    assert_eq!(entry.blob.sha256, "second");
-    assert_eq!(entry.blob.bytes, -2);
-    assert_eq!(entry.keys.kind, "public");
-    assert_eq!(entry.keys.state, "loaded");
-    assert_eq!(entry.keys.sha256, "digest");
-    f.raw("decoded-v1/bad-wire", br#"{"blob":{"bytes":1.0}}"#);
-    assert_eq!(
-        read_entry(&f.store(), "decoded-v1/bad-wire")
-            .err()
-            .unwrap()
-            .code,
-        "vault.blob_integrity"
-    );
-    std::fs::remove_dir_all(f.home).unwrap();
-}
-#[test]
-fn actual_store_alias_unknown_depth_uses_original_go_limit() {
-    let f = Fixture::new();
-    for depth in [10000usize, 10001] {
-        let raw = format!(
-            "{{\"unknown\":{}0{}}}",
-            "[".repeat(depth - 1),
-            "]".repeat(depth - 1)
-        );
-        let key = format!("decoded-v1/depth-{depth}");
-        if depth == 10000 {
-            f.raw(&key, raw.as_bytes());
-            assert!(read_entry(&f.store(), &key).unwrap().is_some());
-        } else {
-            // The historical writer itself rejects this invalid Go document.
-            // Assert that boundary first instead of pretending it can seed it.
-            let written = Metadata::with_historical_write(&f.home, &f.control, |writer| {
-                writer.commit(&[HistoricalMutation {
-                    key: &key,
-                    expected_generation: 0,
-                    bytes: raw.as_bytes(),
-                }])
-            });
-            assert!(written.is_err());
-            assert!(read_entry(&f.store(), &key).unwrap().is_none());
-            // Deliberate legacy/corrupt-row injection through the existing
-            // controlled RawValue serialization seam (same as cache/tests).
-            // No production admission or raw-JSON contract is weakened.
-            let unchecked = serde_json::value::RawValue::from_string(raw).unwrap();
-            f.store().put(&key, &unchecked, None).unwrap();
-            assert_eq!(
-                read_entry(&f.store(), &key).err().unwrap().code,
-                "vault.blob_integrity"
-            );
-        }
-    }
-    std::fs::remove_dir_all(f.home).unwrap();
 }
 #[test]
 fn verified_body_memo_shares_actual_owner_and_new_request_rechecks_missing_blob() {
@@ -269,7 +208,7 @@ fn loaded_public_alias_reestablishes_availability_before_blob_read() {
             "decoded-v1/decoded-loaded",
             &Entry {
                 content_key: record.content_key.clone(),
-                blob: CachedBlob::try_from(blob).unwrap(),
+                blob: BlobRef::try_from(blob).unwrap(),
                 keys: source,
             },
             None,
@@ -402,7 +341,7 @@ fn rebuild_rechecks_alias_digest_length_ckey_and_key_source_before_publication()
         f.entry("decoded-v1/decoded-rebuild", &record, &blob, &keys);
         let mut entry = Entry {
             content_key: record.content_key.clone(),
-            blob: CachedBlob::try_from(blob.clone()).unwrap(),
+            blob: BlobRef::try_from(blob.clone()).unwrap(),
             keys: Source::from(&keys.source),
         };
         match changed {

@@ -3,7 +3,7 @@
 #[path = "data_cache.rs"]
 mod data_cache;
 use lycheedev_core::{
-    Invocation, evidence,
+    evidence, request::RequestContext,
     selection::{self, SelectionSpec},
     storage, workspace,
 };
@@ -11,7 +11,6 @@ use lycheedev_data::{casc, installed};
 use md5::{Digest, Md5};
 use serde_json::json;
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -589,28 +588,21 @@ impl Fixture {
             pin: pin.id,
         }
     }
-    pub fn invocation(&self, command: &str, selectors: &[(&str, &str)]) -> Invocation {
-        let mut flags = BTreeMap::from([
-            ("--snapshot".into(), self.pin.clone()),
-            (
-                "--installation".into(),
-                self.client.to_string_lossy().into_owned(),
-            ),
-            ("--offline".into(), "true".into()),
-        ]);
-        flags.extend(
-            selectors
-                .iter()
-                .map(|(key, value)| ((*key).into(), (*value).into())),
-        );
-        Invocation {
-            command: command.into(),
-            positional: None,
-            flags,
+    pub fn context(&self) -> lycheedev_data::request::DataContext {
+        lycheedev_data::request::DataContext {
             home: self.home.clone(),
             cwd: self.root.clone(),
             control: Default::default(),
+            source: lycheedev_data::request::SourceOptions {
+                snapshot: Some(self.pin.clone()),
+                installation: Some(self.client.clone()),
+                offline: true,
+                ..Default::default()
+            },
         }
+    }
+    pub fn core_context(&self) -> RequestContext {
+        RequestContext { home: self.home.clone(), cwd: self.root.clone(), control: Default::default() }
     }
     pub fn verify(&self, outcome: &lycheedev_core::Outcome) {
         assert_eq!(outcome.provenance.len(), 1);
@@ -624,10 +616,7 @@ impl Fixture {
         );
         assert_eq!(capture["complete"], outcome.complete);
         assert_eq!(capture["truncated"], outcome.data["truncated"]);
-        let mut inv = self.invocation("evidence verify", &[]);
-        inv.flags.clear();
-        inv.positional = Some(id.into());
-        let verified = evidence::dispatch(&inv).unwrap();
+        let verified = evidence::dispatch(&self.core_context(), evidence::EvidenceRequest::Verify { id: id.into() }).unwrap();
         assert_eq!(verified.data["verified"], true);
     }
 }

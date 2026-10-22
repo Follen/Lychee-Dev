@@ -23,7 +23,13 @@ fn doctor_reads_original_journal_without_preparing_or_constraining_archive_desti
     assert!(!root.exists());
     let path = journal_path(&root).unwrap();
     let mut raw = serde_json::to_vec(&plan(&root)).unwrap();
-    raw.extend_from_slice(b" trailing second data is ignored by one Decode");
+    raw.extend_from_slice(b" trailing second data is not a journal");
+    fs::write(&path, &raw).unwrap();
+    assert_eq!(
+        journal_controlled(&root, &control).unwrap_err().code,
+        "vault.archive_state"
+    );
+    let raw = serde_json::to_vec(&plan(&root)).unwrap();
     fs::write(&path, &raw).unwrap();
     let value = journal_controlled(&root, &control).unwrap().unwrap();
     assert_eq!(value.state, "moved");
@@ -45,7 +51,9 @@ fn journal_rejects_unknown_fields_invalid_time_and_actual_oversize() {
         "vault.archive_state"
     );
     value.as_object_mut().unwrap().remove("unknown");
-    value["createdAt"] = json!("2026-10-15 00:00:00Z");
+    // chrono's RFC3339 reader accepts a space date/time separator, so use a
+    // genuinely out-of-range timestamp to exercise the typed time rejection.
+    value["createdAt"] = json!("2026-10-15T25:00:00Z");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     assert_eq!(
         journal_controlled(&root, &control).unwrap_err().code,

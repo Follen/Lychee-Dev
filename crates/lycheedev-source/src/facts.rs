@@ -42,6 +42,9 @@ impl ParseMode {
         }
     }
 }
+/// Pure preparation's input bound is shared with the ordered pipeline admission.
+pub(crate) const WORKER_SOURCE_BYTES: usize = 128 << 10;
+
 /// Pure, optional preparation with one shared document allowance. Admission or
 /// cancellation failure abandons every partial fact; the ordered caller keeps
 /// the full original parser and selects the public result at its original turn.
@@ -51,7 +54,7 @@ pub(crate) fn for_worker(
     control: &lycheedev_core::control::OperationControl,
     max_owned_bytes: usize,
 ) -> Option<Facts> {
-    if raw.len() > 64 << 10 || std::str::from_utf8(raw).is_err() {
+    if raw.len() > WORKER_SOURCE_BYTES || std::str::from_utf8(raw).is_err() {
         return None;
     }
     let guard = WorkerGuard::new(control, max_owned_bytes);
@@ -327,9 +330,8 @@ impl<'a> XmlLines<'a> {
     }
 }
 
-// The public Go scanner consumes XML tokens, not the native UI profile. Native
-// xml_program/xml_inline retain their authenticated catalog, all script kinds,
-// segmented source maps and stricter profile checks at their own entrypoints.
+// Structural extraction consumes XML tokens; native XML analysis retains its
+// authenticated UI catalog, segmented source maps and semantic profile checks.
 pub fn xml(raw: &[u8]) -> Facts {
     let mut lines = XmlLines::new(raw);
     xml_with_line_counter(raw, |offset| lines.at(offset))
@@ -446,37 +448,88 @@ fn xml_characters_guarded(
 fn is_public_handler(tag: &str) -> bool {
     tag.len() > 2 && tag.starts_with("On")
 }
+fn is_inline_lua(tag: &str) -> bool {
+    is_public_handler(tag) || tag == "Script"
+}
+#[derive(Default)]
+struct XmlInlineText {
+    text: String,
+    // Facts expose line ranges. Keep their decoded Lua lines tied to original
+    // XML lines, including entity newlines and gaps from comments/CDATA.
+    lines: Vec<usize>,
+}
+impl XmlInlineText {
+    fn clear(&mut self) {
+        self.text.clear();
+        self.lines.clear();
+    }
+    fn append(
+        &mut self,
+        decoded: &str,
+        physical: Option<&[u8]>,
+        mut original_line: usize,
+        guard: Option<&WorkerGuard<'_>>,
+    ) -> Option<()> {
+        if decoded.is_empty() {
+            return worker::check(guard).then_some(());
+        }
+        if self.lines.is_empty() {
+            if !worker::prepare_scratch_push(guard, &mut self.lines) {
+                return None;
+            }
+            self.lines.push(original_line);
+        } else if self.text.ends_with('\n') {
+            *self.lines.last_mut().unwrap() = original_line;
+        }
+        let mut remaining = physical;
+        for _ in decoded.bytes().filter(|byte| *byte == b'\n') {
+            if let Some(raw) = remaining {
+                // XML normalizes CR and CRLF to LF before entity expansion.
+                let at = raw.iter().position(|byte| matches!(*byte, b'\r' | b'\n'))
+                    .expect("decoded physical newline");
+                let end = at + if raw[at] == b'\r' && raw.get(at + 1) == Some(&b'\n') { 2 } else { 1 };
+                original_line += usize::from(raw[end - 1] == b'\n');
+                remaining = Some(&raw[end..]);
+            }
+            if !worker::prepare_scratch_push(guard, &mut self.lines) {
+                return None;
+            }
+            self.lines.push(original_line);
+        }
+        worker::append_scratch(guard, &mut self.text, decoded).then_some(())
+    }
+    fn original_line(&self, decoded_line: usize) -> usize {
+        self.lines[decoded_line.saturating_sub(1)]
+    }
+}
 fn append_inline(
     facts: &mut Facts,
-    script: &str,
-    script_line: usize,
+    script: &XmlInlineText,
     owner: &str,
     tag: &str,
     guard: Option<&WorkerGuard<'_>>,
 ) -> Option<()> {
-    if script.trim().is_empty() {
+    if script.text.trim().is_empty() {
         return worker::check(guard).then_some(());
     }
     let mut inner = if let Some(guard) = guard {
-        crate::lua_tree::facts_with_worker_guard(script.as_bytes(), guard)?
+        crate::lua_tree::facts_with_worker_guard(script.text.as_bytes(), guard)?
     } else {
-        lua(script.as_bytes(), false)
+        lua(script.text.as_bytes(), false)
     };
-    let offset = script_line.saturating_sub(1);
     for declaration in &mut inner.declarations {
         if !worker::check(guard) {
             return None;
         }
-        declaration.line += offset;
-        // Go adds the offset even to the zero LastLine of assignments.
-        declaration.end_line += offset;
+        declaration.end_line = script.original_line(declaration.end_line.max(declaration.line));
+        declaration.line = script.original_line(declaration.line);
     }
     for relation in &mut inner.relationships {
         if !worker::check(guard) {
             return None;
         }
-        relation.line += offset;
-        if relation.from == "<file>" {
+        relation.line = script.original_line(relation.line);
+        if relation.from == "<file>" && tag != "Script" {
             let from = format!("{owner}:{tag}");
             if !worker::charge(guard, from.capacity()) {
                 return None;
@@ -488,11 +541,7 @@ fn append_inline(
         if !worker::check(guard) {
             return None;
         }
-        diagnostic.line = if diagnostic.line > 0 {
-            diagnostic.line + offset
-        } else {
-            script_line
-        };
+        diagnostic.line = script.original_line(diagnostic.line);
     }
     // Keep token order and raw target ownership. Inner strings/Vec payloads
     // move, but destination vector/map growth is additionally admitted while
@@ -1007,8 +1056,7 @@ fn xml_guarded(
     reader.config_mut().check_comments = true;
     let mut facts = Facts::fresh();
     let mut stack = Vec::<XmlFrame<'_>>::new();
-    let mut script = String::new();
-    let mut script_line = 0;
+    let mut script = XmlInlineText::default();
     let mut character_data_line = None;
     let prefix = if raw.starts_with(b"\xef\xbb\xbf") {
         3
@@ -1181,9 +1229,8 @@ fn xml_guarded(
                             });
                         }
                     }
-                    if is_public_handler(&tag) {
+                    if is_inline_lua(&tag) {
                         script.clear();
-                        script_line = 0;
                     }
                     if !empty {
                         if !worker::prepare_scratch_push(guard, &mut stack) {
@@ -1210,14 +1257,15 @@ fn xml_guarded(
                 Event::End(element) => {
                     let qualified = String::from_utf8_lossy(element.name().as_ref()).into_owned();
                     let tag = xml_name(&qualified).1.to_owned();
-                    if is_public_handler(&tag) {
+                    if is_inline_lua(&tag) {
                         let owner = stack.last().map_or("", |frame| frame.owner.as_str());
-                        append_inline(&mut facts, &script, script_line, owner, &tag, guard)
+                        append_inline(&mut facts, &script, owner, &tag, guard)
                             .ok_or_else(String::new)?;
                     }
                     stack.pop();
                 }
                 Event::Text(text) => {
+                    let physical = text.as_ref();
                     let text = text.xml10_content().map_err(|error| error.to_string())?;
                     xml_characters_guarded(&text, guard)?;
                     if text.contains("]]>") {
@@ -1225,29 +1273,20 @@ fn xml_guarded(
                     }
                     if stack
                         .last()
-                        .is_some_and(|frame| is_public_handler(&frame.tag))
+                        .is_some_and(|frame| is_inline_lua(&frame.tag))
                     {
-                        if script_line == 0 {
-                            script_line = line;
-                        }
-                        if !worker::append_scratch(guard, &mut script, &text) {
-                            return Err(String::new());
-                        }
+                        script.append(&text, Some(physical), line, guard).ok_or_else(String::new)?;
                     }
                 }
                 Event::CData(text) => {
+                    let physical = text.as_ref();
                     let text = text.xml10_content().map_err(|error| error.to_string())?;
                     xml_characters_guarded(&text, guard)?;
                     if stack
                         .last()
-                        .is_some_and(|frame| is_public_handler(&frame.tag))
+                        .is_some_and(|frame| is_inline_lua(&frame.tag))
                     {
-                        if script_line == 0 {
-                            script_line = line;
-                        }
-                        if !worker::append_scratch(guard, &mut script, &text) {
-                            return Err(String::new());
-                        }
+                        script.append(&text, Some(physical), line, guard).ok_or_else(String::new)?;
                     }
                 }
                 Event::GeneralRef(reference) => {
@@ -1255,14 +1294,9 @@ fn xml_guarded(
                     let decoded = xml_entity(&reference)?;
                     if stack
                         .last()
-                        .is_some_and(|frame| is_public_handler(&frame.tag))
+                        .is_some_and(|frame| is_inline_lua(&frame.tag))
                     {
-                        if script_line == 0 {
-                            script_line = line;
-                        }
-                        if !worker::append_scratch(guard, &mut script, &decoded) {
-                            return Err(String::new());
-                        }
+                        script.append(&decoded, None, line, guard).ok_or_else(String::new)?;
                     }
                 }
                 Event::Eof => {
@@ -1325,27 +1359,27 @@ fn xml_guarded(
 mod tests {
     use super::*;
     #[test]
-    fn fixed_go_malformed_observations() {
-        fixed_go_facts_observations(
-            include_str!("../../../tests/rust-parity/source-facts-malformed/cases.json"),
+    fn reference_malformed_observations() {
+        reference_facts_observations(
+            include_str!("../../../tests/fixtures/source-native/facts/malformed/cases.json"),
             "LYCHEEDEV_SOURCE_FACTS_GO_REPORT",
         );
     }
     #[test]
-    fn fixed_go_xml_diagnostic_observations() {
-        fixed_go_facts_observations(
-            include_str!("../../../tests/rust-parity/source-facts-xml-diagnostics/cases.json"),
+    fn reference_xml_diagnostic_observations() {
+        reference_facts_observations(
+            include_str!("../../../tests/fixtures/source-native/facts/xml-diagnostics/cases.json"),
             "LYCHEEDEV_SOURCE_FACTS_XML_GO_REPORT",
         );
     }
     #[test]
-    fn fixed_go_generated_observations() {
-        fixed_go_facts_observations(
-            include_str!("../../../tests/rust-parity/source-facts-generated/cases.json"),
+    fn reference_generated_observations() {
+        reference_facts_observations(
+            include_str!("../../../tests/fixtures/source-native/facts/generated/cases.json"),
             "LYCHEEDEV_SOURCE_FACTS_GENERATED_GO_REPORT",
         );
     }
-    fn fixed_go_facts_observations(fixture: &str, report_variable: &str) {
+    fn reference_facts_observations(fixture: &str, report_variable: &str) {
         use sha2::{Digest, Sha256};
         let input: serde_json::Value = serde_json::from_str(fixture).unwrap();
         let mut observations = Vec::new();
@@ -1383,7 +1417,7 @@ mod tests {
             );
         } else {
             println!(
-                "SOURCE_FACT_ORACLE_NOT_COMPARED: no sealed fixed-Go report supplied; observations only"
+                "SOURCE_FACT_ORACLE_NOT_COMPARED: no sealed external-reference report supplied; observations only"
             );
         }
     }
@@ -1409,7 +1443,7 @@ mod tests {
         }
     }
     #[test]
-    fn public_xml_end_syntax_precedes_mismatch_and_preserves_go_tolerance() {
+    fn public_xml_end_syntax_precedes_mismatch_and_preserves_reference_tolerance() {
         for (raw, expected, consumed) in [
             ("</>", "expected element name after </", 2),
             ("</\nUi>", "expected element name after </", 2),
@@ -1527,7 +1561,7 @@ mod tests {
         }
     }
     #[test]
-    fn public_xml_namespace_prefixes_and_directives_follow_go_tokens() {
+    fn public_xml_namespace_prefixes_and_directives_follow_reference_tokens() {
         let mismatched =
             xml(br#"<Ui><a:Frame xmlns:a="urn:x" xmlns:b="urn:x" name="F"></b:Frame></Ui>"#);
         assert_eq!(mismatched.declarations[0].name, "F");
@@ -1734,7 +1768,7 @@ mod tests {
         }
     }
     #[test]
-    fn public_inline_lines_follow_go_decoded_lines_native_keeps_source_map() {
+    fn public_inline_lines_preserve_original_xml_for_handlers_and_scripts() {
         let raw = "\u{feff}<Ui>\r\n<Frame name=\"Demo\"><Scripts><OnLoad>&#10;local function Inline()&#10; return 1&#10;end&#10;Inline()</OnLoad></Scripts></Frame>\r\n<Script>&#10;function Loaded()&#10; Inline()&#10;end</Script>\r\n</Ui>";
         let facts = xml(raw.as_bytes());
         assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
@@ -1743,22 +1777,19 @@ mod tests {
             .iter()
             .find(|declaration| declaration.name == "Inline")
             .unwrap();
-        assert_eq!((local.line, local.end_line), (3, 5));
-        assert!(
-            !facts
-                .declarations
-                .iter()
-                .any(|declaration| declaration.name == "Loaded")
-        );
-        assert_eq!(facts.relationships.len(), 1);
+        assert_eq!((local.line, local.end_line), (2, 2));
+        let loaded = facts.declarations.iter().find(|declaration| declaration.name == "Loaded").unwrap();
+        assert_eq!((loaded.line, loaded.end_line), (3, 3));
+        assert_eq!(facts.relationships.len(), 2);
         assert_eq!(
             (
                 facts.relationships[0].from.as_str(),
                 facts.relationships[0].to.as_str(),
                 facts.relationships[0].line
             ),
-            ("Demo:OnLoad", "Inline", 6)
+            ("Demo:OnLoad", "Inline", 2)
         );
+        assert_eq!((facts.relationships[1].from.as_str(), facts.relationships[1].to.as_str(), facts.relationships[1].line), ("Loaded", "Inline", 3));
         let scripts = crate::xml_inline::extract("Native.xml", raw.as_bytes()).unwrap();
         assert_eq!(scripts.len(), 2);
         assert_eq!(scripts[0].original_body_line(2).unwrap(), 2);
@@ -1774,42 +1805,6 @@ mod tests {
                 .iter()
                 .any(|r| r.from == "Demo:OnLoad" && r.to == "PLAYER_LOGIN")
         );
-    }
-    #[test]
-    fn xml_linear_lines_match_legacy_prefix_all_fact_fields() {
-        let documents = [
-            "<Ui>\n <Frame name=\"Demo\" inherits=\"A, B\"><Scripts>\n<OnLoad>\nlocal function F() return 1 end\nF()\nself:RegisterEvent(&quot;READY&quot;)\n</OnLoad>\n<OnShow method=\"Show\"/><OnHide function=\"Hide\"/>\n</Scripts></Frame>\n<Script FiLe=\"Other.lua\"/><Include file=\"Other.xml\"/>\n</Ui>",
-            "<?xml version=\"1.0\"?>\n<!-- note\n -->\n<Ui><Frame name=\"Entity\"><Scripts><OnLoad>&#10;local x=1&#10;<![CDATA[x = x + 1]]></OnLoad></Scripts></Frame></Ui>",
-            "<Ui>\n<Frame name=\"Bad &unknown;\"/>\n</Ui>",
-            "<Ui>\n<Frame name=\"First\" name=\"Again\"/>\n</Ui>",
-            "<Ui>\n<Frame name=\"Unclosed\">\n</Ui>",
-            "<Ui>\n<Frame name=\"Truncated\"",
-            "<Ui>\n<Frame name=\"Before\"/>\n<Broken attr=no_quote/>\n</Ui>",
-            "<Ui>\n<Frame name=\"Unicode界🙂\"/>\n</Ui>",
-            "",
-        ];
-        for bom in ["", "\u{feff}"] {
-            for newline in ["\n", "\r\n", "\r"] {
-                for document in documents {
-                    let text = format!("{bom}{}", document.replace('\n', newline));
-                    let raw = text.as_bytes();
-                    let mut lines = XmlLines::new(raw);
-                    let actual = xml_with_line_counter(raw, |at| lines.at(at));
-                    let expected = xml_with_line_counter(raw, |at| {
-                        1 + raw[..at].iter().filter(|byte| **byte == b'\n').count()
-                    });
-                    assert_eq!(
-                        serde_json::to_value(actual).unwrap(),
-                        serde_json::to_value(expected).unwrap(),
-                        "{text:?}"
-                    );
-                    assert!(
-                        lines.scanned <= raw.len(),
-                        "ordered events rescanned source: {text:?}"
-                    );
-                }
-            }
-        }
     }
     #[test]
     fn xml_line_cursor_preserves_repeated_and_backwards_prefix_queries() {
@@ -1863,7 +1858,8 @@ Run()</OnLoad><PreClick>Ignored()</PreClick><OnShow function="" method="Shown"/>
             serde_json::json!([
                 {"from":"First:OnLoad","to":"Run","category":"call","confidence":"inferred","line":3},
                 {"from":"First","to":"Shown","category":"xml-method","confidence":"exact","line":3},
-                {"from":"Last","to":"Base","category":"xml-inherits","confidence":"exact","line":4}
+                {"from":"Last","to":"Base","category":"xml-inherits","confidence":"exact","line":4},
+                {"from":"<file>","to":"IgnoredTopLevel","category":"call","confidence":"inferred","line":5}
             ])
         );
         assert_eq!(
@@ -1902,7 +1898,7 @@ Run()</OnLoad><PreClick>Ignored()</PreClick><OnShow function="" method="Shown"/>
     }
 
     #[test]
-    fn public_xml_error_keeps_go_prior_rows_and_token_diagnostic_position() {
+    fn public_xml_error_keeps_reference_prior_rows_and_token_diagnostic_position() {
         let facts = xml(b"<Ui>\n<Frame name=\"Before\">\n</Ui>");
         assert_eq!(facts.declarations.len(), 1);
         assert_eq!(

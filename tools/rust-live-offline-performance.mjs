@@ -1,22 +1,21 @@
 // Rust-only offline Live diagnostic; no paired Go host performance claim.
-// No arbitrary executable/fixture arguments,
-// game input, Go execution, release publication, or process-runner replacement.
+// No arbitrary executable/fixture arguments, game input, Go execution, release
+// publication, or process-runner replacement. Diagnostic only: a passing run is
+// not a performance acceptance result.
 import assert from 'node:assert/strict';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, writeFileSync} from 'node:fs';
+import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {performance} from 'node:perf_hooks';
-import {verifyPerformanceReport} from '../tests/rust-performance-paired/live-contract.mjs';
 import {beginScratch, contained} from './rust-disk.mjs';
 import {runCargo, sourceDigest, verifyArtifact} from './rust-build.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
-import {verifyInterpreter} from './rust-formal-lua.mjs';
-import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cleanLuaEnvironment, hash, materialize,
-  processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
+import {cleanLuaEnvironment, hash, regular, verifyInterpreter} from './rust-formal-lua.mjs';
+import {ADMISSION_SCHEMA, verifyBridgeInputs} from './rust-formal-lua-bridge.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Optional paths select sealed records and a fresh output directory, never a
-// bare executable. All original identity/receipt validation remains mandatory.
+// bare executable. All identity/receipt validation remains mandatory.
 export function performancePaths(argv = [], repository = root) {
   assert(Array.isArray(argv) && (argv.length === 0 || argv.length === 2), 'live-offline.path_arguments');
   const values = argv.length ? argv : ['.tmp/ci-formal-lua-runtime/build-report.json', '.tmp/ci-live-offline-performance-test'];
@@ -27,11 +26,17 @@ export function performancePaths(argv = [], repository = root) {
   return {runtimePath, artifactDirectory, artifactPath: join(artifactDirectory, 'artifact.json')};
 }
 const args = Object.freeze(['test', '--release', '--locked', '--offline', '-p', 'lycheedev-live', '--lib', '--no-run', '--message-format=json-render-diagnostics', '-j', '1']);
-export const TEST = 'go_mailbox_v1::connection::projection::offline_performance::offline_driver_journal_performance';
+export const TEST = 'mailbox::connection::projection::offline_performance::offline_driver_journal_performance';
 const executeArgs = Object.freeze([TEST, '--exact', '--ignored', '--test-threads=1', '--nocapture']);
-export const SUPPORT = Object.freeze(['tools/rust-live-offline-performance.mjs', 'tests/rust-performance-paired/live-contract.mjs', 'tools/rust-formal-lua.mjs', 'tools/rust-build.mjs', 'tools/rust-cargo.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', ...ORACLE_SUPPORT]);
+const TEST_SUPPORT = ['crates/lycheedev-live/src/mailbox/connection/offline_performance_tests.rs',
+  'crates/lycheedev-live/tests/support/formal_lua_fixture.rs', 'crates/lycheedev-live/tests/support/formal_lua_peer.rs'];
+export const SUPPORT = Object.freeze(['tools/rust-live-offline-performance.mjs', 'tools/rust-formal-lua.mjs', 'tools/rust-formal-lua-bridge.mjs',
+  'tools/rust-build.mjs', 'tools/rust-cargo.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', ...TEST_SUPPORT]);
 const supportIdentity = () => Object.fromEntries(SUPPORT.map(path => [path, hash(regular(join(root, path)))]));
 const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', {flag: 'wx'});
+const RESULT_STRING_BYTES = Object.freeze([256, 16384, 131072]);
+const HISTORY_EVENTS = Object.freeze([1, 255, 256]);
+const REPEATS = 3;
 
 // The artifact must come from this Cargo invocation's structured output, not a
 // newest-file scan or a guessed target path. This helper never launches it.
@@ -59,12 +64,42 @@ export function verifyTestOutput(stdout) {
   assert.match(text, /^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; \d+ filtered out; finished in /m);
   return {passed: 1, failed: 0, ignored: 0, test: TEST};
 }
-function buildTest(support, inputs, {artifactDirectory, artifactPath}) {
+/// Diagnostic completeness only: 27 interleaved samples, every axis value, and
+/// no partial nested profile. It reports no ratio and claims no acceptance.
+export function verifyDiagnosticReport(report) {
+  assert.equal(report.schema, 'lycheedev.live-offline-performance.v1');
+  assert.equal(report.state, 'passed');
+  assert(Array.isArray(report.samples)); assert.equal(report.samples.length, 27);
+  const seen = new Set();
+  for (const row of report.samples) {
+    assert.equal(row.schema, 'lycheedev.live-offline-sample.v1');
+    const {resultStringBytes: bytes, historyEvents: history} = row.input;
+    assert(RESULT_STRING_BYTES.includes(bytes)); assert(HISTORY_EVENTS.includes(history)); assert(Number.isSafeInteger(row.repeat) && row.repeat >= 0 && row.repeat < REPEATS);
+    seen.add(`${bytes}/${history}/${row.repeat}`);
+    assert(Number.isSafeInteger(row.sampleWallNanos) && row.sampleWallNanos > 0);
+    assert.deepEqual(row.completion, {bodyPanicked: false, peerCleanup: {Ok: null}, journalCleanup: 'Ok(())', verified: true});
+  }
+  assert.equal(seen.size, 27, 'live-offline.sample_matrix');
+  for (const key of ['scope', 'timing', 'memory']) assert(typeof report[key] === 'string' && report[key].length < 2048);
+  assert.match(report.scope, /current addon/i); assert.match(report.scope, /no game latency/i);
+  const caseNames = [...seen].map(value => value.split('/')).map(([bytes, history, repeat]) => `string-${bytes}-events-${history}-repeat-${repeat}`);
+  return {caseNames};
+}
+function verifyReceipt(receiptPath, owner) {
+  const bytes = regular(contained(root, receiptPath), 1 << 20);
+  const receipt = JSON.parse(bytes);
+  assert.equal(receipt.schema, 'lycheedev.disk-owner.v1');
+  assert.equal(receipt.owner, owner);
+  assert.equal(receipt.category, 'scratch');
+  assert.ok(['succeeded', 'failed', 'retired'].includes(receipt.state));
+  assert.equal(typeof receipt.handlesReaped, 'boolean');
+  return {receipt, receiptSHA256: hash(bytes)};
+}
+function buildTest(support, {artifactDirectory, artifactPath}) {
   assert(!existsSync(artifactDirectory), 'live-offline.artifact_directory_exists');
   return runCargo(root, [...args], {owner: 'live-offline-performance-build', oneShot: true,
     onSuccess(invocation) {
       assert.deepEqual(supportIdentity(), support, 'live-offline.build_support_changed');
-      assert.deepEqual(authenticate(root), inputs, 'live-offline.build_fixture_changed');
       const {row, executable} = selectTestExecutable(invocation.stdout, invocation.target);
       const bytes = regular(contained(root, executable), 128 << 20);
       mkdirSync(artifactDirectory);
@@ -76,32 +111,26 @@ function buildTest(support, inputs, {artifactDirectory, artifactPath}) {
         sourceBinary: binary, binarySHA256: hash(bytes), bytes: bytes.length,
         inputHashes: invocation.inputHashes, environmentSHA256: invocation.environmentSHA256,
         channel: invocation.target, sameInvocation: true, command: ['cargo', ...args], buildEvidence: invocation.buildEvidence,
-        cargoArtifact: row, oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, support};
+        cargoArtifact: row, support};
       save(artifactPath, artifact);
       return artifact;
     },
   });
 }
-function verifyTestArtifact(expected, support, inputs, {artifactPath}) {
+function verifyTestArtifact(expected, support, {artifactPath}) {
   const artifact = verifyArtifact(root, artifactPath);
   assert.deepEqual(artifact, expected, 'live-offline.test_artifact_changed');
   assert.equal(artifact.schema, 'lycheedev.rust-build-artifact.v1');
   assert.equal(artifact.sameInvocation, true); assert.equal(artifact.sourceRoot, root);
   assert.deepEqual(artifact.command, ['cargo', ...args]);
   assert.equal(artifact.inputHashes.sourceTree, sourceDigest(root), 'live-offline.source_changed');
-  assert.deepEqual(supportIdentity(), support); assert.deepEqual(authenticate(root), inputs);
-  const evidence = verifyOwnerEvidence(root, artifact.buildEvidence, 'live-offline-performance-build');
-  const command = evidence.json('command.json');
+  assert.deepEqual(supportIdentity(), support);
+  const evidence = verifyReceipt(artifact.buildEvidence, 'live-offline-performance-build');
+  const commandPath = join(dirname(artifact.buildEvidence), 'command.json');
+  const command = JSON.parse(regular(contained(root, commandPath), 1 << 20));
   assert.equal(command.command, 'cargo'); assert.deepEqual(command.args, args); assert.equal(command.cwd, root);
   assert.equal(command.exit, 0); assert(!command.error && !command.signal);
   assert.deepEqual(command.inputHashes, artifact.inputHashes); assert.equal(command.environmentSHA256, artifact.environmentSHA256);
-  assert.equal(evidence.processes.length, 1);
-  const request = evidence.processes[0].request;
-  assert.equal(request.command, 'cargo'); assert.deepEqual(request.args, args); assert.equal(request.cwd, root); assert.equal(request.cargoBuild, true);
-  const stdout = evidence.logs.get(join(dirname(artifact.buildEvidence), 'stdout.bin'));
-  assert(stdout, 'live-offline.build_stdout_missing');
-  const selected = selectTestExecutable(stdout.toString('utf8'), artifact.channel);
-  assert.deepEqual(selected.row, artifact.cargoArtifact);
   return {artifactSHA256: hash(regular(artifactPath)), buildReceiptSHA256: evidence.receiptSHA256};
 }
 function collectFiles(directory, cap = 64 << 20) {
@@ -123,29 +152,27 @@ export function main(argv = []) {
   const paths = performancePaths(argv);
   const {runtimePath} = paths;
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
-  const support = supportIdentity(), inputs = authenticate(root);
-  assert.equal(support[`${BASE}/release-fields.json`], RELEASE_FIELDS_SHA256, 'live-offline.release_fields_identity');
+  const fixtureFiles = verifyBridgeInputs(root);
+  const support = supportIdentity();
   const runtime = verifyInterpreter(runtimePath);
-  const test = buildTest(support, inputs, paths);
-  const testIdentity = verifyTestArtifact(test, support, inputs, paths);
+  const test = buildTest(support, paths);
+  const testIdentity = verifyTestArtifact(test, support, paths);
   const job = beginScratch(root, 'live-offline-performance', {command: ['node', 'tools/rust-live-offline-performance.mjs', ...argv],
-    inputs: {oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, interpreterSHA256: runtime.report.executableSHA256,
-      interpreterReportSHA256: runtime.reportSHA256,
-      testArtifact: testIdentity, testBinarySHA256: test.binarySHA256, support},
+    inputs: {interpreterSHA256: runtime.report.executableSHA256, interpreterReportSHA256: runtime.reportSHA256,
+      fixtures: fixtureFiles, testArtifact: testIdentity, testBinarySHA256: test.binarySHA256, support},
     admissionOptions: {requiredBytes: 128 << 20, scratchReserveBytes: 64 << 20}});
-  const fixture = join(job.directory, 'fixture'), caseRoot = join(job.directory, 'cases');
+  const caseRoot = join(job.directory, 'cases');
   const admissionPath = join(job.directory, 'admission.json');
   let handlesReaped = true, succeeded = false, failure;
   try {
-    materialize(root, fixture, inputs); mkdirSync(caseRoot);
-    save(admissionPath, {interpreter: {report: runtimePath, reportSHA256: runtime.reportSHA256,
-      buildReceiptSHA256: runtime.buildReceiptSHA256}, fixture: {root: fixture, oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256},
-      scratch: {receipt: job.receipt, cases: caseRoot}});
-    save(join(job.evidence, 'identity.json'), {runtime, test, testIdentity, support, inputs});
+    mkdirSync(caseRoot);
+    save(admissionPath, {schema: ADMISSION_SCHEMA, interpreter: {report: runtimePath, reportSHA256: runtime.reportSHA256,
+      buildReceiptSHA256: runtime.buildReceiptSHA256}, fixture: {root, files: fixtureFiles}, scratch: {receipt: job.receipt, cases: caseRoot}});
+    save(join(job.evidence, 'identity.json'), {runtime, test, testIdentity, support, fixtures: fixtureFiles});
     const checkIdentity = () => {
       assert.deepEqual(verifyInterpreter(runtimePath), runtime);
-      assert.deepEqual(verifyTestArtifact(test, support, inputs, paths), testIdentity);
-      verifyMaterial(fixture, inputs);
+      assert.deepEqual(verifyTestArtifact(test, support, paths), testIdentity);
+      assert.deepEqual(verifyBridgeInputs(root), fixtureFiles);
     };
     checkIdentity(); handlesReaped = false;
     const invocationStarted = performance.now();
@@ -153,12 +180,12 @@ export function main(argv = []) {
       env: cleanLuaEnvironment({...process.env, LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION: admissionPath}),
       evidence: job.evidence, timeout: 690000, cargoBuild: false, msvcCompile: false});
     const ownedInvocationWallMillis = performance.now() - invocationStarted;
-    handlesReaped = processReaped(result) === true;
+    handlesReaped = result.handlesReaped === true;
     checkIdentity();
-    assert(processPassed(result), `live-offline.process_failed:${result.error?.message ?? result.status}`);
+    assert(!result.error && result.status === 0, `live-offline.process_failed:${result.error?.message ?? result.status}`);
     const counts = verifyTestOutput(result.stdout);
     const measurement = JSON.parse(regular(join(caseRoot, 'performance.json'), 4 << 20));
-    const validated = verifyPerformanceReport(measurement);
+    const validated = verifyDiagnosticReport(measurement);
     const lifetimes = readdirSync(caseRoot).filter(name => name !== 'performance.json').sort().map(name => {
       const proof = JSON.parse(regular(join(caseRoot, name, 'peer-lifetime.json')));
       assert.equal(proof.schema, 'lycheedev.formal-lua-peer-lifetime.v1');
@@ -169,19 +196,16 @@ export function main(argv = []) {
     });
     assert.deepEqual(lifetimes.map(row => row.case), validated.caseNames);
     save(join(job.evidence, 'report.json'), {schema: 'lycheedev.live-offline-controller.v1', state: 'passed',
-      oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256,
       counts, lifetimes, measurement, validation: validated, ownedInvocationWallMillis,
       controllerThroughVerificationMillis: performance.now() - controllerStarted,
       testBinarySHA256: test.binarySHA256, testIdentity,
-      interpreterReportSHA256: runtime.reportSHA256, handlesReaped,
-      scope: 'Rust-only optimized offline Live diagnostic. Complete wrapper-inclusive owned invocation wall includes request preparation, PowerShell startup, root startup, test checks, peer work, cleanup and result collection; compilation and controller preparation are separately included in controllerThroughVerificationMillis. No Go host timing, no ratio, no game input or latency. Inner handles retain the existing std/JobGuard Drop boundary.'});
+      interpreterReportSHA256: runtime.reportSHA256, handlesReaped, fixtures: fixtureFiles,
+      scope: 'Rust-only optimized offline Live diagnostic over the current addon Lua peer. Complete wrapper-inclusive owned invocation wall includes request preparation, PowerShell startup, root startup, test checks, peer work, cleanup and result collection; compilation and controller preparation are separately included in controllerThroughVerificationMillis. No external reference timing, ratio, game input or latency, and no performance acceptance claim. Inner handles retain the existing std/JobGuard Drop boundary.'});
     succeeded = true;
   } catch (error) {
     failure = error;
     save(join(job.evidence, 'failure.json'), {error: error.message, handlesReaped, scratchRetained: true});
   } finally {
-    // Seal journal/result/record/pipe evidence before any successful cleanup.
-    // Failures and uncertain cleanup always retain their original scratch.
     let logs;
     try {
       logs = [...collectFiles(job.evidence).filter(path => basename(path) !== 'receipt.json'),

@@ -7,7 +7,7 @@ use crate::{
     control::OperationControl,
     workspace::data_disk::{MetadataQuota, MetadataReadQuota},
 };
-use historical_write::finish_historical;
+use owned_write::finish_owned;
 use std::time::Duration;
 
 const PAGE_BYTES: u64 = 65_536;
@@ -82,7 +82,7 @@ fn close(connection: Connection) -> Result<()> {
         .close()
         .map_err(|(_connection, error)| error.into());
     #[cfg(test)]
-    let result = finish_historical(result, tests::observe(tests::Point::Closed));
+    let result = finish_owned(result, tests::observe(tests::Point::Closed));
     result
 }
 
@@ -160,7 +160,7 @@ impl DataCacheMetadata {
                 }
                 read_row(&connection, key, control, &supplemental)
             })();
-            finish_historical(read, close(connection))
+            finish_owned(read, close(connection))
         })();
         owner.finish(result)
     }
@@ -232,7 +232,7 @@ impl DataCacheMetadata {
                     |index, state| owner.commit_state(index, state),
                 )
             })();
-            finish_historical(written, close(connection))
+            finish_owned(written, close(connection))
         })();
         owner.finish(result)
     }
@@ -276,7 +276,7 @@ fn open(
     })();
     match setup {
         Ok(()) => Ok(connection),
-        Err(error) => finish_historical(Err(error), close(connection)),
+        Err(error) => finish_owned(Err(error), close(connection)),
     }
 }
 fn validate_connection(
@@ -418,7 +418,7 @@ fn mutate(
         let commit_result = sql(control, supplemental, || connection.execute_batch("COMMIT"));
         #[cfg(test)]
         let commit_result =
-            finish_historical(commit_result, tests::observe(tests::Point::CommitReturned));
+            finish_owned(commit_result, tests::observe(tests::Point::CommitReturned));
         commit_result?;
         settle(index, "committed"); // exact fact before any fallible post-COMMIT check
         #[cfg(test)]
@@ -437,10 +437,10 @@ fn mutate(
             }
         }
         #[cfg(test)]
-        let rolled = finish_historical(rolled, tests::observe(tests::Point::RolledBack));
+        let rolled = finish_owned(rolled, tests::observe(tests::Point::RolledBack));
         rolled
     };
-    finish_historical(result, rollback)
+    finish_owned(result, rollback)
 }
 
 #[cfg(test)]

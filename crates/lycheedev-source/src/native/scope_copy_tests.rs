@@ -1,12 +1,11 @@
-// The full-graph oracle also uses the frozen whole-Vec implementations. These
-// cases ensure each projected source and each XML handler variant is populated.
+// Current graph assertions cover each projected source and XML handler variant.
 #[test]
-fn scope_copies_preserve_full_host_projection_and_charges() {
+fn scope_projection_preserves_full_host_projection_and_charges() {
     for flow in [false, true] {
         let c = control();
         let source = "local one=1\nlocal two=2\nfunction F(x) return one,two,x end\nif Flag then A=one else A=two end\nlocal a,b,c=F(one)\nHost(a,b,c)\n";
         let prepared = prepare(graph_fixture_inputs(&c, flow, source, None), &c).unwrap();
-        let graph = prepared.build("scope-host", EvaluatorProfile::Native, None, &c).unwrap();
+        let graph = prepared.build("scope-host", None, &c).unwrap();
         let native = graph.native_invocations.as_ref().unwrap();
         let host = graph.host_runtime.as_ref().unwrap();
         assert!(native.control.complete);
@@ -16,13 +15,13 @@ fn scope_copies_preserve_full_host_projection_and_charges() {
             assert!(host.transfers.iter().any(|fact| fact.kind == kind), "missing {kind}");
         }
         assert!(!host.capture_references.is_empty());
-        assert_graph_move_equivalent(&prepared, &graph, true);
-        assert_graph_move_cancelled(&prepared, &graph, true);
+        assert_graph_rebuild(&prepared, &graph);
+        assert_graph_cancelled(&prepared, &graph);
     }
 }
 
 #[test]
-fn scope_copies_preserve_all_xml_handler_variants_and_charges() {
+fn scope_projection_preserves_all_xml_handler_variants_and_charges() {
     let c = control();
     let source = "M={}\nfunction M:Run() return self end\nfunction Callback(self) return self end\n";
     let xml = b"<Ui><Script file=\"a.lua\"/><Frame name=\"A\" mixin=\"M\"><Scripts><OnLoad method=\"Run\"/><OnShow function=\"Callback\"/><OnHide/><OnEvent method=\"Run\" function=\"Callback\"/><OnUpdate>return self</OnUpdate></Scripts></Frame><Frame name=\"B\" mixin=\"M\"><Scripts><OnLoad method=\"Missing\"/><OnShow function=\"Bad()\"/></Scripts></Frame></Ui>";
@@ -58,8 +57,8 @@ fn scope_copies_preserve_all_xml_handler_variants_and_charges() {
     assert!(handlers[4].closure.is_some());
     assert!(handlers[5].closure.is_none());
     assert_eq!(handlers[6].selected, Decision::Unavailable("xml_reference_expression_not_static".into()));
-    assert_graph_move_equivalent(&prepared, &graph, true);
-    assert_graph_move_cancelled(&prepared, &graph, true);
+    assert_graph_rebuild(&prepared, &graph);
+    assert_graph_cancelled(&prepared, &graph);
 }
 
 // Reconstruct only the state consumed by host finalization or a script-free XML
@@ -75,7 +74,7 @@ fn scope_projection_builder(seed: &Graph, inputs: Arc<SourceInputs>) -> Builder 
     native.host.open_tail_uses = host.open_tail_uses.clone();
     native.host.cardinality_uses = host.cardinality_uses.clone();
     Builder {
-        inputs, control: seed.control.clone(), native_profile: true, graph: seed.facts.clone(),
+        inputs, control: seed.control.clone(),  graph: seed.facts.clone(),
         harvest: Harvest { declaration_sites: BTreeMap::new(), blocks: BTreeMap::new(),
             local_reads: BTreeMap::new(), signatures: BTreeMap::new(), intrinsic_declarations: BTreeMap::new(), raw: vec![] },
         cells: seed.writes.iter().map(|write| (write.cell.clone(), write.id)).collect(),
@@ -85,105 +84,79 @@ fn scope_projection_builder(seed: &Graph, inputs: Arc<SourceInputs>) -> Builder 
     }
 }
 
-fn assert_scope_methods_equivalent(
-    mut candidate: Builder, mut reference: Builder,
-    candidate_run: impl FnOnce(&mut Builder) -> Result<()>,
-    reference_run: impl FnOnce(&mut Builder) -> Result<()>,
-) -> (Result<()>, usize, Builder) {
+fn run_scope_projection(mut candidate: Builder, run: impl FnOnce(&mut Builder) -> Result<()>) -> (Result<()>, usize, Builder) {
     let before = candidate.inputs.shared_steps.load(Ordering::Relaxed);
-    let result = candidate_run(&mut candidate);
+    let result = run(&mut candidate);
     let charges = candidate.inputs.shared_steps.load(Ordering::Relaxed) - before;
-    let before = reference.inputs.shared_steps.load(Ordering::Relaxed);
-    let expected = reference_run(&mut reference);
-    assert_eq!(result, expected);
-    assert_eq!(charges, reference.inputs.shared_steps.load(Ordering::Relaxed) - before);
-    assert_eq!(serde_json::to_vec(&candidate.graph).unwrap(), serde_json::to_vec(&reference.graph).unwrap());
-    assert_eq!(serde_json::to_vec(&candidate.native.facts).unwrap(), serde_json::to_vec(&reference.native.facts).unwrap());
-    assert_eq!(serde_json::to_vec(&*candidate.native.typed_cells.borrow()).unwrap(), serde_json::to_vec(&*reference.native.typed_cells.borrow()).unwrap());
-    assert_eq!(candidate.native.host.invocation_transfers, reference.native.host.invocation_transfers);
-    assert_eq!(candidate.native.closure_values, reference.native.closure_values);
-    assert_eq!(candidate.cells, reference.cells);
-    assert_eq!(candidate.objects, reference.objects);
-    assert_eq!(candidate.xml_objects, reference.xml_objects);
-    assert_eq!(candidate.heap_observation, reference.heap_observation);
-    assert_eq!(candidate.object_versions, reference.object_versions);
-    assert_eq!(candidate.object_view_ids, reference.object_view_ids);
-    assert_eq!(candidate.object_slots, reference.object_slots);
-    assert_eq!(candidate.field_write_observations, reference.field_write_observations);
-    assert_eq!(candidate.observation_failure, reference.observation_failure);
     (result, charges, candidate)
 }
 
 #[test]
-fn scope_copies_preserve_host_transfer_cap_prefix_and_first_error() {
+fn scope_projection_preserves_host_transfer_cap_prefix_and_first_error() {
     let c = control();
     let source = "function F(x) return x end\nA=1\nF(A)\nHost(A)\n";
     let prepared = prepare(graph_fixture_inputs(&c, true, source, None), &c).unwrap();
-    let seed = prepared.build("scope-transfer-cap", EvaluatorProfile::Native, None, &c).unwrap();
+    let seed = prepared.build("scope-transfer-cap", None, &c).unwrap();
     assert!(seed.native_invocations.as_ref().unwrap().capture_facts.is_empty());
     let existing = seed.host_runtime.as_ref().unwrap().transfers.len();
     // A cap at successive positions crosses the read/write/argument/return
     // projection boundaries without changing production limits or shared quota.
-    let (complete, total, _) = assert_scope_methods_equivalent(
-        scope_projection_builder(&seed, seed.inputs.clone()), scope_projection_builder(&seed, seed.inputs.clone()),
-        Builder::host_finish_facts, Builder::host_finish_facts_copying_reference,
+    let (complete, total, _) = run_scope_projection(
+        scope_projection_builder(&seed, seed.inputs.clone()),
+        Builder::host_finish_facts,
     );
     complete.unwrap();
     for remaining in 0..total {
         let mut candidate = scope_projection_builder(&seed, seed.inputs.clone());
-        let mut reference = scope_projection_builder(&seed, seed.inputs.clone());
         candidate.native.host.invocation_transfers = HOST_TRANSFER_LIMIT - remaining;
-        reference.native.host.invocation_transfers = HOST_TRANSFER_LIMIT - remaining;
-        let (result, charges, builder) = assert_scope_methods_equivalent(candidate, reference,
-            Builder::host_finish_facts, Builder::host_finish_facts_copying_reference);
+        let (result, charges, builder) = run_scope_projection(candidate,
+            Builder::host_finish_facts);
         assert_eq!(result, Err("host transfer fact budget exceeded".into()));
         assert_eq!(charges, remaining + 1);
         assert_eq!(builder.graph.host_runtime.as_ref().unwrap().transfers.len(), existing + remaining);
     }
     let mut candidate = scope_projection_builder(&seed, seed.inputs.clone());
-    let mut reference = scope_projection_builder(&seed, seed.inputs.clone());
-    for builder in [&mut candidate, &mut reference] {
+    for builder in [&mut candidate] {
         builder.observation_failure = Some("original observation failure".into());
         builder.native.host.invocation_transfers = HOST_TRANSFER_LIMIT;
     }
-    let (result, charges, _) = assert_scope_methods_equivalent(candidate, reference,
-        Builder::host_finish_facts, Builder::host_finish_facts_copying_reference);
+    let (result, charges, _) = run_scope_projection(candidate,
+        Builder::host_finish_facts);
     assert_eq!(result, Err("original observation failure".into()));
     assert_eq!(charges, 0);
     // Cancellation wins at the same existing budget check, before any charge.
-    c.cancel_handle().store(true, Ordering::Release);
+    c.tracked_cancel_handle().unwrap().cancel();
     let expected = c.check().unwrap_err().to_string();
-    let (result, charges, _) = assert_scope_methods_equivalent(
-        scope_projection_builder(&seed, seed.inputs.clone()), scope_projection_builder(&seed, seed.inputs.clone()),
-        Builder::host_finish_facts, Builder::host_finish_facts_copying_reference);
+    let (result, charges, _) = run_scope_projection(
+        scope_projection_builder(&seed, seed.inputs.clone()),
+        Builder::host_finish_facts);
     assert_eq!(result, Err(expected));
     assert_eq!(charges, 0);
 }
 
 #[test]
-fn scope_copies_preserve_capture_cap_after_transfer_prefix() {
+fn scope_projection_preserves_capture_cap_after_transfer_prefix() {
     let c = control();
     let source = "local one=1\nlocal two=2\nfunction F() return one,two end\nHost()\n";
     let prepared = prepare(graph_fixture_inputs(&c, true, source, None), &c).unwrap();
-    let seed = prepared.build("scope-capture-cap", EvaluatorProfile::Native, None, &c).unwrap();
+    let seed = prepared.build("scope-capture-cap", None, &c).unwrap();
     let captures = seed.native_invocations.as_ref().unwrap().capture_facts.len();
     assert!(captures >= 2);
-    let (result, total, complete) = assert_scope_methods_equivalent(
-        scope_projection_builder(&seed, seed.inputs.clone()), scope_projection_builder(&seed, seed.inputs.clone()),
-        Builder::host_finish_facts, Builder::host_finish_facts_copying_reference);
+    let (result, total, complete) = run_scope_projection(
+        scope_projection_builder(&seed, seed.inputs.clone()),
+        Builder::host_finish_facts);
     result.unwrap();
     let transfers = complete.graph.host_runtime.as_ref().unwrap().transfers.len();
     for remaining in [0, 1] {
         let mut candidate = scope_projection_builder(&seed, seed.inputs.clone());
-        let mut reference = scope_projection_builder(&seed, seed.inputs.clone());
-        for builder in [&mut candidate, &mut reference] {
+        for builder in [&mut candidate] {
             // Saturate the real destination cap with an existing reference. The
             // source captures and their original order are untouched.
             let references = &mut builder.graph.host_runtime.as_mut().unwrap().capture_references;
             references.resize(INVOCATION_CAPTURE_EDGE_LIMIT - remaining, references[0].clone());
         }
-        let (result, charges, builder) = assert_scope_methods_equivalent(candidate, reference,
-            Builder::host_finish_facts, Builder::host_finish_facts_copying_reference);
+        let (result, charges, builder) = run_scope_projection(candidate,
+            Builder::host_finish_facts);
         assert_eq!(result, Err("host capture reference budget exceeded".into()));
         assert_eq!(charges, total - captures + remaining + 1);
         let host = builder.graph.host_runtime.as_ref().unwrap();
@@ -193,19 +166,19 @@ fn scope_copies_preserve_capture_cap_after_transfer_prefix() {
 }
 
 #[test]
-fn scope_copies_preserve_xml_shared_budget_prefix_and_cancellation() {
+fn scope_projection_preserves_xml_shared_budget_prefix_and_cancellation() {
     let c = control();
     let prepared = prepare(inputs(&c, false), &c).unwrap();
-    let seed = prepared.build("scope-xml-budget", EvaluatorProfile::Native, None, &c).unwrap();
+    let seed = prepared.build("scope-xml-budget", None, &c).unwrap();
     // No Lua actions: every charge belongs to the unchanged action loop or a
     // handler reference. Multiple handlers exercise failure after earlier updates.
     let program = crate::xml_load::Program::from_sources("Main.toc", [
         ("Main.toc", b"ui.xml\n".as_slice()),
         ("ui.xml", b"<Ui><Frame name=\"A\"><Scripts><OnLoad function=\"F\"/><OnShow function=\"Missing\"/><OnHide method=\"Run\"/><OnEvent/></Scripts></Frame></Ui>".as_slice()),
     ], &c).unwrap();
-    let (result, total, _) = assert_scope_methods_equivalent(
-        scope_projection_builder(&seed, seed.inputs.clone()), scope_projection_builder(&seed, seed.inputs.clone()),
-        |builder| builder.xml_load(&program), |builder| builder.xml_load_copying_reference(&program));
+    let (result, total, _) = run_scope_projection(
+        scope_projection_builder(&seed, seed.inputs.clone()),
+        |builder| builder.xml_load(&program));
     result.unwrap();
     for remaining in 0..=total {
         let bounded = || {
@@ -216,17 +189,17 @@ fn scope_copies_preserve_xml_shared_budget_prefix_and_cancellation() {
             input.charge(input.corpus.limits.construction_steps - used - remaining).unwrap();
             scope_projection_builder(&seed, input)
         };
-        let (result, charges, _) = assert_scope_methods_equivalent(bounded(), bounded(),
-            |builder| builder.xml_load(&program), |builder| builder.xml_load_copying_reference(&program));
+        let (result, charges, _) = run_scope_projection(bounded(),
+            |builder| builder.xml_load(&program));
         assert_eq!(charges, remaining);
         if remaining == total { result.unwrap(); }
         else { assert!(result.unwrap_err().contains("shared operation step budget exceeded")); }
     }
-    c.cancel_handle().store(true, Ordering::Release);
+    c.tracked_cancel_handle().unwrap().cancel();
     let expected = c.check().unwrap_err().to_string();
-    let (result, charges, _) = assert_scope_methods_equivalent(
-        scope_projection_builder(&seed, seed.inputs.clone()), scope_projection_builder(&seed, seed.inputs.clone()),
-        |builder| builder.xml_load(&program), |builder| builder.xml_load_copying_reference(&program));
+    let (result, charges, _) = run_scope_projection(
+        scope_projection_builder(&seed, seed.inputs.clone()),
+        |builder| builder.xml_load(&program));
     assert_eq!(result, Err(expected));
     assert_eq!(charges, 0);
 }

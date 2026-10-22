@@ -201,7 +201,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     differentFiles: [],
     firstDifferences: [],
   };
-  const goSources = new Map(), rustSources = [];
+  const goFactSources = new Map(), rustSources = [];
   // Historical callers do not load the new test-exporter/owner dependencies.
   const postcard = layout.postcard ? (await import('./read-fact-delta-postcard.mjs')).openPostcardFacts(postcardExport, {bytes: indexIdentity.rustIndexBytes, sha256: indexIdentity.rustIndexSHA256}, [...rustDocuments.values()]) : undefined;
   try {
@@ -216,9 +216,9 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     const rust = postcard ? await postcard.next(rustDocuments.get(document.path)) : readRustFact(rustHome, rustDocuments?.get(document.path) ?? document, rustLayout), rustFile = rust.file;
     const goRaw = retainedGo ? retainedGo.readFact(goFile) : fs.readFileSync(goFile);
     if (captureSources) {
-      const source = {file: goFile, bytes: goRaw.length, sha256: sha256(goRaw)}, previous = goSources.get(goFile);
+      const source = {file: goFile, bytes: goRaw.length, sha256: sha256(goRaw)}, previous = goFactSources.get(goFile);
       if (previous && signature(previous) !== signature(source)) throw new Error('Go comparison source changed between duplicate references');
-      goSources.set(goFile, source);
+      goFactSources.set(goFile, source);
       rustSources.push({path: document.path, file: rustFile, bytes: rust.bytes, sha256: rust.recordSHA256 ?? rust.fileSHA256, ...(rust.record ? {record: rust.record} : {})});
     }
     const go = JSON.parse(goRaw);
@@ -291,7 +291,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
   if (documents.length !== manifest.summary.documents) {
     throw new Error('Go document total differs from sealed summary');
   }
-  if (captureSources) report.factSources = {go: [...goSources.values()], rust: rustSources};
+  if (captureSources) report.factSources = {go: [...goFactSources.values()], rust: rustSources};
   if (indexProjection) comparedIndexes.set(report, indexProjection);
   return report;
 }

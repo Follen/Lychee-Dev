@@ -216,7 +216,7 @@ fn removed_capture_republished_by_persistence_rejects_stale_generation() {
         )
         .unwrap();
         assert_eq!(state.get(), crate::metadata::CaptureWriteState::Committed);
-        Metadata::with_historical_write(&f.0, &control, |writer| {
+        Metadata::with_owned_write(&f.0, &control, |writer| {
             let recreated = writer.document(&key)?;
             assert_eq!(recreated.generation, 2);
             assert_eq!(recreated.bytes, original.bytes);

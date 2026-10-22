@@ -26,7 +26,7 @@ fn context_projection_load_fixture(complete_load:bool) -> ResearchSession {
         ("Two.toc".into(),second.into()),
         ("Frames.xml".into(),"\u{feff}<Ui>\r\n<Frame name=\"Template\" virtual=\"true\"><Scripts><OnLoad>local s = &quot;😀&quot;&#10;Tar&#103;et(self)</OnLoad></Scripts></Frame>\r\n<Frame name=\"Actual\" inherits=\"Template\"/>\r\n</Ui>".into()),
     ]);
-    ResearchSession::prepare(SnapshotRequest{files,load_documents:documents,environment_documents:BTreeMap::new(),
+    ResearchSession::prepare(SnapshotRequest{encoding_warnings:vec![],files,load_documents:documents,environment_documents:BTreeMap::new(),
         source:json!({"repository":"context-projection-test","product":"retail"}),
         luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
         api:vec![],environment_manifest:None,load_plans:["One.toc","Two.toc"].map(|manifest|LoadEvidence{manifest:manifest.into(),ordered:vec![],issues:vec![]}).to_vec(),input_gaps:vec![]},&control).unwrap()
@@ -150,7 +150,7 @@ fn context_projection_excludes_inherited_owner_files_from_reuse() {
         ("Templates.xml".into(),"<Ui>\n<Frame name=\"Template\" virtual=\"true\"><Scripts><OnLoad>\nlocal function Inner() Hidden(self) end\nTarget(self)\n</OnLoad></Scripts></Frame>\n</Ui>".into()),
         ("Objects.xml".into(),"<Ui>\n<Frame name=\"Actual\" inherits=\"Template\"/>\n</Ui>".into()),
     ]);
-    let session=ResearchSession::prepare(SnapshotRequest{files:BTreeMap::new(),load_documents:documents.clone(),environment_documents:BTreeMap::new(),
+    let session=ResearchSession::prepare(SnapshotRequest{encoding_warnings:vec![],files:BTreeMap::new(),load_documents:documents.clone(),environment_documents:BTreeMap::new(),
         source:json!({"repository":"context-inheritance-test","product":"retail"}),
         luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
         api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
@@ -195,7 +195,7 @@ fn context_projection_rejects_foreign_request_graph_xml_and_later_cancellation()
     assert!(session.prepared.project_research_relations(&plan,&query,Some(&graphs[0]),&other.xml,projection()).is_err());
     assert!(other.prepared.project_research_relations(&plan,&query,Some(&graphs[0]),&session.xml,projection()).is_err());
     let retained=projection();assert!(retained.is_some());
-    control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(session.prepared.project_research_relations(&plan,&query,Some(&graphs[0]),&session.xml,retained).unwrap_err().code,"command.cancelled");
 }
 
@@ -307,7 +307,7 @@ fn context_projection_preserves_nonempty_xml_mixin_copy_tail() {
         ("Templates.xml".into(),"\u{feff}<Ui>\r\n<Frame name=\"Template\" virtual=\"true\"><Scripts><OnLoad>local text = &quot;😀&quot;&#10;Caller(self)</OnLoad></Scripts></Frame>\r\n</Ui>".into()),
         ("Objects.xml".into(),"<Ui>\n<Frame name=\"Actual\" inherits=\"Template\" mixin=\"Mixin\"/>\n</Ui>".into()),
     ]);
-    let session=ResearchSession::prepare(SnapshotRequest{files,load_documents:documents,environment_documents:BTreeMap::new(),
+    let session=ResearchSession::prepare(SnapshotRequest{encoding_warnings:vec![],files,load_documents:documents,environment_documents:BTreeMap::new(),
         source:json!({"repository":"context-mixin-test","product":"retail"}),
         luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
         api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();

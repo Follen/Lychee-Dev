@@ -99,10 +99,7 @@ pub fn fetch_versions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        sync::{Arc, atomic::AtomicBool},
-        time::Instant,
-    };
+    use std::time::Instant;
     #[test]
     fn exact_endpoint_and_bounded_utf8_admission() {
         assert_eq!(
@@ -140,10 +137,8 @@ mod tests {
     }
     #[test]
     fn cancelled_transport_never_attempts_network() {
-        let control = OperationControl::new(
-            Instant::now() + Duration::from_secs(30),
-            Arc::new(AtomicBool::new(true)),
-        );
+        let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(30));
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(
             fetch_versions("us", "wow", &control).unwrap_err().exit_code,
             7

@@ -3,7 +3,7 @@ import {closeSync,copyFileSync,existsSync,lstatSync,mkdirSync,openSync,readFileS
 import {createHash,randomUUID} from 'node:crypto';
 import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
 const GiB=1024**3;
-export const defaults=Object.freeze({cacheBytes:20*GiB,scratchBytes:5*GiB,freeReserveBytes:2*GiB,maxEntries:500000});
+export const defaults=Object.freeze({cacheBytes:50*GiB,scratchBytes:5*GiB,freeReserveBytes:2*GiB,maxEntries:500000});
 export const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function policy(root,env=process.env){let limits={...defaults};const path=join(root,'release/rust-disk-policy.json');if(existsSync(path)){if(lstatSync(path).size>16384)throw new Error('disk.policy_budget');const document=JSON.parse(readFileSync(path));if(document.schema!=='lycheedev.disk-policy.v1')throw new Error('disk.unknown_policy');for(const key of Object.keys(defaults)){if(document[key]!==undefined)limits[key]=document[key];}}
   for(const [name,key]of [['LYCHEEDEV_DISK_CACHE_GIB','cacheBytes'],['LYCHEEDEV_DISK_SCRATCH_GIB','scratchBytes'],['LYCHEEDEV_DISK_FREE_GIB','freeReserveBytes']])if(env[name]!==undefined){if(!/^\d+(\.\d+)?$/.test(env[name]))throw new Error('disk.invalid_policy');limits[key]=Number(env[name])*GiB;}

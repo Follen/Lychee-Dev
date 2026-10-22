@@ -8,7 +8,7 @@ export function auxiliaryRequest({cargoBuild=false,msvcCompile=false}={}){
   if(cargoBuild&&msvcCompile)throw new Error('owned.conflicting_auxiliary_request');
   return {cargoBuild,msvcCompile};
 }
-function request(command,args,{cwd,env,evidence,timeout=600000,orphanMs=30000,cargoBuild=false,msvcCompile=false,memoryObservation=false,startupDiagnostics=false}){
+function request(command,args,{cwd,env,evidence,timeout=900000,orphanMs=30000,cargoBuild=false,msvcCompile=false,memoryObservation=false,startupDiagnostics=false}){
   if(process.platform!=='win32')throw new Error('owned.windows_required');
   const admission=auxiliaryRequest({cargoBuild,msvcCompile});
   if(typeof memoryObservation!=='boolean')throw new Error('owned.invalid_memory_request');
@@ -30,7 +30,7 @@ function result(job,wrapper){
 }
 export function ownedSpawnSync(command,args,options){
   const job=request(command,args,options);
-  const wrapper=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',job.wrapper,'-Request',job.path],{cwd:options.cwd,env:job.env,windowsHide:true,shell:false,timeout:(options.timeout||600000)+60000,maxBuffer:1<<20});
+  const wrapper=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',job.wrapper,'-Request',job.path],{cwd:options.cwd,env:job.env,windowsHide:true,shell:false,timeout:(options.timeout||900000)+60000,maxBuffer:1<<20});
   return result(job,wrapper);
 }
 export async function ownedSpawn(command,args,options){
@@ -39,7 +39,7 @@ export async function ownedSpawn(command,args,options){
   let error,bytes=0;child.once('error',failure=>error=failure);
   function receive(list,chunk){bytes+=chunk.length;if(bytes>1<<20){error=new Error('owned.wrapper_output_budget');child.kill();}else list.push(chunk);}
   child.stdout.on('data',chunk=>receive(chunks,chunk));child.stderr.on('data',chunk=>receive(errors,chunk));
-  const timeout=setTimeout(()=>{error=new Error('owned.wrapper_timeout');child.kill();},(options.timeout||600000)+60000);
+  const timeout=setTimeout(()=>{error=new Error('owned.wrapper_timeout');child.kill();},(options.timeout||900000)+60000);
   const wrapper=await new Promise(ok=>child.once('close',(status,signal)=>ok({status,signal})));clearTimeout(timeout);
   return result(job,{...wrapper,error,stdout:Buffer.concat(chunks),stderr:Buffer.concat(errors)});
 }

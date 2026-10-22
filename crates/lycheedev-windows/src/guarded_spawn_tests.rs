@@ -18,7 +18,13 @@ use std::{
     thread::JoinHandle,
 };
 use windows::Win32::System::Pipes::PeekNamedPipe;
-const CURRENT_LUALS_CHILD_LIMIT: usize = (2 << 30) - (256 << 20); // existing source/luals.rs; no limit change
+const CHILD_MEMORY_LIMIT: usize = (2 << 30) - (256 << 20);
+fn process_image_hash(process: &Process) -> crate::Result<String> {
+    process.verify()?;
+    let bytes = fs::read(process.image_path()?).map_err(|error| error.to_string())?;
+    process.verify()?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
+}
 struct Case {
     directory: PathBuf,
     helper: PathBuf,
@@ -169,7 +175,7 @@ fn observed_members(members: &crate::job::JobMembership) -> (Vec<Process>, Strin
         match Process::open(pid) {
             Ok(process) => {
                 let image = process.image_path();
-                let hash = process.main_module().map(|module| module.hash().to_owned());
+                let hash = process_image_hash(&process);
                 rows.push_str(&format!("pid={} created={} imagePath={image:?} imageSHA256={hash:?} parentPid={:?} memory={:?}\n",
                     process.identity().pid, process.identity().created, process.parent_pid(), process.memory()));
                 held.push(process);
@@ -235,7 +241,7 @@ fn console_roles(
         {
             return Err(format!("unknown member image: {}", actual_path.display()));
         }
-        if member.main_module()?.hash() != image.hash {
+        if process_image_hash(member)? != image.hash {
             return Err("system console loaded module original hash mismatch".into());
         }
         let parent_pid = member.parent_pid()?;
@@ -323,7 +329,7 @@ fn real_child_cannot_run_before_resume_and_stdio_descendant_are_owned() {
     let stages = Cell::new(0u8);
     let (child, job) = spawn_with_probe(
         case.command(),
-        CURRENT_LUALS_CHILD_LIMIT,
+        CHILD_MEMORY_LIMIT,
         Instant::now() + Duration::from_secs(8),
         || false,
         |stage, child, job| {
@@ -340,7 +346,7 @@ fn real_child_cannot_run_before_resume_and_stdio_descendant_are_owned() {
                     assert_eq!(job.membership().unwrap().member_pids, vec![child.id()]);
                     assert_eq!(
                         job.memory_accounting().unwrap().job_memory_limit,
-                        CURRENT_LUALS_CHILD_LIMIT as u64
+                        CHILD_MEMORY_LIMIT as u64
                     );
                     stages.set(stages.get() | 2);
                 }
@@ -417,7 +423,7 @@ fn real_child_cannot_run_before_resume_and_stdio_descendant_are_owned() {
     let grand = Process::open(fields[2].parse().unwrap()).unwrap();
     assert_eq!(grand.identity().created, fields[3].parse::<u64>().unwrap());
     assert_eq!(grand.parent_pid().unwrap(), child_identity.pid);
-    assert_eq!(grand.main_module().unwrap().hash(), case.helper_hash);
+    assert_eq!(process_image_hash(&grand).unwrap(), case.helper_hash);
     let admitted = console_roles(
         &membership,
         &held_members,
@@ -461,16 +467,15 @@ fn real_child_cannot_run_before_resume_and_stdio_descendant_are_owned() {
         b"stderr\0\xfffixture"
     );
     running.terminate_and_join();
-    let never_cancel = AtomicBool::new(false);
     original
-        .wait_exit(Instant::now() + Duration::from_secs(1), &never_cancel)
+        .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
         .unwrap();
     grand
-        .wait_exit(Instant::now() + Duration::from_secs(1), &never_cancel)
+        .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
         .unwrap();
     for member in &held_members {
         member
-            .wait_exit(Instant::now() + Duration::from_secs(1), &never_cancel)
+            .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
             .unwrap();
     }
     case.proof(&format!("createdSuspendedBeforePayload=true\nstages=7\nchild={} created={}\ngrand={} created={}\nexactJobMembers={members:?}\n{admission}allObservedHeldMembersRetired=true\npipeBytes=256\njobActiveProcesses=0\nreadersJoined=true\n",child_identity.pid,child_identity.created,grand.identity().pid,grand.identity().created));
@@ -488,7 +493,7 @@ fn cancelled_or_injected_prepare_failure_never_resumes_and_reaps_original_child(
         let mut observed = None;
         let result = spawn_with_probe(
             case.command(),
-            CURRENT_LUALS_CHILD_LIMIT,
+            CHILD_MEMORY_LIMIT,
             Instant::now() + Duration::from_secs(8),
             || cancel.load(Ordering::Acquire),
             |stage, child, job| {
@@ -525,10 +530,7 @@ fn cancelled_or_injected_prepare_failure_never_resumes_and_reaps_original_child(
         assert_eq!(failure.cleanup.job_empty, Some(true));
         let original = observed.unwrap();
         original
-            .wait_exit(
-                Instant::now() + Duration::from_secs(1),
-                &AtomicBool::new(false),
-            )
+            .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
             .unwrap();
         assert!(
             !case

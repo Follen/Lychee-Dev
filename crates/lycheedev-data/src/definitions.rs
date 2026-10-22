@@ -388,12 +388,12 @@ pub(crate) fn prepare_many_controlled(
 mod batch_tests {
     use super::*;
     use crate::resource::{Budget, Cost};
-    use lycheedev_core::{control::OperationControl, workspace};
-    use serde_json::json;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+    use lycheedev_core::{
+        control::{OperationControl, TrackedCancellation},
+        workspace,
     };
+    use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn one_manifest_and_distinct_definitions_share_admission_and_caller_control() {
@@ -436,11 +436,11 @@ mod batch_tests {
             .unwrap();
         }
         let deadline = Instant::now() + Duration::from_secs(30);
-        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel = TrackedCancellation::new();
         let budget = Budget::controlled(
             Cost::defaults(),
             deadline,
-            OperationControl::new(deadline, cancel.clone()),
+            OperationControl::tracked(deadline, cancel.clone()),
         );
         let prepared = prepare_many_budgeted(
             &home,
@@ -481,7 +481,7 @@ mod batch_tests {
             .code,
             "records.query_resource_budget"
         );
-        cancel.store(true, Ordering::Release);
+        cancel.cancel();
         assert_eq!(
             prepare_many_budgeted(
                 &home,

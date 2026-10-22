@@ -180,17 +180,17 @@ impl Metadata {
                     state.set(CaptureWriteState::NotCommitted);
                 }
                 transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-                historical_write::finish_historical(written, rollback)
+                owned_write::finish_owned(written, rollback)
             })();
             let restore = self
                 .connection
                 .busy_timeout(std::time::Duration::from_secs(5))
                 .map_err(ToolkitError::from);
-            let result = historical_write::finish_historical(result, restore);
+            let result = owned_write::finish_owned(result, restore);
             let result = crate::selection::selection_finish(result, control.check());
             crate::selection::selection_finish(result, check())
         })();
-        historical_write::finish_historical(
+        owned_write::finish_owned(
             result,
             gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
         )

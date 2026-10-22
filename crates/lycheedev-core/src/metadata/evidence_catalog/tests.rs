@@ -24,7 +24,7 @@ impl Fixture {
                 if self.0 {
                     EvidenceDomain::Data
                 } else {
-                    EvidenceDomain::Historical
+                    EvidenceDomain::General
                 }
             }
             fn check(&self) -> Result<()> {
@@ -193,7 +193,7 @@ fn data_removal_receipt_and_generation_history_stay_in_same_store() {
     );
 }
 #[test]
-fn read_only_carrier_observes_later_historical_writes_without_creating_itself() {
+fn read_only_carrier_observes_later_owned_writes_without_creating_itself() {
     let f = Fixture::new();
     f.capture(b"Data first", true, &[]);
     let reader = Metadata::open(&f.0, false).unwrap();
@@ -263,7 +263,7 @@ fn ordinary_metadata_writes_wait_for_catalog_gate_but_ordinary_reads_do_not() {
         let mut metadata = Metadata::open(&home, true).unwrap();
         ready_tx.send(()).unwrap();
         let result = metadata.put("ordinary/second", &2, None);
-        let result = finish_historical(result, metadata.close());
+        let result = finish_owned(result, metadata.close());
         done_tx.send(result).unwrap();
     });
     ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -391,6 +391,26 @@ fn generic_delete_recreate_preserves_data_owner_and_generation_history() {
     let key = format!("capture/{}", id(&capture));
     let mut metadata = Metadata::open(&f.0, true).unwrap();
     assert!(metadata.delete(&key).unwrap());
+    with_catalog(
+        &f.0,
+        None,
+        &OperationControl::default(),
+        &|| Ok(()),
+        |catalog, _| {
+            for related in [
+                key.clone(),
+                format!("evidence/keep/{}", id(&capture)),
+                format!("evidence/remove/{}", id(&capture)),
+            ] {
+                assert_eq!(
+                    catalog.owner(&related, &OperationControl::default(), &|| Ok(()))?,
+                    Some(EvidenceDomain::Data),
+                );
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
     metadata.create(&key, &capture).unwrap();
     assert_eq!(metadata.generation(&key).unwrap(), Some(2));
     assert_eq!(
@@ -618,7 +638,7 @@ fn checked_delete_rejects_cross_store_recovery_before_any_mutation() {
 #[test]
 fn cancelled_removal_rollback_preserves_original_failure_and_manifest() {
     use crate::control::TrackedCancellation;
-    use crate::metadata::historical_write::removal::RemovalCommit;
+    use crate::metadata::owned_write::removal::RemovalCommit;
     use std::time::{Duration, Instant};
     let f = Fixture::new();
     let capture = f.capture(b"first error rollback", true, &[]);
@@ -695,7 +715,7 @@ fn historical_main_identity_is_pinned_through_catalog_sqlite_scope() {
     let capture = f.capture(b"historical", false, &[]);
     with_catalog(
         &f.0,
-        Some(EvidenceDomain::Historical),
+        Some(EvidenceDomain::General),
         &OperationControl::default(),
         &|| Ok(()),
         |catalog, _| {
@@ -712,7 +732,7 @@ fn historical_main_identity_is_pinned_through_catalog_sqlite_scope() {
                 )
                 .is_err()
             );
-            catalog.historical.as_mut().unwrap().put(
+            catalog.general.as_mut().unwrap().put(
                 "ordinary-pinned-test",
                 &serde_json::json!({"ok":true}),
                 None,
@@ -739,13 +759,13 @@ fn historical_creation_is_pinned_before_sqlite_initialization() {
     assert!(!f.0.join("state/toolkit.sqlite").exists());
     with_catalog(
         &f.0,
-        Some(EvidenceDomain::Historical),
+        Some(EvidenceDomain::General),
         &OperationControl::default(),
         &|| Ok(()),
         |catalog, _| {
-            assert!(catalog.historical_anchor.as_ref().unwrap().present());
+            assert!(catalog.shared_anchor.as_ref().unwrap().present());
             assert!(std::fs::remove_file(f.0.join("state/toolkit.sqlite")).is_err());
-            catalog.historical.as_mut().unwrap().put(
+            catalog.general.as_mut().unwrap().put(
                 "ordinary-created-test",
                 &serde_json::json!({"ok":true}),
                 None,

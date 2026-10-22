@@ -1,13 +1,13 @@
 //! VP9 AVI use case. Every frame borrows the single authenticated input buffer;
 //! all output names preflight before writing, with the manifest published last.
+use crate::request::DataContext;
 use super::{avi, fault, input, output};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError,
+    Outcome, Result, ToolkitError,
     evidence::{self, CaptureInput},
     storage,
 };
 use serde_json::{Value, json};
-use std::path::Path;
 mod wire;
 const MANIFEST: &str = "demux-manifest.json";
 
@@ -47,7 +47,7 @@ impl Progress {
     }
 }
 struct Meter<'a> {
-    inv: &'a Invocation,
+    ctx: &'a DataContext,
     budget: Option<crate::resource::Budget>,
 }
 impl lycheedev_core::evidence::CaptureAccounting for Meter<'_> {
@@ -56,7 +56,7 @@ impl lycheedev_core::evidence::CaptureAccounting for Meter<'_> {
     }
 
     fn check(&self) -> Result<()> {
-        self.inv.control.check()?;
+        self.ctx.control.check()?;
         self.budget
             .as_ref()
             .map_or(Ok(()), crate::resource::Budget::check)
@@ -76,7 +76,7 @@ impl lycheedev_core::evidence::CaptureAccounting for Meter<'_> {
 }
 
 fn capture(
-    inv: &Invocation,
+    ctx: &DataContext,
     bytes: &[u8],
     maximum: usize,
     media_type: &str,
@@ -86,7 +86,7 @@ fn capture(
     meter: &Meter<'_>,
 ) -> Result<Value> {
     evidence::commit_capture_budgeted(
-        &inv.home,
+        &ctx.home,
         CaptureInput {
             bytes,
             maximum_bytes: maximum,
@@ -95,100 +95,68 @@ fn capture(
             complete,
             truncated,
         },
-        &inv.control,
+        &ctx.control,
         meter,
     )
 }
-pub fn run(inv: &Invocation) -> Result<Outcome> {
-    inv.control.check()?;
-    let path = inv.flag("--path").filter(|value| !value.is_empty());
-    let id = inv
-        .flag("--file-id")
-        .map(str::parse::<u32>)
-        .transpose()
-        .map_err(|_| ToolkitError::arguments("invalid --file-id"))?
-        .filter(|id| *id != 0);
-    let output_path = inv.flag("--output").filter(|value| !value.is_empty());
-    if output_path.is_none()
-        || path.is_some() == id.is_some()
-        || path.is_none()
-            && (inv.flag("--snapshot").filter(|s| !s.is_empty()).is_none()
-                || !inv.flag_bool("--cdn") && inv.flag("--installation").is_none())
-        || path.is_some()
-            && (inv.flag("--snapshot").is_some()
-                || inv.flag_bool("--cdn")
-                || inv.flag("--installation").is_some())
-    {
-        return Err(ToolkitError::arguments(
-            "asset demux requires --output and exactly one input: --path, or --snapshot/--file-id with --installation or --cdn",
-        ));
-    }
-    if path.is_none() && inv.flag_bool("--cdn") && inv.flag("--installation").is_some() {
-        return Err(ToolkitError::arguments(
-            "choose either --cdn or --installation, not both",
-        ));
-    }
-    let maximum = inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
-    if maximum < 12 {
-        return Err(fault("records.demux_input_limit", 3));
-    }
-    let max_frames = inv.usize_flag("--max-frames", 100000, 1, 1 << 24)?;
-    let directory = output::OutputDirectory::open_scoped(
-        inv,
-        Path::new(output_path.expect("validated output")),
-        inv.flag_bool("--overwrite"),
-    )?;
+pub fn run(ctx: &DataContext, request: &super::request::DemuxRequest) -> Result<Outcome> {
+    ctx.control.check()?;
+    let maximum = request.maximum_bytes;
+    let max_frames = request.max_frames;
+    let directory = output::OutputDirectory::open_scoped(ctx, &request.output, request.overwrite)?;
     let mut progress = Progress::default();
     let result = (|| {
-        directory.preflight_scoped(inv, MANIFEST, None)?;
-        if let Some(path) = path {
+        directory.preflight_scoped(ctx, MANIFEST, None)?;
+        match &request.input {
+            super::request::DemuxInput::Path(path) => {
             let metadata =
-                lycheedev_core::metadata::Metadata::open_controlled(&inv.home, true, &inv.control)?;
+                lycheedev_core::metadata::Metadata::open_controlled(&ctx.home, true, &ctx.control)?;
             let result = (|| {
-                let (bytes, canonical) = input::local(inv, Path::new(path), maximum)?;
+                let (bytes, canonical) = input::local(ctx, path, maximum)?;
                 progress.before_capture()?;
                 let source_capture = capture(
-                    inv,
+                    ctx,
                     &bytes,
                     maximum,
                     "video/x-msvideo",
                     json!({"kind":"asset-demux-source","locator":format!("file:{canonical}"),"snapshot":""}),
                     true,
                     false,
-                    &Meter { inv, budget: None },
+                    &Meter { ctx, budget: None },
                 )?;
                 progress.committed(&source_capture);
                 let source = json!({"kind":"file","input":path,"path":canonical,"bytes":bytes.len(),"sha256":source_capture["blob"]["sha256"]});
                 consume(
-                    inv,
+                    ctx,
                     &directory,
                     &bytes,
                     source,
                     source_capture,
                     "",
                     "",
-                    path,
-                    output_path.expect("validated output"),
+                    &path.to_string_lossy(),
+                    &request.output.to_string_lossy(),
                     maximum,
                     max_frames,
+                    request.allow_partial,
                     None,
                     &mut progress,
                 )
             })();
-            lycheedev_core::metadata::historical_write::finish_historical(result, metadata.close())
-        } else {
+            lycheedev_core::metadata::owned_write::finish_owned(result, metadata.close())
+        }, super::request::DemuxInput::Casc { file_id } => {
             // Reserve the receipt slot before the input helper can commit it.
             progress.before_capture()?;
             input::with_casc_bytes(
-                inv,
-                id.expect("validated ID"),
+                ctx,
+                *file_id,
                 maximum,
                 &mut |input, budget| {
                     progress.committed(&input.capture);
-                    let name = format!("casc:fdid:{}", id.expect("validated ID"));
-                    let source = json!({"kind":"casc","input":name,"fileDataID":id,"snapshot":input.snapshot,"pin":input.reading["pin"],"contentKey":input.reading["entry"]["contentKey"],"encodingKey":input.reading["payloadEncodingKey"],"bytes":input.bytes.len(),"sha256":input.capture["blob"]["sha256"]});
+                    let name = format!("casc:fdid:{}", *file_id);
+                    let source = json!({"kind":"casc","input":name,"fileDataID":file_id,"snapshot":input.snapshot,"pin":input.reading["pin"],"contentKey":input.reading["entry"]["contentKey"],"encodingKey":input.reading["payloadEncodingKey"],"bytes":input.bytes.len(),"sha256":input.capture["blob"]["sha256"]});
                     consume(
-                        inv,
+                        ctx,
                         &directory,
                         &input.bytes,
                         source,
@@ -196,22 +164,23 @@ pub fn run(inv: &Invocation) -> Result<Outcome> {
                         &input.snapshot,
                         &input.data_build,
                         &name,
-                        output_path.expect("validated output"),
+                        &request.output.to_string_lossy(),
                         maximum,
                         max_frames,
+                        request.allow_partial,
                         Some(budget),
                         &mut progress,
                     )
                 },
             )
-        }
+        }}
     })();
-    let result = output::finish_closes(result, directory.close(), &inv.control);
+    let result = output::finish_closes(result, directory.close(), &ctx.control);
     progress.finish(result)
 }
 #[allow(clippy::too_many_arguments)]
 fn consume(
-    inv: &Invocation,
+    ctx: &DataContext,
     directory: &output::OutputDirectory,
     bytes: &[u8],
     source: Value,
@@ -222,11 +191,12 @@ fn consume(
     output_path: &str,
     maximum: usize,
     max_frames: usize,
+    allow_partial: bool,
     budget: Option<&crate::resource::Budget>,
     progress: &mut Progress,
 ) -> Result<Outcome> {
     let meter = Meter {
-        inv,
+        ctx,
         budget: budget.map(crate::resource::Budget::safety_only),
     };
     let parsed = avi::parse_scoped(
@@ -235,9 +205,9 @@ fn consume(
             max_frames,
             max_frame_bytes: 256 << 20,
             max_total_bytes: 1 << 30,
-            allow_partial: inv.flag_bool("--allow-partial"),
+            allow_partial,
         },
-        &inv.control,
+        &ctx.control,
         budget,
     )?;
     // Frame maps, names, receipt clones and Vec slots remain live together.
@@ -257,18 +227,18 @@ fn consume(
         .map(|(index, frame)| format!("frame-{:06}.{}", index + 1, frame.chunk))
         .collect();
     for name in &names {
-        inv.control.check()?;
-        directory.preflight_scoped(inv, name, budget)?;
+        ctx.control.check()?;
+        directory.preflight_scoped(ctx, name, budget)?;
     }
-    directory.preflight_scoped(inv, MANIFEST, budget)?;
+    directory.preflight_scoped(ctx, MANIFEST, budget)?;
     let mut captures = Vec::with_capacity(parsed.frames.len() + 2);
     captures.push(source_capture.clone());
     let mut frames = Vec::with_capacity(parsed.frames.len());
     for (index, frame) in parsed.frames.iter().enumerate() {
-        inv.control.check()?;
+        ctx.control.check()?;
         progress.before_capture()?;
         let frame_capture = capture(
-            inv,
+            ctx,
             frame.payload,
             256 << 20,
             "video/VP9",
@@ -306,7 +276,7 @@ fn consume(
         .collect();
     progress.before_capture()?;
     let manifest_capture = evidence::commit_capture_budgeted_with_references(
-        &inv.home,
+        &ctx.home,
         CaptureInput {
             bytes: &body,
             maximum_bytes: 16 << 20,
@@ -317,7 +287,7 @@ fn consume(
         },
         &[source_id],
         &required,
-        &inv.control,
+        &ctx.control,
         &meter,
     )?;
     progress.committed(&manifest_capture);
@@ -325,13 +295,13 @@ fn consume(
     // The canonical output directory, not workspace home, is the lock domain.
     // One original OS handle protects the whole set and completion marker.
     let _copy_buffer = budget.map(|b| b.reserve_retained(65536)).transpose()?;
-    let lease = directory.lease(inv, budget)?;
+    let lease = directory.lease(ctx, budget)?;
     let published = (|| {
         for name in &names {
-            inv.control.check()?;
-            directory.preflight_scoped(inv, name, budget)?;
+            ctx.control.check()?;
+            directory.preflight_scoped(ctx, name, budget)?;
         }
-        directory.preflight_scoped(inv, MANIFEST, budget)?;
+        directory.preflight_scoped(ctx, MANIFEST, budget)?;
         progress
             .published
             .try_reserve(names.len() + 1)
@@ -339,7 +309,7 @@ fn consume(
         for (name, frame) in names.iter().zip(&parsed.frames) {
             let receipt = directory.path.join(name).to_string_lossy().into_owned();
             let mut receipt = Some(receipt);
-            directory.publish_scoped(inv, name, frame.payload, 1 << 30, budget, &mut |state| {
+            directory.publish_scoped(ctx, name, frame.payload, 1 << 30, budget, &mut |state| {
                 if state == storage::StagedPublication::Published {
                     progress
                         .published
@@ -349,7 +319,7 @@ fn consume(
         }
         let receipt = directory.path.join(MANIFEST).to_string_lossy().into_owned();
         let mut receipt = Some(receipt);
-        directory.publish_scoped(inv, MANIFEST, &body, 16 << 20, budget, &mut |state| {
+        directory.publish_scoped(ctx, MANIFEST, &body, 16 << 20, budget, &mut |state| {
             if state == storage::StagedPublication::Published {
                 progress
                     .published
@@ -358,7 +328,7 @@ fn consume(
         })?;
         Ok(())
     })();
-    lycheedev_core::metadata::historical_write::finish_historical(published, lease.close())?;
+    lycheedev_core::metadata::owned_write::finish_owned(published, lease.close())?;
     let mut outcome = Outcome::new(manifest);
     outcome.complete = !parsed.truncated;
     outcome.selection = json!({"snapshot":snapshot});
@@ -405,7 +375,7 @@ mod scoped_tests {
         let primary = ToolkitError::new("records.metadata_limit", "actual operation stopped", 3);
         let mut published = primary.clone();
         published.details = json!({"schema":"lycheedev.asset-publication-error.v1","primary":primary,"publication":{"state":"unknown","path":"fixture-output"}});
-        let joined = lycheedev_core::metadata::historical_write::finish_historical::<()>(
+        let joined = lycheedev_core::metadata::owned_write::finish_owned::<()>(
             Err(published),
             Err(ToolkitError::new("external.io", "injected-close", 5)),
         );

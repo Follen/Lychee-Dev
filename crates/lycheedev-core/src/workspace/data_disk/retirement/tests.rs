@@ -58,7 +58,7 @@ impl Fixture {
         let result =
             resources.retire_derived_cache_with_check(options, &|| Ok(()), |_| Ok(()), reference);
         let cleanup = resources.close();
-        crate::metadata::historical_write::finish_historical(result, cleanup)
+        crate::metadata::owned_write::finish_owned(result, cleanup)
     }
 }
 impl Drop for Fixture {
@@ -240,13 +240,13 @@ fn cancellation_after_manifest_retirement_keeps_counted_orphan_for_retry() {
     let (object, keys) = f.publish(b"retain until retry", &["cancelled"]);
     let path = manifest_path(&f, &keys[0]);
     let control = OperationControl::default();
-    let cancel = control.cancel_handle();
+    let cancel = control.tracked_cancel_handle().unwrap();
     let resources = f.resources(&control);
     let result = resources.retire_derived_cache_with_check(
         Default::default(),
         &|| {
             if !path.exists() {
-                cancel.store(true, Ordering::Release);
+                cancel.cancel();
             }
             control.check()
         },
@@ -336,15 +336,15 @@ fn same_sha_cap_and_keep_remain_separately_owned_after_derived_retirement() {
     .unwrap();
     assert_eq!(capture["blob"]["sha256"], object.sha256);
     let id = capture["id"].as_str().unwrap();
-    let invocation = crate::Invocation {
-        command: "evidence keep".into(),
-        positional: Some(id.into()),
-        flags: Default::default(),
+    let context = crate::request::RequestContext {
         home: f.0.clone(),
         cwd: f.0.clone(),
         control: OperationControl::default(),
     };
-    evidence::dispatch(&invocation).unwrap();
+    evidence::dispatch(
+        &context,
+        evidence::EvidenceRequest::Keep { id: id.to_owned() },
+    ).unwrap();
     let key = format!("evidence/keep/{id}");
     let metadata = Metadata::open(&f.0, false).unwrap();
     let before: serde_json::Value = metadata.read(&key).unwrap();

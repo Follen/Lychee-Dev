@@ -22,7 +22,7 @@ pub(crate) fn run<T>(
             for key in keys {
                 let selected = catalog
                     .owner(key, control, &|| Ok(()))?
-                    .unwrap_or(EvidenceDomain::Historical);
+                    .unwrap_or(EvidenceDomain::General);
                 if destination.is_some_and(|previous| previous != selected) {
                     return Err(ToolkitError::invalid(
                         "checked deletion cannot mutate two evidence stores",
@@ -30,7 +30,7 @@ pub(crate) fn run<T>(
                 }
                 destination = Some(selected);
             }
-            let destination = destination.unwrap_or(EvidenceDomain::Historical);
+            let destination = destination.unwrap_or(EvidenceDomain::General);
             if destination == EvidenceDomain::Data {
                 store::admit_mutation(
                     catalog.data.as_mut().ok_or_else(integrity)?,
@@ -39,16 +39,16 @@ pub(crate) fn run<T>(
                     &|| Ok(()),
                 )?;
             } else {
-                if let Some(metadata) = catalog.historical.take() {
+                if let Some(metadata) = catalog.general.take() {
                     metadata.close()?;
                 }
-                let mut metadata = catalog.open_historical(home, true, control, &|| Ok(()))?;
+                let mut metadata = catalog.open_general(home, true, control, &|| Ok(()))?;
                 metadata.evidence_gate_held = true;
-                catalog.historical = Some(metadata);
+                catalog.general = Some(metadata);
             }
             let metadata = match destination {
                 EvidenceDomain::Data => catalog.data.as_ref(),
-                EvidenceDomain::Historical => catalog.historical.as_ref(),
+                EvidenceDomain::General => catalog.general.as_ref(),
             }
             .ok_or_else(integrity)?;
             let connection = &metadata.connection;
@@ -121,7 +121,7 @@ pub(crate) fn run<T>(
                                     if EvidenceKey::parse(&key).is_some() {
                                         destination
                                     } else {
-                                        EvidenceDomain::Historical
+                                        EvidenceDomain::General
                                     }
                                 });
                         if selected != destination {
@@ -161,7 +161,7 @@ pub(crate) fn run<T>(
                 transaction.execute_batch("ROLLBACK").map_err(Into::into)
             };
             transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-            crate::selection::selection_finish(finish_historical(result, rollback), control.check())
+            crate::selection::selection_finish(finish_owned(result, rollback), control.check())
         },
     )
 }

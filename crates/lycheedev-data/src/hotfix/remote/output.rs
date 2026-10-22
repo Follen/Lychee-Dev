@@ -1,4 +1,4 @@
-//! The fixed Hotfix CSV manifest and typed JSONL stream, sharing the SQL pair lease.
+//! The fixed Hotfix CSV manifest, sharing the existing pair lease.
 use super::*;
 use std::path::Path;
 const COLUMNS: [&str; 9] = [
@@ -152,8 +152,8 @@ struct CsvSource {
     reference: String,
     fetched_at: String,
 }
-pub(super) fn csv(inv: &Invocation, result: &RemoteResult, budget: &Budget) -> Result<Value> {
-    let (raw, manifest) = encode_with_check(result, budget, || inv.control.check())?;
+pub(super) fn csv(ctx: &DataContext, path: &Path, result: &RemoteResult, budget: &Budget) -> Result<Value> {
+    let (raw, manifest) = encode_with_check(result, budget, || ctx.control.check())?;
     let wire: Manifest = serde_json::from_value(manifest.clone())?;
     let mut sidecar = serde_json::to_string_pretty(&wire)?
         .replace('&', "\\u0026")
@@ -163,17 +163,17 @@ pub(super) fn csv(inv: &Invocation, result: &RemoteResult, budget: &Budget) -> R
         .replace('\u{2029}', "\\u2029")
         .into_bytes();
     sidecar.push(b'\n');
-    let path = inv.required("--output")?;
+    let sidecar_path = std::path::PathBuf::from(format!("{}.manifest.json", path.display()));
     // Go Hotfix intentionally overwrites; --overwrite belongs only to SQL.
     let (data, destination) = crate::assets::output::destination_pair_scoped(
-        inv,
-        Path::new(path),
-        Path::new(&format!("{path}.manifest.json")),
+        ctx,
+        path,
+        &sidecar_path,
         true,
         budget,
     )?;
-    let result = crate::local_query::query_csv::publish_pair_after_data(
-        inv,
+    let result = crate::assets::pair_output::publish_pair_after_data(
+        ctx,
         &data,
         &destination,
         true,
@@ -183,132 +183,6 @@ pub(super) fn csv(inv: &Invocation, result: &RemoteResult, budget: &Budget) -> R
         || Ok(()),
     );
     let published = result.is_ok();
-    crate::assets::output::finish_pair(inv, data, destination, budget, result, published)?;
+    crate::assets::output::finish_pair(ctx, data, destination, budget, result, published)?;
     Ok(manifest)
-}
-#[derive(Serialize)]
-struct Context<'a> {
-    query: &'a Query,
-    coverage: &'a Coverage,
-    change: &'a selection::ChangePin,
-}
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Frame<'a> {
-    schema: &'static str,
-    #[serde(rename = "type")]
-    kind: &'static str,
-    #[serde(skip_serializing_if = "str::is_empty")]
-    operation_id: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    context: Option<Context<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    index: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    record: Option<&'a Record>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    complete: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    truncated: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    count: Option<usize>,
-    #[serde(skip_serializing_if = "<[String]>::is_empty")]
-    warnings: &'a [String],
-}
-pub(super) fn jsonl(
-    result: &RemoteResult,
-    control: &OperationControl,
-    budget: &Budget,
-    emit: &mut impl FnMut(&[u8]) -> Result<()>,
-) -> Result<()> {
-    let frame = |kind| Frame {
-        schema: "lycheedev.jsonl.v1",
-        kind,
-        operation_id: &result.snapshot,
-        context: None,
-        index: None,
-        record: None,
-        complete: None,
-        truncated: None,
-        count: None,
-        warnings: &[],
-    };
-    let mut send = |value: Frame<'_>| -> Result<()> {
-        control.check()?;
-        let mut raw = go_bytes(&value, budget, usize::MAX)?;
-        raw.push(b'\n');
-        control.check()?;
-        budget.check()?;
-        emit(&raw)
-    };
-    let mut begin = frame("begin");
-    begin.context = Some(Context {
-        query: &result.query,
-        coverage: &result.coverage,
-        change: &result.change,
-    });
-    send(begin)?;
-    for (index, record) in result.records.iter().enumerate() {
-        let mut row = frame("record");
-        row.index = Some(index);
-        row.record = Some(record);
-        send(row)?;
-    }
-    let mut end = frame("end");
-    end.complete = Some(result.complete);
-    end.truncated = Some(result.truncated);
-    end.count = Some(result.records.len());
-    end.warnings = &result.warnings;
-    send(end)
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Envelope<'a> {
-    schema: &'static str,
-    ok: bool,
-    operation_id: &'static str,
-    context: Value,
-    result: &'a RemoteResult,
-    captures: &'a [Value],
-    warnings: &'a [Value],
-    error: Option<()>,
-}
-pub(super) fn render(
-    inv: &Invocation,
-    result: &RemoteResult,
-    timeout: Option<u64>,
-    out: &mut impl std::io::Write,
-    budget: &Budget,
-) -> Result<()> {
-    if inv.flag("--format") == Some("jsonl") {
-        return jsonl(result, &inv.control, budget, &mut |raw| {
-            out.write_all(raw)?;
-            out.flush()?;
-            Ok(())
-        });
-    }
-    inv.control.check()?;
-    if inv.flag("--format") == Some("json") {
-        let outcome = outcome(result, Value::Null);
-        let mut context = outcome.selection;
-        if let Some(seconds) = timeout {
-            context["timeoutSeconds"] = json!(seconds);
-        }
-        let envelope = Envelope {
-            schema: "lycheedev.result.v1",
-            ok: true,
-            operation_id: "",
-            context,
-            result,
-            captures: &outcome.provenance,
-            warnings: &outcome.warnings,
-            error: None,
-        };
-        lycheedev_core::public_json::write_serializable_line(out, &envelope)?;
-    } else {
-        lycheedev_core::public_json::write_pretty_serializable_line(out, result)?;
-    }
-    out.flush()?;
-    Ok(())
 }

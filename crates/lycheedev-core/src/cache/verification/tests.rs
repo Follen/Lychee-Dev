@@ -1,7 +1,6 @@
 use super::*;
 use crate::control::{StopCause, TrackedCancellation};
 use std::{
-    collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
@@ -55,8 +54,10 @@ fn verify_streams_objects_sorts_all_errors_and_never_mutates_them() {
     let missing = "b".repeat(64);
     let marker = f.marker(
         &missing,
-        format!(r#"{{"sha256":"{missing}","owners":[{{"kind":"pinned","owner":"fixture"}}]}}"#)
-            .as_bytes(),
+        format!(
+            r#"{{"sha256":"{missing}","owners":[{{"kind":"pinned","owner":"fixture","retainedAt":"2026-10-15T00:00:00Z"}}]}}"#
+        )
+        .as_bytes(),
     );
     let foreign = f.home.join("cache/objects/foreign");
     fs::write(&foreign, b"ignored name").unwrap();
@@ -74,60 +75,12 @@ fn verify_streams_objects_sorts_all_errors_and_never_mutates_them() {
     f.cleanup();
 }
 #[test]
-fn retention_duplicate_slice_null_and_zero_time_follow_go_reader() {
+fn retention_marker_has_an_actual_64k_limit_without_legacy_depth_tolerance() {
     let f = Fixture::new();
     let key = "a".repeat(64);
-    let marker=f.marker(&key,format!(r#"{{"SHA256":"{key}","sha256":null,"owners":[{{"kind":"pinned","owner":"before"}}],"OWNERS":[{{"owner":"after","retainedAt":null}}]}}"#).as_bytes());
-    let report = verify(&f.home, &f.control).unwrap();
-    assert_eq!(report.missing, vec![key.clone()]);
-    assert!(report.errors.is_empty());
-    fs::write(
-        &marker,
-        format!(
-            r#"{{"sha256":"{key}","owners":[{{"kind":"pinned","owner":"x"}}],"owners":[null]}}"#
-        ),
-    )
-    .unwrap();
-    assert_eq!(
-        verify(&f.home, &f.control).unwrap().missing,
-        vec![key.clone()]
-    );
-    fs::write(
-        &marker,
-        format!(r#"{{"sha256":"{key}","owners":[{{"kind":"pinned","owner":"x"}}],"owners":null}}"#),
-    )
-    .unwrap();
-    assert!(verify(&f.home, &f.control).unwrap().ok);
-    f.cleanup();
-}
-#[test]
-fn retention_raw_timestamp_escape_is_not_json_unescaped_into_valid_time() {
-    let f = Fixture::new();
-    let key = "a".repeat(64);
-    let marker=f.marker(&key,format!(r#"{{"sha256":"{key}","owners":[{{"kind":"evidence","owner":"x","retainedAt":"2026-10-15T00:00:00\u005a"}}]}}"#).as_bytes());
-    let report = verify(&f.home, &f.control).unwrap();
-    assert!(report.missing.is_empty());
-    assert_eq!(report.errors.len(), 1);
-    fs::write(marker,format!(r#"{{"sha256":"{key}","owners":[{{"kind":"evidence","owner":"x","retainedAt":"2026-10-15T00:00:00,123Z"}}]}}"#)).unwrap();
-    assert_eq!(verify(&f.home, &f.control).unwrap().missing, vec![key]);
-    f.cleanup();
-}
-#[test]
-fn ignored_retention_values_use_go_depth_and_actual_64k_limit() {
-    let f = Fixture::new();
-    let key = "a".repeat(64);
-    let value = |depth: usize| {
-        format!(
-            r#"{{"sha256":"{key}","owners":[],"ignored":{}0{}}}"#,
-            "[".repeat(depth),
-            "]".repeat(depth)
-        )
-    };
-    let path = f.marker(&key, value(9999).as_bytes());
-    assert!(verify(&f.home, &f.control).unwrap().ok);
-    fs::write(&path, value(10000)).unwrap();
-    assert_eq!(verify(&f.home, &f.control).unwrap().errors.len(), 1);
     let mut bytes = format!(r#"{{"sha256":"{key}","owners":[]}}"#).into_bytes();
+    let path = f.marker(&key, &bytes);
+    assert!(verify(&f.home, &f.control).unwrap().ok);
     bytes.resize(65536, b' ');
     fs::write(&path, &bytes).unwrap();
     assert!(verify(&f.home, &f.control).unwrap().ok);
@@ -152,18 +105,15 @@ fn cancelled_cache_dispatch_keeps_original_stop_and_does_not_scan() {
     let stop = TrackedCancellation::new();
     let control = OperationControl::tracked(Instant::now() + Duration::from_secs(30), stop.clone());
     stop.cancel();
-    let inv = Invocation {
-        command: "cache verify".into(),
-        positional: None,
-        flags: BTreeMap::new(),
+    let context = crate::request::RequestContext {
         home: f.home.clone(),
         cwd: f.home.clone(),
         control,
     };
-    let error = super::super::dispatch(&inv).unwrap_err();
+    let error = super::super::dispatch(&context, super::super::CacheRequest::Verify).unwrap_err();
     assert_eq!(error.code, "command.cancelled");
     assert_eq!(
-        inv.control.stop_cause().unwrap(),
+        context.control.stop_cause().unwrap(),
         Some(StopCause::Cancelled)
     );
     assert!(!f.home.join("cache/objects").exists());
@@ -173,15 +123,12 @@ fn cancelled_cache_dispatch_keeps_original_stop_and_does_not_scan() {
 fn cache_dispatch_integrity_preserves_report_and_existing_warning_slot() {
     let f = Fixture::new();
     f.object(&"d".repeat(64), b"bad");
-    let inv = Invocation {
-        command: "cache verify".into(),
-        positional: None,
-        flags: BTreeMap::new(),
+    let context = crate::request::RequestContext {
         home: f.home.clone(),
         cwd: f.home.clone(),
         control: f.control.clone(),
     };
-    let error = super::super::dispatch(&inv).unwrap_err();
+    let error = super::super::dispatch(&context, super::super::CacheRequest::Verify).unwrap_err();
     assert_eq!(error.code, "vault.cache_integrity");
     assert_eq!(error.details["result"]["checked"], 1);
     assert_eq!(error.details["warnings"].as_array().unwrap().len(), 1);

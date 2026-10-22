@@ -1,17 +1,12 @@
-//! Fixed Go scenario mapping (all runtime execution is NOT_RUN until CI):
-//! slots_test.go: TestSlotPoolInstallPublicationAndIsolation,
-//! TestSlotPoolIncompleteInstallAndPendingPublication,
-//! TestEndedProcessRetirementReconcilesTornPublication,
-//! TestRuntimeRetirementNeverClaimsConsumptionOrTouchesAnotherProcess.
-//! slot_route_test.go: TestForwardAllocationIsBoundedAndPreservesUnknown,
-//! TestRouteChecksActualForeignAndEmptyBytes.
-//! slot_runtime_retirement_test.go: TestRuntimeRetirementReconcilesTornPublication,
-//! TestRuntimeRetirementRejectsCorruptPayload.
-//! Additional faults cover every before/after durable-write boundary, cancellation,
-//! exact field/digest correlation, stale acknowledgements, and lease ownership.
+//! Current delivery slot publication scenarios: install/publication isolation,
+//! incomplete install and pending publication, ended-process and runtime
+//! retirement of torn publications, bounded forward allocation preserving
+//! unknown bytes, and actual foreign/empty route bytes. Additional faults cover
+//! every before/after durable-write boundary, cancellation, exact field/digest
+//! correlation, stale acknowledgements, and lease ownership.
 use super::*;
 use crate::installation::Resource;
-use lycheedev_core::coordination::InstallationGuard;
+use lycheedev_core::coordination::InstallationMaintenanceLease;
 use std::{
     cell::RefCell,
     fs,
@@ -201,7 +196,7 @@ fn publication_is_intent_then_exact_core_payload_then_commit() {
     assert_eq!(store.writes.len(), 3, "exact retry is read-only");
 }
 #[test]
-fn reserved_preserves_both_go_causes_and_exact_captured_owner() {
+fn reserved_preserves_both_causes_and_exact_captured_owner() {
     let mut store = MemoryStore::new();
     let c = OperationControl::default();
     let e = envelope();
@@ -227,7 +222,7 @@ fn reserved_preserves_both_go_causes_and_exact_captured_owner() {
         assert_eq!(reservation, store.pool.files[0]);
     }
     assert_eq!(store.writes.len(), 3);
-    // Go checks the existing reservation before validating malformed tokens.
+    // The existing reservation is checked before validating malformed tokens.
     let mut malformed = e.clone();
     malformed.nonce = "bad".into();
     code(
@@ -458,13 +453,13 @@ fn confirmation_rejects_pending_empty_identity_and_invalid_index() {
     assert!(store.writes.is_empty());
 }
 #[test]
-fn lower_level_confirmation_keeps_go_nonce_contract_after_durable_receipt() {
+fn lower_level_confirmation_keeps_nonce_contract_after_durable_receipt() {
     let mut store = MemoryStore::new();
     let c = OperationControl::default();
     let e = envelope();
     publish(&mut store, &c, "a", &e).unwrap();
     // The exact receipt has already been verified by the caller. Delivery does
-    // not silently add a second schema/owner/fence gate absent in Go.
+    // not silently add a second schema/owner/fence gate absent from the retained contract.
     let expected = ExpectedEnvelope {
         index: e.index,
         nonce: e.nonce,
@@ -577,7 +572,7 @@ fn retirement_rejects_corrupt_payload_and_wrong_runtime_without_mutation() {
     }
 }
 #[test]
-fn retirement_prechecks_and_lower_level_successor_length_match_go() {
+fn retirement_prechecks_and_lower_level_successor_length_match_reference() {
     let (mut store, e) = MemoryStore::torn(false);
     let c = OperationControl::default();
     for next in [
@@ -801,7 +796,7 @@ fn route_runtime_is_unique_anchored_ascii_and_checks_every_skipped_file() {
     verify_route(&mut store, &OperationControl::default(), &e).unwrap();
 }
 #[test]
-fn route_range_defaults_and_schema_gate_match_go() {
+fn route_range_defaults_and_schema_gate_match_reference() {
     let mut store = MemoryStore::new();
     let c = OperationControl::default();
     let mut e = envelope();
@@ -1228,7 +1223,6 @@ impl DiskFixture {
             identity: VerifiedInstallation {
                 canonical_path: addon,
                 manifest_sha256: storage::sha256(&raw),
-                generation: 1,
             },
             root,
         }
@@ -1369,7 +1363,7 @@ fn disk_publication_roundtrip_holds_both_locks_and_releases_before_receipt_wait(
     let c = OperationControl::default();
     let e = envelope();
     let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
-    assert!(InstallationGuard::acquire(&f.identity.canonical_path).is_err());
+    assert!(InstallationMaintenanceLease::acquire(&f.identity.canonical_path).is_err());
     assert!(ExclusiveLock::resource(&f.root.join(".lycheedev-slot-locks"), "publication").is_err());
     lease.publish("123/456", &e).unwrap();
     lease.verify("123/456", &e).unwrap();
@@ -1379,7 +1373,7 @@ fn disk_publication_roundtrip_holds_both_locks_and_releases_before_receipt_wait(
         mailbox::slot_payload(&e).unwrap()
     );
     lease.close().unwrap(); // receipt wait begins only after checked lease close
-    let gate = InstallationGuard::acquire(&f.identity.canonical_path).unwrap();
+    let gate = InstallationMaintenanceLease::acquire(&f.identity.canonical_path).unwrap();
     drop(gate);
     let mut resumed = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
     let mut foreign = e.clone();
@@ -1409,7 +1403,7 @@ fn disk_publication_rejects_changed_receipt_and_admission_rejects_pool_drift() {
         "delivery.invalid_installation",
     );
     drop(lease);
-    assert!(InstallationGuard::acquire(&f.identity.canonical_path).is_ok());
+    assert!(InstallationMaintenanceLease::acquire(&f.identity.canonical_path).is_ok());
     let loader = slots::directory(&f.root, 500).join("Loader.lua");
     let original = fs::read(&loader).unwrap();
     fs::write(&loader, b"-- changed").unwrap();
@@ -1437,8 +1431,8 @@ fn disk_publication_rejects_changed_receipt_and_admission_rejects_pool_drift() {
 
 #[test]
 fn disk_cleanup_uses_recorded_path_and_pool_even_when_addon_or_receipt_changed() {
-    // Go Consumed/native_windows.go and RetireSlotProcess/process_end_windows.go
-    // do not call addon Guard or read its installation receipt during cleanup.
+    // Recorded cleanup does not call the addon Guard or read its installation
+    // receipt; it uses the recorded path and pool only.
     let f = DiskFixture::new();
     let c = OperationControl::default();
     let e = envelope();
@@ -1508,47 +1502,6 @@ fn disk_pre_input_rechecks_addon_inventory_with_original_control() {
     cancelled.cancel();
     code(lease.verify("a", &e), "command.cancelled");
     assert!(!slots::read_pool(&f.root).unwrap().files[0].consumed);
-}
-
-#[test]
-fn disk_formal_cleanup_does_not_load_legacy_claims_but_shares_maintenance_lock() {
-    let f = DiskFixture::new();
-    let c = OperationControl::default();
-    let e = envelope();
-    let recorded =
-        RecordedInstallationIdentity::from_authenticated_record(f.identity.canonical_path.clone())
-            .unwrap();
-    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
-    lease.publish("123/456", &e).unwrap();
-    drop(lease);
-    fs::write(
-        f.root.join(".lycheedev-claims.json"),
-        b"broken historical registry",
-    )
-    .unwrap();
-    let mut cleanup = PublicationLease::acquire_recorded(&recorded, "3.2.0", &c).unwrap();
-    assert_eq!(
-        InstallationGuard::acquire(&f.identity.canonical_path)
-            .err()
-            .unwrap()
-            .code,
-        "workspace.busy"
-    );
-    cleanup.retire_process("123/456", &e).unwrap();
-    assert!(cleanup.inspect().unwrap().files[0].retired_process);
-    drop(cleanup);
-    // The legacy API retains its former registry-validation behavior.
-    assert_eq!(
-        InstallationGuard::acquire(&f.identity.canonical_path)
-            .err()
-            .unwrap()
-            .code,
-        "input.invalid"
-    );
-    assert_eq!(
-        fs::read(f.root.join(".lycheedev-claims.json")).unwrap(),
-        b"broken historical registry"
-    );
 }
 
 #[test]
@@ -1637,7 +1590,7 @@ fn repair_capability_only_admits_exact_unbind_without_invented_wire_restrictions
         RepairPublication::from_authenticated_record(&identity, "3.2.0", "123/456", &e),
         "bridge.invalid_slot_token",
     );
-    // Go's shared envelope admission does not forbid ignored unbind fields or
+    // Shared envelope admission does not forbid ignored unbind fields or
     // demand a newly invented consumer/version format. Preserve them exactly.
     e = unbind();
     e.code = "-- ignored for unbind".into();
@@ -1708,8 +1661,8 @@ fn disk_repair_modified_addon_uses_original_release_and_exact_consumer() {
     let f = DiskFixture::new();
     let c = OperationControl::default();
     let original_release = "3.1.9";
-    // This fixture models a valid recorded older pool. It is not evidence that
-    // Go 3.1.9 is the oracle; the oracle requires State.Identity.Release here.
+    // This fixture models a valid recorded older pool; no older release is an
+    // oracle for the current behavior.
     for index in 1..=slots::COUNT {
         for (name, bytes) in slots::files(index, original_release) {
             fs::write(slots::directory(&f.root, index).join(name), bytes).unwrap();
@@ -2241,4 +2194,32 @@ fn repair_finalization_capability_rejects_business_and_copies_exact_envelope() {
             );
         }
     }
+}
+
+#[test]
+fn recorded_cleanup_shares_current_installation_maintenance_lock() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let e = envelope();
+    let recorded =
+        RecordedInstallationIdentity::from_authenticated_record(f.identity.canonical_path.clone())
+            .unwrap();
+    let mut publication = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    publication.publish("123/456", &e).unwrap();
+    publication.close().unwrap();
+    let mut cleanup = PublicationLease::acquire_recorded(&recorded, "3.2.0", &c).unwrap();
+    assert_eq!(
+        InstallationMaintenanceLease::acquire(&f.identity.canonical_path)
+            .err()
+            .unwrap()
+            .code,
+        "workspace.busy"
+    );
+    cleanup.retire_process("123/456", &e).unwrap();
+    assert!(cleanup.inspect().unwrap().files[0].retired_process);
+    cleanup.close().unwrap();
+    InstallationMaintenanceLease::acquire(&f.identity.canonical_path)
+        .unwrap()
+        .close()
+        .unwrap();
 }

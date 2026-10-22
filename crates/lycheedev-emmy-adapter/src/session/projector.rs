@@ -6,11 +6,11 @@
 //! selected value is unavailable, or discard object provenance/session tokens.
 use super::{
     BindingCoverage, BindingDecision, BindingSite, BoundValue, DerivedNumberRule,
-    EnvironmentCallable, EnvironmentSlot, EnvironmentTypeCatalog, FunctionRef, ObjectRef,
-    OwnedBindingSession, SelectedValue,
+    EnvironmentRecord, EnvironmentSlot, EnvironmentTypeCatalog, FunctionRef, ObjectRef,
+    OwnedBindingSession, OwnedValue, SelectedValue,
 };
 use emmylua_code_analysis::{
-    AsyncState, EmmyLuaAnalysis, LuaFunctionType, LuaType, LuaUnionType, SemanticId, VariadicType,
+    AsyncState, EmmyLuaAnalysis, LuaFunctionType, LuaType, SemanticId, VariadicType,
 };
 use emmylua_parser::{LuaAstNode, LuaForStat};
 use std::sync::Arc;
@@ -32,6 +32,18 @@ pub trait SelectedProjectionBackend {
 
     fn checkpoint(&mut self) -> Result<(), Self::Error>;
     fn plain(&mut self, ty: LuaType) -> Self::Value;
+
+    /// Context-free test backends may inspect ordinary signatures. An owned
+    /// backend must explicitly retain nominal children instead of flattening them.
+    fn environment_value(
+        &mut self,
+        value: OwnedValue,
+    ) -> ProjectionResult<Self::Value, Self::Error> {
+        Ok(match value.into_context_free_type() {
+            Ok(ty) => Ok(self.plain(ty)),
+            Err(_) => Err("environment_carrier_backend_unavailable"),
+        })
+    }
 
     fn expression(
         &mut self,
@@ -178,8 +190,24 @@ impl<'a> SelectedProjector<'a> {
                 Ok(Ok(backend.plain(LuaType::FloatConst(number.value))))
             }
             SelectedValue::EnvironmentCallable(callable) => {
-                let result = environment_function(callable, &mut || backend.checkpoint())?;
-                Ok(result.map(|function| backend.plain(LuaType::DocFunction(Arc::new(function)))))
+                if callable.declaration.kind != "function"
+                    || callable.origin.identity.is_empty()
+                    || callable.origin.material_sha256.len() != 64
+                {
+                    return Ok(Err("environment_callable_identity_invalid"));
+                }
+                let result = EnvironmentProjection::new(&callable.types, self.session, &mut || {
+                    backend.checkpoint()
+                })
+                .function(
+                    &callable.declaration,
+                    callable.receiver_type_name(),
+                    0,
+                )?;
+                match result {
+                    Ok(value) => backend.environment_value(value),
+                    Err(reason) => Ok(Err(reason)),
+                }
             }
             SelectedValue::EnvironmentReturn(result) => {
                 if result.invocation_identity.is_empty() || result.slot == 0 {
@@ -194,114 +222,184 @@ impl<'a> SelectedProjector<'a> {
                 {
                     return Ok(Err("environment_return_slot_or_origin_invalid"));
                 }
-                let result = environment_slot(slot, &result.callable.types, 0, &mut || {
-                    backend.checkpoint()
-                })?;
-                Ok(result.map(|ty| backend.plain(ty)))
+                let result =
+                    EnvironmentProjection::new(&result.callable.types, self.session, &mut || {
+                        backend.checkpoint()
+                    })
+                    .slot(slot, 0, false)?;
+                match result {
+                    Ok(value) => backend.environment_value(value),
+                    Err(reason) => Ok(Err(reason)),
+                }
             }
         }
     }
 }
 
-fn environment_slot<E>(
-    slot: &EnvironmentSlot,
-    types: &EnvironmentTypeCatalog,
-    depth: usize,
-    check: &mut impl FnMut() -> Result<(), E>,
-) -> ProjectionResult<LuaType, E> {
-    let ty = match environment_type(&slot.type_name, &slot.inner_type, types, depth, check)? {
-        Ok(ty) => ty,
-        Err(reason) => return Ok(Err(reason)),
-    };
-    Ok(Ok(if slot.nilable {
-        LuaType::Union(Arc::new(LuaUnionType::from_vec(vec![ty, LuaType::Nil])))
-    } else {
-        ty
-    }))
+struct EnvironmentProjection<'a, E> {
+    types: &'a EnvironmentTypeCatalog,
+    session: &'a OwnedBindingSession,
+    check: &'a mut dyn FnMut() -> Result<(), E>,
+    work: usize,
 }
-
-fn environment_type<E>(
-    name: &str,
-    inner: &str,
-    types: &EnvironmentTypeCatalog,
-    depth: usize,
-    check: &mut impl FnMut() -> Result<(), E>,
-) -> ProjectionResult<LuaType, E> {
-    check()?;
-    if depth >= 32 {
-        return Ok(Err("environment_type_depth"));
-    }
-    if let Some(alias) = types.aliases.get(name) {
-        return environment_type(alias, inner, types, depth + 1, check);
-    }
-    Ok(Ok(match name {
-        "number" => LuaType::Number,
-        "integer" => LuaType::Integer,
-        "string" => LuaType::String,
-        "bool" | "boolean" => LuaType::Boolean,
-        "nil" => LuaType::Nil,
-        "any" => LuaType::Any,
-        "function" | "LuaFunction" => LuaType::Function,
-        "table" if inner.is_empty() => LuaType::Table,
-        _ => return Ok(Err("environment_type_unavailable")),
-    }))
-}
-
-fn environment_function<E>(
-    callable: &EnvironmentCallable,
-    check: &mut impl FnMut() -> Result<(), E>,
-) -> ProjectionResult<LuaFunctionType, E> {
-    check()?;
-    if callable.declaration.kind != "function"
-        || callable.origin.identity.is_empty()
-        || callable.origin.material_sha256.len() != 64
-    {
-        return Ok(Err("environment_callable_identity_invalid"));
-    }
-    if callable.declaration.owner.is_some() {
-        return Ok(Err("environment_receiver_unavailable"));
-    }
-    if callable.declaration.parameters.len() > 32 || callable.declaration.returns.len() > 32 {
-        return Ok(Err("environment_signature_budget"));
-    }
-    let mut parameters = Vec::with_capacity(callable.declaration.parameters.len());
-    for (index, slot) in callable.declaration.parameters.iter().enumerate() {
-        check()?;
-        if slot.index != index + 1 {
-            return Ok(Err("environment_parameter_index_invalid"));
+impl<'a, E> EnvironmentProjection<'a, E> {
+    fn new(
+        types: &'a EnvironmentTypeCatalog,
+        session: &'a OwnedBindingSession,
+        check: &'a mut dyn FnMut() -> Result<(), E>,
+    ) -> Self {
+        Self {
+            types,
+            session,
+            check,
+            work: 0,
         }
-        let ty = match environment_slot(slot, &callable.types, 0, check)? {
-            Ok(ty) => ty,
+    }
+    fn slot(
+        &mut self,
+        slot: &EnvironmentSlot,
+        depth: usize,
+        partial: bool,
+    ) -> ProjectionResult<OwnedValue, E> {
+        let value = match self.named(&slot.type_name, &slot.inner_type, depth)? {
+            Ok(value) => value,
+            // A missing nominal declaration is not permission to guess its
+            // structure. Keep this slot unknown without losing known siblings.
+            Err("environment_type_unavailable") if partial => OwnedValue::plain(LuaType::Unknown),
             Err(reason) => return Ok(Err(reason)),
         };
-        parameters.push((slot.name.clone(), Some(ty)));
+        Ok(Ok(if slot.nilable {
+            OwnedValue::raw_union(vec![value, OwnedValue::plain(LuaType::Nil)])
+        } else {
+            value
+        }))
     }
-    let mut returns = Vec::with_capacity(callable.declaration.returns.len());
-    for (index, slot) in callable.declaration.returns.iter().enumerate() {
-        check()?;
-        if slot.index != index + 1 {
-            return Ok(Err("environment_return_index_invalid"));
+    fn named(&mut self, name: &str, inner: &str, depth: usize) -> ProjectionResult<OwnedValue, E> {
+        (self.check)()?;
+        self.work += 1;
+        if self.work > 4096 {
+            return Ok(Err("environment_projection_budget"));
         }
-        let ty = match environment_slot(slot, &callable.types, 0, check)? {
-            Ok(ty) => ty,
-            Err(reason) => return Ok(Err(reason)),
+        if depth >= 32 {
+            return Ok(Err("environment_type_depth"));
+        }
+        if let Some(alias) = self.types.aliases.get(name) {
+            return self.named(alias, inner, depth + 1);
+        }
+        let primitive = match name {
+            "number" | "float" | "double" => Some(LuaType::Number),
+            "integer" | "int" => Some(LuaType::Integer),
+            "string" | "cstring" | "localizedstring" | "cstringOptional" => Some(LuaType::String),
+            "bool" | "boolean" => Some(LuaType::Boolean),
+            "nil" => Some(LuaType::Nil),
+            "any" => Some(LuaType::Any),
+            "unknown" => Some(LuaType::Unknown),
+            "thread" => Some(LuaType::Thread),
+            "userdata" => Some(LuaType::Userdata),
+            "function" | "LuaFunction" => Some(LuaType::Function),
+            "table" if inner.is_empty() => Some(LuaType::Table),
+            _ => None,
         };
-        returns.push(ty);
+        if let Some(ty) = primitive {
+            return Ok(Ok(OwnedValue::plain(ty)));
+        }
+        if !inner.is_empty() {
+            return Ok(Err("environment_type_unavailable"));
+        }
+        if self.types.nominal_objects.contains_key(name) {
+            if self.types.identity.is_empty() {
+                return Ok(Err("environment_declaration_identity_invalid"));
+            }
+            return Ok(Ok(OwnedValue::nominal(
+                self.session,
+                &self.types.identity,
+                name,
+            )));
+        }
+        let types = self.types;
+        let Some(records) = types.declarations.get(name) else {
+            return Ok(Err("environment_type_unavailable"));
+        };
+        let [record] = records.as_slice() else {
+            return Ok(Err("environment_declaration_ambiguous"));
+        };
+        if record.name != name || types.identity.is_empty() {
+            return Ok(Err("environment_declaration_identity_invalid"));
+        }
+        if !matches!(record.kind.as_str(), "callback" | "callbacktype") {
+            return Ok(Err("environment_type_unavailable"));
+        }
+        self.function(record, None, depth + 1)
     }
-    let returns = if callable.declaration.raw.get("MayReturnNothing")
-        == Some(&serde_json::Value::Bool(true))
-    {
-        LuaType::Variadic(Arc::new(VariadicType::Base(LuaType::Unknown)))
-    } else {
-        LuaType::Variadic(Arc::new(VariadicType::Multi(returns)))
-    };
-    check()?;
-    Ok(Ok(LuaFunctionType::new(
-        AsyncState::None,
-        false,
-        false,
-        parameters,
-        returns,
-        None,
-    )))
+    fn function(
+        &mut self,
+        record: &EnvironmentRecord,
+        receiver: Option<&str>,
+        depth: usize,
+    ) -> ProjectionResult<OwnedValue, E> {
+        (self.check)()?;
+        if depth >= 32 {
+            return Ok(Err("environment_type_depth"));
+        }
+        if record.owner.is_some() && receiver.is_none() {
+            return Ok(Err("environment_receiver_unavailable"));
+        }
+        if record.parameters.len() > 32 || record.returns.len() > 32 {
+            return Ok(Err("environment_signature_budget"));
+        }
+        let mut names = Vec::new();
+        let mut params = Vec::new();
+        if let Some(receiver) = receiver {
+            if self.types.identity.is_empty() {
+                return Ok(Err("environment_declaration_identity_invalid"));
+            }
+            names.push(("self".into(), None));
+            params.push(Some(OwnedValue::nominal(
+                self.session,
+                &self.types.identity,
+                receiver,
+            )));
+        }
+        for (index, slot) in record.parameters.iter().enumerate() {
+            (self.check)()?;
+            if slot.index != index + 1 {
+                return Ok(Err("environment_parameter_index_invalid"));
+            }
+            let value = match self.slot(slot, depth, true)? {
+                Ok(value) => value,
+                Err(reason) => return Ok(Err(reason)),
+            };
+            names.push((slot.name.clone(), None));
+            params.push(Some(value));
+        }
+        let mut returns = Vec::new();
+        for (index, slot) in record.returns.iter().enumerate() {
+            (self.check)()?;
+            if slot.index != index + 1 {
+                return Ok(Err("environment_return_index_invalid"));
+            }
+            let value = match self.slot(slot, depth, true)? {
+                Ok(value) => value,
+                Err(reason) => return Ok(Err(reason)),
+            };
+            returns.push(value);
+        }
+        let ret = if record.raw.get("MayReturnNothing") == Some(&serde_json::Value::Bool(true)) {
+            OwnedValue::plain(LuaType::Variadic(Arc::new(VariadicType::Base(
+                LuaType::Unknown,
+            ))))
+        } else {
+            OwnedValue::pack(returns)
+        };
+        let metadata = LuaFunctionType::new(
+            AsyncState::None,
+            false,
+            false,
+            names,
+            ret.structural_type().clone(),
+            None,
+        );
+        (self.check)()?;
+        Ok(Ok(OwnedValue::function(&metadata, params, ret)))
+    }
 }

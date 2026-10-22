@@ -49,6 +49,9 @@ fn trim_time(text: String) -> String {
         text
     }
 }
+pub fn parse_timestamp(value: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_rfc3339(value).ok()
+}
 pub fn utc_now() -> String {
     timestamp(chrono::Utc::now())
 }
@@ -769,7 +772,7 @@ mod controlled_publication_tests {
             // Entry, staging admission, one block, then after sync. Cancel at
             // that final boundary; cancelling only at entry misses the race.
             if checks == 4 {
-                control.cancel_handle().store(true, Ordering::Release);
+                control.tracked_cancel_handle().unwrap().cancel();
             }
             control.check()
         })
@@ -838,7 +841,7 @@ mod controlled_publication_tests {
             || control.check(),
             |file| {
                 lycheedev_windows::filesystem::close_file(file)?;
-                control.cancel_handle().store(true, Ordering::Release);
+                control.tracked_cancel_handle().unwrap().cancel();
                 Ok(())
             },
         )

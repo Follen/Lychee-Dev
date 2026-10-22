@@ -219,7 +219,7 @@ impl StreamQuota<'_> {
                 owner.finish(result)
             }
             Err(error) => {
-                crate::metadata::historical_write::finish_historical(Err(error), slot.release())
+                crate::metadata::owned_write::finish_owned(Err(error), slot.release())
             }
         }
     }

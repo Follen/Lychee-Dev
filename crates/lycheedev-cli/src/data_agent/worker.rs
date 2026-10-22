@@ -70,51 +70,50 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     if startup.lifetime_ms == 0 || startup.lifetime_ms > 3_600_000 {
         return Err(fault("Invalid private worker lifetime"));
     }
-    let inv = Invocation {
-        command: "data agent serve".into(),
-        positional: None,
+    let context = lycheedev_data::request::DataContext {
         home: startup.home,
         cwd: startup.cwd,
-        flags: startup.flags,
+        source: startup.source,
         control: lycheedev_core::control::OperationControl::uncancelable(
             Instant::now() + Duration::from_millis(startup.lifetime_ms),
         ),
     };
-    let retained = inv.usize_flag("--max-bytes", 512 << 20, 1 << 20, 2usize << 30)?;
-    let mut job =
-        lycheedev_windows::BrokerJob::own_current_process(retained + (256 << 20)).map_err(fault)?;
+    let mut job = lycheedev_windows::BrokerJob::own_current_process(
+        startup.session.retained_bytes + (256 << 20),
+    )
+    .map_err(fault)?;
     let stream = TcpStream::connect_timeout(
         &SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into(),
         Duration::from_secs(5),
     )?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_nodelay(true)?;
     let stream = Arc::new(Mutex::new(stream));
     let token = token.clone();
-    let observer = Arc::new(
-        move |event: lycheedev_data::agent_session::ReceiptEvent| -> Result<()> {
-            let (event, id) = match event {
-                lycheedev_data::agent_session::ReceiptEvent::Ready => ("ready", None),
-                lycheedev_data::agent_session::ReceiptEvent::Completed(id) => {
-                    ("completed", Some(id))
-                }
-            };
-            let receipt = Receipt {
-                protocol: RECEIPT_PROTOCOL.into(),
-                token: token.clone(),
-                pid: std::process::id(),
-                event: event.into(),
-                id,
-            };
-            let mut stream = stream
-                .lock()
-                .map_err(|_| fault("Private receipt lock poisoned"))?;
-            serde_json::to_writer(&mut *stream, &receipt)?;
-            stream.write_all(b"\n")?;
-            stream.flush()?;
-            Ok(())
-        },
-    );
-    let result = lycheedev_data::agent_session::serve_stdio_observed(inv, observer);
+    let observer = Arc::new(move |event: ReceiptEvent| -> Result<()> {
+        let (event, id) = match event {
+            ReceiptEvent::Ready => ("ready", None),
+            ReceiptEvent::Completed(id) => ("completed", Some(id)),
+        };
+        let receipt = Receipt {
+            protocol: RECEIPT_PROTOCOL.into(),
+            token: token.clone(),
+            pid: std::process::id(),
+            event: event.into(),
+            id,
+        };
+        // Send each small receipt as one frame. Direct serialization to
+        // TCP splits it into tiny writes and can delay ready/completion.
+        let mut bytes = serde_json::to_vec(&receipt)?;
+        bytes.push(b'\n');
+        let mut stream = stream
+            .lock()
+            .map_err(|_| fault("Private receipt lock poisoned"))?;
+        stream.write_all(&bytes)?;
+        stream.flush()?;
+        Ok(())
+    });
+    let result = super::transport::serve_stdio_observed(context, startup.session, observer);
     let close = job.disarm().map_err(fault);
     match (result, close) {
         (Ok(()), result) => result,

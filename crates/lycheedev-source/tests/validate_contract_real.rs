@@ -1,7 +1,8 @@
-//! Real compiler/Git/metadata regression for the distinct fixed Go 3.2.3
+//! Real compiler/Git/metadata regression for the distinct external fixed reference 3.2.3
 //! single-addon and matrix entrypoints. No network or game is required.
+use lycheedev_source::request::{AddonValidationRequest, SelectedSource, SourceContext, SourceRequest};
 use lycheedev_core::{
-    Invocation, evidence,
+    evidence,
     metadata::Metadata,
     selection::{self, SelectionSpec, SourcePin},
     workspace,
@@ -13,7 +14,6 @@ use lycheedev_source::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -114,7 +114,7 @@ fn verify_capture(home: &Path, capture: &Value, result: &Value, complete: bool, 
 
 #[test]
 #[ignore = "explicit verified bundled luac, local Git and persisted dual-entry regression"]
-fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
+fn single_and_matrix_native_validation_keep_coverage_and_warm_index_gaps() {
     let stage =
         PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("verified luac stage"));
     let release: Value =
@@ -166,23 +166,23 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
         "C_Good.Do(); C_Missing.Do(); C_Missing.Do()\n",
     )
     .unwrap();
-    let single_inv = Invocation {
-        command: "source validate".into(),
-        positional: None,
-        flags: BTreeMap::from([
-            ("--snapshot".into(), pin.id.clone()),
-            ("--path".into(), addon.to_string_lossy().into_owned()),
-            ("--toc".into(), "Main.toc".into()),
-        ]),
+    let ctx = SourceContext {
         home: home.clone(),
         cwd: home.clone(),
         control: Default::default(),
     };
+    let single_request = SourceRequest::Validate(AddonValidationRequest {
+        selection: SelectedSource::new(pin.clone()).unwrap(),
+        root: addon.clone(),
+        toc: "Main.toc".into(),
+        semantic: false,
+        environment: None,
+        locator: format!("{}/Main.toc", addon.display()),
+    });
     let tools = || SourceTools {
         luac: Some(&runtime),
-        luals: None,
     };
-    let single = lycheedev_source::dispatch_with_tools(&single_inv, tools()).unwrap();
+    let single = lycheedev_source::dispatch_with_tools(&ctx, &single_request, tools()).unwrap();
     assert_eq!(single.data["staticValid"], true);
     assert!(single.data.get("valid").is_none());
     assert_eq!(single.data["resolved"], 1);
@@ -198,18 +198,34 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
         false,
         "addon-static-check",
     );
-    let warm_single = lycheedev_source::dispatch_with_tools(&single_inv, tools()).unwrap();
+    fs::write(addon.join("Complete.toc"), "## Interface: 120100\nComplete.lua\n").unwrap();
+    fs::write(addon.join("Complete.lua"), "local count = 1\n").unwrap();
+    let mut semantic_request = single_request.clone();
+    if let SourceRequest::Validate(request) = &mut semantic_request {
+        request.toc = "Complete.toc".into(); request.semantic = true;
+        request.locator = format!("{}/Complete.toc", addon.display());
+    }
+    let semantic_complete=lycheedev_source::dispatch_with_tools(&ctx, &semantic_request,tools()).unwrap();
+    assert_eq!(semantic_complete.data["semantic"]["passed"],true);
+    assert_eq!(semantic_complete.data["semantic"]["complete"],true);
+    // The local commit has complete semantic inputs but no pinned client
+    // Interface baseline. Semantic success cannot certify that missing fact.
+    assert_eq!(semantic_complete.data["staticValid"], true);
+    assert_eq!(semantic_complete.data["interfaceStatus"], "unresolved");
+    assert!(!semantic_complete.complete,"{}",semantic_complete.data);
+    verify_capture(&home,&semantic_complete.provenance[0],&semantic_complete.data,false,"addon-static-check");
+    let warm_single = lycheedev_source::dispatch_with_tools(&ctx, &single_request, tools()).unwrap();
     assert_eq!(warm_single.data["references"], single.data["references"]);
     let matrix_path = addon.join("matrix.json");
     fs::write(&matrix_path,serde_json::to_vec(&json!({"targets":[{"id":"retail","toc":"Main.toc","product":"retail","ref":source.exact_commit}]})).unwrap()).unwrap();
-    let matrix_inv = Invocation {
-        flags: BTreeMap::from([(
-            "--matrix".into(),
-            matrix_path.to_string_lossy().into_owned(),
-        )]),
-        ..single_inv.clone()
+    let (configuration, matrix_root) = lycheedev_source::matrix::read_config(&matrix_path, &ctx.control).unwrap();
+    let matrix_request = lycheedev_source::request::MatrixValidationRequest {
+        configuration: matrix_path.clone(),
+        root: matrix_root,
+        targets: configuration.targets,
+        semantic: false,
     };
-    let missing = matrix::validate_with_resolver(&matrix_inv, tools(), &mut |_| Ok(source.clone()))
+    let missing = matrix::validate_with_resolver(&ctx, &matrix_request, tools(), &mut |_| Ok(source.clone()))
         .unwrap_err();
     assert_eq!(missing.code, "codebase.addon_static_check_failed");
     let target = &missing.details["result"]["targets"][0];
@@ -243,7 +259,7 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
     )
     .unwrap();
     let partial =
-        matrix::validate_with_resolver(&matrix_inv, tools(), &mut |_| Ok(source.clone())).unwrap();
+        matrix::validate_with_resolver(&ctx, &matrix_request, tools(), &mut |_| Ok(source.clone())).unwrap();
     assert_eq!(partial.data["valid"], true);
     assert!(!partial.complete);
     assert_eq!(
@@ -259,7 +275,7 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
     );
     fs::write(addon.join("Main.lua"), "C_Good.Do()\n").unwrap();
     let complete =
-        matrix::validate_with_resolver(&matrix_inv, tools(), &mut |_| Ok(source.clone())).unwrap();
+        matrix::validate_with_resolver(&ctx, &matrix_request, tools(), &mut |_| Ok(source.clone())).unwrap();
     assert!(complete.complete);
     verify_capture(
         &home,
@@ -268,7 +284,7 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
         true,
         "addon-matrix-validate",
     );
-    // Public syntax accepts the same generic/namespaced XML tokens as Go,
+    // Public syntax accepts the same generic/namespaced XML tokens as the external fixed reference,
     // while still compiling the real inline body and mapping diagnostics.
     fs::write(addon.join("Main.toc"), "## Interface: 120100\nMain.xml\n").unwrap();
     let mut public_xml = vec![];
@@ -277,26 +293,23 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
         "<n:Root xmlns:n='urn:fixture'><n:OnLoad>local value = 1</n:OnLoad></n:Root>",
     ] {
         fs::write(addon.join("Main.xml"), xml).unwrap();
-        let single = lycheedev_source::dispatch_with_tools(&single_inv, tools()).unwrap();
+        let single = lycheedev_source::dispatch_with_tools(&ctx, &single_request, tools()).unwrap();
         assert_eq!(single.data["staticValid"], true);
         assert_eq!(single.data["syntaxCompilation"]["passed"], true);
         assert_eq!(single.data["syntaxCompilation"]["checkedInlineScripts"], 1);
         assert_eq!(single.data["semantic"]["state"], "not_requested");
         let matrix =
-            matrix::validate_with_resolver(&matrix_inv, tools(), &mut |_| Ok(source.clone()))
+            matrix::validate_with_resolver(&ctx, &matrix_request, tools(), &mut |_| Ok(source.clone()))
                 .unwrap();
         assert_eq!(matrix.data["valid"], true);
         assert_eq!(
             matrix.data["targets"][0]["syntaxCompilation"]["checkedInlineScripts"],
             1
         );
-        #[cfg(feature = "emmy-prototype")]
-        {
-            let mut semantic_inv = single_inv.clone();
-            semantic_inv
-                .flags
-                .insert("--semantic".into(), "true".into());
-            let native = lycheedev_source::dispatch_with_tools(&semantic_inv, tools()).unwrap_err();
+                {
+            let mut semantic_request = single_request.clone();
+            if let SourceRequest::Validate(request) = &mut semantic_request { request.semantic = true; }
+            let native = lycheedev_source::dispatch_with_tools(&ctx, &semantic_request, tools()).unwrap_err();
             assert_eq!(native.code, "codebase.xml_invalid");
         }
         public_xml.push(json!({"xml":xml,"single":single.data,"matrix":matrix.data}));
@@ -306,7 +319,7 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
         "<Root>\n<OnLoad>\nlocal broken =\n</OnLoad></Root>",
     )
     .unwrap();
-    let bad_inline = lycheedev_source::dispatch_with_tools(&single_inv, tools()).unwrap_err();
+    let bad_inline = lycheedev_source::dispatch_with_tools(&ctx, &single_request, tools()).unwrap_err();
     assert_eq!(bad_inline.code, "codebase.addon_static_check_failed");
     let diagnostic = bad_inline.details["result"]["syntaxCompilation"]["diagnostics"]
         .as_array()
@@ -325,11 +338,18 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
     let gap_source = source_with_gaps(&mirror);
     fs::write(&matrix_path,serde_json::to_vec(&json!({"targets":[{"id":"retail","toc":"Main.toc","product":"retail","ref":gap_source.exact_commit}]})).unwrap()).unwrap();
     fs::write(addon.join("Main.lua"), "C_Good.Do(); C_Missing.Do()\n").unwrap();
+    let (configuration, matrix_root) = lycheedev_source::matrix::read_config(&matrix_path, &ctx.control).unwrap();
+    let matrix_request = lycheedev_source::request::MatrixValidationRequest {
+        configuration: matrix_path.clone(),
+        root: matrix_root,
+        targets: configuration.targets,
+        semantic: false,
+    };
     let cold_gap =
-        matrix::validate_with_resolver(&matrix_inv, tools(), &mut |_| Ok(gap_source.clone()))
+        matrix::validate_with_resolver(&ctx, &matrix_request, tools(), &mut |_| Ok(gap_source.clone()))
             .unwrap();
     let warm_gap =
-        matrix::validate_with_resolver(&matrix_inv, tools(), &mut |_| Ok(gap_source.clone()))
+        matrix::validate_with_resolver(&ctx, &matrix_request, tools(), &mut |_| Ok(gap_source.clone()))
             .unwrap();
     for result in [&cold_gap, &warm_gap] {
         let target = &result.data["targets"][0];

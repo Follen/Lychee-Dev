@@ -10,14 +10,16 @@ use arrow_array::{
 };
 use arrow_ipc::reader::FileReader;
 use arrow_schema::{DataType, Field, Schema};
-use lycheedev_core::{Invocation, Result, storage, workspace::data_disk::DataCachePaths};
+use lycheedev_core::{
+    Result,
+    control::TrackedCancellation,
+    storage,
+    workspace::data_disk::DataCachePaths,
+};
 use std::{
     collections::BTreeSet,
     fs,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 #[allow(dead_code)]
@@ -60,10 +62,8 @@ fn limits(rows: usize, bytes: usize) -> ImportLimits {
         text_bytes: 1 << 20,
     }
 }
-fn command(fixture: &Fixture, name: &str) -> Invocation {
-    let mut inv = fixture.invocation("data cache prepare", &[]);
-    inv.positional = Some(name.to_owned());
-    inv
+fn request(name: &str) -> crate::request::CachePrepareRequest {
+    crate::request::CachePrepareRequest { table: name.into(), timeout: Duration::from_secs(300) }
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn cancelled_importer_stops_and_does_not_resume_or_replay() {
         &[("ID", "uint"), ("Value", "uint")],
         &[vec![Cell::U(1), Cell::U(7)], vec![Cell::U(2), Cell::U(8)]],
     );
-    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled = TrackedCancellation::new();
     let budget = Arc::new(Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(30),
@@ -296,7 +296,7 @@ fn cancelled_importer_stops_and_does_not_resume_or_replay() {
             .value(0),
         1
     );
-    cancelled.store(true, Ordering::Release);
+    cancelled.cancel();
     assert_eq!(
         importer.next_batch().err().unwrap().code,
         "operation.cancelled"
@@ -323,8 +323,9 @@ fn real_prepare_publishes_authenticated_ipc_once_and_never_prefetches_other_tabl
             &[vec![Cell::U(1), Cell::BadString]],
         ),
     ]);
-    let inv = command(&fx, "Sample");
-    let first = crate::migration_oracle::dispatch(&inv).unwrap();
+    let inv = fx.context();
+    let request = request("Sample");
+    let first = crate::prepare_cache(&inv, &request).unwrap();
     assert!(first.complete);
     assert_eq!(first.data["sourceKind"], "static");
     assert_eq!(first.data["availableRows"], 1);
@@ -417,7 +418,7 @@ fn real_prepare_publishes_authenticated_ipc_once_and_never_prefetches_other_tabl
         "logical-record-id"
     );
     assert!(reader.next().is_none());
-    let second = crate::migration_oracle::dispatch(&inv).unwrap();
+    let second = crate::prepare_cache(&inv, &request).unwrap();
     assert_eq!(first.data["generation"], second.data["generation"]);
     assert_eq!(first.data["object"], second.data["object"]);
     assert_eq!(fs::read_dir(&paths.generations).unwrap().count(), 1);
@@ -431,7 +432,7 @@ fn prepare_preserves_partial_key_coverage_and_never_promotes_it_to_complete() {
     let spec = fixture::encrypted_sections(201);
     let (_, encoded) = fixture::encrypted_frame(&spec.raw);
     let fx = Fixture::with_encoded_table(spec, encoded);
-    let result = crate::migration_oracle::dispatch(&command(&fx, "Sample")).unwrap();
+    let result = crate::prepare_cache(&fx.context(), &request("Sample")).unwrap();
     assert!(!result.complete);
     assert_eq!(result.data["complete"], false);
     assert_eq!(result.data["availableRows"], 1);
@@ -460,7 +461,7 @@ fn bad_row_preparation_never_publishes_a_generation_and_cleans_private_staging()
         &[("ID", "uint"), ("Text", "text")],
         &[vec![Cell::U(1), Cell::BadString]],
     )]);
-    let error = crate::migration_oracle::dispatch(&command(&fx, "Broken")).unwrap_err();
+    let error = crate::prepare_cache(&fx.context(), &request("Broken")).unwrap_err();
     assert_eq!(error.code, "table.invalid_format");
     let paths = DataCachePaths::new(&fx.home);
     assert_eq!(fs::read_dir(&paths.generations).unwrap().count(), 0);
@@ -487,7 +488,7 @@ fn low_derived_quota_preserves_existing_evidence_and_publishes_nothing() {
     .unwrap();
     let original = lycheedev_core::evidence::read_blob(&fx.home, &capture["blob"], 1024).unwrap();
     fs::write(fx.home.join("config.json"), br#"{"schema":"lycheedev.config.v1","cache":{"maxBytes":21474836480},"dataCache":{"maxBytes":1}}"#).unwrap();
-    let error = crate::migration_oracle::dispatch(&command(&fx, "Sample")).unwrap_err();
+    let error = crate::prepare_cache(&fx.context(), &request("Sample")).unwrap_err();
     assert_eq!(error.code, "vault.data_cache_budget_exceeded");
     assert_eq!(
         lycheedev_core::evidence::read_blob(&fx.home, &capture["blob"], 1024).unwrap(),
@@ -515,12 +516,13 @@ fn cancellation_after_ipc_finish_aborts_before_object_or_generation_publication(
         &[("ID", "uint"), ("Value", "uint")],
         &[vec![Cell::U(1), Cell::U(42)]],
     )]);
-    let inv = command(&fx, "Sample");
-    let cancel = inv.control.cancel_handle();
+    let inv = fx.context();
+    let request = request("Sample");
+    let cancel = inv.control.tracked_cancel_handle().unwrap();
     let mut reached = false;
-    let error = application::dispatch_after_encode(&inv, &mut || {
+    let error = application::dispatch_after_encode(&inv, &request, &mut || {
         reached = true;
-        cancel.store(true, Ordering::Release);
+        cancel.cancel();
         Ok(())
     })
     .unwrap_err();
@@ -546,7 +548,8 @@ fn generation_identity_ignores_runtime_counters_but_binds_locale_schema_and_key_
         &[("ID", "uint"), ("Value", "uint")],
         &[vec![Cell::U(1), Cell::U(42)]],
     )]);
-    let inv = command(&fx, "Sample");
+    let inv = fx.context();
+    let request = request("Sample");
     let budget = Arc::new(Budget::query_controlled(
         inv.control.deadline(),
         inv.control.clone(),
@@ -558,7 +561,7 @@ fn generation_identity_ignores_runtime_counters_but_binds_locale_schema_and_key_
     let result = (|| -> Result<()> {
         let pin = scope.resolve_pin()?;
         scope.with_local_session(pin.data.as_ref().unwrap(), |reader| {
-            let mut prepared = crate::db2::prepare_scoped(
+            let mut prepared = crate::table_source::prepare_scoped(
                 &inv,
                 "Sample",
                 &budget,
@@ -640,11 +643,12 @@ fn changed_original_source_after_ipc_finish_never_acquires_a_generation() {
         &[("ID", "uint"), ("Value", "uint")],
         &[vec![Cell::U(1), Cell::U(42)]],
     )]);
-    let inv = command(&fx, "Sample");
+    let inv = fx.context();
+    let request = request("Sample");
     let version = fx.client.join("version.txt");
     let original = fs::read(&version).unwrap();
     let mut reached = false;
-    let result = application::dispatch_after_encode(&inv, &mut || {
+    let result = application::dispatch_after_encode(&inv, &request, &mut || {
         reached = true;
         fs::write(&version, b"12.1.0.69934")?;
         Ok(())
@@ -656,7 +660,7 @@ fn changed_original_source_after_ipc_finish_never_acquires_a_generation() {
     let paths = DataCachePaths::new(&fx.home);
     assert_eq!(fs::read_dir(&paths.generations).unwrap().count(), 0);
     assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
-    assert!(crate::migration_oracle::dispatch(&inv).unwrap().complete);
+    assert!(crate::prepare_cache(&inv, &request).unwrap().complete);
     fs::remove_dir_all(fx.root).unwrap();
 }
 
@@ -668,9 +672,10 @@ fn checked_scope_close_error_retains_the_published_generation_receipt() {
         &[("ID", "uint"), ("Value", "uint")],
         &[vec![Cell::U(1), Cell::U(42)]],
     )]);
-    let inv = command(&fx, "Sample");
+    let inv = fx.context();
+    let request = request("Sample");
     let mut closes = 0;
-    let error = application::dispatch_after_hooks(&inv, &mut || Ok(()), &mut |result| {
+    let error = application::dispatch_after_hooks(&inv, &request, &mut || Ok(()), &mut |result| {
         assert!(result.is_ok());
         closes += 1;
         // The real quota, local provider and workspace owners have closed.

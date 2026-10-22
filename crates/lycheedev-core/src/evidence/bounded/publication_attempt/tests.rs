@@ -16,6 +16,37 @@ impl Fixture {
         workspace::initialize(&home).unwrap();
         Self(home)
     }
+    fn predeclared(
+        &self,
+        reference: &BlobRef,
+    ) -> lycheedev_windows::filesystem::destination::ManagedStageName {
+        use lycheedev_windows::filesystem::destination::{
+            ManagedStageDeclaration, ManagedStageKind,
+        };
+        let records = self.0.join("indexes/data-derived-v1/shared-blobs-v1");
+        fs::create_dir_all(&records).unwrap();
+        let control = OperationControl::default();
+        let mut check = || Ok(());
+        let mut files = PathControl {
+            control: Some(&control),
+            supplemental: &mut check,
+        };
+        let directory = Directory::open_controlled(&records, &mut files).unwrap();
+        let mut raw = [0; 128];
+        raw[..8].copy_from_slice(b"LDST0002");
+        raw[8] = 2; // Shard, slot zero.
+        raw[16..24].copy_from_slice(&reference.bytes.to_le_bytes());
+        hex::decode_to_slice(&reference.sha256, &mut raw[56..88]).unwrap();
+        let checksum = Sha256::digest(&raw[..96]);
+        raw[96..].copy_from_slice(&checksum);
+        let mut declaration =
+            ManagedStageDeclaration::create(&directory, ManagedStageKind::Shard, 0, &mut files)
+                .unwrap();
+        let name = declaration.persist(&raw, &mut files).unwrap();
+        assert!(declaration.close().is_empty());
+        directory.close().unwrap();
+        name
+    }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -54,7 +85,7 @@ fn stages(home: &Path) -> usize {
 fn cancelled_before_stage_returns_original_failure_and_no_growth_witness() {
     let f = Fixture::new();
     let control = OperationControl::default();
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     let attempt = publish_blob_attempt_with_check(&f.0, b"body", 4, &control, || Ok(()));
     assert_eq!(attempt.result.unwrap_err().code, "command.cancelled");
     assert!(!attempt.settlement.stage_created);
@@ -115,6 +146,99 @@ fn successful_existing_body_reuse_keeps_native_not_published_separate() {
     );
     assert!(!attempt.settlement.may_release_unpublished_intent());
 }
+#[test]
+fn predeclared_authenticated_body_preserves_publication_reuse_and_winner_validation() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let reference = BlobRef {
+        sha256: storage::sha256(b"body"),
+        bytes: 4,
+    };
+    let name = f.predeclared(&reference);
+    let attempt = publish_blob_attempt_predeclared_with_check(
+        &f.0,
+        b"body",
+        &reference,
+        4,
+        &control,
+        || Ok(()),
+        &name,
+    );
+    assert_eq!(
+        attempt.result.unwrap(),
+        serde_json::to_value(&reference).unwrap()
+    );
+    assert_eq!(attempt.settlement.publication, StagedPublication::Published);
+    assert!(attempt.settlement.stage_cleanup_complete);
+    assert_eq!(stages(&f.0), 0);
+
+    let reused = publish_blob_attempt_predeclared_with_check(
+        &f.0,
+        b"body",
+        &reference,
+        4,
+        &control,
+        || Ok(()),
+        &name,
+    );
+    assert!(reused.result.is_ok());
+    assert!(reused.settlement.reused);
+    assert!(!reused.settlement.stage_created);
+    let path = blob_path(&f.0, &reference.sha256).unwrap();
+    fs::write(&path, b"evil").unwrap();
+    let corrupt = publish_blob_attempt_predeclared_with_check(
+        &f.0,
+        b"body",
+        &reference,
+        4,
+        &control,
+        || Ok(()),
+        &name,
+    );
+    assert_eq!(corrupt.result.unwrap_err().code, "vault.blob_integrity");
+    assert_eq!(fs::read(path).unwrap(), b"evil");
+    assert_eq!(stages(&f.0), 0);
+}
+
+#[test]
+fn predeclared_authenticated_body_keeps_length_and_maximum_admission() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let reference = BlobRef {
+        sha256: storage::sha256(b"body"),
+        bytes: 4,
+    };
+    let name = f.predeclared(&reference);
+    let limit = publish_blob_attempt_predeclared_with_check(
+        &f.0,
+        b"body",
+        &reference,
+        3,
+        &control,
+        || Ok(()),
+        &name,
+    );
+    assert_eq!(limit.result.unwrap_err().code, "vault.blob_limit");
+    assert!(!limit.settlement.stage_created);
+    let mismatched = BlobRef {
+        bytes: 5,
+        ..reference.clone()
+    };
+    let length = publish_blob_attempt_predeclared_with_check(
+        &f.0,
+        b"body",
+        &mismatched,
+        4,
+        &control,
+        || Ok(()),
+        &name,
+    );
+    assert_eq!(length.result.unwrap_err().code, "vault.blob_integrity");
+    assert!(!length.settlement.stage_created);
+    assert!(!blob_path(&f.0, &reference.sha256).unwrap().exists());
+    assert_eq!(stages(&f.0), 0);
+}
+
 #[test]
 fn unknown_or_incomplete_cleanup_never_authorizes_intent_release() {
     let mut receipt = BlobPublicationSettlement::new();

@@ -2,7 +2,6 @@
 use super::*;
 use std::{
     process::{Child, Command, Stdio},
-    sync::atomic::Ordering,
     thread,
 };
 
@@ -118,7 +117,7 @@ fn facts_cancel_at_each_owned_stage_boundary_preserves_old_snapshot_and_foreign_
             .join(format!(".lycheedev-cache-{key}-0"));
         fs::write(&foreign, b"foreign original").unwrap();
         let cancelled = OperationControl::default();
-        let token = cancelled.cancel_handle();
+        let token = cancelled.tracked_cancel_handle().unwrap();
         let body = vec![51; 131073];
         let error = cache
             .publish_profiled(
@@ -127,7 +126,7 @@ fn facts_cancel_at_each_owned_stage_boundary_preserves_old_snapshot_and_foreign_
                 &cancelled,
                 &mut |at| {
                     if at == stopped_at {
-                        token.store(true, Ordering::Release);
+                        token.cancel();
                     }
                     Ok(())
                 },
@@ -138,7 +137,7 @@ fn facts_cancel_at_each_owned_stage_boundary_preserves_old_snapshot_and_foreign_
                             | ("renamed", SourceCachePublicationPhase::Rename)
                             | ("closed", SourceCachePublicationPhase::StageClose)
                     ) {
-                        token.store(true, Ordering::Release);
+                        token.cancel();
                     }
                 }),
             )
@@ -274,13 +273,13 @@ fn facts_real_sharing_wait_cancel_discards_only_the_private_candidate() {
         .join(format!(".lycheedev-cache-{key}-63"));
     fs::write(&foreign, b"foreign retained").unwrap();
     let bounded = OperationControl::default();
-    let cancel = bounded.cancel_handle();
+    let cancel = bounded.tracked_cancel_handle().unwrap();
     let mut blocked = 0;
     let error = cache
         .publish_observed(&key, b"second complete", &bounded, |at| {
             if at == "rename_blocked" {
                 blocked += 1;
-                cancel.store(true, Ordering::Release);
+                cancel.cancel();
             }
             Ok(())
         })
@@ -350,7 +349,7 @@ fn facts_primary_failure_keeps_details_and_late_cancel_after_checked_stage_close
     let control = OperationControl::default();
     let cache = cache(&f, &control);
     let stopped = OperationControl::default();
-    let cancel = stopped.cancel_handle();
+    let cancel = stopped.tracked_cancel_handle().unwrap();
     let key = storage::sha256(b"compound causes");
     let error = cache
         .publish_profiled(
@@ -363,7 +362,7 @@ fn facts_primary_failure_keeps_details_and_late_cancel_after_checked_stage_close
             },
             Some(&mut |phase, _| {
                 if phase == SourceCachePublicationPhase::StageClose {
-                    cancel.store(true, Ordering::Release);
+                    cancel.cancel();
                 }
             }),
         )
@@ -423,7 +422,7 @@ fn facts_finish_closes_only_its_directory_and_preserves_all_causes() {
     cache
         .publish(&storage::sha256(b"close"), b"complete", &control)
         .unwrap();
-    let cancel = control.cancel_handle();
+    let cancel = control.tracked_cancel_handle().unwrap();
     let mut closes = 0;
     let primary: Result<()> = Err(ToolkitError::new("fixture.primary", "first cause", 5));
     let error = cache
@@ -431,7 +430,7 @@ fn facts_finish_closes_only_its_directory_and_preserves_all_causes() {
             closes += 1;
             let mut errors = directory.close().err().unwrap_or_default();
             errors.push(std::io::Error::other("fixture.directory_close"));
-            cancel.store(true, Ordering::Release);
+            cancel.cancel();
             Err(errors)
         })
         .unwrap_err();

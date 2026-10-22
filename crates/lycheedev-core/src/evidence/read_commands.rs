@@ -1,11 +1,11 @@
 //! Fixed Go323 ReadWorkspace / InspectEvidence / ListCaptures default routes.
 //! One read-only Metadata owner survives inspection and streaming verification.
 use super::*;
-use crate::{control::OperationControl, metadata::historical_write::finish_historical};
-use dependencies::GoCaptureDecode;
+use crate::{control::OperationControl, metadata::owned_write::finish_owned};
+
 
 fn finish<T>(metadata: Metadata, result: Result<T>, control: &OperationControl) -> Result<T> {
-    let result = finish_historical(result, metadata.close());
+    let result = finish_owned(result, metadata.close());
     crate::selection::selection_finish(result, control.check())
 }
 pub(super) fn read_metadata(home: &Path, control: &OperationControl) -> Result<Metadata> {
@@ -30,10 +30,10 @@ fn read_metadata_with_check(
             }
             error
         })?;
-    match metadata.require_historical_schema_with_check(control, &mut *check) {
+    match metadata.require_current_schema_with_check(control, &mut *check) {
         Ok(()) => Ok(metadata),
         Err(error) => {
-            let result = finish_historical(Err(error), metadata.close());
+            let result = finish_owned(Err(error), metadata.close());
             dependencies::finish_capture_checks(result, control, check)
         }
     }
@@ -42,10 +42,10 @@ pub(super) fn inspect(
     metadata: &Metadata,
     id: &str,
     control: &OperationControl,
-) -> Result<GoCaptureDecode> {
+) -> Result<CaptureRef> {
     let raw =
         metadata.read_bytes_controlled_with_check(&format!("capture/{id}"), control, || Ok(()))?;
-    dependencies::inspect_capture_projection(&raw, id, control)
+    dependencies::inspect_capture_ref(&raw, id, control)
 }
 /// Inspect one authenticated historical manifest with the caller's original
 /// stop scope and independent budget. No Data admission or fresh deadline.
@@ -66,12 +66,12 @@ pub fn read_capture_controlled_with_check(
             &mut check,
         )?;
         let value =
-            dependencies::inspect_capture_projection_with_check(&raw, id, control, &mut check)?;
+            dependencies::inspect_capture_ref_with_check(&raw, id, control, &mut check)?;
         control.check()?;
         check()?;
         serde_json::to_value(value).map_err(Into::into)
     })();
-    let result = finish_historical(result, metadata.close());
+    let result = finish_owned(result, metadata.close());
     dependencies::finish_capture_checks(result, control, &mut check)
 }
 
@@ -88,8 +88,8 @@ fn inspect_evidence(
         // the manifest under the same Metadata owner. Do not silently bypass
         // the second read or verify a replaced row against the first value.
         let verified = inspect(metadata, id, control)?;
-        let (digest, bytes) = verified.signed_blob();
-        bounded::verify_historical_blob(home, digest, bytes, control)?;
+        let (digest, bytes) = verified.blob_identity();
+        bounded::verify_capture_blob(home, digest, bytes, control)?;
     }
     let result = serde_json::to_value(capture).map_err(Into::into);
     crate::selection::selection_finish(result, control.check())
@@ -102,8 +102,8 @@ fn list(metadata: &Metadata, limit: usize, control: &OperationControl) -> Result
     let mut captures = Vec::new();
     for document in documents {
         control.check()?;
-        let projected = dependencies::decode_capture_projection(&document.bytes, control)?;
-        let capture = inspect(metadata, projected.id(), control)?;
+        let projected = dependencies::decode_capture_ref(&document.bytes, control)?;
+        let capture = inspect(metadata, &projected.id, control)?;
         captures.try_reserve(1).map_err(|_| {
             ToolkitError::new("command.failed", "capture page allocation failed", 5)
         })?;
@@ -112,38 +112,38 @@ fn list(metadata: &Metadata, limit: usize, control: &OperationControl) -> Result
     control.check()?;
     Ok(json!({"captures":captures}))
 }
-pub(super) fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    let id = if inv.command == "evidence list" {
-        None
-    } else {
-        Some(inv.argument()?)
+pub(super) fn dispatch(
+    context: &crate::request::RequestContext,
+    request: crate::evidence::EvidenceRequest,
+) -> Result<Outcome> {
+    use crate::evidence::EvidenceRequest as E;
+    let (id, limit, verify) = match request {
+        E::Show { id } => (Some(id), None, false),
+        E::Verify { id } => (Some(id), None, true),
+        E::List { limit } => (None, Some(limit), false),
+        _ => unreachable!("read command request routed by evidence::dispatch"),
     };
-    let limit = if id.is_none() {
-        Some(inv.usize_flag("--limit", 100, 1, 1000)?)
-    } else {
-        None
-    };
-    let metadata = read_metadata(&inv.home, &inv.control)?;
-    let result = match id {
+    let metadata = read_metadata(&context.home, &context.control)?;
+    let result = match id.as_deref() {
         Some(id) => inspect_evidence(
             &metadata,
-            &inv.home,
+            &context.home,
             id,
-            inv.command == "evidence verify",
-            &inv.control,
+            verify,
+            &context.control,
         ),
-        None => list(&metadata, limit.expect("list limit"), &inv.control),
+        None => list(&metadata, limit.expect("list request carries limit"), &context.control),
     };
     // Keep the existing library verification receipt. The CLI's existing
     // evidence-verify adapter projects its capture as Go's public result.
     let result = result.map(|capture| {
-        if inv.command == "evidence verify" {
+        if verify {
             Outcome::new(json!({"capture":capture,"verified":true}))
         } else {
             Outcome::new(capture)
         }
     });
-    finish(metadata, result, &inv.control)
+    finish(metadata, result, &context.control)
 }
 #[cfg(test)]
 mod tests;

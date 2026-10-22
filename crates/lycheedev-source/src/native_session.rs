@@ -1,8 +1,11 @@
 //! Single-thread reusable native analysis. IPC and lifetime ownership reuse the
 //! Windows Source mechanisms; the cached analysis never executes studied code.
-use crate::native_research::{QueryRequest, ResearchSession, WorkerRequest};
+#[path = "native_session/serialize.rs"]
+pub(crate) mod serialize;
+use crate::native_research::{QueryRequest, ResearchSession, WorkerRequest, ResearchReply};
+use crate::request::SourceContext;
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError, control::OperationControl, storage, workspace,
+    Outcome, Result, ToolkitError, control::OperationControl, storage, workspace,
 };
 use lycheedev_windows::{
     BrokerJob, Process,
@@ -135,7 +138,7 @@ fn finish_session_end(
     cleanup: Result<()>,
     control: &OperationControl,
 ) -> Result<SessionEnd> {
-    let mut result = lycheedev_core::metadata::historical_write::finish_historical(result, cleanup);
+    let mut result = lycheedev_core::metadata::owned_write::finish_owned(result, cleanup);
     if let Ok(SessionEnd::LifetimeExpired(deadline)) = &result
         && Instant::now() >= *deadline + OWNER_RETIRE_LIMIT
     {
@@ -213,6 +216,11 @@ enum Action {
     Close,
     Query,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionAction {
+    Status,
+    Close,
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
@@ -248,6 +256,15 @@ struct Response {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     terminal: Option<analysis_process::AnalysisTerminal>,
 }
+// Only the analysis writer uses typed payloads. Existing Value decoding and
+// owner raw-byte forwarding keep their original public/private wire contract.
+#[derive(Serialize)]
+struct ResponseWrite<T> {
+    value: Option<T>,
+    error: Option<ToolkitError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal: Option<analysis_process::AnalysisTerminal>,
+}
 struct Identity {
     path: PathBuf,
     digest: String,
@@ -258,8 +275,8 @@ struct Cached {
     analysis: ResearchSession,
     admission: SemanticAdmission,
 }
-fn execute_cached_query(cached:&mut Option<Cached>,work:Option<WorkerRequest>,reuse:Option<CachedQuery>,control:&OperationControl,owner_pid:u32,record:impl Fn(&str,Option<&ToolkitError>))->Result<Value> {
-    let result = (|| -> Result<Value> {
+fn execute_cached_query(cached:&mut Option<Cached>,work:Option<WorkerRequest>,reuse:Option<CachedQuery>,control:&OperationControl,owner_pid:u32,record:impl Fn(&str,Option<&ToolkitError>))->Result<ResearchReply> {
+    let result = (|| -> Result<ResearchReply> {
         control.check()?;
         let identity_only = reuse.is_some();
         let mut retained_snapshot=None;
@@ -323,8 +340,8 @@ fn execute_cached_query(cached:&mut Option<Cached>,work:Option<WorkerRequest>,re
         // completion cannot keep a hot worker alive indefinitely.
         let executed=cached.as_mut().expect("admitted snapshot").analysis.execute_planned_observed(planned,&control,|phase|record(phase,None))?;
         let mut value=executed.value;
-        value["analysis"]["cacheHit"] = json!(hit);
-        value["nativeSession"] = json!({"workerPid":owner_pid,"cacheHit":hit,"snapshotTransfer":if identity_only{"identity_only"}else{"full"},"batches":admitted,"admittedSemanticBatches":requested,"analysisRetired":admitted>=SEMANTIC_BATCH_LIMIT});
+        value.fields_mut()["analysis"]["cacheHit"] = json!(hit);
+        value.fields_mut()["nativeSession"] = json!({"workerPid":owner_pid,"cacheHit":hit,"snapshotTransfer":if identity_only{"identity_only"}else{"full"},"batches":admitted,"admittedSemanticBatches":requested,"analysisRetired":admitted>=SEMANTIC_BATCH_LIMIT});
         control.check()?;
         Ok(value)
     })();
@@ -390,7 +407,7 @@ fn identity(control: &OperationControl) -> Result<Identity> {
     }
 }
 fn write_frame(writer: &mut dyn Write, value: &impl Serialize, maximum: usize) -> Result<()> {
-    let bytes = crate::lsp_frame::serialize(value, maximum).map_err(|_| {
+    let bytes = serialize::serialize(value, maximum).map_err(|_| {
         ToolkitError::new(
             "source.native_frame_limit",
             "Source frame exceeds budget",
@@ -443,7 +460,7 @@ fn peer_failure(
     details["ownerRetirementError"] = json!(retirement.and_then(|result| result.err()));
     error.with_details(details)
 }
-fn request(inv: &Invocation, action: Action, work: Option<WorkerRequest>) -> Result<Request> {
+fn request(inv: &SourceContext, action: Action, work: Option<WorkerRequest>) -> Result<Request> {
     let remaining = inv.control.remaining()?;
     Ok(Request {
         wire: WIRE.into(),
@@ -453,13 +470,17 @@ fn request(inv: &Invocation, action: Action, work: Option<WorkerRequest>) -> Res
         cached: None,
     })
 }
-fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<Option<Value>> {
+fn transport_check(control: &OperationControl) -> Arc<dyn Fn() -> lycheedev_windows::Result<()> + Send + Sync> {
+    let control = control.clone();
+    Arc::new(move || control.check().map_err(|error|error.to_string()))
+}
+fn exchange(inv: &SourceContext, current: &Identity, request: &Request) -> Result<Option<Value>> {
     inv.control.check()?;
     let observed=Instant::now();
     let deadline=exchange_deadline(request.deadline_unix_ms,utc_ms()?,observed,inv.control.deadline())?;
     let scope = BrokerScope::for_native_source(&inv.home).map_err(platform)?;
     let mut stream =
-        match BrokerStream::connect(&scope, deadline, inv.control.cancel_handle()) {
+        match BrokerStream::connect_with_control(&scope, deadline, transport_check(&inv.control)) {
             Ok(stream) => stream,
             Err(message) if message.starts_with("broker.not_found:") => return Ok(None),
             Err(message) => return Err(platform(message)),
@@ -492,12 +513,12 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
     let response_deadline = deadline
         .checked_sub(reply_reserve(deadline) / 2)
         .unwrap_or_else(Instant::now);
-    stream.set_deadline(response_deadline, inv.control.cancel_handle());
+    stream.set_deadline_with_control(response_deadline, transport_check(&inv.control));
     let response: Response = match read_frame(&mut stream, RESPONSE_BYTES) {
         Ok(response) => response,
         Err(error)
             if Instant::now() >= response_deadline
-                || inv.control.token().load(Ordering::Acquire) =>
+                || inv.control.check().is_err() =>
         {
             let retired = retirement.retire(inv.control.deadline());
             let primary = inv.control.check().err().unwrap_or_else(|| ToolkitError::new(
@@ -516,7 +537,7 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
                 .control
                 .deadline()
                 .min(Instant::now() + Duration::from_millis(50));
-            let observed = peer.wait_exit(wait, &AtomicBool::new(false));
+            let observed = peer.wait_exit_with_control(wait, || inv.control.check().map_err(|error|error.to_string()));
             let retired = if observed.is_err() {
                 Some(retirement.retire(inv.control.deadline()))
             } else {
@@ -537,7 +558,7 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
         return Err(error);
     }
     if closing {
-        peer.wait_exit(inv.control.deadline(), inv.control.token())
+        peer.wait_exit_with_control(inv.control.deadline(), || inv.control.check().map_err(|error|error.to_string()))
             .map_err(platform)?;
     }
     if matches!(request.action, Action::Status) {
@@ -547,27 +568,22 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
     Ok(response.value)
 }
 
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+pub fn dispatch(inv: &SourceContext, action: SessionAction) -> Result<Outcome> {
     workspace::open_controlled(&inv.home, &inv.control)?;
-    let action = match inv.command.as_str() {
-        "source session status" => Action::Status,
-        "source session close" => Action::Close,
-        _ => {
-            return Err(ToolkitError::arguments(
-                "Invalid native Source session command",
-            ));
-        }
+    let wire_action = match action {
+        SessionAction::Status => Action::Status,
+        SessionAction::Close => Action::Close,
     };
     let current = identity(&inv.control)?;
     let result = (|| {
         Ok(Outcome::new(
-            exchange(inv, &current, &request(inv, action, None)?)?
+            exchange(inv, &current, &request(inv, wire_action, None)?)?
                 .unwrap_or_else(|| json!({"state":"closed","backend":"native"})),
         ))
     })();
     storage::finish_file(current._file, result, &inv.control)
 }
-pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
+pub fn analyze(inv: &SourceContext, work: WorkerRequest) -> Result<Value> {
     workspace::open_controlled(&inv.home, &inv.control)?;
     let current = identity(&inv.control)?;
     let result = (|| {
@@ -626,7 +642,7 @@ pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
             let mut child = match spawned {
                 Ok(child) => child,
                 Err(message) => {
-                    return lycheedev_core::metadata::historical_write::finish_historical(
+                    return lycheedev_core::metadata::owned_write::finish_owned(
                         Err(platform(message)),
                         remove_startup_intent(inv, &store_key, generation, &intent),
                     );
@@ -651,11 +667,11 @@ pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
                 let retired = child
                     .terminate_and_wait(inv.control.deadline())
                     .map_err(platform);
-                let failed = lycheedev_core::metadata::historical_write::finish_historical(
+                let failed = lycheedev_core::metadata::owned_write::finish_owned(
                     Err(error),
                     retired.map(|_| ()),
                 );
-                return lycheedev_core::metadata::historical_write::finish_historical(
+                return lycheedev_core::metadata::owned_write::finish_owned(
                     failed,
                     remove_startup_intent(inv, &store_key, generation, &intent),
                 );
@@ -665,7 +681,7 @@ pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
                 .ok_or_else(|| fault("Source owner disappeared after startup"))
         })();
         crate::persistence::finish_control(
-            lycheedev_core::metadata::historical_write::finish_historical(result, launch.close()),
+            lycheedev_core::metadata::owned_write::finish_owned(result, launch.close()),
             inv.control.check(),
         )
     })();
@@ -673,7 +689,7 @@ pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
 }
 
 fn remove_startup_intent(
-    inv: &Invocation,
+    inv: &SourceContext,
     key: &str,
     generation: i64,
     expected: &StartupIntent,
@@ -704,7 +720,7 @@ fn remove_startup_intent(
     }
 }
 
-fn startup_identity(inv: &Invocation, current: &Identity) -> Result<String> {
+fn startup_identity(inv: &SourceContext, current: &Identity) -> Result<String> {
     let scope = BrokerScope::for_native_source(&inv.home).map_err(platform)?;
     Ok(storage::sha256(&serde_json::to_vec(&(
         WIRE,
@@ -714,60 +730,41 @@ fn startup_identity(inv: &Invocation, current: &Identity) -> Result<String> {
     ))?))
 }
 
-/// Private CLI entry. The single-use intent binds this launch to its actual
-/// parent process, this executable and the selected same-logon workspace.
-pub fn server(args: &[String]) -> Result<()> {
-    let accepted = [
-        "--home",
-        "--parent-pid",
-        "--parent-created",
-        "--start-token",
-    ];
-    if args.len() != 9 || args[0] != "--source-native-session-server" {
-        return Err(ToolkitError::arguments(
-            "private native Source startup requires exact owned arguments",
-        ));
-    }
-    let mut flags = BTreeMap::new();
-    for pair in args[1..].as_chunks::<2>().0 {
-        if !accepted.contains(&pair[0].as_str())
-            || pair[1].is_empty()
-            || flags.insert(pair[0].clone(), pair[1].clone()).is_some()
-        {
-            return Err(ToolkitError::arguments(
-                "invalid private native Source startup arguments",
-            ));
-        }
-    }
-    let token = &flags["--start-token"];
-    if !lycheedev_core::selection::valid_digest(token, 32)
-        || std::env::var("LYCHEEDEV_NATIVE_SOURCE_START").ok().as_ref() != Some(token)
+#[derive(Debug)]
+pub struct SessionStartup {
+    pub home: PathBuf,
+    pub parent_pid: u32,
+    pub parent_created: u64,
+    pub start_token: String,
+}
+
+/// The single-use intent binds this launch to its actual parent process,
+/// this executable and the selected same-logon workspace.
+pub fn server(startup: SessionStartup) -> Result<()> {
+    let SessionStartup {
+        home,
+        parent_pid: pid,
+        parent_created: created,
+        start_token: token,
+    } = startup;
+    if !lycheedev_core::selection::valid_digest(&token, 32)
+        || std::env::var("LYCHEEDEV_NATIVE_SOURCE_START").ok().as_ref() != Some(&token)
     {
         return Err(fault("Native Source startup token differs"));
     }
-    let pid = flags["--parent-pid"]
-        .parse::<u32>()
-        .map_err(|_| ToolkitError::arguments("invalid native Source parent PID"))?;
-    let created = flags["--parent-created"]
-        .parse::<u64>()
-        .map_err(|_| ToolkitError::arguments("invalid native Source parent creation"))?;
-    let home = PathBuf::from(&flags["--home"]);
-    if !home.is_absolute() {
-        return Err(ToolkitError::arguments(
-            "native Source home must be absolute",
-        ));
-    }
-    let console =
-        lycheedev_windows::cancellation::ConsoleCancellation::install().map_err(platform)?;
-    let inv = Invocation {
-        command: String::new(),
-        positional: None,
-        flags: flags.clone(),
+    let control = OperationControl::uncancelable(Instant::now() + OWNER_LIFETIME);
+    let cancellation = control.tracked_cancel_handle()?;
+    let _console =
+        lycheedev_windows::cancellation::ConsoleCancellation::install_callback(move || {
+            cancellation.cancel()
+        })
+        .map_err(platform)?;
+    let context = SourceContext {
         home: home.canonicalize()?,
         cwd: std::env::current_dir()?,
-        control: OperationControl::new(Instant::now() + OWNER_LIFETIME, console.token()),
+        control,
     };
-    let current = identity(&inv.control)?;
+    let current = identity(&context.control)?;
     let startup = (|| {
         let own = Process::open(std::process::id()).map_err(platform)?;
         let parent = Process::open(pid).map_err(platform)?;
@@ -778,13 +775,13 @@ pub fn server(args: &[String]) -> Result<()> {
             return Err(fault("Native Source actual launcher differs"));
         }
         parent.verify().map_err(platform)?;
-        let expected = startup_identity(&inv, &current)?;
+        let expected = startup_identity(&context, &current)?;
         let now = utc_ms()?;
         crate::persistence::consume::<StartupIntent, _>(
-            &inv.home,
+            &context.home,
             &format!("source/native-session-start/{token}"),
             None,
-            &inv.control,
+            &context.control,
             |intent| {
                 if intent.identity != expected
                     || intent.parent_pid != pid
@@ -799,20 +796,23 @@ pub fn server(args: &[String]) -> Result<()> {
         )
     })();
     if let Err(error) = startup {
-        return storage::finish_file(current._file, Err(error), &inv.control);
+        return storage::finish_file(current._file, Err(error), &context.control);
     }
     // This is the same lifetime fixed before authentication/startup above, not
     // a fresh 600-second interval after startup finishes.
-    let lifetime = SessionLifetime { deadline: inv.control.deadline(), normal_expiry: true };
-    serve_owned(&inv, current, lifetime)
+    let lifetime = SessionLifetime {
+        deadline: context.control.deadline(),
+        normal_expiry: true,
+    };
+    serve_owned(&context, current, lifetime)
 }
 
-pub fn serve(inv: &Invocation) -> Result<()> {
+pub fn serve(inv: &SourceContext) -> Result<()> {
     let current = identity(&inv.control)?;
     let lifetime = SessionLifetime::new(Instant::now(), inv.control.deadline());
     serve_owned(inv, current, lifetime)
 }
-fn serve_owned(inv: &Invocation, current: Identity, lifetime: SessionLifetime) -> Result<()> {
+fn serve_owned(inv: &SourceContext, current: Identity, lifetime: SessionLifetime) -> Result<()> {
     let result = serve_borrowed(inv, &current, &lifetime);
     finish_session_file(current._file, result, &inv.control)
 }
@@ -826,10 +826,8 @@ fn finish_session_file(file: File, result: Result<SessionEnd>, control: &Operati
         storage::finish_file(file, result.map(|_| ()), control)
     }
 }
-fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifetime) -> Result<SessionEnd> {
-    let owner_control = inv
-        .control
-        .child(lifetime.deadline, inv.control.cancel_handle());
+fn serve_borrowed(inv: &SourceContext, current: &Identity, lifetime: &SessionLifetime) -> Result<SessionEnd> {
+    let owner_control = inv.control.ordered_child(lifetime.deadline)?;
     workspace::open_controlled(&inv.home, &inv.control)?;
     let scope = BrokerScope::for_native_source(&inv.home).map_err(platform)?;
     let owner = storage::ExclusiveLock::resource_controlled(
@@ -855,7 +853,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                 if let Some(end) = lifetime.admission_end(&owner_control)? {
                     return Ok(end);
                 }
-                let mut stream = match listener.accept(idle_deadline, owner_control.token()) {
+                let mut stream = match listener.accept_with_control(idle_deadline, transport_check(&owner_control)) {
                     Ok(stream) => stream,
                     Err(message) if message.contains("deadline") => {
                         return Ok(lifetime.admission_end(&owner_control)?.unwrap_or(SessionEnd::IdleExpired));
@@ -865,9 +863,9 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                 if let Some(end) = lifetime.admission_end(&owner_control)? {
                     return Ok(end);
                 }
-                stream.set_deadline(
+                stream.set_deadline_with_control(
                     lifetime.handshake_deadline(Instant::now(), idle_deadline),
-                    owner_control.cancel_handle(),
+                    transport_check(&owner_control),
                 );
                 if write_frame(
                     &mut stream,
@@ -928,8 +926,8 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                 terminal_deadline = total_deadline;
                 let (processing_deadline, retirement_deadline) = request_cutoffs(total_deadline, observed);
                 let response_control =
-                    owner_control.child(total_deadline, owner_control.cancel_handle());
-                stream.set_deadline(total_deadline, response_control.cancel_handle());
+                    owner_control.ordered_child(total_deadline)?;
+                stream.set_deadline_with_control(total_deadline, transport_check(&response_control));
                 match request.action {
                     Action::Status => {
                         analysis_process::refresh(&mut analysis, retirement_deadline)?;
@@ -975,31 +973,46 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                         return Ok(SessionEnd::Closed);
                     }
                     Action::Query => {
-                        let cancel = Arc::new(AtomicBool::new(false));
+                        let control = owner_control.ordered_child(processing_deadline)?;
                         let observer_stop = Arc::new(AtomicBool::new(false));
-                        let read_cancel = Arc::new(AtomicBool::new(false));
                         let mut observer = stream.try_clone().map_err(platform)?;
+                        // The observation read shares the processing cutoff but
+                        // has its own stop: a completed query releases the
+                        // blocked read without claiming the request cancelled.
+                        // A peer EOF cancels this request's local signal only.
+                        let read_cancel = lycheedev_core::control::TrackedCancellation::new();
+                        let observer_check: Arc<
+                            dyn Fn() -> lycheedev_windows::Result<()> + Send + Sync,
+                        > = {
+                            let read_cancel = read_cancel.clone();
+                            Arc::new(move || {
+                                if read_cancel.is_cancelled() {
+                                    Err("broker.observation_stopped".into())
+                                } else {
+                                    Ok(())
+                                }
+                            })
+                        };
                         // Observation is needed only while analysis can run.
                         // Its original processing cutoff also bounds the final
                         // join; a short request must not wait through its reply
                         // reserve for the broker's cancellation polling slice.
-                        observer.set_deadline(processing_deadline, read_cancel.clone());
+                        observer.set_deadline_with_control(processing_deadline, observer_check);
                         let observing = observer_stop.clone();
-                        let request_cancel = cancel.clone();
+                        let request_cancel = control.tracked_cancel_handle()?;
                         let handle = std::thread::spawn(move || {
                             let mut marker = [0u8; 1];
                             match observer.read(&mut marker) {
                                 Ok(0) if !observing.load(Ordering::Acquire) => {
-                                    request_cancel.store(true, Ordering::Release)
+                                    request_cancel.cancel()
                                 }
                                 Ok(_) if marker[0] == 1 && !observing.load(Ordering::Acquire) => {
-                                    request_cancel.store(true, Ordering::Release)
+                                    request_cancel.cancel()
                                 }
                                 // Timeout/stop of our observation is not a peer disconnect.
                                 _ => {}
                             }
                         });
-                        let control = owner_control.child(processing_deadline, cancel);
                         let mut terminal = None;
                         let result = analysis_process::query(
                             &mut analysis, raw, request.work.is_none().then_some(request.cached.as_ref()).flatten().map(|value|value.key.as_str()),
@@ -1007,7 +1020,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                             &mut terminal,
                         );
                         observer_stop.store(true, Ordering::Release);
-                        read_cancel.store(true, Ordering::Release);
+                        read_cancel.cancel();
                         if handle.join().is_err() {
                             return Err(fault("Source request observer failed"));
                         }
@@ -1047,8 +1060,8 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
             // disarm a tree whose actual retirement remains unconfirmed.
             std::mem::forget(job);
         }
-        lycheedev_core::metadata::historical_write::finish_historical(
-            lycheedev_core::metadata::historical_write::finish_historical(run, retired), disarmed)
+        lycheedev_core::metadata::owned_write::finish_owned(
+            lycheedev_core::metadata::owned_write::finish_owned(run, retired), disarmed)
     })();
     finish_session_end(owned, owner.close(), &owner_control)
 }
@@ -1179,19 +1192,12 @@ mod tests {
             lifetime.request_deadline(start + Duration::from_secs(5)),
             start + Duration::from_secs(5)
         );
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let owner = OperationControl::new(lifetime.deadline, cancelled.clone());
-        let request = owner.child(
-            start + Duration::from_secs(100),
-            Arc::new(AtomicBool::new(false)),
-        );
+        let owner = OperationControl::uncancelable(lifetime.deadline);
+        let request = owner.ordered_child(start + Duration::from_secs(100)).unwrap();
         assert_eq!(request.deadline(), lifetime.deadline);
-        // Blocking transport only observes this atomic, without invoking
-        // OperationControl::check to propagate cancellation lazily.
-        let transport = owner.child(lifetime.deadline, owner.cancel_handle());
-        let transport_token = transport.cancel_handle();
-        cancelled.store(true, Ordering::Release);
-        assert!(transport_token.load(Ordering::Acquire));
+        let check = transport_check(&owner);
+        owner.tracked_cancel_handle().unwrap().cancel();
+        assert!(check().unwrap_err().contains("command.cancelled"));
         assert_eq!(request.check().unwrap_err().code, "command.cancelled");
     }
 
@@ -1265,7 +1271,9 @@ mod tests {
     #[test]
     fn terminal_cleanup_preserves_primary_cancellation_and_close_errors() {
         let original = Instant::now();
-        let cancelled = OperationControl::new(original, Arc::new(AtomicBool::new(true)));
+        // The new timestamped stop model needs the live deadline after the
+        // cancellation instant so cancellation is the first observed event.
+        let cancelled = crate::native::stopped_control(false, original + Duration::from_secs(30));
         let primary = cancelled.check().unwrap_err();
         let cleanup = fault("Native analysis retirement is unconfirmed");
         let failure = finish_session_end(Err(primary), Err(cleanup), &cancelled).unwrap_err();
@@ -1302,8 +1310,7 @@ mod tests {
     fn normal_lifetime_end_never_hides_cancellation_or_unconfirmed_retirement() {
         let now = Instant::now();
         let lifetime = SessionLifetime::new(now - OWNER_LIFETIME, now);
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let control = OperationControl::new(now, cancelled.clone());
+        let control = OperationControl::uncancelable(now);
         let end = lifetime.admission_end(&control).unwrap().unwrap();
         let cleanup = fault("Native analysis retirement is unconfirmed")
             .with_details(json!({"analysisRetired":false,"rootReaped":false,"jobEmpty":false}));
@@ -1312,10 +1319,22 @@ mod tests {
         assert_eq!(failure.details["primary"]["details"]["analysisRetired"], false);
         assert_eq!(failure.details["primary"]["details"]["rootReaped"], false);
         assert_eq!(failure.details["cleanup"]["code"], "command.deadline");
-        // Cancellation arriving during cleanup also wins over the expected end.
-        cancelled.store(true, Ordering::Release);
-        assert_eq!(finish_session_end(Ok(end), Ok(()), &control).unwrap_err().code, "command.cancelled");
-        assert_eq!(lifetime.admission_end(&control).unwrap_err().code, "command.cancelled");
+        // A cancellation stamped before the fixed cutoff wins over the expected
+        // lifetime end. The timestamped model keeps the first observed event;
+        // a later cancellation cannot retroactively reorder an expired deadline.
+        let cancelled = lycheedev_core::control::TrackedCancellation::new();
+        cancelled.cancel();
+        let stopped = OperationControl::tracked(now + Duration::from_secs(30), cancelled);
+        assert_eq!(
+            finish_session_end(Ok(end), Ok(()), &stopped)
+                .unwrap_err()
+                .code,
+            "command.cancelled"
+        );
+        assert_eq!(
+            lifetime.admission_end(&stopped).unwrap_err().code,
+            "command.cancelled"
+        );
     }
 
     #[test]
@@ -1349,7 +1368,7 @@ mod tests {
         let failure = finish_session_end(Ok(SessionEnd::LifetimeExpired(original_deadline)), Err(close_error), &control).unwrap_err();
         assert_eq!(failure.code, "external.io");
         assert_eq!(failure.details["primary"]["message"], "checked close failed");
-        let cancelled = OperationControl::new(original_deadline, Arc::new(AtomicBool::new(true)));
+        let cancelled = crate::native::stopped_control(false, original_deadline + Duration::from_secs(30));
         let file = File::open(std::env::current_exe().unwrap()).unwrap();
         assert_eq!(finish_session_file(file, Ok(SessionEnd::LifetimeExpired(original_deadline)), &cancelled).unwrap_err().code, "command.cancelled");
     }
@@ -1429,7 +1448,7 @@ mod tests {
 mod semantic_admission_tests {
     use super::*;
     fn material()->crate::native_research::SnapshotRequest {
-        crate::native_research::SnapshotRequest{files:BTreeMap::from([("a.lua".into(),format!("function Caller()\n{}end\n",(0..128).map(|n|format!(" missing{n}()\n")).collect::<String>()))]),load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),source:json!({"repository":"quota-fixture","product":"retail"}),
+        crate::native_research::SnapshotRequest{encoding_warnings:vec![],files:BTreeMap::from([("a.lua".into(),format!("function Caller()\n{}end\n",(0..128).map(|n|format!(" missing{n}()\n")).collect::<String>()))]),load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),source:json!({"repository":"quota-fixture","product":"retail"}),
             luac:crate::native::LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]}
     }
     fn query(direction:&str)->QueryRequest {
@@ -1445,46 +1464,46 @@ mod semantic_admission_tests {
         assert_ne!(key,old_key);
         assert_ne!(key,storage::sha256(&serde_json::to_vec(&("source-native-research-v7-xml-script-ancestry",&snapshot)).unwrap()));
         let mut cached=None;
-        let first=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        let first=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap().into_value();
         assert_eq!(first["nativeSession"]["cacheHit"],false);
         assert_eq!(cached.as_ref().unwrap().key,key);
         let phases=std::cell::RefCell::new(Vec::new());
         let miss=execute_cached_query(&mut cached,None,Some(CachedQuery{key:old_key,query:query("incoming")}),&control,42,|phase,_|phases.borrow_mut().push(phase.to_owned())).unwrap_err();
         assert_eq!(miss.code,"source.native_snapshot_missing");assert!(!phases.borrow().iter().any(|phase|phase=="querying"));
-        let restored=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        let restored=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("incoming")}),None,&control,42,|_,_|{}).unwrap().into_value();
         assert_eq!(restored["nativeSession"]["cacheHit"],false);
-        let reused=execute_cached_query(&mut cached,None,Some(CachedQuery{key,query:query("incoming")}),&control,42,|_,_|{}).unwrap();
+        let reused=execute_cached_query(&mut cached,None,Some(CachedQuery{key,query:query("incoming")}),&control,42,|_,_|{}).unwrap().into_value();
         assert_eq!(reused["nativeSession"]["cacheHit"],true);assert_eq!(reused["nativeSession"]["snapshotTransfer"],"identity_only");
         assert_eq!(restored["inputIdentity"],reused["inputIdentity"]);assert_eq!(restored["relations"],reused["relations"]);
     }
     #[test]
     fn cached_partial_queries_reach_quota_retire_analysis_and_allow_full_resend() {
         let control=OperationControl::default();let snapshot=material();let key=snapshot.cache_key(&control).unwrap();let mut cached=None;
-        let value=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        let value=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap().into_value();
         assert_eq!(value["semanticExecution"]["receipt"]["completed_batches"],0);assert_eq!(value["nativeSession"]["batches"],1);
         cached.as_mut().unwrap().admission.batches=254;
-        for total in [255,256]{let value=execute_cached_query(&mut cached,None,Some(CachedQuery{key:key.clone(),query:query("incoming")}),&control,42,|_,_|{}).unwrap();assert_eq!(value["nativeSession"]["batches"],total);}
+        for total in [255,256]{let value=execute_cached_query(&mut cached,None,Some(CachedQuery{key:key.clone(),query:query("incoming")}),&control,42,|_,_|{}).unwrap().into_value();assert_eq!(value["nativeSession"]["batches"],total);}
         assert!(cached.is_none());assert_eq!(session_status(None,42)["ownerPid"],42);assert_eq!(session_status(None,42)["workerPid"],0);
         assert_eq!(execute_cached_query(&mut cached,None,Some(CachedQuery{key,query:query("incoming")}),&control,42,|_,_|{}).unwrap_err().code,"source.native_snapshot_missing");
-        let fresh=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();assert_eq!(fresh["nativeSession"]["batches"],1);assert_eq!(fresh["nativeSession"]["cacheHit"],false);
+        let fresh=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("incoming")}),None,&control,42,|_,_|{}).unwrap().into_value();assert_eq!(fresh["nativeSession"]["batches"],1);assert_eq!(fresh["nativeSession"]["cacheHit"],false);
     }
     #[test]
     fn overflow_retires_before_execution_and_full_input_rebuilds_once() {
         let control=OperationControl::default();let snapshot=material();let key=snapshot.cache_key(&control).unwrap();let mut cached=None;
-        execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap().into_value();
         cached.as_mut().unwrap().admission.batches=255;
         let phases=std::cell::RefCell::new(Vec::new());
         let error=execute_cached_query(&mut cached,None,Some(CachedQuery{key,query:query("both")}),&control,42,|phase,_|phases.borrow_mut().push(phase.to_owned())).unwrap_err();
         assert_eq!(error.code,"source.native_snapshot_missing");assert!(cached.is_none());assert!(!phases.borrow().iter().any(|phase|phase=="querying"));
-        execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();cached.as_mut().unwrap().admission.batches=255;phases.borrow_mut().clear();
-        let value=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("both")}),None,&control,42,|phase,_|phases.borrow_mut().push(phase.to_owned())).unwrap();
+        execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap().into_value();cached.as_mut().unwrap().admission.batches=255;phases.borrow_mut().clear();
+        let value=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("both")}),None,&control,42,|phase,_|phases.borrow_mut().push(phase.to_owned())).unwrap().into_value();
         assert_eq!(value["nativeSession"]["batches"],2);assert_eq!(value["nativeSession"]["cacheHit"],false);assert_eq!(phases.borrow().iter().filter(|phase|*phase=="quota_repreparing").count(),1);assert_eq!(phases.borrow().iter().filter(|phase|*phase=="querying").count(),1);
         assert_eq!(cached.as_ref().unwrap().analysis.request_control().deadline(),control.deadline());
     }
     #[test]
     fn execution_failure_after_admission_retires_cached_analysis() {
         let control=OperationControl::default();let mut cached=None;
-        let cancel=control.cancel_handle();let error=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:material(),query:query("incoming")}),None,&control,42,|phase,_|{if phase=="querying"{cancel.store(true,Ordering::Release);}}).unwrap_err();
+        let cancel=control.tracked_cancel_handle().unwrap();let error=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:material(),query:query("incoming")}),None,&control,42,|phase,_|{if phase=="querying"{cancel.cancel();}}).unwrap_err();
         assert_eq!(error.code,"command.cancelled");assert!(cached.is_none());
     }
     #[test]

@@ -21,7 +21,7 @@ fn retail_environment() -> (environment::Environment, BTreeMap<String, String>) 
     // Complete, unchanged documents from the same authenticated Retail archive
     // as the Windows full-corpus failure; no studied source is executed.
     let fixture: Value = serde_json::from_str(include_str!(
-        "../../../../tests/rust-source-data/retail-api-return-labels.json"
+        "../../../../tests/fixtures/source-native/catalog/retail-api-return-labels.json"
     ))
     .unwrap();
     assert_eq!(fixture["commit"], RETAIL_COMMIT);
@@ -162,6 +162,7 @@ fn retail_return_labels_allow_ordinary_research_preparation_and_query() {
     let control = OperationControl::default();
     let mut session = ResearchSession::prepare(
         SnapshotRequest {
+            encoding_warnings:vec![],
             files: BTreeMap::from([("logic.lua".into(), "function Probe() end\nProbe()\n".into())]),
             load_documents: BTreeMap::new(),
             environment_documents: files,

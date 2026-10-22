@@ -1,12 +1,15 @@
 //! Adapted from fixed Emmy return_type_mismatch.rs; Copyright (c) CppCXY, MIT.
 use super::CheckContext;
+use crate::session::backend::return_pack::{
+    return_arity, return_expands, return_has_typed_open_tail, return_prefix_extent,
+};
 use crate::session::backend::{OwnedQuery, QueryResult};
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
     DiagnosticCode, LuaType, SemanticId, SemanticModel, SignatureDoc, TypeDef, TypeScope,
     humanize_semantic_type,
 };
-use emmylua_parser::{LuaAstNode, LuaClosureExpr, LuaReturnStat};
+use emmylua_parser::{LuaAstNode, LuaClosureExpr, LuaExpr, LuaReturnStat};
 
 impl<E> OwnedQuery<'_, '_, E> {
     pub(in crate::session::backend) fn check_return_type_mismatch(
@@ -63,7 +66,14 @@ impl<E> OwnedQuery<'_, '_, E> {
         expected: &OwnedValue,
         docs: &SignatureDoc,
     ) -> QueryResult<(), E> {
-        for expression in ret.get_expr_list() {
+        let expressions = ret.get_expr_list().collect::<Vec<_>>();
+        // Never on the expected side rejects any normal returned value; it
+        // must not suppress the type comparison as an actual Never does.
+        let expected_arity = return_arity(expected.structural_type())
+            .unwrap_or(crate::session::backend::return_pack::ReturnArity::fixed(1));
+        let expected_max = expected_arity.max;
+        let mut offset = 0;
+        for (index, expression) in expressions.iter().enumerate() {
             self.checkpoint()?;
             let mut raw = self.type_of_expr_at(
                 expression.get_syntax_id(),
@@ -72,36 +82,96 @@ impl<E> OwnedQuery<'_, '_, E> {
             if let Some(ty) = inline_as_type(&self.model, ret, &expression) {
                 raw = OwnedValue::plain(ty);
             }
-            if is_unresolved_generic_ref(&self.model, raw.structural_type(), docs) {
-                if let Some(constraint) =
-                    generic_constraint_type(&self.model, raw.structural_type())
-                {
-                    let constraint = OwnedValue::plain(constraint);
-                    if !self.return_compatible(&constraint, expected)? {
-                        add_mismatch(context, expression.get_range(), expected, &constraint);
+            let expands = return_expands(expression, index + 1 == expressions.len());
+            let Some(arity) = (if expands {
+                return_arity(raw.structural_type())
+            } else if matches!(raw.structural_type(), LuaType::Never) {
+                None
+            } else {
+                Some(crate::session::backend::return_pack::ReturnArity::fixed(1))
+            }) else {
+                self.finish_return_quality(expression, &raw, expected, false)?;
+                break;
+            };
+            let (minimum, maximum) = (arity.min, arity.max);
+            let comparisons = match maximum {
+                Some(count) => count,
+                None if return_has_typed_open_tail(raw.structural_type()) => match expected_max {
+                    Some(count) => return_prefix_extent(raw.structural_type())
+                        .max(count.saturating_sub(offset)),
+                    None => {
+                        return_prefix_extent(raw.structural_type()).max(
+                            return_prefix_extent(expected.structural_type()).saturating_sub(offset),
+                        ) + 1
                     }
-                    self.finish_return_quality(&expression, &constraint, expected, true)?;
-                } else {
-                    self.finish_return_quality(&expression, &raw, expected, false)?;
+                },
+                // Unknown/Any tails do not supply invented values or Nil.
+                None => minimum,
+            };
+            let mut compared = false;
+            let mut complete = maximum == Some(minimum);
+            if expands && let LuaExpr::CallExpr(call) = expression {
+                if let Some(observed) = self.binding_call_return_arity(call)? {
+                    complete &= observed.max == Some(observed.min);
                 }
-                continue;
             }
-            let actual = generic_constraint_type(&self.model, raw.structural_type())
-                .map(OwnedValue::plain)
-                .unwrap_or(raw);
-            if matches!(
-                actual.structural_type(),
-                LuaType::Unknown | LuaType::Any | LuaType::Never
-            ) {
-                self.finish_return_quality(&expression, &actual, expected, false)?;
-                continue;
+            for slot in 0..comparisons {
+                self.checkpoint()?;
+                if expected_max.is_some_and(|max| offset + slot >= max) {
+                    // Excess and missing slots belong to the count checker.
+                    break;
+                }
+                let target =
+                    if matches!(expected.structural_type(), LuaType::Never) && offset + slot == 0 {
+                        Some(expected.clone())
+                    } else {
+                        self.owned_return_slot(expected, offset + slot)?
+                    };
+                let Some(target) = target else {
+                    complete = false;
+                    break;
+                };
+                let actual = self
+                    .owned_return_slot(&raw, slot)?
+                    .unwrap_or_else(|| OwnedValue::plain(LuaType::Nil));
+                complete &= self.check_return_slot(context, expression, &actual, &target, docs)?;
+                compared = true;
             }
-            if !self.return_compatible(&actual, expected)? {
-                add_mismatch(context, expression.get_range(), expected, &actual);
-            }
-            self.finish_return_quality(&expression, &actual, expected, true)?;
+            self.finish_return_quality(expression, &raw, expected, compared && complete)?;
+            offset += maximum.unwrap_or(minimum);
         }
         Ok(())
+    }
+
+    fn check_return_slot(
+        &mut self,
+        context: &mut CheckContext<'_>,
+        expression: &LuaExpr,
+        raw: &OwnedValue,
+        expected: &OwnedValue,
+        docs: &SignatureDoc,
+    ) -> QueryResult<bool, E> {
+        let constraint = generic_constraint_type(&self.model, raw.structural_type());
+        if is_unresolved_generic_ref(&self.model, raw.structural_type(), docs)
+            && constraint.is_none()
+        {
+            return Ok(false);
+        }
+        let actual = constraint
+            .map(OwnedValue::plain)
+            .unwrap_or_else(|| raw.clone());
+        if matches!(
+            actual.structural_type(),
+            LuaType::Unknown | LuaType::Any | LuaType::Never
+        ) || !self.structure_allowed(&actual)?
+            || !self.structure_allowed(expected)?
+        {
+            return Ok(false);
+        }
+        if !self.return_compatible(&actual, expected)? {
+            add_mismatch(context, expression.get_range(), expected, &actual);
+        }
+        Ok(true)
     }
 
     fn return_compatible(

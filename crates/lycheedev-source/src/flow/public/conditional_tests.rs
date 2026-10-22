@@ -595,9 +595,9 @@ fn flow_conditional_production_collector_preserves_original_control_before_heade
             ("Selected.lua", ""),
         ],
     );
-    let cancelled = OperationControl::new(
+    let cancelled = crate::native::stopped_control(
+        false,
         std::time::Instant::now() + std::time::Duration::from_secs(60),
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
     );
     for (control, code) in [
         (cancelled, "command.cancelled"),
@@ -680,8 +680,8 @@ fn flow_conditional_header_references_share_the_existing_work_budget() {
     assert!(result.ordered.is_none());
     assert_eq!(result.load_evidence["budget"]["work"], 2);
     assert_eq!(result.load_evidence["budget"]["exhausted"], true);
-    let token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let control = OperationControl::new(
+    let token = lycheedev_core::control::TrackedCancellation::new();
+    let control = OperationControl::tracked(
         std::time::Instant::now() + std::time::Duration::from_secs(60),
         token.clone(),
     );
@@ -696,7 +696,7 @@ fn flow_conditional_header_references_share_the_existing_work_budget() {
         Limits::default(),
         |work| {
             if work > fixture.facts.len() {
-                token.store(true, Ordering::Release);
+                token.cancel();
             }
         },
     )

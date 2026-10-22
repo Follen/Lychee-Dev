@@ -1,4 +1,5 @@
-//! NOT_RUN. Go3057a966 internal/vault/workspace.go:42–73,158–174.
+//! Current workspace marker validation: schema family, ordering, strict decoding
+//! and exact identity retention. NOT_RUN refers to real-client execution.
 use super::*;
 use std::{
     path::PathBuf,
@@ -74,7 +75,7 @@ fn workspace_open_missing_manifest_distinguishes_nonempty_legacy() {
     assert!(!f.0.join("workspace.json").exists());
 }
 #[test]
-fn workspace_open_schema_family_and_validation_priority_match_go() {
+fn workspace_open_schema_family_and_validation_priority_match_reference() {
     let f = Fixture::new();
     for (schema, newer) in [
         ("foreign", false),
@@ -113,26 +114,6 @@ fn workspace_open_schema_family_and_validation_priority_match_go() {
         "2026-10-15T00:00:00Z",
     );
     assert_eq!(open(&f.0).unwrap_err().code, "vault.workspace_schema_newer");
-}
-#[test]
-fn workspace_open_go_case_duplicate_null_and_time_escape_rules() {
-    let f = Fixture::new();
-    let raw = format!(
-        r#"{{"SCHEMA":"lycheedev.workspace.v1","workspaceId":"{}","WORKSPACEID":null,"createdAt":"2026-10-15T0:00:00,1234567899Z","CreatedAt":null,"unknown":{{"field":true}}}}"#,
-        "a".repeat(32)
-    );
-    fs::write(f.0.join("workspace.json"), raw).unwrap();
-    let v = open(&f.0).unwrap();
-    assert_eq!(v["createdAt"], "2026-10-15T00:00:00.123456789Z");
-    let raw = format!(
-        r#"{{"schema":"lycheedev.workspace.v1","workspaceId":"{}","createdAt":"2026-10-15T00:00:00\u005a"}}"#,
-        "a".repeat(32)
-    );
-    fs::write(f.0.join("workspace.json"), raw).unwrap();
-    assert_eq!(
-        open(&f.0).unwrap_err().message,
-        "vault.unsupported_workspace"
-    );
 }
 #[test]
 fn workspace_open_malformed_field_rejects_even_when_later_duplicate_is_valid() {

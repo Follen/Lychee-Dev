@@ -99,16 +99,19 @@ impl<'a> SourceQueries<'a> {
         if self.prepared.inputs.corpus.index.contains_key(&site.file){return site.text(&self.prepared.inputs);}
         self.graph.and_then(|graph|graph.inputs.xml.as_ref()).and_then(|program|program.original(&site.file)).and_then(|text|text.get(site.start as usize..site.end as usize)).ok_or_else(||input_error("query source range unavailable"))
     }
-    fn validate_target(&self,target:&QueryTarget)->lycheedev_core::Result<()> {
+    fn validate_target(&self,target:&QueryTarget)->lycheedev_core::Result<Option<DeclarationId>> {
         self.prepared.control.check()?;
-        if matches!(target,QueryTarget::Declaration(id)|QueryTarget::Storage(id)|QueryTarget::Value(id) if !valid_sha(id)){return Err(input_error("invalid query identity"))}
+        if matches!(target,QueryTarget::Storage(id)|QueryTarget::Value(id) if !valid_sha(id)){return Err(input_error("invalid query identity"))}
         if self.selector==QuerySelector::SyntaxOnly&&matches!(target,QueryTarget::Storage(_)|QueryTarget::Value(_)){return Err(input_error("storage and selected-value queries require an explicit execution selector"))}
         match target {
-            QueryTarget::Site(site)=>self.validate_site(site),
-            QueryTarget::Declaration(id)=>if self.prepared.syntax.declaration_by_id(id).is_some(){Ok(())}else{Err(input_error("foreign or unknown declaration identity"))},
-            QueryTarget::Value(id)=>{if let Some(graph)=self.graph{for value in &graph.values{self.step()?;if self.value_id(value.id)==*id{return Ok(())}}}Err(input_error("foreign or unknown selected value identity"))},
-            QueryTarget::Storage(id)=>{if let Some(facts)=self.graph.and_then(|graph|graph.native_invocations.as_ref()){for storage in &facts.storages{self.step()?;if self.storage_id(&storage.cell)==*id{return Ok(())}}}Err(input_error("foreign or unknown storage identity"))},
-            QueryTarget::All=>Ok(()),
+            QueryTarget::Site(site)=>{self.validate_site(site)?;Ok(None)},
+            QueryTarget::Declaration(id)=>{
+                let key=DeclarationId::parse(id).ok_or_else(||input_error("invalid query identity"))?;
+                if self.prepared.syntax.declaration_by_key(&key).is_some(){Ok(Some(key))}else{Err(input_error("foreign or unknown declaration identity"))}
+            },
+            QueryTarget::Value(id)=>{if let Some(graph)=self.graph{for value in &graph.values{self.step()?;if self.value_id(value.id)==*id{return Ok(None)}}}Err(input_error("foreign or unknown selected value identity"))},
+            QueryTarget::Storage(id)=>{if let Some(facts)=self.graph.and_then(|graph|graph.native_invocations.as_ref()){for storage in &facts.storages{self.step()?;if self.storage_id(&storage.cell)==*id{return Ok(None)}}}Err(input_error("foreign or unknown storage identity"))},
+            QueryTarget::All=>Ok(None),
         }
     }
     fn value_id(&self,value:usize)->String {digest(&(self.graph.map(|graph|graph.snapshot_key.as_str()),"value",value))}
@@ -130,7 +133,7 @@ impl<'a> SourceQueries<'a> {
     fn lexical_at(&self,site:&Site)->Option<&IndexedDeclaration> {
         self.prepared.lexical_declaration_at(site)
     }
-    fn lexical_id_at(&self,site:&Site)->Option<String>{self.lexical_at(site).map(|decl|decl.id.clone())}
+    fn lexical_id_at(&self,site:&Site)->Option<DeclarationId>{self.lexical_at(site).map(|decl|decl.id)}
     fn selected(&self,decision:&Decision,writes:&[usize],proof:&str)->QueryFact<ValueDefinition> {
         let Some(graph)=self.graph else{return QueryFact::NotApplicable};
         match decision {
@@ -174,17 +177,17 @@ impl<'a> SourceQueries<'a> {
         self.prepared.syntax_callee_at(&call.site).unwrap_or_else(||fact.site.clone())
     }
     fn call_cell(&self,fact:&UseFact)->Option<&str>{self.use_cell(fact.id).or_else(||fact.writes.first().and_then(|id|self.graph?.writes.get(*id)).map(|write|write.cell.as_str()))}
-    fn target_matches(&self,target:&QueryTarget,site:&Site,lexical:Option<&str>,cell:Option<&str>,decision:Option<&Decision>)->bool {
+    fn target_matches(&self,target:&QueryTarget,declaration_target:Option<DeclarationId>,site:&Site,lexical:Option<DeclarationId>,cell:Option<&str>,decision:Option<&Decision>)->bool {
         match target {
             QueryTarget::All=>true,QueryTarget::Site(expected)=>expected==site,
-            QueryTarget::Declaration(expected)=>lexical==Some(expected.as_str()),
+            QueryTarget::Declaration(_)=>lexical==declaration_target,
             QueryTarget::Storage(expected)=>cell.is_some_and(|cell|self.storage_id(cell)==*expected),
             QueryTarget::Value(expected)=>matches!(decision,Some(Decision::Bound(value)) if self.value_id(*value)==*expected),
         }
     }
     fn role_match(filter:&ReferenceFilter,roles:&[ReferenceRole])->bool {filter.roles.is_empty()||filter.roles.iter().any(|role|roles.contains(role))}
     pub fn references(&self,target:QueryTarget,filter:ReferenceFilter,page:PageRequest)->lycheedev_core::Result<QueryPage<ReferenceRecord>> {
-        self.validate_target(&target)?;
+        let declaration_target=self.validate_target(&target)?;
         if filter.roles.len()>5||filter.roles.iter().enumerate().any(|(i,role)|filter.roles[..i].contains(role)){return Err(input_error("invalid or duplicate reference roles"))}
         self.page_key(&("references",&target,&filter),&page)?;let mut rows=Vec::new();
         if self.selector==QuerySelector::SyntaxOnly || self.graph.is_none() {
@@ -194,13 +197,13 @@ impl<'a> SourceQueries<'a> {
                 let mut file_rows=Vec::new();
                 for reference in &syntax.references {
                     self.step()?;
-                    let site=reference.site.public(&self.prepared.inputs);let lexical=reference.declaration.map(|id|self.prepared.syntax.declarations[id].id.as_str());
-                    if Self::role_match(&filter,&reference.roles)&&self.target_matches(&target,&site,lexical,None,None){file_rows.push(ReferenceRecord{id:reference.id.clone(),site,roles:reference.roles.clone(),lexical_declaration:lexical.map(str::to_owned),storage:None,storage_owner:None,write:None,closure:None,selected:QueryFact::NotApplicable,occurrence:QuerySelector::SyntaxOnly,coverage:"syntax_only".into(),proof:reference.id.clone()});}
+                    let site=reference.site.public(&self.prepared.inputs);let lexical=reference.declaration.map(|id|self.prepared.syntax.declarations[id].id);
+                    if Self::role_match(&filter,&reference.roles)&&self.target_matches(&target,declaration_target,&site,lexical,None,None){file_rows.push(ReferenceRecord{id:reference.id.clone(),site,roles:reference.roles.clone(),lexical_declaration:lexical.map(DeclarationId::public),storage:None,storage_owner:None,write:None,closure:None,selected:QueryFact::NotApplicable,occurrence:QuerySelector::SyntaxOnly,coverage:"syntax_only".into(),proof:reference.id.clone()});}
                 }
                 for declaration in &self.prepared.syntax.declarations[self.prepared.syntax.declaration_ranges[file].clone()] {
                     self.step()?;let roles=vec![ReferenceRole::Declaration];
                     let site=declaration.site.public(&self.prepared.inputs);
-                    if Self::role_match(&filter,&roles)&&self.target_matches(&target,&site,Some(&declaration.id),None,None){file_rows.push(ReferenceRecord{id:digest(&(&declaration.id,"declaration_reference")),site,roles,lexical_declaration:Some(declaration.id.clone()),storage:None,storage_owner:None,write:None,closure:None,selected:QueryFact::NotApplicable,occurrence:QuerySelector::SyntaxOnly,coverage:"syntax_only".into(),proof:declaration.id.clone()});}
+                    if Self::role_match(&filter,&roles)&&self.target_matches(&target,declaration_target,&site,Some(declaration.id),None,None){let public_id=declaration.id.public();file_rows.push(ReferenceRecord{id:digest(&(&public_id,"declaration_reference")),site,roles,lexical_declaration:Some(public_id.clone()),storage:None,storage_owner:None,write:None,closure:None,selected:QueryFact::NotApplicable,occurrence:QuerySelector::SyntaxOnly,coverage:"syntax_only".into(),proof:public_id});}
                 }
                 file_rows.sort_by_key(|row|self.sort_key(&row.site,&row.occurrence,&row.roles,&row.id));
                 for row in file_rows {if total>=offset&&rows.len()<page.limit{rows.push(row)}total+=1;}
@@ -211,7 +214,7 @@ impl<'a> SourceQueries<'a> {
             if let Some(xml)=&graph.xml{for reference in &xml.references{
                 self.step()?;let fact=&graph.uses[reference.use_fact];if !self.accepts(&fact.context){continue;}
                 let roles=vec![ReferenceRole::Read];let cell=self.use_cell(fact.id);
-                if Self::role_match(&filter,&roles)&&self.target_matches(&target,&fact.site,None,cell,Some(&fact.decision)){
+                if Self::role_match(&filter,&roles)&&self.target_matches(&target,declaration_target,&fact.site,None,cell,Some(&fact.decision)){
                     rows.push(ReferenceRecord{id:digest(&(graph.snapshot_key.as_str(),"xml_reference",fact.id)),site:fact.site.clone(),roles,lexical_declaration:None,storage:cell.map(|cell|self.storage_id(cell)),storage_owner:cell.and_then(|cell|self.storage(cell)).map(|storage|storage.owner.clone()),write:fact.writes.first().map(|id|self.write_id(*id)),closure:None,selected:self.selected(&fact.decision,&fact.writes,&fact.proof_id),occurrence:self.occurrence(&fact.context),coverage:"xml_declared_reference_observation".into(),proof:fact.proof_id.clone()});
                 }
             }}
@@ -225,42 +228,42 @@ impl<'a> SourceQueries<'a> {
                 }
                 let Some(syntax)=file_syntax.as_ref().unwrap().1.reference_at(&self.prepared.inputs,&fact.site)else{continue};
                 let roles:Vec<_>=syntax.roles.iter().filter(|role|matches!(role,ReferenceRole::Read)).cloned().collect();if roles.is_empty(){continue}
-                let cell=self.use_cell(fact.id);let lexical=syntax.declaration.map(|id|self.prepared.syntax.declarations[id].id.as_str());
-                if Self::role_match(&filter,&roles)&&self.target_matches(&target,&fact.site,lexical,cell,Some(&fact.decision)){
-                    rows.push(ReferenceRecord{id:digest(&(graph.snapshot_key.as_str(),"read",fact.id)),site:fact.site.clone(),roles,lexical_declaration:lexical.map(str::to_owned),storage:cell.map(|cell|self.storage_id(cell)),storage_owner:cell.and_then(|cell|self.storage(cell)).map(|storage|storage.owner.clone()),write:fact.writes.first().map(|id|self.write_id(*id)),closure:None,selected:self.selected(&fact.decision,&fact.writes,&fact.proof_id),occurrence:self.occurrence(&fact.context),coverage:if self.conditional_context(&fact.context){"conditional_abstract_read"}else if matches!(self.occurrence(&fact.context),QuerySelector::SourceTemplate{..}){"symbolic_template_read"}else{"abstract_input_observation"}.into(),proof:fact.proof_id.clone()});
+                let cell=self.use_cell(fact.id);let lexical=syntax.declaration.map(|id|self.prepared.syntax.declarations[id].id);
+                if Self::role_match(&filter,&roles)&&self.target_matches(&target,declaration_target,&fact.site,lexical,cell,Some(&fact.decision)){
+                    rows.push(ReferenceRecord{id:digest(&(graph.snapshot_key.as_str(),"read",fact.id)),site:fact.site.clone(),roles,lexical_declaration:lexical.map(DeclarationId::public),storage:cell.map(|cell|self.storage_id(cell)),storage_owner:cell.and_then(|cell|self.storage(cell)).map(|storage|storage.owner.clone()),write:fact.writes.first().map(|id|self.write_id(*id)),closure:None,selected:self.selected(&fact.decision,&fact.writes,&fact.proof_id),occurrence:self.occurrence(&fact.context),coverage:if self.conditional_context(&fact.context){"conditional_abstract_read"}else if matches!(self.occurrence(&fact.context),QuerySelector::SourceTemplate{..}){"symbolic_template_read"}else{"abstract_input_observation"}.into(),proof:fact.proof_id.clone()});
                 }
             }
             for write in &graph.writes {
                 self.step()?;if !self.accepts(&write.context){continue}
-                let storage=self.storage(&write.cell);let lexical=match storage.map(|storage|&storage.owner){Some(StorageOwner::Local{declaration,..})=>Some(source_decl_id(&self.prepared.inputs,declaration)),_=>self.lexical_id_at(&write.site)};
+                let storage=self.storage(&write.cell);let lexical=match storage.map(|storage|&storage.owner){Some(StorageOwner::Local{declaration,..})=>Some(source_decl_key(&self.prepared.inputs,declaration)),_=>self.lexical_id_at(&write.site)};
                 let roles=vec![ReferenceRole::Write];
-                if Self::role_match(&filter,&roles)&&self.target_matches(&target,&write.site,lexical.as_deref(),Some(&write.cell),Some(&write.decision)){
-                    rows.push(ReferenceRecord{id:self.write_id(write.id),site:write.site.clone(),roles,lexical_declaration:lexical,storage:Some(self.storage_id(&write.cell)),storage_owner:storage.map(|storage|storage.owner.clone()),write:Some(self.write_id(write.id)),closure:None,selected:self.selected(&write.decision,&[write.id],&self.write_id(write.id)),occurrence:self.occurrence(&write.context),coverage:if write.conditional_branch.is_some(){"conditional_abstract_write"}else{"abstract_input_write"}.into(),proof:self.write_id(write.id)});
+                if Self::role_match(&filter,&roles)&&self.target_matches(&target,declaration_target,&write.site,lexical,Some(&write.cell),Some(&write.decision)){
+                    rows.push(ReferenceRecord{id:self.write_id(write.id),site:write.site.clone(),roles,lexical_declaration:lexical.map(DeclarationId::public),storage:Some(self.storage_id(&write.cell)),storage_owner:storage.map(|storage|storage.owner.clone()),write:Some(self.write_id(write.id)),closure:None,selected:self.selected(&write.decision,&[write.id],&self.write_id(write.id)),occurrence:self.occurrence(&write.context),coverage:if write.conditional_branch.is_some(){"conditional_abstract_write"}else{"abstract_input_write"}.into(),proof:self.write_id(write.id)});
                 }
             }
             if let Some(facts)=&graph.native_invocations {for capture in &facts.capture_facts{
                 self.step()?;if !self.accepts(&capture.creation_context){continue}
                 let Some(closure)=facts.closures.get(capture.closure)else{continue};let site=graph.functions[closure.function].closure.clone();
-                let lexical=source_decl_id(&self.prepared.inputs,&capture.declaration);let roles=vec![ReferenceRole::Capture];
-                if Self::role_match(&filter,&roles)&&self.target_matches(&target,&site,Some(&lexical),Some(&capture.cell),None){let proof=digest(&(graph.snapshot_key.as_str(),"capture",capture));rows.push(ReferenceRecord{id:proof.clone(),site,roles,lexical_declaration:Some(lexical),storage:Some(self.storage_id(&capture.cell)),storage_owner:self.storage(&capture.cell).map(|storage|storage.owner.clone()),write:None,closure:Some(capture.closure),selected:QueryFact::NotApplicable,occurrence:self.occurrence(&capture.creation_context),coverage:if self.conditional_context(&capture.creation_context){"conditional_abstract_closure_capture"}else{"abstract_closure_cell_capture"}.into(),proof});}
+                let lexical=source_decl_key(&self.prepared.inputs,&capture.declaration);let roles=vec![ReferenceRole::Capture];
+                if Self::role_match(&filter,&roles)&&self.target_matches(&target,declaration_target,&site,Some(lexical),Some(&capture.cell),None){let proof=digest(&(graph.snapshot_key.as_str(),"capture",capture));rows.push(ReferenceRecord{id:proof.clone(),site,roles,lexical_declaration:Some(lexical.public()),storage:Some(self.storage_id(&capture.cell)),storage_owner:self.storage(&capture.cell).map(|storage|storage.owner.clone()),write:None,closure:Some(capture.closure),selected:QueryFact::NotApplicable,occurrence:self.occurrence(&capture.creation_context),coverage:if self.conditional_context(&capture.creation_context){"conditional_abstract_closure_capture"}else{"abstract_closure_cell_capture"}.into(),proof});}
             }}
             if filter.roles.is_empty()||filter.roles.contains(&ReferenceRole::Call){for call in &graph.calls{
                 self.step()?;if !self.accepts(&call.context){continue}let fact=&graph.uses[call.callee];let callee=self.call_callee(call,fact);let lexical=self.lexical_id_at(&callee);let cell=self.call_cell(fact);
-                if self.target_matches(&target,&callee,lexical.as_deref(),cell,Some(&fact.decision)){rows.push(ReferenceRecord{id:digest(&(graph.snapshot_key.as_str(),"callee",call.id)),site:callee,roles:vec![ReferenceRole::Call],lexical_declaration:lexical,storage:cell.map(|cell|self.storage_id(cell)),storage_owner:cell.and_then(|cell|self.storage(cell)).map(|storage|storage.owner.clone()),write:fact.writes.first().map(|id|self.write_id(*id)),closure:None,selected:self.selected(&fact.decision,&fact.writes,&fact.proof_id),occurrence:self.occurrence(&call.context),coverage:if call.conditional_branch.is_some(){"conditional_abstract_call"}else{"abstract_input_call"}.into(),proof:fact.proof_id.clone()});}
+                if self.target_matches(&target,declaration_target,&callee,lexical,cell,Some(&fact.decision)){rows.push(ReferenceRecord{id:digest(&(graph.snapshot_key.as_str(),"callee",call.id)),site:callee,roles:vec![ReferenceRole::Call],lexical_declaration:lexical.map(DeclarationId::public),storage:cell.map(|cell|self.storage_id(cell)),storage_owner:cell.and_then(|cell|self.storage(cell)).map(|storage|storage.owner.clone()),write:fact.writes.first().map(|id|self.write_id(*id)),closure:None,selected:self.selected(&fact.decision,&fact.writes,&fact.proof_id),occurrence:self.occurrence(&call.context),coverage:if call.conditional_branch.is_some(){"conditional_abstract_call"}else{"abstract_input_call"}.into(),proof:fact.proof_id.clone()});}
             }}
         }
         rows.sort_by_key(|row|self.sort_key(&row.site,&row.occurrence,&row.roles,&row.id));
         self.page(rows,&("references",target,filter),page,None)
     }
     pub fn calls(&self,target:QueryTarget,page:PageRequest)->lycheedev_core::Result<QueryPage<CallRecord>> {
-        self.validate_target(&target)?;self.page_key(&("calls",&target),&page)?;let mut rows=Vec::new();
+        let declaration_target=self.validate_target(&target)?;self.page_key(&("calls",&target),&page)?;let mut rows=Vec::new();
         if self.selector==QuerySelector::SyntaxOnly || self.graph.is_none() {
             let offset=page.cursor.as_ref().map_or(0,|cursor|cursor.offset);let mut total=0;
             for file in 0..self.prepared.inputs.corpus.files.len() {
                 let syntax=public_result(self.prepared.file_syntax(file),&self.prepared.control)?;
                 let mut file_rows=Vec::new();
                 for call in &syntax.calls{self.step()?;let callee=call.callee.public(&self.prepared.inputs);let lexical=self.lexical_id_at(&callee);let site=call.site.public(&self.prepared.inputs);
-                    if self.target_matches(&target,&callee,lexical.as_deref(),None,None)||matches!(&target,QueryTarget::Site(expected) if expected==&site){file_rows.push(CallRecord{id:call.id.clone(),site,callee,lexical_declaration:lexical,selected:QueryFact::NotApplicable,occurrence:QuerySelector::SyntaxOnly,evidence_kind:"syntactic_call_site".into(),conditional_branch:None,invocation_coverage:None,effect_coverage:None,frame:None,arguments:vec![]});}
+                    if self.target_matches(&target,declaration_target,&callee,lexical,None,None)||matches!(&target,QueryTarget::Site(expected) if expected==&site){file_rows.push(CallRecord{id:call.id.clone(),site,callee,lexical_declaration:lexical.map(DeclarationId::public),selected:QueryFact::NotApplicable,occurrence:QuerySelector::SyntaxOnly,evidence_kind:"syntactic_call_site".into(),conditional_branch:None,invocation_coverage:None,effect_coverage:None,frame:None,arguments:vec![]});}
                 }
                 file_rows.sort_by_key(|row|self.sort_key(&row.site,&row.occurrence,&[],&row.id));
                 for row in file_rows {if total>=offset&&rows.len()<page.limit{rows.push(row)}total+=1;}
@@ -268,7 +271,7 @@ impl<'a> SourceQueries<'a> {
             return self.page_window(rows,total,&("calls",target),page,None);
         }else if let Some(graph)=self.graph{for call in &graph.calls{
             self.step()?;if !self.accepts(&call.context){continue}let fact=&graph.uses[call.callee];let callee=self.call_callee(call,fact);let lexical=self.lexical_id_at(&callee);let cell=self.call_cell(fact);
-            if self.target_matches(&target,&callee,lexical.as_deref(),cell,Some(&fact.decision))||matches!(&target,QueryTarget::Site(site) if site==&call.site){rows.push(CallRecord{id:digest(&(graph.snapshot_key.as_str(),"call",call.id)),site:call.site.clone(),callee,lexical_declaration:lexical,selected:self.selected(&fact.decision,&fact.writes,&fact.proof_id),occurrence:self.occurrence(&call.context),evidence_kind:if call.conditional_branch.is_some(){"conditional_abstract_call"}else if matches!(self.occurrence(&call.context),QuerySelector::SourceTemplate{..}){"symbolic_template_call"}else{"explicit_input_abstract_call"}.into(),conditional_branch:call.conditional_branch,invocation_coverage:Some(call.invocation_coverage.clone()),effect_coverage:Some(call.effect_coverage.clone()),frame:graph.native_invocations.as_ref().and_then(|facts|facts.frames.iter().find(|frame|frame.call==Some(call.id))).map(|frame|frame.id),arguments:call.arguments.iter().map(|id|graph.uses[*id].site.clone()).collect()});}
+            if self.target_matches(&target,declaration_target,&callee,lexical,cell,Some(&fact.decision))||matches!(&target,QueryTarget::Site(site) if site==&call.site){rows.push(CallRecord{id:digest(&(graph.snapshot_key.as_str(),"call",call.id)),site:call.site.clone(),callee,lexical_declaration:lexical.map(DeclarationId::public),selected:self.selected(&fact.decision,&fact.writes,&fact.proof_id),occurrence:self.occurrence(&call.context),evidence_kind:if call.conditional_branch.is_some(){"conditional_abstract_call"}else if matches!(self.occurrence(&call.context),QuerySelector::SourceTemplate{..}){"symbolic_template_call"}else{"explicit_input_abstract_call"}.into(),conditional_branch:call.conditional_branch,invocation_coverage:Some(call.invocation_coverage.clone()),effect_coverage:Some(call.effect_coverage.clone()),frame:graph.native_invocations.as_ref().and_then(|facts|facts.frames.iter().find(|frame|frame.call==Some(call.id))).map(|frame|frame.id),arguments:call.arguments.iter().map(|id|graph.uses[*id].site.clone()).collect()});}
         }}
         rows.sort_by_key(|row|self.sort_key(&row.site,&row.occurrence,&[],&row.id));self.page(rows,&("calls",target),page,None)
     }
@@ -340,13 +343,13 @@ enum ContextNode { Declaration(usize), Use(usize), Write(usize), Value(usize), F
 impl SourceQueries<'_> {
     fn context_node_id(&self,node:&ContextNode)->String {
         match node {
-            ContextNode::Declaration(id)=>self.prepared.syntax.declarations[*id].id.clone(),
+            ContextNode::Declaration(id)=>self.prepared.syntax.declarations[*id].id.public(),
             ContextNode::Write(id)=>self.write_id(*id),ContextNode::Value(id)=>self.value_id(*id),
             other=>digest(&(self.prepared.inputs.identity_sha256(),self.graph.map(|graph|graph.snapshot_key.as_str()),"context",format!("{other:?}"))),
         }
     }
     pub fn context(&self,target:QueryTarget,options:ContextOptions,page:PageRequest)->lycheedev_core::Result<QueryPage<ContextRecord>> {
-        self.validate_target(&target)?;
+        let declaration_target=self.validate_target(&target)?;
         if options.depth>4||options.snippet_bytes==0||options.snippet_bytes>65536{return Err(input_error("context depth or snippet byte bounds"))}
         self.page_key(&("context",&target,&options),&page)?;
         let mut work=std::collections::VecDeque::new();let mut truncation=None;
@@ -354,16 +357,16 @@ impl SourceQueries<'_> {
         let index=&self.prepared.syntax;
         for (id,decl) in index.declarations.iter().enumerate(){
             self.step()?;
-            let matches=match &target{QueryTarget::All=>true,QueryTarget::Declaration(expected)=>expected==&decl.id,QueryTarget::Site(site)=>self.lexical_id_at(site).as_deref()==Some(decl.id.as_str()),_=>false};
+            let matches=match &target{QueryTarget::All=>true,QueryTarget::Declaration(_)=>declaration_target==Some(decl.id),QueryTarget::Site(site)=>self.lexical_id_at(site)==Some(decl.id),_=>false};
             if matches{seed(&mut work,ContextNode::Declaration(id),&mut truncation);}
         }
         if let Some(graph)=self.graph && self.selector!=QuerySelector::SyntaxOnly {
             for fact in &graph.uses{self.step()?;if !self.accepts(&fact.context){continue}
-                if self.target_matches(&target,&fact.site,self.lexical_id_at(&fact.site).as_deref(),self.use_cell(fact.id),Some(&fact.decision)){seed(&mut work,ContextNode::Use(fact.id),&mut truncation);}
+                if self.target_matches(&target,declaration_target,&fact.site,self.lexical_id_at(&fact.site),self.use_cell(fact.id),Some(&fact.decision)){seed(&mut work,ContextNode::Use(fact.id),&mut truncation);}
             }
             for write in &graph.writes{self.step()?;if !self.accepts(&write.context){continue}
-                let lexical=match self.storage(&write.cell).map(|storage|&storage.owner){Some(StorageOwner::Local{declaration,..})=>Some(source_decl_id(&self.prepared.inputs,declaration)),_=>self.lexical_id_at(&write.site)};
-                if self.target_matches(&target,&write.site,lexical.as_deref(),Some(&write.cell),Some(&write.decision)){seed(&mut work,ContextNode::Write(write.id),&mut truncation);}
+                let lexical=match self.storage(&write.cell).map(|storage|&storage.owner){Some(StorageOwner::Local{declaration,..})=>Some(source_decl_key(&self.prepared.inputs,declaration)),_=>self.lexical_id_at(&write.site)};
+                if self.target_matches(&target,declaration_target,&write.site,lexical,Some(&write.cell),Some(&write.decision)){seed(&mut work,ContextNode::Write(write.id),&mut truncation);}
             }
             for call in &graph.calls {self.step()?;if self.accepts(&call.context)&&matches!(&target,QueryTarget::Site(site) if site==&call.site){seed(&mut work,ContextNode::Call(call.id),&mut truncation);}}
             if let QueryTarget::Value(expected)=&target {for value in &graph.values {self.step()?;if self.value_id(value.id)==*expected{seed(&mut work,ContextNode::Value(value.id),&mut truncation);}}}
@@ -396,7 +399,7 @@ impl SourceQueries<'_> {
         }
         let graph=self.graph.ok_or_else(||input_error("execution context node without graph"))?;
         let load_for=|context:&str|match self.occurrence(context){QuerySelector::LoadOccurrence{occurrence}=>Some(occurrence),QuerySelector::Invocation{frame}|QuerySelector::Entry{frame}=>graph.native_invocations.as_ref().and_then(|facts|facts.frames.get(frame)).and_then(|frame|frame.closure).and_then(|closure|graph.native_invocations.as_ref()?.closures.get(closure)).map(|closure|closure.load_occurrence),_=>None};
-        let add_decl=|site:&Site,next:&mut Vec<ContextNode>|{if let Some(id)=self.lexical_id_at(site).and_then(|id|self.prepared.syntax.declaration_by_id(&id)){next.push(ContextNode::Declaration(id));}};
+        let add_decl=|site:&Site,next:&mut Vec<ContextNode>|{if let Some(id)=self.lexical_id_at(site).and_then(|id|self.prepared.syntax.declaration_by_key(&id)){next.push(ContextNode::Declaration(id));}};
         let result=match node {
             ContextNode::Use(id)=>{
                 let fact=&graph.uses[*id];add_decl(&fact.site,&mut next);if let Decision::Bound(value)=fact.decision{next.push(ContextNode::Value(value))}

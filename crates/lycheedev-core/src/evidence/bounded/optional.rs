@@ -41,7 +41,7 @@ fn finish_directory_close<T>(
     if let Err(errors) = closed {
         for error in errors {
             // Each close is a separate event, including identical failures.
-            result = crate::metadata::historical_write::finish_historical(
+            result = crate::metadata::owned_write::finish_owned(
                 result,
                 Err(ToolkitError::from(error)),
             );
@@ -55,7 +55,7 @@ fn close_optional_opened<T>(
     control: &OperationControl,
     supplemental: &mut impl FnMut() -> Result<()>,
 ) -> Result<T> {
-    let result = crate::metadata::historical_write::finish_historical(
+    let result = crate::metadata::owned_write::finish_owned(
         result,
         lycheedev_windows::filesystem::close_file(opened.file).map_err(ToolkitError::from),
     );
@@ -125,7 +125,7 @@ fn open_optional_blob(
             },
             Err(error) => {
                 return finish_checks(
-                    crate::metadata::historical_write::finish_historical(Err(error), closed),
+                    crate::metadata::owned_write::finish_owned(Err(error), closed),
                     control,
                     supplemental,
                 );
@@ -168,7 +168,7 @@ fn open_optional_blob(
             let result = finish_checks(result, control, supplemental);
             match result {
                 Ok(()) => Ok(Some(file)),
-                Err(error) => crate::metadata::historical_write::finish_historical(
+                Err(error) => crate::metadata::owned_write::finish_owned(
                     Err(error),
                     lycheedev_windows::filesystem::close_file(file).map_err(ToolkitError::from),
                 ),
@@ -261,20 +261,20 @@ pub fn open_verified_blob_bounded_optional_with_check(
 
 /// Removal's historical streaming verification has no new production payload
 /// cap. The signed Go length is validated before the original native lookup.
-pub(in crate::evidence) fn verify_historical_blob_optional(
+pub(in crate::evidence) fn verify_capture_blob_optional(
     home: &Path,
     digest: &str,
-    bytes: i64,
+    bytes: u64,
     control: &OperationControl,
 ) -> Result<bool> {
     control.check()?;
-    if bytes < 0 || !crate::selection::valid_digest(digest, 64) {
+    if !crate::selection::valid_digest(digest, 64) {
         return Err(integrity("vault.blob_integrity"));
     }
     open_workspace(home, Some(control), &mut || Ok(()))?;
     let reference = BlobRef {
         sha256: digest.into(),
-        bytes: bytes as u64,
+        bytes,
     };
     let Some(opened) = open_optional_blob(home, reference, control, &mut || Ok(()))? else {
         return Ok(false);

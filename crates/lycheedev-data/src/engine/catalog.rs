@@ -2,10 +2,11 @@
 //! checked workspace teardown as table preparation, without importing rows.
 use super::api::{CatalogTable, DatasetCatalog};
 use crate::{definitions, fault, remote::provider::OpenedScope, resource::Budget};
-use lycheedev_core::{Invocation, Result, selection::PinnedSet};
+use crate::request::DataContext;
+use lycheedev_core::{Result, selection::PinnedSet};
 use std::sync::Arc;
 
-pub(super) fn read(inv: &Invocation, budget: &Arc<Budget>) -> Result<(DatasetCatalog, PinnedSet)> {
+pub(super) fn read(inv: &DataContext, budget: &Arc<Budget>) -> Result<(DatasetCatalog, PinnedSet)> {
     inv.control.check()?;
     // The manifest has at most 16,384 names of at most 128 bytes. This allowance
     // covers the decoded inventory, conversion overlap, and serialized owner.
@@ -24,7 +25,7 @@ pub(super) fn read(inv: &Invocation, budget: &Arc<Budget>) -> Result<(DatasetCat
         let (identities, receipt) = definitions::catalog_controlled(
             &inv.home,
             &data.definition_commit,
-            inv.flag_bool("--offline"),
+            inv.source.offline,
             budget,
             &inv.control,
         )?;
@@ -77,9 +78,9 @@ mod tests {
             &[vec![fixture::Cell::U(1)]],
         );
         let fx = fixture::Fixture::new(&[table]);
-        let invocation = fx.invocation("data agent serve", &[]);
-        let control = invocation.control.clone();
-        let mut engine = Engine::new(invocation, EngineLimits::default()).unwrap();
+        let context = fx.context();
+        let control = context.control.clone();
+        let mut engine = Engine::new(context, EngineLimits::default()).unwrap();
         let catalog = engine.catalog(control).await.unwrap();
         assert_eq!(catalog.snapshot_id, fx.pin);
         assert!(catalog.complete);
@@ -106,13 +107,12 @@ mod tests {
             &[vec![fixture::Cell::U(1)]],
         );
         let fx = fixture::Fixture::new(&[table]);
-        let invocation = fx.invocation("data agent serve", &[]);
-        let control = invocation.control.clone();
-        let mut engine = Engine::new(invocation, EngineLimits::default()).unwrap();
-        let cancelled = lycheedev_core::control::OperationControl::new(
-            control.deadline(),
-            Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        );
+        let context = fx.context();
+        let control = context.control.clone();
+        let mut engine = Engine::new(context, EngineLimits::default()).unwrap();
+        let cancelled =
+            lycheedev_core::control::OperationControl::uncancelable(control.deadline());
+        cancelled.tracked_cancel_handle().unwrap().cancel();
         assert!(engine.catalog(cancelled).await.is_err());
         let catalog = engine.catalog(control).await.unwrap();
         assert_eq!(catalog.tables.len(), 1);

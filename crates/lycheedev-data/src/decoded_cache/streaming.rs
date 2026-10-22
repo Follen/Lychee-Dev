@@ -526,7 +526,7 @@ pub(crate) fn read_content_in_session(
     selected_maximum: Option<usize>,
     control: &OperationControl,
     policy: blte::DecodePolicy,
-) -> Result<(String, blte::Content)> {
+) -> Result<(String, blte::Content, evidence::BlobRef)> {
     read_content_source(
         home,
         source.root(),
@@ -541,7 +541,6 @@ pub(crate) fn read_content_in_session(
         Some(source),
         policy,
     )
-    .map(|(key, content, _)| (key, content))
 }
 
 /// Actual local DB2/root consumers need a bounded decoded owner, not the old

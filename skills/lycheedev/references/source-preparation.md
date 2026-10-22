@@ -19,11 +19,11 @@ For `wow-ui-source`, the seven delivery products map to these Git branches:
 | `forever-asia-beta`, `forever-cn-beta` | `forever` |
 | `anniversary` | `classic_anniversary` |
 
-The beta folder `_classic_beta_` does not imply the old Git branch `classic_beta`.
-The legacy family-wide `forever` source pin can accompany either beta's Data
-pin; regional source pins retain their exact delivery identity. Data build
-configurations and client runtime verification remain separate even when the
-UI source commit is shared.
+The `_classic_beta_` client folder does not map to the `classic_beta` track; both
+Forever betas use the family-wide `forever` track. A family-wide `forever`
+Source pin can accompany either beta's Data pin; regional Source pins retain
+their exact delivery identity. Data build configurations and client runtime
+verification remain separate even when the UI source commit is shared.
 
 Reuse an initialized Toolkit home for preparation and later reads; a pin ID does
 not select a different home. Initialize a new home only when needed. `source sync`

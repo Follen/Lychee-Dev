@@ -423,29 +423,3 @@ impl<E> OwnedQuery<'_, '_, E> {
         Ok(())
     }
 }
-
-pub(super) fn plain_atom(value: &LuaType) -> bool {
-    matches!(
-        value,
-        LuaType::Unknown
-            | LuaType::Any
-            | LuaType::Nil
-            | LuaType::Table
-            | LuaType::Userdata
-            | LuaType::Function
-            | LuaType::Thread
-            | LuaType::Boolean
-            | LuaType::String
-            | LuaType::Integer
-            | LuaType::Number
-            | LuaType::Io
-            | LuaType::Never
-            | LuaType::BooleanConst(_)
-            | LuaType::StringConst(_)
-            | LuaType::IntegerConst(_)
-            | LuaType::FloatConst(_)
-            | LuaType::DocStringConst(_)
-            | LuaType::DocIntegerConst(_)
-            | LuaType::DocBooleanConst(_)
-    )
-}

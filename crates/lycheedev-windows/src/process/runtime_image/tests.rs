@@ -18,12 +18,23 @@ use windows::{
     core::w,
 };
 
+struct FixtureFlagControl(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl crate::process::RuntimeControl for FixtureFlagControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        if self.0.load(std::sync::atomic::Ordering::Acquire) {
+            Err("memory.runtime_cancelled".into())
+        } else {
+            Ok(())
+        }
+    }
+}
 fn budget() -> (RuntimeBudget, Arc<AtomicBool>) {
     let cancel = Arc::new(AtomicBool::new(false));
-    let budget = RuntimeBudget::new(
+    let budget = RuntimeBudget::with_control_factory(
         RuntimeCost::defaults(),
         Instant::now() + Duration::from_secs(30),
-        cancel.clone(),
+        0,
+        || FixtureFlagControl(cancel.clone()),
     )
     .unwrap();
     (budget, cancel)
@@ -319,10 +330,19 @@ fn cancellation_and_exhausted_limits_prevent_io_and_do_not_replace_control() {
             "os" => limits.os_call_units = 0,
             _ => (),
         }
-        let mut budget =
-            RuntimeBudget::new(limits, Instant::now() + Duration::from_secs(10), cancel).unwrap();
+        let admitted = RuntimeBudget::with_control_factory(
+            limits,
+            Instant::now() + Duration::from_secs(10),
+            0,
+            || FixtureFlagControl(cancel),
+        );
         let reader = Bytes::new(vec![1]);
-        assert!(hash_image(&reader, 1, &mut budget).is_err(), "{kind}");
+        match admitted {
+            Ok(mut budget) => assert!(hash_image(&reader, 1, &mut budget).is_err(), "{kind}"),
+            Err(error) => {
+                assert!(matches!(kind, "cancel" | "allocation"), "{kind}: {error}");
+            }
+        }
         assert_eq!(reader.calls.get(), 0, "{kind}");
     }
 }
@@ -521,10 +541,11 @@ fn os_issued_self_executable_layout_is_bound_to_exact_module_issuance_and_reques
     );
     assert_eq!(budget.usage(), before_wrong);
     let cancel = Arc::new(AtomicBool::new(false));
-    let mut replacement = RuntimeBudget::new(
+    let mut replacement = RuntimeBudget::with_control_factory(
         RuntimeCost::defaults(),
         Instant::now() + Duration::from_secs(30),
-        cancel,
+        0,
+        || FixtureFlagControl(cancel),
     )
     .unwrap();
     assert_eq!(
@@ -535,7 +556,7 @@ fn os_issued_self_executable_layout_is_bound_to_exact_module_issuance_and_reques
 }
 
 #[test]
-fn trusted_image_path_uses_shared_fixed_go_fold_without_ordinal_os_comparison() {
+fn trusted_image_path_uses_shared_fold_without_ordinal_os_comparison() {
     let (mut b, _) = budget();
     for (left, right) in [
         ("C:\\K\\wow.exe", "c:\\K\\WOW.EXE"),

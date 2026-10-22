@@ -19,6 +19,22 @@ use windows::{
     core::w,
 };
 
+struct FixtureClearControl;
+impl lycheedev_windows::process::RuntimeControl for FixtureClearControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
+struct FixtureFlagControl(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl lycheedev_windows::process::RuntimeControl for FixtureFlagControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        if self.0.load(std::sync::atomic::Ordering::Acquire) {
+            Err("memory.runtime_cancelled".into())
+        } else {
+            Ok(())
+        }
+    }
+}
 struct Window {
     hwnd: Option<HWND>,
     _thread: PhantomData<Rc<()>>,
@@ -76,10 +92,11 @@ impl Drop for Window {
 fn budget(limits: RuntimeLimits) -> (RuntimeBudget, Arc<AtomicBool>) {
     let cancel = Arc::new(AtomicBool::new(false));
     (
-        RuntimeBudget::new(
+        RuntimeBudget::with_control_factory(
             limits,
             Instant::now() + Duration::from_secs(10),
-            cancel.clone(),
+            0,
+            || FixtureFlagControl(cancel.clone()),
         )
         .unwrap(),
         cancel,
@@ -168,7 +185,13 @@ fn cancellation_deadline_and_a_fresh_budget_do_not_read_or_publish_bytes() {
             .unwrap_err(),
         "memory.runtime_budget_replaced"
     );
-    assert_eq!(replacement.usage(), RuntimeCost::default());
+    assert_eq!(
+        replacement.usage(),
+        RuntimeCost {
+            allocation_bytes: std::mem::size_of::<FixtureFlagControl>() as u64,
+            ..RuntimeCost::default()
+        }
+    );
     let before = first.usage();
     cancel.store(true, Ordering::Release);
     assert_eq!(
@@ -179,19 +202,11 @@ fn cancellation_deadline_and_a_fresh_budget_do_not_read_or_publish_bytes() {
     );
     assert_eq!(first.usage(), before);
     assert_eq!(bytes, [0xa5; 2]);
-    let mut expired = RuntimeBudget::new(
-        RuntimeLimits::defaults(),
-        Instant::now(),
-        Arc::new(AtomicBool::new(false)),
-    )
-    .unwrap();
-    assert_eq!(
-        RuntimeModule::open(window.identity(), &mut expired)
-            .err()
-            .unwrap(),
-        "memory.runtime_deadline"
-    );
-    assert_eq!(expired.usage(), RuntimeCost::default());
+    let expired =
+        RuntimeBudget::with_control_factory(RuntimeLimits::defaults(), Instant::now(), 0, || {
+            FixtureClearControl
+        });
+    assert_eq!(expired.err().unwrap(), "memory.runtime_deadline");
 }
 #[test]
 fn closed_window_and_wrong_creation_identity_fail_before_rpm() {
@@ -373,7 +388,13 @@ fn private_point_preflight_identity_budget_and_cancellation_never_publish_bytes(
             .unwrap_err(),
         "memory.runtime_budget_replaced"
     );
-    assert_eq!(replacement.usage(), RuntimeCost::default());
+    assert_eq!(
+        replacement.usage(),
+        RuntimeCost {
+            allocation_bytes: std::mem::size_of::<FixtureFlagControl>() as u64,
+            ..RuntimeCost::default()
+        }
+    );
     cancel.store(true, Ordering::Release);
     assert_eq!(
         module
@@ -442,7 +463,13 @@ fn image_directory_comes_from_selected_os_module_and_original_request() {
         module.image_directory(&mut foreign).unwrap_err(),
         "memory.runtime_budget_replaced"
     );
-    assert_eq!(foreign.usage(), RuntimeCost::default());
+    assert_eq!(
+        foreign.usage(),
+        RuntimeCost {
+            allocation_bytes: std::mem::size_of::<FixtureFlagControl>() as u64,
+            ..RuntimeCost::default()
+        }
+    );
 }
 
 #[test]

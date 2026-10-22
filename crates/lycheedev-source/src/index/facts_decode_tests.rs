@@ -3,19 +3,6 @@ use crate::facts::binary::{HEADER, MAGIC};
 use lycheedev_core::{cache::SourceFactsCache, control::OperationControl};
 use std::{fs, time::Instant};
 
-// Frozen JSON v11 decoder, used only as a business-result oracle. Production
-// does not migrate or accept v11/v12 cache records.
-fn historical_facts(facts: &Facts, input: &str) -> Facts {
-    let raw = facts_encode_tests::historical_encode(facts, input).unwrap();
-    let value: Value = serde_json::from_slice(&raw).unwrap();
-    assert_eq!(value["schema"], "lycheedev.source-facts.rust.v11");
-    assert_eq!(value["inputSHA256"], input);
-    assert_eq!(
-        value["factsSHA256"],
-        storage::sha256(&serde_json::to_vec(&value["facts"]).unwrap())
-    );
-    serde_json::from_value(value["facts"].clone()).unwrap()
-}
 fn full_facts() -> Value {
     let mut facts = json!({
         "declarations":[
@@ -114,7 +101,7 @@ pub(super) fn malformed_records(valid: &[u8]) -> Vec<(String, Vec<u8>)> {
 }
 
 #[test]
-fn binary_decode_matches_complete_historical_facts_without_mutating_the_producer() {
+fn binary_decode_matches_complete_public_facts_without_mutating_the_producer() {
     let input = storage::sha256(b"complete source");
     let expected: Facts = serde_json::from_value(full_facts()).unwrap();
     let before = serde_json::to_vec(&expected).unwrap();
@@ -126,7 +113,7 @@ fn binary_decode_matches_complete_historical_facts_without_mutating_the_producer
     assert_eq!(serde_json::to_vec(&actual).unwrap(), before);
     assert_eq!(
         serde_json::to_vec(&actual).unwrap(),
-        serde_json::to_vec(&historical_facts(&expected, &input)).unwrap()
+        serde_json::to_vec(&expected).unwrap()
     );
     assert_eq!(serde_json::to_vec(&expected).unwrap(), before);
     assert!(actual.raw_relationship_targets.is_none());
@@ -162,27 +149,6 @@ fn binary_decode_authenticates_schema_input_length_sha_and_rejects_authenticated
         decode_facts(&valid, &input.to_uppercase(), &control)
             .unwrap()
             .is_none()
-    );
-}
-
-#[test]
-fn binary_decode_rejects_old_json_and_abandoned_v12_even_at_the_current_key() {
-    let input = storage::sha256(b"obsolete");
-    let facts: Facts = serde_json::from_value(full_facts()).unwrap();
-    let old = facts_encode_tests::historical_encode(&facts, &input).unwrap();
-    let control = OperationControl::default();
-    assert!(decode_facts(&old, &input, &control).unwrap().is_none());
-    let valid = encode_facts(&facts, &input, None).unwrap();
-    let mut abandoned = with_payload(&valid, &serde_json::to_vec(&facts).unwrap());
-    abandoned[..8].copy_from_slice(b"LYCFCT12");
-    assert!(
-        decode_facts(&abandoned, &input, &control)
-            .unwrap()
-            .is_none()
-    );
-    assert_eq!(
-        serde_json::to_vec(&historical_facts(&facts, &input)).unwrap(),
-        serde_json::to_vec(&facts).unwrap()
     );
 }
 
@@ -233,18 +199,14 @@ fn binary_loose_consumer_preserves_hit_precedence_and_repairs_each_corruption_fr
     assert!(hit);
     assert_eq!(
         serde_json::to_vec(&hit_facts).unwrap(),
-        serde_json::to_vec(&historical_facts(&cached, &input)).unwrap()
+        serde_json::to_vec(&cached).unwrap()
     );
     assert_eq!(profile.calls(Phase::FactsParse), 0);
     assert_eq!(profile.calls(Phase::FactsPublish), 0);
     assert_eq!(cache.read(&key, &control).unwrap().unwrap(), valid);
     let expected = facts::xml(source);
     let repaired = encode_facts(&expected, &input, None).unwrap();
-    let mut corrupt = malformed_records(&valid);
-    corrupt.push((
-        "old JSON".into(),
-        facts_encode_tests::historical_encode(&cached, &input).unwrap(),
-    ));
+    let corrupt = malformed_records(&valid);
     for (name, raw) in corrupt {
         fs::write(facts_cache_path(&fixture.home, path, &input), raw).unwrap();
         let profile = Profile::enabled(true);
@@ -323,95 +285,6 @@ fn binary_loose_entry_stop_keeps_reads_parsing_and_publication_unstarted() {
 }
 
 #[test]
-fn binary_identity_rebuilds_published_v11_facts_and_index_without_migration() {
-    let fixture = facts_cache_tests::Fixture::new();
-    let sources = BTreeMap::from([
-        (
-            "A.xml".into(),
-            "<Ui><Script file=\"B.lua\"/><Frame name=\"雪\"/></Ui>".into(),
-        ),
-        (
-            "B.lua".into(),
-            "function Run() Target() Target() end".into(),
-        ),
-        ("C.toc".into(), "## Title: Fixture\nA.xml\nA.xml\n".into()),
-    ]);
-    let pin = fixture.pin(&sources);
-    let control = OperationControl::default();
-    let mut expected = build_uncached(&fixture.home, &pin, &control).unwrap();
-    // Keep authenticated old records and an old v6 index manifest on disk;
-    // remove only this fixture's newly generated reconstructible Facts packs.
-    fs::remove_dir_all(fixture.home.join("cache/source-facts-rust")).unwrap();
-    let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
-    let mut old_records = Vec::new();
-    for document in &mut expected.documents {
-        document.facts_locator = None;
-        let key = storage::sha256(format!("facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{}\0{}", document.path, document.sha256).as_bytes());
-        assert_ne!(key, facts_cache_key(&document.path, &document.sha256));
-        let raw = facts_encode_tests::historical_encode(&document.facts, &document.sha256).unwrap();
-        cache.publish(&key, &raw, &control).unwrap();
-        old_records.push((key, raw));
-    }
-    cache.finish(Ok(()), &control).unwrap();
-    let old_identity = storage::sha256(format!("rust-index-v15\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes());
-    assert_ne!(old_identity, fingerprint(&pin));
-    let blob = lycheedev_core::cache::publish_derived_controlled(
-        &fixture.home,
-        &serde_json::to_vec(&expected).unwrap(),
-        128 << 20,
-        &control,
-    )
-    .unwrap();
-    let old_manifest_key = format!("source/rust-index/{old_identity}");
-    let old_manifest =
-        json!({"schema":"lycheedev.source-index.rust.v6", "identity":old_identity, "blob":blob});
-    crate::persistence::put_manifest(&fixture.home, &old_manifest_key, &old_manifest, &control)
-        .unwrap();
-    assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
-    assert_eq!(
-        crate::query_store::status_with_control(&fixture.home, &pin, &control).unwrap()["ready"],
-        false
-    );
-    let rebuilt = build_with_control(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(rebuilt.summary.io["parsedDocuments"], sources.len());
-    assert_eq!(rebuilt.summary.io["cachedFacts"], 0);
-    assert_eq!(
-        serde_json::to_value(&rebuilt.symbols).unwrap(),
-        serde_json::to_value(&expected.symbols).unwrap()
-    );
-    for (actual, expected) in rebuilt.documents.iter().zip(&expected.documents) {
-        assert_eq!(
-            serde_json::to_vec(&actual.facts).unwrap(),
-            serde_json::to_vec(&historical_facts(&expected.facts, &expected.sha256)).unwrap()
-        );
-    }
-    let clean_summary = |value: &SourceSummary| {
-        let mut value = serde_json::to_value(value).unwrap();
-        value.as_object_mut().unwrap().remove("io");
-        value
-    };
-    assert_eq!(
-        clean_summary(&rebuilt.summary),
-        clean_summary(&expected.summary)
-    );
-    let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
-    for (key, raw) in old_records {
-        assert_eq!(cache.read(&key, &control).unwrap().unwrap(), raw);
-    }
-    cache.finish(Ok(()), &control).unwrap();
-    assert!(is_ready_with_control(&fixture.home, &pin, &control).unwrap());
-    let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
-    let loads = load_facts_with_control(&fixture.home, &pin, &warm, &control).unwrap();
-    assert_eq!(
-        loads
-            .iter()
-            .map(|row| row.target.as_str())
-            .collect::<Vec<_>>(),
-        ["B.lua", "A.xml", "A.xml"]
-    );
-}
-
-#[test]
 fn binary_facts_cohort_locator_and_loose_keep_complete_bytes() {
     let fixture = facts_cache_tests::Fixture::new();
     let raw = BTreeMap::from([
@@ -461,10 +334,10 @@ fn binary_facts_cohort_locator_and_loose_keep_complete_bytes() {
     for pack in packs {
         fs::remove_file(pack).unwrap();
     }
-    let legacy = build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(legacy.summary.io["cachedFacts"], raw.len());
-    assert_eq!(legacy.summary.io["parsedDocuments"], 0);
-    for (expected, actual) in cold.documents.iter().zip(&legacy.documents) {
+    let loose = build_uncached(&fixture.home, &pin, &control).unwrap();
+    assert_eq!(loose.summary.io["cachedFacts"], raw.len());
+    assert_eq!(loose.summary.io["parsedDocuments"], 0);
+    for (expected, actual) in cold.documents.iter().zip(&loose.documents) {
         assert_eq!(
             serde_json::to_vec(&actual.facts).unwrap(),
             serde_json::to_vec(&expected.facts).unwrap()

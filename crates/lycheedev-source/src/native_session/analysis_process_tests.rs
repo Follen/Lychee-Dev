@@ -300,8 +300,7 @@ fn terminal_process() -> AnalysisProcess {
 fn stopped_phase_observation_never_starts_optional_disk_work() {
     let expired=OperationControl::uncancelable(Instant::now());
     observe_if_active(&expired,||panic!("expired phase must not start optional storage"));
-    let cancelled=Arc::new(AtomicBool::new(true));
-    let control=OperationControl::new(Instant::now()+Duration::from_secs(1),cancelled);
+    let control=crate::native::stopped_control(false,Instant::now()+Duration::from_secs(1));
     observe_if_active(&control,||panic!("cancelled phase must not start optional storage"));
 }
 #[test]
@@ -383,20 +382,20 @@ fn private_phase_policy_keeps_real_multifile_query_and_stops_on_cancellation() {
         let control=OperationControl::default();
         let mut files=BTreeMap::from([("target.lua".into(),"function Target() end\n".into())]);
         for id in 0..48 {files.insert(format!("caller-{id:03}.lua"),"Target()\n".into());}
-        let snapshot=crate::native_research::SnapshotRequest{files,load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),
+        let snapshot=crate::native_research::SnapshotRequest{encoding_warnings:vec![],files,load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),
             source:json!({"repository":"phase-cap-fixture","product":"retail"}),
             luac:crate::native::LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
             api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]};
         let query=crate::native_research::QueryRequest{symbol:crate::index::Symbol{id:String::new(),kind:"declaration".into(),name:"Target".into(),target:String::new(),category:"function".into(),confidence:String::new(),path:"target.lua".into(),line:1,end_line:1,signature:String::new(),scope:String::new(),ordinal:0},direction:"incoming".into()};
         let sampling=std::cell::RefCell::new(PhaseSampling::default());let recorded=std::cell::RefCell::new(Vec::new());
-        let cancel=control.cancel_handle();let mut cached=None;
+        let cancel=control.tracked_cancel_handle().unwrap();let mut cached=None;
         let result=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query}),None,&control,41,|phase,_|{
             // Match production: cancellation suppresses optional diagnostics,
             // including retirement callbacks. Policy-only reserve is tested above.
             observe_if_active(&control,||{
                 if sampling.borrow_mut().admit(phase,0){recorded.borrow_mut().push(phase.to_owned());}Ok(())
             });
-            if cancel_type&&phase=="query_type_observations"{cancel.store(true,Ordering::Release);}
+            if cancel_type&&phase=="query_type_observations"{cancel.cancel();}
         });
         let sampling=sampling.into_inner();let recorded=recorded.into_inner();
         assert_eq!(sampling.details,PHASE_DETAIL_LIMIT);assert!(sampling.file_visits>=48);assert!(sampling.omitted>0);
@@ -458,7 +457,7 @@ fn cancelled_and_expired_requests_retire_completed_raw_exchange_on_default_stack
             }));
             let owner=process.owner.clone();
             let mut slot=Some(process);let mut terminal=None;
-            let control=OperationControl::new(if cancelled{deadline}else{Instant::now()},Arc::new(AtomicBool::new(cancelled)));
+            let control=crate::native::stopped_control(!cancelled,deadline);
             let result=query(&mut slot,Vec::new(),None,&current,std::path::Path::new("unused"),&owner,&control,deadline,&mut terminal);
             let error=match result{Err(error)=>error,Ok(_)=>panic!("stopped request admitted")};
             assert_eq!(error.code,if cancelled{"command.cancelled"}else{"command.deadline"});

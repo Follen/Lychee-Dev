@@ -20,10 +20,9 @@ lycheedev-delivery.workspace = true
 lycheedev-windows.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio = { version = "=1.53.2", default-features = false, features = ["rt", "net", "time"] }
 
 [dev-dependencies]
-# Historical comparison only; production does not expose these routes.
-lycheedev-data = { workspace = true, features = ["migration-oracle"] }
 # Reuse the authenticated Data CASC/DBD/WDC fixture in actual CLI regressions.
 md-5 = "0.10.6"
 sha2.workspace = true

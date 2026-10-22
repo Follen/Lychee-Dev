@@ -147,7 +147,7 @@ fn reject_at_eof(failure: Fault) {
                     fs::remove_file(f.0.join("state/data/cache-v1.sqlite"))?;
                 }
                 Fault::Cancel => {
-                    control.cancel_handle().store(true, Ordering::Release);
+                    control.tracked_cancel_handle().unwrap().cancel();
                 }
                 Fault::Budget => {
                     budget.charge(Cost::work(100_000_001))?;

@@ -155,7 +155,7 @@ pub(super) fn open(
             } else {
                 connection.execute_batch("ROLLBACK").map_err(Into::into)
             };
-            finish_historical(written, rollback)?;
+            finish_owned(written, rollback)?;
         }
         control.check()?;
         check()
@@ -168,7 +168,7 @@ pub(super) fn open(
             evidence_gate_held: true,
             catalog_only: false,
         })),
-        Err(error) => finish_historical(
+        Err(error) => finish_owned(
             Err(error),
             connection.close().map_err(|(_, error)| error.into()),
         ),

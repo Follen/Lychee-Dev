@@ -162,7 +162,7 @@ fn controlled_schema_versions_match_existing_open_diagnostics() {
 }
 
 #[test]
-fn controlled_open_retains_existing_unversioned_table_compatibility() {
+fn controlled_open_rejects_unversioned_foreign_tables_without_touching_them() {
     let f = Fixture::new();
     let connection = Connection::open(f.database()).unwrap();
     connection
@@ -171,13 +171,22 @@ fn controlled_open_retains_existing_unversioned_table_compatibility() {
         )
         .unwrap();
     connection.close().unwrap();
-    let metadata = Metadata::open_controlled(&f.home, true, &OperationControl::default()).unwrap();
-    let retained: String = metadata
-        .connection
+    let failed = error(Metadata::open_controlled(
+        &f.home,
+        true,
+        &OperationControl::default(),
+    ));
+    assert_eq!(failed.code, "vault.schema_invalid");
+    let connection = Connection::open(f.database()).unwrap();
+    let retained: String = connection
         .query_row("SELECT value FROM unrelated", [], |r| r.get(0))
         .unwrap();
     assert_eq!(retained, "retained");
-    metadata.close().unwrap();
+    let version: i32 = connection
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 0);
+    connection.close().unwrap();
 }
 
 #[test]
@@ -218,7 +227,9 @@ fn controlled_open_returns_same_metadata_and_readonly_remains_readonly() {
         .connection
         .pragma_query_value(None, "busy_timeout", |r| r.get(0))
         .unwrap();
-    assert_eq!(timeout, 5000);
+    // The compatibility entry now delegates to the same controlled open, so the
+    // fixed five-second Go busy handler is gone from both entry points.
+    assert_eq!(timeout, 0);
     legacy.put("cache/second", &true, None).unwrap();
     legacy.close().unwrap();
     // The close is consuming and leaves no reader lock or live connection.
@@ -342,8 +353,11 @@ fn original_deadline_bounds_schema_read_begin_and_commit_contention() {
 fn sqlite_schema_error_rolls_back_and_allows_recovery() {
     let f = Fixture::new();
     let connection = Connection::open(f.database()).unwrap();
+    // A version-0 database may be bootstrapped only when it has no tables. This
+    // view makes the documents CREATE fail inside the transaction, proving the
+    // bootstrap rolls back and a later clean open can still initialize.
     connection
-        .execute_batch("CREATE TABLE holder(value); CREATE INDEX documents ON holder(value)")
+        .execute_batch("CREATE VIEW documents AS SELECT 1 AS key")
         .unwrap();
     connection.close().unwrap();
     let failed = error(Metadata::open_controlled(
@@ -357,8 +371,16 @@ fn sqlite_schema_error_rolls_back_and_allows_recovery() {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
     assert_eq!(version, 0);
+    let view: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name='documents' AND type='view'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(view, 1);
     connection
-        .execute_batch("BEGIN EXCLUSIVE; DROP INDEX documents; COMMIT")
+        .execute_batch("DROP VIEW documents")
         .unwrap();
     connection.close().unwrap();
     Metadata::open_controlled(&f.home, true, &OperationControl::default())
@@ -397,8 +419,8 @@ fn cleanup_combination_preserves_primary_rollback_and_close_causes() {
         .with_details(serde_json::json!({"step": "rollback"}));
     let close = ToolkitError::new("vault.metadata", "close failed", 5)
         .with_details(serde_json::json!({"step": "close"}));
-    let result: Result<()> = finish_historical(Err(primary.clone()), Err(rollback.clone()));
-    let combined = finish_historical(result, Err(close.clone())).unwrap_err();
+    let result: Result<()> = finish_owned(Err(primary.clone()), Err(rollback.clone()));
+    let combined = finish_owned(result, Err(close.clone())).unwrap_err();
     assert_eq!(
         (combined.code.as_str(), combined.exit_code),
         ("command.cancelled", 7)

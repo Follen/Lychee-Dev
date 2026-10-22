@@ -29,7 +29,7 @@ pub use staged::publish_blob_stream_bounded_with_check;
 pub(crate) use staged::{StreamPublicationSettlement, publish_data_blob_stream_with_check};
 
 mod optional;
-pub(super) use optional::verify_historical_blob_optional;
+pub(super) use optional::verify_capture_blob_optional;
 pub use optional::{
     open_verified_blob_bounded_optional_with_check, read_blob_bounded_optional_with_check,
 };
@@ -74,7 +74,7 @@ fn finish_check<T>(result: Result<T>, stopped: Result<()>) -> Result<T> {
     {
         return result;
     }
-    crate::metadata::historical_write::finish_historical(result, stopped)
+    crate::metadata::owned_write::finish_owned(result, stopped)
 }
 fn limit(message: &str) -> ToolkitError {
     ToolkitError::new("vault.blob_limit", message, 4)
@@ -188,7 +188,7 @@ impl VerifiedBlob {
         close: impl FnOnce(File) -> io::Result<()>,
     ) -> Result<T> {
         let closed = close(self.opened.file).map_err(ToolkitError::from);
-        let result = crate::metadata::historical_write::finish_historical(result, closed);
+        let result = crate::metadata::owned_write::finish_owned(result, closed);
         let result = optional::finish_directory(result, self.opened._directory);
         optional::finish_checks(result, &self.control, &mut || {
             optional_check(&mut self.supplemental)
@@ -269,7 +269,7 @@ fn open_blob_with_check(
         })();
         match finish_controls(result, control, supplemental) {
             Ok(()) => Ok(file),
-            Err(error) => crate::metadata::historical_write::finish_historical(
+            Err(error) => crate::metadata::owned_write::finish_owned(
                 Err(error),
                 storage::close_file(file).map_err(Into::into),
             ),
@@ -469,7 +469,7 @@ fn close_opened_blob<T>(
     control: &OperationControl,
     supplemental: &mut Option<BlobCheck>,
 ) -> Result<T> {
-    let result = crate::metadata::historical_write::finish_historical(
+    let result = crate::metadata::owned_write::finish_owned(
         result,
         lycheedev_windows::filesystem::close_file(opened.file).map_err(ToolkitError::from),
     );
@@ -687,19 +687,19 @@ pub fn verify_blob_bounded(
 }
 // Go VerifyBlob has no producer/capture size ceiling. It is a streaming
 // verification of an already authenticated signed historical reference.
-pub(super) fn verify_historical_blob(
+pub(super) fn verify_capture_blob(
     home: &Path,
     digest: &str,
-    bytes: i64,
+    bytes: u64,
     control: &OperationControl,
 ) -> Result<()> {
     control.check()?;
-    if bytes < 0 || !crate::selection::valid_digest(digest, 64) {
+    if !crate::selection::valid_digest(digest, 64) {
         return Err(integrity("vault.blob_integrity"));
     }
     let reference = BlobRef {
         sha256: digest.into(),
-        bytes: bytes as u64,
+        bytes,
     };
     scan_blob(
         open_blob(home, reference, Some(control))?,
@@ -812,6 +812,7 @@ fn publish_internal_with_check(
         maximum,
         control,
         supplemental,
+        None,
         &mut BlobPublicationSettlement::new(),
     )
 }
@@ -821,6 +822,7 @@ fn publish_internal_observed(
     maximum: usize,
     control: Option<&OperationControl>,
     supplemental: &mut impl FnMut() -> Result<()>,
+    authenticated: Option<&BlobRef>,
     settlement: &mut BlobPublicationSettlement,
 ) -> Result<Value> {
     check_with(control, supplemental)?;
@@ -837,7 +839,15 @@ fn publish_internal_observed(
     )?;
     let result = (|| {
         open_workspace(home, control, supplemental)?;
-        let digest = digest_bytes_with_check(bytes, control, supplemental)?;
+        let digest = match authenticated {
+            Some(reference) => {
+                if reference.bytes != bytes.len() as u64 {
+                    return Err(integrity("authenticated body length differs"));
+                }
+                reference.sha256.clone()
+            }
+            None => digest_bytes_with_check(bytes, control, supplemental)?,
+        };
         let guard = ExclusiveLock::resource_wait_checked(
             &home.join("locks"),
             &format!("blob:{digest}"),
@@ -854,7 +864,7 @@ fn publish_internal_observed(
             settlement,
         )
         .and_then(|reference| serde_json::to_value(reference).map_err(Into::into));
-        crate::metadata::historical_write::finish_historical(result, guard.close())
+        crate::metadata::owned_write::finish_owned(result, guard.close())
     })();
     let result = optional::finish_directory(result, home_owner);
     finish_controls(result, control, supplemental)
@@ -1022,7 +1032,7 @@ fn commit_internal_observed_with_check(
         let checks = std::cell::RefCell::new(&mut supplemental);
         let written = crate::metadata::evidence_catalog::put_capture(
             home,
-            crate::metadata::EvidenceDomain::Historical,
+            crate::metadata::EvidenceDomain::General,
             &format!("capture/{}", capture.id),
             &raw,
             &[],
@@ -1049,10 +1059,7 @@ fn commit_internal_observed_with_check(
                 if written.is_ok() {
                     publication(CapturePublication::BlobPublished);
                 }
-                crate::metadata::historical_write::finish_historical(
-                    written.map(|_| ()),
-                    guard.close(),
-                )
+                crate::metadata::owned_write::finish_owned(written.map(|_| ()), guard.close())
             },
             &state,
         );
@@ -1072,10 +1079,7 @@ fn commit_internal_observed_with_check(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
+    use crate::control::TrackedCancellation;
     #[test]
     fn real_body_scan_stops_after_caller_cancel_without_reading_next_block() {
         let path = std::env::temp_dir().join(format!(
@@ -1087,8 +1091,8 @@ mod tests {
         let bytes = vec![0x69u8; BLOCK * 3];
         let blob =
             publish_blob_bounded(&path, &bytes, bytes.len(), &OperationControl::default()).unwrap();
-        let token = Arc::new(AtomicBool::new(false));
-        let control = OperationControl::new(
+        let token = TrackedCancellation::new();
+        let control = OperationControl::tracked(
             std::time::Instant::now() + std::time::Duration::from_secs(30),
             token.clone(),
         );
@@ -1101,7 +1105,7 @@ mod tests {
         let mut observed = 0;
         let error = scan_blob(opened, Some(&control), |block| {
             observed += block.len();
-            token.store(true, Ordering::Release);
+            token.cancel();
             Ok(())
         })
         .unwrap_err();

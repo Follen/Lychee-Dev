@@ -11,8 +11,8 @@ import {collectOwnedMemory} from '../../tools/rust-owned-memory.mjs';
 import {hashFile, ownedUserEnvironment, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
 import {assertEnvelope, sha256} from '../rust-source-full-corpus/assertions.mjs';
-import {CASES, GO_COMMIT, REPETITIONS, TARGET_RATIO, compareSamples, elapsed, orderFor, semantic, startupBreakdown, summarize} from './contract.mjs';
-import {assertSeedCold, auditCorpus, cloneSeed, derivedIdentity, proveWarmReuse, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
+import {CASES, REPETITIONS, TARGET_RATIO, compareSamples, elapsed, orderFor, semantic, selectedPathsPassed, startupBreakdown, summarize} from './contract.mjs';
+import {assertSeedCold, auditCorpus, cloneSeed, derivedIdentity, proveWarmReuse, verifyGoReferenceArtifact, verifySeedMetadata} from './inputs.mjs';
 
 const [configuration, ...extra] = process.argv.slice(2);
 assert(configuration && extra.length === 0 && process.platform === 'win32', 'owned Windows controller requires configuration');
@@ -22,16 +22,18 @@ assert(config.startupDiagnostics === undefined || typeof config.startupDiagnosti
 const startupDiagnostics = config.startupDiagnostics === true;
 assert(config.coldIndexDiagnostics === undefined || typeof config.coldIndexDiagnostics === 'boolean', 'cold index diagnostic mode must be boolean');
 const coldIndexDiagnostics = config.coldIndexDiagnostics === true;
-assert(!(startupDiagnostics && coldIndexDiagnostics), 'diagnostic modes are mutually exclusive');
-const diagnosticMode = startupDiagnostics || coldIndexDiagnostics;
-const executionCases = coldIndexDiagnostics ? [CASES[1]] : CASES;
-const executionRepetitions = coldIndexDiagnostics ? 1 : REPETITIONS;
+assert(config.sourceDiagnostics === undefined || typeof config.sourceDiagnostics === 'boolean', 'Source diagnostic mode must be boolean');
+const sourceDiagnostics = config.sourceDiagnostics === true;
+assert([startupDiagnostics, coldIndexDiagnostics, sourceDiagnostics].filter(Boolean).length <= 1, 'diagnostic modes are mutually exclusive');
+const diagnosticMode = startupDiagnostics || coldIndexDiagnostics || sourceDiagnostics;
+const executionCases = coldIndexDiagnostics ? [CASES[1]] : sourceDiagnostics ? CASES.slice(1) : CASES;
+const executionRepetitions = coldIndexDiagnostics || sourceDiagnostics ? 1 : REPETITIONS;
 const executionCacheModes = coldIndexDiagnostics ? ['cold'] : ['cold', 'warm'];
 let fatal = false, sequence = 0;
 const report = {
-  schema: 'lycheedev.paired-performance.v1', mode: startupDiagnostics ? 'startup_diagnostics' : coldIndexDiagnostics ? 'cold_index_diagnostics' : 'paired_performance', performanceAcceptanceEvaluated: !diagnosticMode, state: 'running', startedAt: new Date().toISOString(),
-  scope: startupDiagnostics ? ['B01 describe startup diagnostic only; exactly one invocation per engine'] : coldIndexDiagnostics ? ['B02 fixed full-Retail cold index diagnostic only; one invocation per engine; no performance acceptance'] : ['B01 describe only', 'B02 fixed full-Retail local index and precise query only'],
-  completeB01B07Acceptance: false, targetRatio: TARGET_RATIO, repetitionsPerColdWarmGroup: diagnosticMode ? null : REPETITIONS,
+  schema: 'lycheedev.paired-performance.v1', mode: startupDiagnostics ? 'startup_diagnostics' : coldIndexDiagnostics ? 'cold_index_diagnostics' : sourceDiagnostics ? 'source_diagnostics' : 'paired_performance', performanceAcceptanceEvaluated: !diagnosticMode, state: 'running', startedAt: new Date().toISOString(),
+  scope: startupDiagnostics ? ['B01 describe startup diagnostic only; exactly one invocation per engine'] : coldIndexDiagnostics ? ['B02 fixed full-Retail cold index diagnostic only; one invocation per engine; no performance acceptance'] : sourceDiagnostics ? ['B02 fixed full-Retail index and precise query diagnostic only; one cold and one warm pair per case; no performance acceptance'] : ['B01 describe only', 'B02 fixed full-Retail local index and precise query only'],
+  completeB01B07Acceptance: false, targetRatio: TARGET_RATIO, performanceExemptCaseIds: CASES.filter(entry => !entry.performance).map(entry => entry.id), repetitionsPerColdWarmGroup: diagnosticMode ? null : REPETITIONS,
   remaining: ['B01 parser/selection/project/persistence', 'B02 local sync preparation, refs/context/flow/batch and full semantic checks', 'B03 retained session/invalidation/error recovery/close', 'B04-B07', 'full F/P correctness qualification'],
   cacheDefinition: 'Application-derived cache cold: independent new home per engine/path/pair copied only from that engine’s independently initialized, synced and authenticated seed; no cross-engine cache or metadata sharing; warm: exact same home, pin, binary and command after its own successful cold invocation. OS page/file caches are not flushed or claimed cold. Describe has no derived cache; cold/warm names denote first/repeated invocation only.',
   timingDefinition: 'Native monotonic clock immediately before CLI CreateProcessW until root and every owned descendant reaped and output drained. Includes all CLI local validation, worktree/index/cache reads/writes, worker startup and cleanup. PowerShell/compiler startup and observer shutdown excluded; observer startup, scheduling and pipe-drain overhead within the native interval remain included without subtraction. Wrapper wall time separately retained.',
@@ -70,11 +72,13 @@ function git(args, input) {
   assert(!run.error && run.status === 0, 'authenticated Git read failed'); return stdout;
 }
 function identity() {
-  const source = config.goSource;
-  assert.equal(git(['-C', source, 'rev-parse', 'HEAD']).toString().trim(), GO_COMMIT);
-  assert.equal(git(['-C', source, 'status', '--porcelain', '--untracked-files=all']).toString().trim(), '', 'Go checkout must be exact and clean');
-  const go = verifyGoPackage(config.go.root, config.luaLSArchive);
-  assert.equal(go.packageSHA256, config.go.packageSHA256, 'Go package changed');
+  // The fixed Go 3.2.4 reference product is an explicit external input. Only
+  // its byte identity is re-authenticated here; the repository never builds,
+  // syncs or inspects a Go source checkout or Go toolchain.
+  const go = verifyGoReferenceArtifact(config.go.referenceRoot);
+  assert.equal(go.artifactSHA256, config.go.artifactSHA256, 'external Go reference artifact changed');
+  assert.equal(go.packageSHA256, config.go.packageSHA256, 'external Go reference package changed');
+  assert.equal(go.binarySHA256, config.go.binarySHA256, 'external Go reference binary changed');
   const rust = verifyArtifact(root, config.rustArtifact);
   assert(['release', 'symbols'].includes(rust.profile), 'optimized Rust required');
   assert.equal(rust.binarySHA256, config.rust.binarySHA256); assert.equal(sourceDigest(root), rust.inputHashes.sourceTree, 'Rust source/build identity changed');
@@ -89,7 +93,12 @@ function identity() {
 function invoke(entry, engine, home, pin, evidence, iteration, cacheMode) {
   const binary = engine === 'go' ? config.go.binary : config.rust.sourceBinary;
   const args = [...entry.args, ...(pin ? ['--snapshot', pin] : []), '--home', home, '--format', 'json'];
-  const {run, row} = controlled(binary, args, evidence, {env: ownedUserEnvironment(dirname(home)), measure: true, diagnoseStartup: startupDiagnostics});
+  const env = ownedUserEnvironment(dirname(home));
+  if (config.sourceDiagnostics === true) {
+    for (const key of Object.keys(env)) if (key.toUpperCase() === 'LYCHEEDEV_SOURCE_PHASE_PROFILE') delete env[key];
+    if (engine === 'rust') env.LYCHEEDEV_SOURCE_PHASE_PROFILE = '1';
+  }
+  const {run, row} = controlled(binary, args, evidence, {env, measure: true, diagnoseStartup: startupDiagnostics});
   Object.assign(row, {caseId: entry.id, engine, iteration, cacheMode, home, snapshot: pin, excludedDownloadMillis: 0, excludedExternalWaitMillis: 0, valid: false});
   let envelope;
   try {
@@ -101,13 +110,21 @@ function invoke(entry, engine, home, pin, evidence, iteration, cacheMode) {
   return {row, envelope};
 }
 
+function sourceDiagnosticsComplete(pairs) {
+  return pairs.length === 4 && CASES.slice(1).every(entry => ['cold', 'warm'].every(cacheMode => {
+    const rows = pairs.filter(row => row.caseId === entry.id && row.cacheMode === cacheMode);
+    return rows.length === 1 && rows[0].iteration === 0 && rows[0].resultEquivalent === true
+      && ['go', 'rust'].every(engine => rows[0][engine]?.valid === true && rows[0][engine]?.handlesReaped === true && (cacheMode !== 'warm' || rows[0][engine]?.warmReuse?.verified === true));
+  }));
+}
+
 save();
 try {
   identity();
-  report.inputs.go.build = verifyGoMetadata(prepare('go', ['version', '-m', config.go.binary], 'fixed-Go-build-metadata').toString());
+  report.inputs.go.build = {schema: 'lycheedev.external-go-reference.v1', referenceRoot: config.go.referenceRoot, artifactSHA256: config.go.artifactSHA256, packageSHA256: config.go.packageSHA256, binarySHA256: config.go.binarySHA256, sourceCleanBeforeAndAfter: config.go.sourceCleanBeforeAndAfter === true};
   report.machine.powerBefore = prepare('powercfg.exe', ['/getactivescheme'], 'power-policy-before').toString().trim();
   assert(!process.env.RUSTFLAGS && !process.env.CARGO_ENCODED_RUSTFLAGS, 'benchmark compiler override environment must be empty');
-  report.machine.toolchains = {nodeBinarySHA256: hashFile(process.execPath), rustc: prepare('rustc', ['-Vv'], 'Rust-toolchain-metadata').toString(), go: prepare('go', ['version'], 'Go-toolchain-metadata').toString()};
+  report.machine.toolchains = {nodeBinarySHA256: hashFile(process.execPath), rustc: prepare('rustc', ['-Vv'], 'Rust-toolchain-metadata').toString()};
   assert.match(report.machine.toolchains.rustc, /^rustc 1\.99\.0\b/);
   const seeds = {}, seedIdentities = {}, pins = {};
   function prepareSeeds() {
@@ -207,8 +224,8 @@ try {
   report.machine.powerAfter = prepare('powercfg.exe', ['/getactivescheme'], 'power-policy-after').toString().trim();
   assert.equal(report.machine.powerAfter, report.machine.powerBefore, 'power policy changed');
   report.groups = diagnosticMode ? [] : summarize(report.pairs);
-  report.state = startupDiagnostics ? report.diagnosticPairs.length === 1 && report.diagnosticPairs[0].resultEquivalent === true ? 'startup_diagnostics_observed' : 'startup_diagnostics_failed' : coldIndexDiagnostics ? report.pairs.length === 1 && report.pairs[0].resultEquivalent === true ? 'cold_index_diagnostics_observed' : 'cold_index_diagnostics_failed' : report.groups.every(row => row.state === 'passed_selected_path') ? 'passed_selected_paths_full_acceptance_open' : 'failed';
-} catch (error) { report.blocker = error.message.slice(0, 4096); report.groups = diagnosticMode ? [] : summarize(report.pairs); report.state = startupDiagnostics ? 'startup_diagnostics_failed' : coldIndexDiagnostics ? 'cold_index_diagnostics_failed' : 'failed'; }
+  report.state = startupDiagnostics ? report.diagnosticPairs.length === 1 && report.diagnosticPairs[0].resultEquivalent === true ? 'startup_diagnostics_observed' : 'startup_diagnostics_failed' : coldIndexDiagnostics ? report.pairs.length === 1 && report.pairs[0].resultEquivalent === true ? 'cold_index_diagnostics_observed' : 'cold_index_diagnostics_failed' : sourceDiagnostics ? sourceDiagnosticsComplete(report.pairs) ? 'source_diagnostics_observed' : 'source_diagnostics_failed' : selectedPathsPassed(report.groups) ? 'passed_selected_paths_full_acceptance_open' : 'failed';
+} catch (error) { report.blocker = error.message.slice(0, 4096); report.groups = diagnosticMode ? [] : summarize(report.pairs); report.state = startupDiagnostics ? 'startup_diagnostics_failed' : coldIndexDiagnostics ? 'cold_index_diagnostics_failed' : sourceDiagnostics ? 'source_diagnostics_failed' : 'failed'; }
 finally { report.wallMillis = performance.now() - start; report.finishedAt = new Date().toISOString(); report.requiresOuterRetirement = fatal; save(); }
 console.log(JSON.stringify({state: report.state, report: join(out, 'report.json'), groups: report.groups, diagnosticPairs: report.diagnosticPairs}));
-if (!['passed_selected_paths_full_acceptance_open', 'startup_diagnostics_observed', 'cold_index_diagnostics_observed'].includes(report.state)) process.exitCode = 1;
+if (!['passed_selected_paths_full_acceptance_open', 'startup_diagnostics_observed', 'cold_index_diagnostics_observed', 'source_diagnostics_observed'].includes(report.state)) process.exitCode = 1;

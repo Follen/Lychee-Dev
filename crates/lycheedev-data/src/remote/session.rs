@@ -11,7 +11,7 @@ use super::{
 #[cfg(test)]
 use crate::metadata_format::Encoding;
 use crate::{
-    blte::{self, ByteSource},
+    blte,
     casc,
     decoded_cache::Stats,
     fault, keys,
@@ -39,12 +39,6 @@ pub(super) struct File {
 impl File {
     pub fn into_parts(self) -> (Arc<SharedContent>, serde_json::Value) {
         (self.materialized.content, self.reading)
-    }
-    pub fn bytes(&self) -> &[u8] {
-        &self.materialized.content.bytes
-    }
-    pub fn reference(&self) -> &evidence::BlobRef {
-        &self.materialized.blob
     }
 }
 /// Kept private to the scoped dispatch. Existing FileBytes consumers continue
@@ -604,7 +598,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
                         .ok_or_else(internal)?;
                     let mut reading = serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key(),"content":content.reference(),"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats});
                     if let SelectedBody::Materialized(materialized) = &content {
-                        crate::local_query::report_partial(
+                        crate::query_source::report_partial(
                             &mut reading,
                             &materialized.content.missing,
                         )?;

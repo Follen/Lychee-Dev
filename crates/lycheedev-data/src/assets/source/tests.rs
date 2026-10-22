@@ -155,48 +155,6 @@ fn listfile_refresh_samples_generation_after_fetch_and_keeps_original_control() 
     assert_eq!(offline(&f).unwrap().index.entries[0].file_id, 2);
 }
 #[test]
-fn listfile_cache_duplicate_null_case_time_and_signed_fields_follow_go_typed_reader() {
-    let f = Fixture::new();
-    let doc = seed(&f);
-    let provenance = serde_json::to_string(&doc["provenance"]).unwrap();
-    let raw = format!(
-        r#"{{"schema":"wrong","SCHEMA":"{SCHEMA}","schema":null,"provenance":{provenance},"Provenance":{{"fetchedAt":"2026-10-14T2:00:00,125Z","entryCount":null}},"provenance":null}}"#
-    );
-    write(&f, &raw);
-    let prepared = offline(&f).unwrap();
-    assert_eq!(
-        serde_json::to_value(&prepared.provenance).unwrap()["fetchedAt"],
-        "2026-10-14T02:00:00.125Z"
-    );
-    for token in ["1.0", "1e0", "-1", "9223372036854775808"] {
-        let raw = format!(
-            r#"{{"schema":"{SCHEMA}","provenance":{provenance},"Provenance":{{"entryCount":{token}}}}}"#
-        );
-        write(&f, &raw);
-        assert_eq!(offline(&f).err().unwrap().code, "records.listfile_format");
-    }
-    let raw = format!(
-        r#"{{"schema":"{SCHEMA}","provenance":{provenance},"Provenance":{{"fetchedAt":"2026-10-14T22:00:00\u005a"}}}}"#
-    );
-    write(&f, &raw);
-    assert_eq!(offline(&f).err().unwrap().code, "records.listfile_format");
-}
-#[test]
-fn listfile_cache_depth_admission_uses_original_bytes_and_go_boundary() {
-    let f = Fixture::new();
-    let doc = serde_json::to_string(&seed(&f)).unwrap();
-    for (depth, valid) in [(9999, true), (10000, false)] {
-        let raw = format!(
-            "{},\"ignored\":{}0{}}}",
-            &doc[..doc.len() - 1],
-            "[".repeat(depth),
-            "]".repeat(depth)
-        );
-        write(&f, &raw);
-        assert_eq!(offline(&f).is_ok(), valid);
-    }
-}
-#[test]
 fn listfile_cache_invalid_source_reloads_same_origin_online_without_swallowing_stop() {
     let f = Fixture::new();
     let mut doc = seed(&f);
@@ -232,16 +190,6 @@ fn listfile_cache_invalid_source_reloads_same_origin_online_without_swallowing_s
     assert_eq!(error.code, "command.cancelled");
     assert_eq!(fetch.calls.get(), 1);
 }
-#[test]
-fn listfile_unknown_timezone_is_accepted_on_read_and_fails_only_public_serialization() {
-    let f = Fixture::new();
-    let mut doc = seed(&f);
-    doc["provenance"]["fetchedAt"] = serde_json::json!("2026-10-14T22:00:00+24:00");
-    write(&f, &doc.to_string());
-    let prepared = offline(&f).unwrap();
-    assert!(serde_json::to_value(&prepared.provenance).is_err());
-}
-
 #[test]
 fn listfile_private_metadata_corruption_never_authorizes_network_or_shared_fallback() {
     let f = Fixture::new();

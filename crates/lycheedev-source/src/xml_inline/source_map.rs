@@ -234,4 +234,3 @@ pub fn lua_line_span_bytes(bytes:&[u8],line:usize)->Result<Span>{
     while current<line{start=next(start).ok_or("xml.compiler_line_outside_input")?;current+=1;}
     Ok(Span::new(start,next(start).unwrap_or(bytes.len())))
 }
-

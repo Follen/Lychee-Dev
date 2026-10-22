@@ -1,9 +1,13 @@
 use lycheedev_core::{
-    Invocation, evidence,
+    evidence,
     selection::{self, SelectionSpec, SourcePin},
     workspace,
 };
-use lycheedev_source::{SourceTools, context, git, refs};
+use lycheedev_source::request::{
+    ContextRequest, RelationDirection, RelationRequest, ResearchMode, ResearchSelection,
+    SourceContext, SymbolSelector,
+};
+use lycheedev_source::{context, git, refs};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -147,8 +151,8 @@ impl NativeCli {
         }
     }
     fn refs(&self, f: &Fixture, flags: &[(&str, &str)]) -> Value {
-        let inv = invoke(f, "source refs", flags);
-        let envelope = project_selection::cli_envelope(&self.executable, &self.release, &inv);
+        let options = cli_options(f, flags);
+        let envelope = project_selection::cli_envelope(&self.executable, &self.release, f, &f.home, "source refs", &options);
         assert_eq!(envelope["result"]["snapshot"], f.pin);
         assert_eq!(envelope["context"]["snapshot"], f.pin);
         let captures = envelope["captures"].as_array().unwrap();
@@ -369,34 +373,70 @@ fn assert_observed_target(row: &Value) {
         assert_target_definition(&observation["selected"]);
     }
 }
-fn invoke(f: &Fixture, command: &str, flags: &[(&str, &str)]) -> Invocation {
-    let mut options: BTreeMap<_, _> = flags
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-    options.insert("--snapshot".into(), f.pin.clone());
-    Invocation {
-        command: command.into(),
-        flags: options,
-        positional: None,
+fn source_context(f: &Fixture) -> SourceContext {
+    SourceContext {
         home: f.home.clone(),
         cwd: f.home.clone(),
         control: Default::default(),
     }
 }
+fn cli_options(f: &Fixture, flags: &[(&str, &str)]) -> BTreeMap<String, String> {
+    let mut options: BTreeMap<_, _> = flags
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    options.insert("--snapshot".into(), f.pin.clone());
+    options
+}
+fn research_selection(f: &Fixture) -> ResearchSelection {
+    ResearchSelection {
+        pin: selection::load_pinned(&f.home, &f.pin).unwrap(),
+        environment: None,
+    }
+}
+fn relation(
+    selector: &str,
+    direction: RelationDirection,
+    limit: usize,
+    cursor: &str,
+) -> RelationRequest {
+    RelationRequest {
+        selector: SymbolSelector::Name(selector.into()),
+        direction,
+        limit,
+        cursor: cursor.into(),
+    }
+}
+fn context_request(
+    selector: &str,
+    limit: usize,
+    max_bytes: usize,
+    max_lines: usize,
+    depth: usize,
+    cursor: &str,
+    flow: bool,
+) -> ContextRequest {
+    ContextRequest {
+        selector: SymbolSelector::Name(selector.into()),
+        limit,
+        max_bytes,
+        max_lines,
+        depth,
+        cursor: cursor.into(),
+        flow,
+    }
+}
 #[test]
 fn structural_refs_cursor_and_original_context_are_bounded_without_semantic_claims() {
     let f = fixture();
-    let first = refs::dispatch(&invoke(
-        &f,
-        "source refs",
-        &[
-            ("--symbol", "Target"),
-            ("--direction", "incoming"),
-            ("--limit", "1"),
-            ("--static-only", "true"),
-        ],
-    ))
+    let ctx = source_context(&f);
+    let selected = research_selection(&f);
+    let first = refs::dispatch(
+        &ctx,
+        &selected,
+        &relation("Target", RelationDirection::Incoming, 1, ""),
+        ResearchMode::Static,
+    )
     .unwrap();
     assert_eq!(first.data["relations"].as_array().unwrap().len(), 1);
     assert_eq!(first.data["relations"][0]["state"], "static_candidate");
@@ -404,46 +444,34 @@ fn structural_refs_cursor_and_original_context_are_bounded_without_semantic_clai
     assert!(first.data["relations"][0].get("targetId").is_none());
     assert!(!first.complete);
     let cursor = first.data["nextCursor"].as_str().unwrap();
-    let next = refs::dispatch(&invoke(
-        &f,
-        "source refs",
-        &[
-            ("--symbol", "Target"),
-            ("--direction", "incoming"),
-            ("--limit", "1"),
-            ("--cursor", cursor),
-            ("--static-only", "true"),
-        ],
-    ))
+    let next = refs::dispatch(
+        &ctx,
+        &selected,
+        &relation("Target", RelationDirection::Incoming, 1, cursor),
+        ResearchMode::Static,
+    )
     .unwrap();
     assert_ne!(
         next.data["relations"][0]["line"],
         first.data["relations"][0]["line"]
     );
     assert_eq!(
-        refs::dispatch(&invoke(
-            &f,
-            "source refs",
-            &[
-                ("--symbol", "Caller"),
-                ("--direction", "incoming"),
-                ("--limit", "1"),
-                ("--cursor", cursor)
-            ]
-        ))
+        refs::dispatch(
+            &ctx,
+            &selected,
+            &relation("Caller", RelationDirection::Incoming, 1, cursor),
+            ResearchMode::Static,
+        )
         .unwrap_err()
         .exit_code,
         2
     );
-    let reading = context::dispatch(&invoke(
-        &f,
-        "source context",
-        &[
-            ("--symbol", "Target"),
-            ("--static-only", "true"),
-            ("--max-lines", "2"),
-        ],
-    ))
+    let reading = context::dispatch(
+        &ctx,
+        &selected,
+        &context_request("Target", 50, 16 << 10, 2, 1, "", false),
+        ResearchMode::Static,
+    )
     .unwrap();
     assert!(!reading.complete);
     assert!(!reading.data["snippets"].as_array().unwrap().is_empty());
@@ -456,53 +484,27 @@ fn structural_refs_cursor_and_original_context_are_bounded_without_semantic_clai
     );
 }
 #[test]
-fn research_rejects_unconnected_profiles_and_selector_conflicts_explicitly() {
+fn context_flow_requires_a_compiler_and_static_depth_remains_available() {
     let f = fixture();
+    let ctx = source_context(&f);
+    let selected = research_selection(&f);
     assert_eq!(
-        refs::dispatch(&invoke(&f, "source refs", &[]))
-            .unwrap_err()
-            .exit_code,
-        2
-    );
-    assert_eq!(
-        refs::dispatch(&invoke(
-            &f,
-            "source refs",
-            &[("--symbol", "Target"), ("--symbol-id", "different")]
-        ))
-        .unwrap_err()
-        .exit_code,
-        2
-    );
-    assert_eq!(
-        refs::dispatch(&invoke(
-            &f,
-            "source refs",
-            &[("--symbol", "Target"), ("--release", "explicit")]
-        ))
+        context::dispatch(
+            &ctx,
+            &selected,
+            &context_request("Target", 50, 16 << 10, 120, 1, "", true),
+            ResearchMode::Static,
+        )
         .unwrap_err()
         .exit_code,
         3
     );
-    assert_eq!(
-        context::dispatch(&invoke(
-            &f,
-            "source context",
-            &[("--symbol", "Target"), ("--flow", "true")]
-        ))
-        .unwrap_err()
-        .exit_code,
-        3
-    );
-    let deep = context::dispatch(&invoke(
-        &f,
-        "source context",
-        &[
-            ("--symbol", "Target"),
-            ("--depth", "2"),
-            ("--static-only", "true"),
-        ],
-    ))
+    let deep = context::dispatch(
+        &ctx,
+        &selected,
+        &context_request("Target", 50, 16 << 10, 120, 2, "", false),
+        ResearchMode::Static,
+    )
     .unwrap();
     assert!(!deep.complete);
     assert!(
@@ -516,24 +518,19 @@ fn research_rejects_unconnected_profiles_and_selector_conflicts_explicitly() {
 #[test]
 fn context_byte_continuation_progresses_and_query_changes_reject_the_cursor() {
     let f = fixture();
+    let ctx = source_context(&f);
+    let selected = research_selection(&f);
     let mut cursor = String::new();
     let mut texts = vec![];
     let mut previous = String::new();
     for _ in 0..32 {
-        let mut invocation = invoke(
-            &f,
-            "source context",
-            &[
-                ("--symbol", "Caller"),
-                ("--static-only", "true"),
-                ("--depth", "0"),
-                ("--max-bytes", "7"),
-            ],
-        );
-        if !cursor.is_empty() {
-            invocation.flags.insert("--cursor".into(), cursor.clone());
-        }
-        let reading = context::dispatch(&invocation).unwrap();
+        let reading = context::dispatch(
+            &ctx,
+            &selected,
+            &context_request("Caller", 50, 7, 120, 0, &cursor, false),
+            ResearchMode::Static,
+        )
+        .unwrap();
         let snippets = reading.data["snippets"].as_array().unwrap();
         let bytes = snippets
             .iter()
@@ -553,17 +550,12 @@ fn context_byte_continuation_progresses_and_query_changes_reject_the_cursor() {
         cursor = next.into();
     }
     assert!(texts.concat().contains("Caller"));
-    let changed = context::dispatch(&invoke(
-        &f,
-        "source context",
-        &[
-            ("--symbol", "Target"),
-            ("--static-only", "true"),
-            ("--depth", "0"),
-            ("--max-bytes", "7"),
-            ("--cursor", &cursor),
-        ],
-    ))
+    let changed = context::dispatch(
+        &ctx,
+        &selected,
+        &context_request("Target", 50, 7, 120, 0, &cursor, false),
+        ResearchMode::Static,
+    )
     .unwrap_err();
     assert_eq!(changed.code, "codebase.invalid_search_cursor");
     assert_eq!(changed.exit_code, 2);
@@ -571,32 +563,36 @@ fn context_byte_continuation_progresses_and_query_changes_reject_the_cursor() {
 #[test]
 fn unicode_context_continuation_never_splits_codepoints_or_restarts_a_consumed_byte() {
     let f = fixture();
+    let ctx = source_context(&f);
+    let selected = research_selection(&f);
     let mut cursor = None;
     let mut fragments = String::new();
     let mut pages = 0;
     loop {
-        let mut inv = invoke(
-            &f,
-            "source context",
-            &[
-                ("--symbol", "Unicode"),
-                ("--static-only", "true"),
-                ("--depth", "0"),
-                ("--max-bytes", "7"),
-            ],
-        );
-        if let Some(value) = cursor.take() {
-            inv.flags.insert("--cursor".into(), value);
-        }
-        let reading = context::dispatch(&inv).unwrap();
+        let reading = context::dispatch(
+            &ctx,
+            &selected,
+            &context_request(
+                "Unicode",
+                50,
+                7,
+                120,
+                0,
+                cursor.as_deref().unwrap_or(""),
+                false,
+            ),
+            ResearchMode::Static,
+        )
+        .unwrap();
         let part = reading.data["snippets"][0]["text"].as_str().unwrap();
         assert!(!part.is_empty() && part.len() <= 7);
         fragments.push_str(part);
         pages += 1;
-        cursor = reading.data["nextCursor"].as_str().map(str::to_owned);
-        if cursor.is_none() {
+        let next = reading.data["nextCursor"].as_str().map(str::to_owned);
+        if next.is_none() {
             break;
         }
+        cursor = next;
         assert!(pages < 32, "continuation failed to make bounded progress");
     }
     assert!(fragments.contains("汉字abcdef🙂"));
@@ -714,26 +710,18 @@ fn actual_full_source_semantic_relations_preserve_candidates_and_client_gaps() {
 #[test]
 fn context_after_index_lazily_caches_only_snippet_originals_and_reuses_locked_warm_bytes() {
     let f = fixture();
-    let inv = invoke(
-        &f,
-        "source context",
-        &[
-            ("--symbol", "Target"),
-            ("--static-only", "true"),
-            ("--depth", "0"),
-            ("--limit", "1"),
-            ("--max-lines", "20"),
-        ],
-    );
-    let pin = selection::resolve_pinned(&inv).unwrap();
+    let ctx = source_context(&f);
+    let selected = research_selection(&f);
+    let pin = &selected.pin;
     let index = lycheedev_source::index::build_with_control(
         &f.home,
         pin.source.as_ref().unwrap(),
-        &inv.control,
+        &ctx.control,
     )
     .unwrap();
     assert!(!f.home.join("cache/source-originals-rust").exists());
-    let first = context::dispatch(&inv).unwrap();
+    let request = context_request("Target", 1, 16 << 10, 20, 0, "", false);
+    let first = context::dispatch(&ctx, &selected, &request, ResearchMode::Static).unwrap();
     assert_eq!(first.data["snippets"].as_array().unwrap().len(), 1);
     assert_eq!(first.data["snippets"][0]["path"], "a.lua");
     let doc = index
@@ -754,8 +742,8 @@ fn context_after_index_lazily_caches_only_snippet_originals_and_reuses_locked_wa
     // Deny write/delete while the second actual context command reads the
     // warmed original. Re-publication would fail instead of hiding a rewrite.
     let (held, _) =
-        lycheedev_core::storage::locked_sha256(&original, doc.bytes as u64, &inv.control).unwrap();
-    let second = context::dispatch(&inv).unwrap();
+        lycheedev_core::storage::locked_sha256(&original, doc.bytes as u64, &ctx.control).unwrap();
+    let second = context::dispatch(&ctx, &selected, &request, ResearchMode::Static).unwrap();
     for field in [
         "symbol",
         "relations",
@@ -767,7 +755,7 @@ fn context_after_index_lazily_caches_only_snippet_originals_and_reuses_locked_wa
     ] {
         assert_eq!(first.data[field], second.data[field], "{field}");
     }
-    lycheedev_core::storage::finish_file(held, Ok(()), &inv.control).unwrap();
+    lycheedev_core::storage::finish_file(held, Ok(()), &ctx.control).unwrap();
     for result in [&first, &second] {
         let captured =
             evidence::read_blob(&f.home, &result.provenance[0]["blob"], 1 << 20).unwrap();

@@ -34,7 +34,7 @@ export function prepareAgentImporter(root) {
   }});
 }
 
-import {bounded} from './data-inputs.mjs';
+import {bounded} from './agent-fixture-inputs.mjs';
 const parseFile=path=>parse(bounded(path,4<<20));
 export function loadAgentImporter(root, receiptPath, sourceTree) {
   const receipt = parseFile(contained(root, resolve(receiptPath))), evidence = dirname(receiptPath);

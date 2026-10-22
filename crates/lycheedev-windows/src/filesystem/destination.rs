@@ -16,10 +16,11 @@ use windows::{
         Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
         Storage::FileSystem::{
             CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-            FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_RENAME_INFO,
-            FILE_RENAME_INFO_0, FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo,
-            OPEN_EXISTING, SetFileInformationByHandle,
+            FILE_ATTRIBUTE_TAG_INFO, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+            FILE_READ_DATA, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, FileAttributeTagInfo, FileDispositionInfo,
+            GetFileInformationByHandleEx, OPEN_EXISTING, SetFileInformationByHandle,
         },
     },
     core::PCWSTR,
@@ -91,7 +92,7 @@ enum RelativeOpen {
     Inspect,
     InspectPinned { create: bool },
     Reader,
-    ProjectReader,
+    SharedReader,
     Cleanup,
     Lock,
 }
@@ -235,9 +236,9 @@ fn relative_file_optional_owner<C: FileControl>(
             1,
             0x00200000 | 0x20,
         ),
-        // Fixed Go project Root.Open keeps readers valid across atomic lock
-        // replacement. Other readers retain their deny-write/delete policy.
-        RelativeOpen::ProjectReader => (
+        // External sources and replaceable project declarations allow shared
+        // writers and replacement; their consumers verify the observed content.
+        RelativeOpen::SharedReader => (
             1 | FILE_READ_ATTRIBUTES.0 | 0x100000,
             1 | 2 | 4,
             1,
@@ -311,6 +312,23 @@ fn win_error(error: windows::core::Error) -> io::Error {
 }
 fn handle(file: &File) -> HANDLE {
     HANDLE(file.as_raw_handle())
+}
+// Directory authentication needs attributes, not sizes, timestamps or volume
+// identity. Query those flags directly on the same original handle.
+fn file_attributes(file: &File) -> io::Result<u32> {
+    let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
+    // SAFETY: the live File owns this handle, and the correctly sized output
+    // structure remains aligned and writable throughout the synchronous call.
+    unsafe {
+        GetFileInformationByHandleEx(
+            handle(file),
+            FileAttributeTagInfo,
+            (&raw mut info).cast(),
+            size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    }
+    .map_err(win_error)?;
+    Ok(info.FileAttributes)
 }
 fn valid_name(name: &std::ffi::OsStr) -> bool {
     let units: Vec<u16> = name.encode_wide().collect();
@@ -393,6 +411,70 @@ impl Directory {
         control: &mut C,
     ) -> Result<Self, C::Error> {
         Self::open_mode_controlled(directory, true, control)
+    }
+    /// Open one child through this held parent. Duplicated ancestry handles
+    /// preserve its identity after the caller closes the original Directory;
+    /// no ancestor is reopened by pathname and the child still denies writers.
+    pub fn open_child_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<Self, C::Error> {
+        self.open_child_mode_controlled(name, true, control)
+    }
+    /// Open one shared child through held ancestry. Its access/sharing policy
+    /// matches open_shared_controlled, including writable directory attributes.
+    pub fn open_shared_child_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<Self, C::Error> {
+        self.open_child_mode_controlled(name, false, control)
+    }
+    fn open_child_mode_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        deny_write: bool,
+        control: &mut C,
+    ) -> Result<Self, C::Error> {
+        self.verify_controlled(control)?;
+        let child = relative_file_controlled(
+            self.parent_handle(),
+            name,
+            RelativeOpen::Directory { deny_write },
+            control,
+        )?;
+        let attrs = controlled_io(control, || file_attributes(&child))?;
+        if attrs & FILE_ATTRIBUTE_DIRECTORY.0 == 0 || attrs & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            return Err(invalid("output directory is not a regular directory").into());
+        }
+        let handles = self._directories.len() + 1;
+        let path_bytes = self.path.as_os_str().len() + name.len() + 1;
+        control.charge(FileCost {
+            allocation_bytes: (path_bytes * 4 + handles * size_of::<File>()) as u64,
+            work_units: (path_bytes + handles) as u64,
+            ..FileCost::default()
+        })?;
+        let path = self.path.join(name);
+        if path.as_os_str().len() > 32768 || path.components().count() > 1024 {
+            return Err(invalid("directory exceeds component admission").into());
+        }
+        let mut directories = Vec::with_capacity(handles);
+        for file in &self._directories {
+            // Reserve the DuplicateHandle operation and its eventual close.
+            control.charge(FileCost {
+                io_operations: 2,
+                ..FileCost::default()
+            })?;
+            control.check()?;
+            directories.push(file.try_clone().map_err(C::Error::from)?);
+            control.check()?;
+        }
+        directories.push(child);
+        Ok(Self {
+            path,
+            _directories: directories,
+        })
     }
     fn open_mode_controlled<C: FileControl>(
         directory: &Path,
@@ -490,7 +572,7 @@ impl Directory {
                 control.check()?;
                 file
             };
-            let attrs = controlled_io(control, || file.metadata())?.file_attributes();
+            let attrs = controlled_io(control, || file_attributes(&file))?;
             if attrs & FILE_ATTRIBUTE_DIRECTORY.0 == 0
                 || attrs & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
             {
@@ -514,7 +596,7 @@ impl Directory {
     }
     pub fn verify_controlled<C: FileControl>(&self, control: &mut C) -> Result<(), C::Error> {
         for file in &self._directories {
-            let attrs = controlled_io(control, || file.metadata())?.file_attributes();
+            let attrs = controlled_io(control, || file_attributes(file))?;
             if attrs & FILE_ATTRIBUTE_DIRECTORY.0 == 0
                 || attrs & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
             {
@@ -549,7 +631,22 @@ impl Directory {
         self.verify_controlled(control)?;
         relative_file_controlled(self.parent_handle(), name, RelativeOpen::Reader, control)
     }
-    /// Read a project declaration/lock while allowing Go's atomic replacement.
+    /// Read an external source that can have concurrent writers or replacements.
+    /// The caller validates regular-file kind, length and content consistency.
+    pub fn open_shared_file_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<File, C::Error> {
+        self.verify_controlled(control)?;
+        relative_file_controlled(
+            self.parent_handle(),
+            name,
+            RelativeOpen::SharedReader,
+            control,
+        )
+    }
+    /// Read a project declaration/lock while allowing atomic replacement.
     /// The caller must validate regular-file kind and bound its body; this is
     /// deliberately separate from immutable blob/archive Reader semantics.
     pub fn open_optional_project_file_controlled<C: FileControl>(
@@ -561,7 +658,7 @@ impl Directory {
         relative_file_optional(
             self.parent_handle(),
             name,
-            RelativeOpen::ProjectReader,
+            RelativeOpen::SharedReader,
             true,
             control,
         )
@@ -1285,6 +1382,110 @@ mod tests {
             "fixture.io_budget"
         );
         drop(directory);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn controlled_child_keeps_original_ancestry_after_parent_close() {
+        let root = std::env::temp_dir().join(format!(
+            "lychee-child-directory-{}",
+            crate::random::token().unwrap()
+        ));
+        let parent_path = root.join("parent");
+        let selected = parent_path.join("selected");
+        fs::create_dir_all(&selected).unwrap();
+        fs::write(selected.join("identity"), b"original").unwrap();
+        let parent = Directory::open(&parent_path).unwrap();
+        let mut meter = Meter::default();
+        let child = parent
+            .open_child_controlled("selected".as_ref(), &mut meter)
+            .unwrap();
+        assert_eq!(child.path(), selected);
+        assert_eq!(child._directories.len(), parent._directories.len() + 1);
+        assert!(meter.cost.io_operations >= parent._directories.len() as u64 * 3 + 4);
+        assert!(
+            parent
+                .open_child_controlled("../parent".as_ref(), &mut meter)
+                .is_err()
+        );
+        parent.close().unwrap();
+        assert!(fs::rename(&parent_path, root.join("moved")).is_err());
+        assert!(reparse::reparse_writer(&selected).is_err());
+        let mut file = child.open_file("identity".as_ref()).unwrap();
+        let mut content = String::new();
+        file.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "original");
+        super::super::close_file(file).unwrap();
+        child.close().unwrap();
+        fs::rename(&parent_path, root.join("moved")).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn controlled_shared_child_keeps_shared_policy_and_ancestry_after_parent_close() {
+        let root = std::env::temp_dir().join(format!(
+            "lychee-shared-child-{}",
+            crate::random::token().unwrap()
+        ));
+        let parent_path = root.join("parent");
+        let selected = parent_path.join("selected");
+        fs::create_dir_all(&selected).unwrap();
+        fs::write(selected.join("identity"), b"original").unwrap();
+        let parent = Directory::open_shared(&parent_path).unwrap();
+        let mut meter = Meter::default();
+        let child = parent
+            .open_shared_child_controlled("selected".as_ref(), &mut meter)
+            .unwrap();
+        assert_eq!(child.path(), selected);
+        assert!(meter.cost.io_operations > 0 && meter.cost.allocation_bytes > 0);
+        // Shared children keep the original shared-directory policy.
+        super::super::close_file(reparse::reparse_writer(&selected).unwrap()).unwrap();
+        fs::write(selected.join("identity"), b"updated").unwrap();
+        parent.close().unwrap();
+        assert!(fs::rename(&parent_path, root.join("moved")).is_err());
+        let mut file = child.open_file("identity".as_ref()).unwrap();
+        let mut content = String::new();
+        file.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "updated");
+        super::super::close_file(file).unwrap();
+        let handles = child._directories.len();
+        let errors = child
+            .close_with(|file| {
+                super::super::close_file(file)?;
+                Err(io::Error::other("fixture.shared_child_close"))
+            })
+            .unwrap_err();
+        assert_eq!(errors.len(), handles);
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.to_string() == "fixture.shared_child_close")
+        );
+        // Even failed checked-close reports consumed every actual handle.
+        fs::rename(&parent_path, root.join("moved")).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn controlled_shared_child_refuses_later_reparse_after_parent_close() {
+        let root = std::env::temp_dir().join(format!(
+            "lychee-shared-child-reparse-{}",
+            crate::random::token().unwrap()
+        ));
+        let selected = root.join("selected");
+        let outside = root.join("outside");
+        fs::create_dir_all(&selected).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("identity"), b"outside").unwrap();
+        let parent = Directory::open_shared(&root).unwrap();
+        let child = parent
+            .open_shared_child_controlled("selected".as_ref(), &mut Meter::default())
+            .unwrap();
+        parent.close().unwrap();
+        let writer = reparse::reparse_writer(&selected).unwrap();
+        reparse::set_junction(&writer, &outside).unwrap();
+        super::super::close_file(writer).unwrap();
+        assert!(child.open_file("identity".as_ref()).is_err());
+        assert_eq!(fs::read(outside.join("identity")).unwrap(), b"outside");
+        child.close().unwrap();
+        fs::remove_dir(&selected).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

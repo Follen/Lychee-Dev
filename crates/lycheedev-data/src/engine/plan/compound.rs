@@ -5,7 +5,7 @@ use crate::engine::{api::Expression, output_batches::OutputBatches, values};
 use arrow_schema::{DataType, SchemaRef};
 use datafusion::{
     catalog::{Session, TableProvider},
-    common::{Column, DFSchema, Result, TableReference, tree_node::{Transformed, TransformedResult}},
+    common::{DFSchema, Result, TableReference, tree_node::{Transformed, TransformedResult}},
     dataframe::DataFrame,
     datasource::{MemTable, cte_worktable::CteWorkTable, empty::EmptyTable, provider_as_source},
     logical_expr::{Expr, ExprSchemable, LogicalPlan, LogicalPlanBuilder, TableType, expr::Cast},

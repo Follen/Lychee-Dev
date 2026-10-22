@@ -528,6 +528,7 @@ fn call_setup(
             },
             closure_identity: "closure:0".into(),
             invocation_identity: "frame:0".into(),
+            open_tail: false,
             proof: "observation-proof".into(),
             returns: vec![
                 BindingDecision::Bound(BoundValue {
@@ -1086,24 +1087,24 @@ fn fixed_return_quality_fixture() -> (
     const INPUTS: [(&str, &str); 5] = [
         (
             "profile.lua",
-            include_str!("../../../tests/rust-source-engine/wow/profile.lua"),
+            include_str!("../../../tests/fixtures/source-native/wow/profile.lua"),
         ),
         (
             "generic-defs.lua",
-            include_str!("../../../tests/rust-source-engine/wow/native/generic-defs.lua"),
+            include_str!("../../../tests/fixtures/source-native/wow/native/generic-defs.lua"),
         ),
         (
             "generic-calls.lua",
-            include_str!("../../../tests/rust-source-engine/wow/native/generic-calls.lua"),
+            include_str!("../../../tests/fixtures/source-native/wow/native/generic-calls.lua"),
         ),
         (
             "generic-replace.lua",
-            include_str!("../../../tests/rust-source-engine/wow/native/generic-replace.lua"),
+            include_str!("../../../tests/fixtures/source-native/wow/native/generic-replace.lua"),
         ),
         (
             "coverage-unknown-argument.lua",
             include_str!(
-                "../../../tests/rust-source-engine/wow/native/coverage-unknown-argument.lua"
+                "../../../tests/fixtures/source-native/wow/native/coverage-unknown-argument.lua"
             ),
         ),
     ];
@@ -1561,6 +1562,704 @@ fn one_checker_fixture(
         OwnedQueryTest::ingest(analysis, vec![(root.join(name), Some(Arc::from(source)))]).unwrap();
     let file = fixture.file_ids()[0];
     (fixture, file, checks)
+}
+
+fn host_callable(
+    record: serde_json::Value,
+    types: EnvironmentTypeCatalog,
+) -> Arc<EnvironmentCallable> {
+    Arc::new(EnvironmentCallable {
+        origin: EnvironmentOrigin {
+            material: "api".into(),
+            material_sha256: "a".repeat(64),
+            pointer: "/callables/0".into(),
+            identity: "host".into(),
+        },
+        declaration: serde_json::from_value(record).unwrap(),
+        types: Arc::new(types),
+    })
+}
+fn bind_host(
+    provider: &mut Context,
+    fixture: &OwnedQueryTest,
+    file: FileId,
+    text: &str,
+    callable: Arc<EnvironmentCallable>,
+) {
+    use emmylua_parser::LuaCallExpr;
+    let call = site(fixture, file, text);
+    let prefix = fixture
+        .semantic_model(file)
+        .syntax_tree()
+        .unwrap()
+        .get_red_root()
+        .descendants()
+        .find_map(|node| LuaCallExpr::cast(node).filter(|node| node.get_syntax_id() == call.syntax))
+        .unwrap()
+        .get_prefix_expr()
+        .unwrap();
+    let callee = BindingSite {
+        file_id: file,
+        syntax: prefix.get_syntax_id(),
+    };
+    provider.decisions.insert(
+        callee,
+        BindingDecision::Bound(BoundValue {
+            identity: "host".into(),
+            proof: "declaration".into(),
+            value: SelectedValue::EnvironmentCallable(callable),
+        }),
+    );
+    provider.calls.insert(
+        call,
+        BindingDecision::Bound(CallPermit {
+            callee,
+            proof: "call".into(),
+            capability_profile: "authenticated_environment_signature_v1".into(),
+        }),
+    );
+}
+
+#[test]
+fn colon_receiver_checks_typed_self_and_uses_the_receiver_range() {
+    use emmylua_code_analysis::DiagnosticCode;
+    use emmylua_parser::{LuaCallExpr, LuaClosureExpr};
+
+    for receiver_name in ["self", "receiver"] {
+        for (explicit_argument, generic, colon) in [
+            (false, false, true),
+            (true, false, true),
+            (false, true, true),
+            (false, true, false),
+        ] {
+            for expected in ["number", "table"] {
+                let (parameters, arguments, extra_doc) = if explicit_argument {
+                    (format!("{receiver_name}, x"), "7", "---@param x number\n")
+                } else {
+                    (receiver_name.to_owned(), "", "")
+                };
+                let generic_doc = if generic { "---@generic T\n" } else { "" };
+                let parameter_type = if generic { "T" } else { expected };
+                let generic_call = if generic {
+                    format!("--[[@<{expected}>]]")
+                } else {
+                    String::new()
+                };
+                let invocation = if colon {
+                    format!("target:method{generic_call}({arguments})")
+                } else {
+                    format!("target.method{generic_call}(target)")
+                };
+                let source = format!(
+                    "{generic_doc}---@param {receiver_name} {parameter_type}\n{extra_doc}---@return nil\nlocal function f({parameters}) end\nlocal target={{method=f}}\n{invocation}\n"
+                );
+                let (fixture, file, checks) = one_checker_fixture(
+                    "typed-colon-receiver.lua",
+                    &source,
+                    DiagnosticCode::ParamTypeMismatch,
+                );
+                let root = fixture
+                    .semantic_model(file)
+                    .syntax_tree()
+                    .unwrap()
+                    .get_red_root();
+                let closure = root.descendants().find_map(LuaClosureExpr::cast).unwrap();
+                let call_site = site(&fixture, file, &invocation);
+                let call = call_site
+                    .syntax
+                    .to_node_from_root(&root)
+                    .and_then(LuaCallExpr::cast)
+                    .unwrap();
+                let callee = BindingSite {
+                    file_id: file,
+                    syntax: call.get_prefix_expr().unwrap().get_syntax_id(),
+                };
+                let mut provider = context("typed-colon-receiver");
+                provider.decisions.insert(
+                    callee,
+                    BindingDecision::Bound(BoundValue {
+                        identity: "selected-method".into(),
+                        proof: "method-definition".into(),
+                        value: SelectedValue::Function(FunctionRef {
+                            file_id: file,
+                            closure: closure.get_syntax_id(),
+                            declaration: None,
+                        }),
+                    }),
+                );
+                provider.calls.insert(
+                    call_site,
+                    BindingDecision::Bound(CallPermit {
+                        callee,
+                        proof: "receiver-call".into(),
+                        capability_profile: "typed-call-v1".into(),
+                    }),
+                );
+                let session = owned_query::session(Arc::new(provider));
+                let run = fixture.diagnose(file, checks, &session).unwrap();
+                assert_eq!(
+                    run.diagnostics.len(),
+                    usize::from(expected == "number"),
+                    "{receiver_name}, {invocation}, {expected}: {:?}",
+                    run.diagnostics
+                );
+                let start = if colon {
+                    source.rfind("target:method").unwrap()
+                } else {
+                    source.rfind("(target)").unwrap() + 1
+                };
+                for diagnostic in run.diagnostics {
+                    assert_eq!(diagnostic.code, DiagnosticCode::ParamTypeMismatch);
+                    assert_eq!(u32::from(diagnostic.range.start()) as usize, start);
+                    assert_eq!(
+                        u32::from(diagnostic.range.end()) as usize,
+                        start + "target".len()
+                    );
+                }
+                let coverage = session.coverage();
+                assert!(
+                    coverage.iter().any(|row| row.site == call_site
+                        && row.operation == "argument_check"
+                        && row.parameter.is_none()
+                        && row.state == "native_checked"
+                        && row.proof == "receiver-call"),
+                    "{coverage:?}"
+                );
+                assert!(
+                    !coverage.iter().any(|row| row.site == call_site
+                        && row.operation == "argument_check"
+                        && row.state == "unavailable"),
+                    "{coverage:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn environment_known_parameter_checks_survive_unknown_siblings() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for (argument, errors) in [("true", 0), ("{}", 1)] {
+        let text = format!("Host(\"player\", {argument})");
+        let (fixture, file, checks) =
+            one_checker_fixture("host-partial.lua", &text, DiagnosticCode::ParamTypeMismatch);
+        let callable = host_callable(
+            serde_json::json!({"kind":"function","name":"Host","parameters":[
+            {"index":1,"name":"unit","type":"UnitTokenPvPRestrictedForAddOns"},
+            {"index":2,"name":"usePredicted","type":"bool"}],"returns":[{"index":1,"name":"result","type":"number"}]}),
+            EnvironmentTypeCatalog::default(),
+        );
+        let mut provider = context("host-partial");
+        bind_host(&mut provider, &fixture, file, &text, callable);
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert_eq!(
+            run.diagnostics.len(),
+            errors,
+            "{argument}: {:?}",
+            run.diagnostics
+        );
+        assert!(
+            run.diagnostics
+                .iter()
+                .all(|row| row.code == DiagnosticCode::ParamTypeMismatch)
+        );
+        let rows = session.coverage();
+        assert!(rows.iter().any(|row| row.operation == "argument_check"
+            && row.parameter.as_deref() == Some("unit")
+            && row.state == "unavailable"));
+        assert!(rows.iter().any(|row| row.operation == "argument_check"
+            && row.parameter_index == Some(2)
+            && row.state == "native_checked"));
+        assert!(rows.iter().any(|row| row.operation == "argument_check"
+            && row.parameter.is_none()
+            && row.state == "unavailable"));
+    }
+}
+
+#[test]
+fn environment_argument_checks_do_not_require_known_return_types() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for (argument, errors) in [("true", 0), ("{}", 1)] {
+        let text = format!("Host({argument})");
+        let (fixture, file, checks) = one_checker_fixture(
+            "host-unknown-return.lua",
+            &text,
+            DiagnosticCode::ParamTypeMismatch,
+        );
+        let callable = host_callable(
+            serde_json::json!({"kind":"function","name":"Host","parameters":[
+            {"index":1,"name":"enabled","type":"bool"}],"returns":[{"index":1,"name":"result","type":"UnmodeledReturn"}]}),
+            EnvironmentTypeCatalog::default(),
+        );
+        let mut provider = context("host-unknown-return");
+        bind_host(&mut provider, &fixture, file, &text, callable);
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert_eq!(
+            run.diagnostics.len(),
+            errors,
+            "{argument}: {:?}",
+            run.diagnostics
+        );
+        let rows = session.coverage();
+        assert!(rows.iter().any(|row| row.operation == "argument_check"
+            && row.parameter.as_deref() == Some("enabled")
+            && row.state == "native_checked"));
+        assert!(rows.iter().any(|row| row.operation == "argument_check"
+            && row.parameter.is_none()
+            && row.state == "native_checked"));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.operation == "argument_check" && row.state == "unavailable"),
+            "{rows:?}"
+        );
+    }
+}
+
+#[test]
+fn environment_generic_function_callback_preserves_compatibility_without_signature_precision() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for (expected, nilable, state) in [
+        ("function", false, "native_checked"),
+        ("function", true, "native_checked"),
+        ("Callback", false, "unavailable"),
+        ("Callback", true, "unavailable"),
+    ] {
+        let text = "Host(callback)";
+        let (fixture, file, checks) = one_checker_fixture(
+            "host-generic-callback.lua",
+            text,
+            DiagnosticCode::ParamTypeMismatch,
+        );
+        let mut types = EnvironmentTypeCatalog {
+            identity: "catalog-a".into(),
+            ..Default::default()
+        };
+        types.declarations.insert("Callback".into(), vec![serde_json::from_value(serde_json::json!({
+            "kind":"callbacktype","name":"Callback","parameters":[{"index":1,"name":"value","type":"number"}],
+            "returns":[{"index":1,"name":"result","type":"bool"}]})).unwrap()]);
+        let callable = host_callable(
+            serde_json::json!({"kind":"function","name":"Host","parameters":[
+            {"index":1,"name":"callback","type":expected,"nilable":nilable}]}),
+            types,
+        );
+        let returned = host_callable(
+            serde_json::json!({"kind":"function","name":"CreateCallback","returns":[
+            {"index":1,"name":"result","type":"function"}]}),
+            EnvironmentTypeCatalog::default(),
+        );
+        let mut provider = context("host-generic-callback");
+        bind_host(&mut provider, &fixture, file, text, callable);
+        provider.decisions.insert(
+            site(&fixture, file, "callback"),
+            BindingDecision::Bound(BoundValue {
+                identity: "callback".into(),
+                proof: "returned-callback".into(),
+                value: SelectedValue::EnvironmentReturn(EnvironmentReturn {
+                    callable: returned,
+                    slot: 1,
+                    invocation_identity: "create-callback".into(),
+                }),
+            }),
+        );
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(
+            run.diagnostics.is_empty(),
+            "{expected}, nilable={nilable}: {:?}",
+            run.diagnostics
+        );
+        let rows = session.coverage();
+        for parameter in [None, Some("callback")] {
+            assert!(
+                rows.iter().any(|row| row.operation == "argument_check"
+                    && row.parameter.as_deref() == parameter
+                    && row.state == state),
+                "{expected}, nilable={nilable}: {rows:?}"
+            );
+        }
+        if expected == "Callback" {
+            assert!(
+                !rows
+                    .iter()
+                    .any(|row| row.operation == "argument_check" && row.state == "native_checked"),
+                "{rows:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn environment_callback_declarations_reach_actual_parameter_checks() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for (argument, errors) in [("function() end", 0), ("{}", 1)] {
+        let text = format!("Host(\"EVENT\", {argument})");
+        let (fixture, file, checks) = one_checker_fixture(
+            "host-callback.lua",
+            &text,
+            DiagnosticCode::ParamTypeMismatch,
+        );
+        let mut types = EnvironmentTypeCatalog {
+            identity: "catalog-a".into(),
+            ..Default::default()
+        };
+        types.declarations.insert(
+            "EventCallbackType".into(),
+            vec![
+                serde_json::from_value(
+                    serde_json::json!({"kind":"callbacktype","name":"EventCallbackType"}),
+                )
+                .unwrap(),
+            ],
+        );
+        let callable = host_callable(
+            serde_json::json!({"kind":"function","name":"Host","parameters":[
+            {"index":1,"name":"eventName","type":"cstring"},{"index":2,"name":"callback","type":"EventCallbackType"}]}),
+            types,
+        );
+        let mut provider = context("host-callback");
+        bind_host(&mut provider, &fixture, file, &text, callable);
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert_eq!(
+            run.diagnostics.len(),
+            errors,
+            "{argument}: {:?}",
+            run.diagnostics
+        );
+        assert!(
+            session
+                .coverage()
+                .iter()
+                .any(|row| row.operation == "argument_check"
+                    && row.parameter.as_deref() == Some("callback")
+                    && row.parameter_index == Some(2)
+                    && row.state == "native_checked")
+        );
+    }
+}
+
+#[test]
+fn environment_callback_projection_preserves_ambiguity_and_cycle_failures() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for (case, reason) in [
+        ("ambiguous", "environment_declaration_ambiguous"),
+        ("cycle", "environment_type_depth"),
+        ("nominal", "native_check_inputs_or_signature_unavailable"),
+    ] {
+        let text = "Host(function() end)";
+        let (fixture, file, checks) = one_checker_fixture(
+            "host-callback-unavailable.lua",
+            text,
+            DiagnosticCode::ParamTypeMismatch,
+        );
+        let mut types = EnvironmentTypeCatalog {
+            identity: "catalog-a".into(),
+            ..Default::default()
+        };
+        let record: EnvironmentRecord = serde_json::from_value(if case == "cycle" {
+            serde_json::json!({"kind":"callbacktype","name":"Callback","parameters":[{"index":1,"name":"recursive","type":"Callback"}]})
+        } else if case == "nominal" {
+            serde_json::json!({"kind":"structure","name":"Callback"})
+        } else { serde_json::json!({"kind":"callbacktype","name":"Callback"}) }).unwrap();
+        types.declarations.insert(
+            "Callback".into(),
+            if case == "ambiguous" {
+                vec![record.clone(), record]
+            } else {
+                vec![record]
+            },
+        );
+        let callable = host_callable(
+            serde_json::json!({"kind":"function","name":"Host","parameters":[{"index":1,"name":"callback","type":"Callback"}]}),
+            types,
+        );
+        let mut provider = context("host-callback-unavailable");
+        bind_host(&mut provider, &fixture, file, text, callable);
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.diagnostics.is_empty());
+        let rows = session.coverage();
+        assert!(
+            rows.iter()
+                .any(|row| row.state == "unavailable" && row.reason.as_deref() == Some(reason)),
+            "{case}: {rows:?}"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.operation == "argument_check" && row.state == "native_checked"),
+            "{case}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn environment_nominal_parameters_reject_tables_foreign_catalogs_and_alias_spoofs() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for (name, invocation, actual_catalog, actual_type, managed, errors) in [
+        (
+            "same",
+            "Host(value,value)",
+            "catalog-a",
+            "Duration",
+            true,
+            0,
+        ),
+        ("table", "Host(value,{})", "catalog-a", "Duration", true, 1),
+        (
+            "receiver",
+            "Host({},value)",
+            "catalog-a",
+            "Duration",
+            true,
+            1,
+        ),
+        (
+            "colon_same",
+            "value:Assign(value)",
+            "catalog-a",
+            "Duration",
+            true,
+            0,
+        ),
+        (
+            "colon_stolen",
+            "other:Assign(value)",
+            "catalog-a",
+            "Duration",
+            true,
+            1,
+        ),
+        (
+            "stored_alias",
+            "assign(value,value)",
+            "catalog-a",
+            "Duration",
+            true,
+            0,
+        ),
+        (
+            "dot_unknown_return",
+            "Host(value,value)",
+            "catalog-a",
+            "Duration",
+            true,
+            0,
+        ),
+        ("dot_pack", "Host(Pair())", "catalog-a", "Duration", true, 0),
+        (
+            "foreign",
+            "Host(value,value)",
+            "catalog-b",
+            "Duration",
+            true,
+            2,
+        ),
+        (
+            "different",
+            "Host(value,value)",
+            "catalog-a",
+            "Curve",
+            true,
+            2,
+        ),
+        (
+            "erased",
+            "Host(value,value)",
+            "catalog-a",
+            "Duration",
+            false,
+            2,
+        ),
+    ] {
+        let borrowed = if name == "colon_stolen" {
+            "local other = {Assign=value.Assign}\n"
+        } else if name == "stored_alias" {
+            "local assign = value.Assign\n"
+        } else if name == "dot_pack" {
+            "local function Pair() return value,value end\n"
+        } else {
+            ""
+        };
+        let source = format!(
+            "---@alias Duration string\n---@type Duration\nlocal value = {{}}\n{borrowed}{invocation}"
+        );
+        let (fixture, file, checks) = one_checker_fixture(
+            "host-nominal.lua",
+            &source,
+            DiagnosticCode::ParamTypeMismatch,
+        );
+        let types = |catalog: &str| EnvironmentTypeCatalog {
+            identity: catalog.into(),
+            nominal_objects: [
+                (
+                    "Duration".into(),
+                    serde_json::json!({"owner":"DurationAPI"}),
+                ),
+                ("Curve".into(), serde_json::json!({"owner":"CurveAPI"})),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let mut declaration = serde_json::json!({"kind":"function","name":"Assign","owner":{"kind":"script-object","name":"DurationAPI"},"parameters":[{"index":1,"name":"other","type":"Duration"}]});
+        if name == "dot_unknown_return" {
+            declaration["returns"] =
+                serde_json::json!([{"index":1,"name":"result","type":"UnmodeledReturn"}]);
+        }
+        let method = host_callable(declaration, types("catalog-a"));
+        let returned = host_callable(
+            serde_json::json!({"kind":"function","name":"Create","returns":[{"index":1,"name":"result","type":actual_type}]}),
+            types(actual_catalog),
+        );
+        let mut provider = context("host-nominal");
+        bind_host(&mut provider, &fixture, file, invocation, method.clone());
+        if matches!(name, "colon_stolen" | "stored_alias") {
+            provider.decisions.insert(
+                site(&fixture, file, "value.Assign"),
+                BindingDecision::Bound(BoundValue {
+                    identity: "host".into(),
+                    proof: "declaration".into(),
+                    value: SelectedValue::EnvironmentCallable(method),
+                }),
+            );
+        }
+        if managed {
+            for expression in fixture
+                .semantic_model(file)
+                .syntax_tree()
+                .unwrap()
+                .get_red_root()
+                .descendants()
+                .filter_map(LuaExpr::cast)
+                .filter(|expression| expression.syntax().text().to_string() == "value")
+            {
+                provider.decisions.insert(
+                    BindingSite {
+                        file_id: file,
+                        syntax: expression.get_syntax_id(),
+                    },
+                    BindingDecision::Bound(BoundValue {
+                        identity: "returned-value".into(),
+                        proof: "return".into(),
+                        value: SelectedValue::EnvironmentReturn(EnvironmentReturn {
+                            callable: returned.clone(),
+                            slot: 1,
+                            invocation_identity: "create-call".into(),
+                        }),
+                    }),
+                );
+            }
+        }
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert_eq!(
+            run.diagnostics.len(),
+            errors,
+            "{name}: {:?}",
+            run.diagnostics
+        );
+        assert!(
+            run.diagnostics
+                .iter()
+                .all(|row| row.code == DiagnosticCode::ParamTypeMismatch)
+        );
+        if matches!(
+            name,
+            "colon_same"
+                | "colon_stolen"
+                | "same"
+                | "receiver"
+                | "stored_alias"
+                | "dot_unknown_return"
+                | "dot_pack"
+        ) {
+            let call = site(&fixture, file, invocation);
+            let (receiver_start, receiver_length) = if name == "colon_stolen" {
+                (source.rfind(invocation).unwrap(), "other".len())
+            } else if name == "colon_same" {
+                (source.rfind(invocation).unwrap(), "value".len())
+            } else if name == "receiver" {
+                (
+                    source.rfind(invocation).unwrap() + invocation.find("{}").unwrap(),
+                    2,
+                )
+            } else if name == "dot_pack" {
+                (
+                    source.rfind(invocation).unwrap() + invocation.find("Pair()").unwrap(),
+                    "Pair()".len(),
+                )
+            } else {
+                (
+                    source.rfind(invocation).unwrap() + invocation.find("value").unwrap(),
+                    "value".len(),
+                )
+            };
+            let rows = session
+                .coverage()
+                .into_iter()
+                .filter(|row| {
+                    row.site == call
+                        && row.operation == "argument_check"
+                        && row.parameter.as_deref() == Some("receiver")
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(rows.len(), 1, "{name}: {rows:?}");
+            assert_eq!(rows[0].state, "native_checked");
+            assert_eq!(rows[0].proof, "call");
+            assert_eq!(rows[0].parameter_index, None);
+            if name == "dot_pack" {
+                let other = session
+                    .coverage()
+                    .into_iter()
+                    .find(|row| {
+                        row.site == call
+                            && row.operation == "argument_check"
+                            && row.parameter.as_deref() == Some("other")
+                    })
+                    .unwrap();
+                assert_eq!(other.state, "native_checked");
+                assert_eq!(other.argument, rows[0].argument);
+                assert_eq!(other.proof, "call");
+            }
+            if name == "dot_unknown_return" {
+                assert!(session.coverage().iter().any(|row| row.site == call
+                    && row.operation == "argument_check"
+                    && row.parameter.is_none()
+                    && row.state == "native_checked"));
+            }
+            let argument = rows[0].argument.unwrap();
+            assert_eq!(argument.file_id, file);
+            assert_eq!(
+                u32::from(argument.syntax.get_range().start()) as usize,
+                receiver_start
+            );
+            assert_eq!(
+                u32::from(argument.syntax.get_range().end()) as usize,
+                receiver_start + receiver_length
+            );
+            if name == "colon_stolen" {
+                assert_eq!(
+                    u32::from(run.diagnostics[0].range.start()) as usize,
+                    receiver_start
+                );
+                assert_eq!(
+                    u32::from(run.diagnostics[0].range.end()) as usize,
+                    receiver_start + receiver_length
+                );
+            }
+        }
+        if name == "same" {
+            owned_query::model!(model, fixture, file, session.clone());
+            let value = model.value_of_expr(site(&fixture, file, "value").syntax);
+            let foreign = owned_query::session(Arc::new(context("host-nominal")));
+            owned_query::model!(other, fixture, file, foreign);
+            assert!(!other.type_check(&value, &value));
+        }
+    }
 }
 
 #[test]

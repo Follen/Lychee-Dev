@@ -1,6 +1,5 @@
 use super::*;
 use lycheedev_core::control::OperationControl;
-use std::sync::atomic::Ordering;
 
 // Leaf decoder tests inject fixed limits; real workspace admission is exercised
 // by the local/CDN consumer fixtures, not this in-memory reader.
@@ -106,7 +105,7 @@ fn table_policy_still_checks_ciphertext_keys_whole_ckey_eof_and_original_stop() 
         let mut clear = [0; 5];
         assert_eq!(reader.read(&mut clear).unwrap(), 5);
         if mode == "cancel" {
-            control.cancel_handle().store(true, Ordering::Release);
+            control.tracked_cancel_handle().unwrap().cancel();
         }
         let error = stream_io_error(reader.read_to_end(&mut Vec::new()).unwrap_err());
         if mode == "cancel" {

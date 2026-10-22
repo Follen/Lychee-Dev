@@ -212,8 +212,17 @@ fn managed_condition_roots_and_children_do_not_fold_original_literals() {
 }
 
 #[test]
-fn managed_variadic_argument_packs_never_claim_completed_argument_type_checks() {
-    for (statement, count) in [("F(G())", 2), ("F(G())", 0), ("F(G())", 1), ("F(0,G())", 2)] {
+fn managed_argument_packs_check_observed_slots_and_keep_open_tails_partial() {
+    for (statement, count, open_tail, mismatches, complete) in [
+        ("F(G())", Some(2), false, 1, true),
+        ("F(G())", Some(0), false, 0, true),
+        ("F(G())", Some(1), false, 1, true),
+        ("F(0,G())", Some(2), false, 1, true),
+        ("F(G(),\"ok\")", Some(2), false, 0, true),
+        ("F((G()))", Some(2), false, 0, true),
+        ("F(\"bad\",G())", None, false, 1, false),
+        ("F(G())", Some(1), true, 1, false),
+    ] {
         let source = format!(
             "---@param a number\n---@param b string\nlocal function F(a,b) end\nlocal function G() return 1, true end\n{statement}\n"
         );
@@ -252,14 +261,14 @@ fn managed_variadic_argument_packs_never_claim_completed_argument_type_checks() 
                 }),
             );
         }
-        let returned_literals = if count == 1 {
+        let returned_literals = if count == Some(1) {
             vec!["true"]
         } else {
             vec!["1", "true"]
         };
         let returns = returned_literals
             .into_iter()
-            .take(count)
+            .take(count.unwrap_or(0))
             .map(|text| expression(site(&analysis, file, text)))
             .collect();
         provider.observations.insert(
@@ -274,22 +283,66 @@ fn managed_variadic_argument_packs_never_claim_completed_argument_type_checks() 
                 closure_identity: "G-closure".into(),
                 invocation_identity: "G-invocation".into(),
                 returns,
+                open_tail: open_tail || count.is_none(),
                 proof: "observed-return-proof".into(),
             },
         );
         let session = owned_query::session(Arc::new(provider));
-        let _diagnostics = codes(&analysis, file, session.clone());
+        let run = analysis
+            .diagnose(file, Arc::new(CheckConfig::default()), &session)
+            .unwrap();
+        let errors = run
+            .diagnostics
+            .iter()
+            .filter(|row| row.code == DiagnosticCode::ParamTypeMismatch)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            errors.len(),
+            mismatches,
+            "{statement}, {count:?}: {:?}",
+            run.diagnostics
+        );
+        if mismatches != 0 {
+            let expression = if count.is_none() { "\"bad\"" } else { "G()" };
+            let start = source.rfind(expression).unwrap();
+            for error in errors {
+                assert_eq!(u32::from(error.range.start()) as usize, start);
+                assert_eq!(
+                    u32::from(error.range.end()) as usize,
+                    start + expression.len()
+                );
+            }
+        }
+        if count == Some(0) {
+            assert!(
+                run.diagnostics
+                    .iter()
+                    .any(|row| row.code == DiagnosticCode::MissingParameter),
+                "{:?}",
+                run.diagnostics
+            );
+        }
         let coverage = session.coverage();
         assert!(
             coverage.iter().any(|row| row.site == outer
                 && row.operation == "argument_check"
-                && row.state == "unavailable"
-                && row.reason.as_deref() == Some("native_multi_argument_projection_unavailable")),
-            "{statement}: {count} slots: {coverage:?}"
+                && row.state
+                    == if complete {
+                        "native_checked"
+                    } else {
+                        "unavailable"
+                    }
+                && row.proof == "permit-proof"),
+            "{statement}: {count:?} slots: {coverage:?}"
         );
         assert!(!coverage.iter().any(|row| row.site == outer
             && row.operation == "argument_check"
-            && row.state == "native_checked"));
+            && row.state
+                == if complete {
+                    "unavailable"
+                } else {
+                    "native_checked"
+                }));
     }
 }
 

@@ -4,7 +4,7 @@ Read for requested toolkit changes or managed deployment needed by an authorized
 live task. Live scope can cover the selected client's necessary deployment/
 activation; it does not imply global npm update, another client or another release.
 Use installed help and supported distribution tools; do not invent release flags
-or substitute a legacy installer.
+or use an unsupported installer.
 
 ## Preserve release and targets
 
@@ -35,13 +35,14 @@ installation does not authorize restart or a character switch. Each authorized
 PID sharing files needs its own runtime activation/verification.
 
 Finish/disconnect owned compatible CON work before managed replacement; unresolved
-or foreign ownership remains a blocker. Preserve old journals/reservations for
-matching-version diagnosis. Inert older managed files can migrate via receipts;
-that does not make old wire/identity journals compatible with a new driver.
-Never rewrite their schema or clear their claims to permit installation.
+or foreign ownership remains a blocker. Preserve journals and reservations from
+another wire/identity version for matching-version diagnosis. Inert older managed
+files can migrate via receipts; that does not make those journals driveable by
+the current driver. Never rewrite their schema or clear their claims to permit
+installation.
 
-Lychee Dev includes its Source analysis tools; no separate language-server
-installation is required. Managed addon file checking needs no Git/language
-server on the target machine. Do not import legacy task/queue/binding/SavedVariables
-state into a new run. Installed files, slot inventory and loaded readiness remain
+Lychee Dev ships its Source analysis tools; no separate analysis server must be
+installed. Managed addon file checking needs no Git or analysis server on the
+target machine. Do not import unrelated task/queue/binding/SavedVariables state
+into a new run. Installed files, slot inventory and loaded readiness remain
 separate evidence.

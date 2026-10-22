@@ -1,11 +1,8 @@
 use super::*;
+use lycheedev_core::control::TrackedCancellation;
 use std::{
     io::{Cursor, Read, Write},
     pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
     task::{Context, Poll},
 };
 struct Ready<R>(R);
@@ -124,17 +121,17 @@ fn empty_prefix_never_reads_or_calls_consumer_for_raw_or_gzip() {
 #[test]
 fn raw_stop_after_read_preserves_observed_bytes_without_running_consumer() {
     struct Cancelling {
-        token: Arc<AtomicBool>,
+        token: TrackedCancellation,
     }
     impl Read for Cancelling {
         fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
             out[..4].copy_from_slice(b"read");
-            self.token.store(true, Ordering::Release);
+            self.token.cancel();
             Ok(4)
         }
     }
-    let token = Arc::new(AtomicBool::new(false));
-    let control = OperationControl::new(Instant::now() + Duration::from_secs(10), token.clone());
+    let token = TrackedCancellation::new();
+    let control = OperationControl::tracked(Instant::now() + Duration::from_secs(10), token.clone());
     let budget = Budget::new(Cost::defaults(), control.deadline(), None);
     let result = run(collect_admitted(
         Ready(Cancelling { token }),

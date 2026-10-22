@@ -1,6 +1,6 @@
 //! Exact Arrow scalar seam; integers never pass through a binary float.
 use super::{external, unsupported};
-use crate::relational::{Scalar, engine_compat};
+use crate::query_value::{self as scalar, Scalar};
 use arrow_schema::DataType;
 use datafusion::common::{Result, ScalarValue};
 
@@ -29,7 +29,7 @@ pub(super) fn read(value: ScalarValue) -> Result<Scalar> {
         ScalarValue::Int64(Some(value)) => Scalar::Int(value),
         ScalarValue::UInt64(Some(value)) => Scalar::UInt(value),
         ScalarValue::Decimal128(Some(value), 20, 0) => {
-            engine_compat::checked_integer(value).map_err(external)?
+            scalar::checked_integer(value).map_err(external)?
         }
         ScalarValue::Float32(Some(value)) if value.is_finite() => Scalar::Float(f64::from(value)),
         ScalarValue::Float64(Some(value)) if value.is_finite() => Scalar::Float(value),

@@ -1,5 +1,5 @@
+use lycheedev_source::request::{AddonValidationRequest, SelectedSource, SourceContext, SourceRequest};
 use lycheedev_core::{
-    Invocation,
     selection::{self, SelectionSpec, SourcePin},
     workspace,
 };
@@ -10,7 +10,6 @@ use lycheedev_source::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -101,23 +100,23 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
     let xml_path = "界 面.xml";
     let legal = "<Ui>\n<Include file=\"界 面.xml\"/>\n<Frame><Scripts><OnLoad>\nlocal x = 1 &lt; 2\n<![CDATA[local arg = ...; self.value = '中文']]>&#10;local s = &quot;text&quot;\n</OnLoad></Scripts></Frame></Ui>";
     fs::write(root.join(xml_path), legal).unwrap();
-    let inv = Invocation {
-        command: "source validate".into(),
-        positional: None,
-        flags: BTreeMap::from([
-            ("--snapshot".into(), pin.id.clone()),
-            ("--path".into(), root.to_string_lossy().into_owned()),
-            ("--toc".into(), "Main.toc".into()),
-        ]),
+    let ctx = SourceContext {
         home: home.clone(),
         cwd: home.clone(),
         control: Default::default(),
     };
+    let request = SourceRequest::Validate(AddonValidationRequest {
+        selection: SelectedSource::new(pin.clone()).unwrap(),
+        root: root.clone(),
+        toc: "Main.toc".into(),
+        semantic: false,
+        environment: None,
+        locator: format!("{}/Main.toc", root.display()),
+    });
     let tools = || SourceTools {
         luac: Some(&runtime),
-        luals: None,
     };
-    let cycle = lycheedev_source::dispatch_with_tools(&inv, tools()).unwrap_err();
+    let cycle = lycheedev_source::dispatch_with_tools(&ctx, &request, tools()).unwrap_err();
     assert_eq!(cycle.code, "codebase.addon_static_check_failed");
     let single_cycle=&cycle.details["result"];
     assert_eq!(single_cycle["staticValid"],false);
@@ -130,8 +129,14 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
     let matrix_path=root.join("matrix.json");
     let source=pin.source.as_ref().unwrap();
     fs::write(&matrix_path,serde_json::to_vec(&json!({"targets":[{"id":"inline","toc":"Main.toc","product":source.product,"ref":source.exact_commit}]})).unwrap()).unwrap();
-    let matrix_inv=Invocation{flags:BTreeMap::from([("--matrix".into(),matrix_path.to_string_lossy().into_owned())]),..inv.clone()};
-    let good=lycheedev_source::matrix::validate_with_resolver(&matrix_inv,tools(),&mut |_|Ok(source.clone())).unwrap();
+    let (configuration, matrix_root) = lycheedev_source::matrix::read_config(&matrix_path, &ctx.control).unwrap();
+    let matrix_request = lycheedev_source::request::MatrixValidationRequest {
+        configuration: matrix_path.clone(),
+        root: matrix_root,
+        targets: configuration.targets,
+        semantic: false,
+    };
+    let good=lycheedev_source::matrix::validate_with_resolver(&ctx, &matrix_request,tools(),&mut |_|Ok(source.clone())).unwrap();
     let target=&good.data["targets"][0];
     assert_eq!(target["valid"],true,"{}",good.data);
     assert_eq!(target["syntaxCompilation"]["checkedLua"], 0);
@@ -150,7 +155,7 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
         );
     }
     fs::write(root.join(xml_path),legal.replace("<Include file=\"界 面.xml\"/>","")).unwrap();
-    let single_good=lycheedev_source::dispatch_with_tools(&inv,tools()).unwrap();
+    let single_good=lycheedev_source::dispatch_with_tools(&ctx, &request,tools()).unwrap();
     assert_eq!(single_good.data["staticValid"],true);
     assert_eq!(single_good.data["syntaxCompilation"]["checkedInlineScripts"],1);
     let mut invalid = vec![];
@@ -163,7 +168,7 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
             "<Ui>\n<Frame><Scripts>\n<OnLoad>\n{expression}\n</OnLoad></Scripts></Frame></Ui>"
         );
         fs::write(root.join(xml_path), &xml).unwrap();
-        let error = lycheedev_source::dispatch_with_tools(&inv, tools()).unwrap_err();
+        let error = lycheedev_source::dispatch_with_tools(&ctx, &request, tools()).unwrap_err();
         assert_eq!(error.exit_code, 4);
         let diagnostics = error.details["result"]["diagnostics"].as_array().unwrap();
         let syntax = diagnostics

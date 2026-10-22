@@ -144,10 +144,9 @@ impl Builder {
         let body=self.harvest.blocks[file].clone();let ctx=Context{file:file.into(),occurrence,name:format!("load:{occurrence}:{file}"),deferred:false,parameters:BTreeMap::new(),conditional_branch:None};
         match body {
             ScriptBody::Block(block)=>self.block(block,&ctx),
-            ScriptBody::Empty(range) if self.native_profile=>{
+            ScriptBody::Empty(range)=>{
                 let paths=self.native_block_body(None,range,&ctx,0)?;self.native_load_terminals(paths)
             },
-            ScriptBody::Empty(_)=>Ok(()),
         }
     }
 }

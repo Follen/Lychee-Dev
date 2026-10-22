@@ -1,44 +1,224 @@
-# Lychee Dev Toolkit · Rust migration
+# Lychee Dev
 
 [简体中文](README_zhCN.md)
 
-This branch, `rust-refactor`, is an **unfinished Rust implementation of the tagged Go 3.2.3 product contract**. It is not a release or a claim of functional/performance parity.
+[![CI](https://github.com/Follen/Lychee-Dev/actions/workflows/ci.yml/badge.svg?branch=rust-refactor)](https://github.com/Follen/Lychee-Dev/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/lycheedev)](https://www.npmjs.com/package/lycheedev)
+[![platform](https://img.shields.io/badge/platform-Windows_amd64-0078d4)](https://github.com/Follen/Lychee-Dev)
+[![runtime dependencies](https://img.shields.io/badge/npm_runtime_dependencies-0-52a788)](packages/npm/lycheedev/package.json)
+[![license](https://img.shields.io/badge/license-MIT-52a788)](LICENSE)
 
-The unpublished Rust candidate version is **3.5.0**, with **beta** distribution configuration. This is a package identity separate from the fixed Go 3.2.3 behavior oracle; no release or npm dist-tag operation has been performed.
+Lychee Dev is a World of Warcraft investigation toolkit for developers and
+agents: a native Rust CLI, an in-game Lua workbench addon, a first-party Agent
+Skill and an npm package. It turns a WoW question into fixed-source evidence,
+typed game data, exported assets or an authorized observation on a running
+client, and keeps the result inspectable.
 
-Final acceptance now requires **unmodified Emmy upstream source**: all current patches must be replaced by equivalent owned-crate/public-API behavior while retaining the complete XML/Lua enhancement. The current source candidate now selects the unmodified upstream tree and runs contextual queries and diagnostics in the owned adapter. Compilation, complete semantic differentials, full Retail and performance acceptance remain pending.
+The released platform is **Windows amd64**. The product version is defined only
+by [release/version.json](release/version.json) and is currently **3.5.0**.
 
-## Goal and fixed baseline
+## Capabilities
 
-The behavioral oracle is **v3.2.3**, peeled tag commit **`3766f9cacb52e93a803a626187e2a1d54a445468`** ([release source](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/README.md)). Do not use a moving `main`, Go 3.1.2, an arbitrary development binary, or later fixes as the oracle.
+| Area | What it answers |
+| --- | --- |
+| Source | Fixed Blizzard UI or third-party addon revisions: declarations, callers, context, load closure, validation, secret/value flow and revision differences. |
+| Data | Typed DB2 records and metadata: catalog, fields, foreign keys, filters, joins, aggregates, paging, export and Hotfix records; spell, item, creature, encounter and decor reports. |
+| Assets | Listfile search, CASC file inspect, raw export and BLP2-to-PNG/lossless-WebP conversion; local installation or explicit CDN delivery. |
+| Live | Behavior in one verified running client through the existing addon and Lycheedev mailbox protocol v1: bounded Lua probes, verified reports, recovery and cleanup. |
+| Evidence | Fixed pins and project locks, content-addressed captures, verification, bundles and bounded cache management. |
+| Delivery | Managed addon and Skill installation, updates and removal from a release package; npm CLI update handoff. |
 
-Prior v3.2.2 (`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`), v3.2.1 (`10b561db5706702cd42e047eaeed4ccb5e825351`) and v3.2.0 (`3057a9666ab078270b63c7f06de748069b0d1f4b`) fixtures and results retain their identities. The cumulative [3.2.1](docs/toolkit/rust-go-3.2.1-increment.md) and [3.2.2](docs/toolkit/rust-go-3.2.2-increment.md) requirements remain. The new [3.2.3 increment](docs/toolkit/rust-go-3.2.3-increment.md) covers admission-scoped adaptive Data memory, compact WDC records and safe indexed IN selection, with updated Data recovery guidance. Its Rust acceptance is pending. The exact tag/source is verified; release binaries/assets are not verified.
+Source, data and asset work do not require a running game. Live work requires a
+logged-in client with the managed addon loaded.
 
-Reuse the existing Rust work where differential evidence supports it. Keep, replace or complete each module against Go 3.2.3; do not start over indiscriminately or preserve an obsolete Rust protocol merely because it already exists.
+## Requirements
 
-Only the host implementation language and Source analysis engine change: Rust plus **EmmyLua's direct analysis libraries, native worker and session ownership**, replacing LuaLS. All other business behavior, the same Lua addon, public CLI, versioned Skill, delivery and complete **Lycheedev mailbox protocol v1** remain equivalent to the pinned release.
+- Windows amd64 (`x86_64-pc-windows-msvc`); this is the only released target.
+- [Node.js](https://nodejs.org/) **22.14.0 or newer** for the npm launcher and
+  package tooling. The CLI itself is a native executable and has no runtime npm
+  dependencies.
+- Git on `PATH` for Source repository preparation.
+- Game data work needs an installed client or an explicitly selected CDN
+  source; some content is encrypted or unavailable and is reported as such.
+- Live work needs a supported client, a running game process and the managed
+  addon. Client support in code is not a claim of interactive acceptance.
 
-Performance acceptance means at least **70% less controllable elapsed time: Rust ≤ 30% of Go** on every agreed required path, with equivalent results on the same machine/data. Download time and uncontrollable external waiting are reported separately. Cold/warm samples are independent. This is a target, not a measured result.
+## Install and deploy
 
-## Read these first
+```powershell
+npm install --global lycheedev
+lycheedev version --format json
+```
 
-- [handover.md](handover.md): the only current migration status/decision/evidence source; human-assisted tests are its final section.
-- [DESIGN.md](DESIGN.md): target architecture and compatibility rules, derived from that authority.
-- [todo.md](todo.md): ordered implementation/acceptance checklist, no independent status narrative.
-- [Pinned Go protocol](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/docs/live-protocol.md): the full wire, recovery, input and diagnostic contract.
+The npm package contains the native CLI, the addon and the Agent Skill. Installing
+the package does **not** deploy the addon or Skill automatically:
 
-Older `docs/toolkit/` plans and test reports are historical evidence. Their Go 3.1.2 goals, 50% threshold, four-slot exact-COMMIT redesign and old input assumptions do not override this migration.
+```powershell
+$release = Join-Path (npm root -g) 'lycheedev'
+$client  = 'D:\Game\World of Warcraft\_retail_'   # your client directory
+$skill   = Join-Path $env:USERPROFILE '.agents\skills\lycheedev'
 
-## Current implementation and build boundary
+lycheedev addon install --release $release --installation $client
+lycheedev skill install --release $release --path $skill
+```
 
-Nine crates exist under `crates/`: cli, core, source, data, live, delivery, windows, emmy-adapter and binding-contracts. Source uses the owned adapter and engine-neutral contracts; the fixed upstream engine does not depend on those contracts. Source defaults to `emmy-prototype` and links the unmodified EmmyLua commit `08b0873962e83bb8307e9a81052e3f41578fbc78` directly. The verified tree is exactly 848 upstream files; [third_party/emmy](third_party/emmy/README.md) records source, archive and license identity with no production patches. Owned algorithms retain the upstream MIT attribution. The preparation recipe materializes the ignored dependency directory. A separately fixed historical patched tree is retained only for reference tests, never as the production dependency. Source identity checks are not compilation or behavioral acceptance.
+Inspect targets first and apply later updates through the managed updater:
 
-Successful component runs do not establish full Source, default Live, package or performance acceptance. Full Retail native analysis has exposed real generated-API failures; new fixes require execution on their exact candidate. Formal runtime/input/backend components are connected to the default public lifecycle; exact-candidate acceptance remains open. Use [handover.md](handover.md) for exact passed/failed/not-run evidence and [the current module queue](todo.md#current-module-work-queue-derived-from-handover-no-percentage-claims) for remaining work. Independent reproducible-build and final package gates remain open.
+```powershell
+lycheedev update --plan --format json
+lycheedev update
+```
 
-Windows amd64 remains the product platform. Source/Data/assets do not require a running game. A running selected client is needed only for final Live acceptance.
+`update` synchronizes the npm CLI and managed Skills/addons. `--release <root>`
+applies an already installed release offline; repeated `--path` / `--installation`
+options scope the targets explicitly. Filesystem completion does not activate a
+running game or an existing agent context: the client still needs a reload.
 
-## Work policy
+## Discover capabilities
 
-The initial change was documentation only; full implementation of the plan is now in progress. No game input, publication or main merge is authorized. Implementation proceeds through offline tests and automated Windows checks first; tests needing the user, a real game, or a specific interactive machine run last. Each authorized batch updates the same dedicated draft PR. After implementation, perform the five sequential convergent audit stages specified in handover. Preserve historical failures and artifacts, and delete dead code only after call-site, feature, package and regression evidence proves it is unused.
+The CLI is self-describing. Start from the task, then read only the contracts that
+are needed:
 
-Released installation instructions belong to the [pinned Go README](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/README.md). This branch must not present an npm install as installation of the unfinished Rust candidate. Prior branch README and UI design text are preserved in [docs/history](docs/history/).
+```powershell
+lycheedev cli search "spell cooldown" --format json
+lycheedev schema target resolve
+lycheedev data agent schema
+lycheedev describe --format json
+lycheedev <command> --help
+```
+
+Discovery reads command metadata only: it does not create a workspace, open a
+cache, start a worker, use the network or connect to the game. The full installed
+command list is in `lycheedev describe`; the authoritative Agent task and session
+contract for Data is `lycheedev data agent schema`.
+
+## Examples
+
+### Source
+
+```powershell
+lycheedev init
+$source = lycheedev source sync --source wow-ui-source --product retail --ref refs/heads/live --format json | ConvertFrom-Json
+$sourcePin = $source.result.id
+
+lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json
+lycheedev source context --snapshot $sourcePin --symbol-id <symbolId> --format json
+```
+
+A branch is resolved once into an immutable pin. Reuse that pin, or the project
+lock, for follow-up reads. Use `source inspect`, `source refs`, `source diff` and
+`source validate` for exact files, relationships, revision comparison and addon
+load closures.
+
+### Data
+
+```powershell
+$target  = lycheedev target resolve --installation $client --region cn --locale zhCN --format json | ConvertFrom-Json
+$dataPin = $target.result.id
+
+lycheedev data agent serve --snapshot $dataPin --installation $client --format jsonl
+```
+
+Open one caller-owned `data agent serve` process and send the typed JSONL tasks
+declared by `lycheedev schema data agent serve`. The session owns a fixed data
+identity and result handles for paging, export and capture; closing or a deadline
+ends that ownership. Use `target available` for advertised releases and
+`target add` / `target show` / `target list` for named target configurations.
+
+### Assets
+
+```powershell
+lycheedev asset search --snapshot $dataPin --listfile community-csv --query "interface/icons" --format json
+lycheedev asset export --snapshot $dataPin --installation $client --file-id 123456 --encoding png --output .\icon.png
+```
+
+Raw bytes are the default export. An explicit encoding selects image conversion;
+a missing name, ambiguous variant, missing key or size limit is an error, not an
+empty success.
+
+### Live (authorized tasks only)
+
+```powershell
+lycheedev live instances --format json
+lycheedev live doctor --pid <pid> --format json        # read-only readiness
+lycheedev live connect --installation $client --format json
+lycheedev live probe put --name <name> --file <probe.lua>
+lycheedev live execute --session <CON-id> --probe <name> --request <key> --format json
+lycheedev live disconnect <CON-id>
+```
+
+Live work binds one verified process/runtime and keeps durable ownership, request
+identity and recovery journals. `live doctor --fix` repairs within the authorized
+installation/target scope; when no current input protocol is loaded, first
+activation can require one manual reload. Submitted or unknown input is never
+replayed. `live status`, `live resume` and `live session` inspect and recover the
+original work.
+
+### Workspace, cache and evidence
+
+```powershell
+lycheedev doctor --format json
+lycheedev cache status --data --format json
+lycheedev evidence list --limit 20 --format json
+lycheedev evidence verify <CAP-id>
+```
+
+`cache prune` reclaims only ordinary rebuildable cache; Data-derived pruning is an
+explicit `--data-derived` operation. Captures and committed evidence are kept
+until explicitly removed. The default Data capacity budget is decimal 5 GB
+(5,000,000,000 bytes) and is configurable with `lycheedev config set`.
+
+## Results and limits
+
+- Ordinary commands return the versioned `lycheedev.result.v1` envelope; JSONL
+  output uses begin/record/end frames with a legal end frame required for success.
+  Data Agent session output uses its own versioned protocol.
+- `complete`, `partial`, `pending`, truncated and unknown values are reported
+  separately. An empty partial result never proves absence.
+- Exit codes: `0` complete, `2` arguments/selection, `3` capability/environment,
+  `4` input/protocol, `5` external/business failure, `6` pending, `7` cancelled,
+  `8` internal.
+- Session result handles are owned by the session; CAPs are committed evidence and
+  outlive it. Pagination and export consume a retained result instead of
+  re-running the query.
+- Missing content, keys, coverage and quota are reported as errors or explicit
+  gaps; they are not substituted with another build, region, product or client.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| [crates/lycheedev-cli](crates/lycheedev-cli/) | Command catalog, parsing, discovery, application orchestration and public output. |
+| [crates/lycheedev-source](crates/lycheedev-source/) | Fixed source identity, load closure, analysis, query, relation and validation. |
+| [crates/lycheedev-emmy-adapter](crates/lycheedev-emmy-adapter/), [crates/lycheedev-binding-contracts](crates/lycheedev-binding-contracts/) | Narrow adapter and shared types around the fixed Emmy upstream engine. |
+| [crates/lycheedev-data](crates/lycheedev-data/) | CASC/WDC/BLTE input, Engine, DataFusion, Data Agent session, assets and Hotfix. |
+| [crates/lycheedev-live](crates/lycheedev-live/) | Game instance binding, Mailbox, input, recovery, reports and cleanup. |
+| [crates/lycheedev-delivery](crates/lycheedev-delivery/) | Managed installation, update transactions, addon/Skill delivery and npm handoff. |
+| [crates/lycheedev-core](crates/lycheedev-core/) | Shared identities, errors, control, workspace, storage and evidence. |
+| [crates/lycheedev-windows](crates/lycheedev-windows/) | Windows handles, files, processes, jobs, IPC and input boundaries. |
+| [addon/](addon/) | Existing in-game Lua workbench addon, client profiles and Mailbox v1. |
+| [skills/lycheedev](skills/lycheedev/) | First-party Agent Skill and its task-specific references. |
+| [packages/npm/lycheedev](packages/npm/lycheedev/) | npm package and native CLI launcher. |
+| [tools/](tools/), [tests/](tests/) | Build, packaging, CI and test tooling; fixtures and test targets. |
+| [release/](release/) | Version source, release tool identities, license supplements and data. |
+
+## Documentation
+
+- [DESIGN.md](DESIGN.md): business goals, architecture boundaries, public
+  contracts and the Skill/CLI usage surface.
+- [AGENTS.md](AGENTS.md): repository working rules, documentation ownership and
+  verification policy.
+- [todo.md](todo.md): open implementation, cleanup, CI and verification work.
+- [test.md](test.md): current test purpose, entry points and coverage.
+- [handover.md](handover.md): current branch, collaboration boundaries, actual
+  verification results and blockers.
+- [skills/lycheedev/SKILL.md](skills/lycheedev/SKILL.md): the installed Agent
+  skill.
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md): third-party components and
+  attribution.
+
+## License
+
+Project-owned code is distributed under the [MIT license](LICENSE). Third-party
+components retain their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

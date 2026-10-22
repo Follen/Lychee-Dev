@@ -1,9 +1,10 @@
 //! Reusable authenticated whole-source inputs, independent of the requested query.
+use crate::request::SourceContext;
 use crate::{environment, index, luac, native, native_research};
-use lycheedev_core::{Invocation, Result, ToolkitError, cache, selection::SourcePin, storage};
+use lycheedev_core::{Result, ToolkitError, cache, selection::SourcePin, storage};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::time::Instant;
+use std::{collections::BTreeMap, time::Instant};
 
 const SCHEMA: &str = "lycheedev.source-research-material.v3";
 const MAX_BYTES: usize = 768 << 20;
@@ -44,11 +45,11 @@ fn integrity(message: &str) -> ToolkitError {
 
 fn serialize(
     material: &StoredMaterial,
-    inv: &Invocation,
+    inv: &SourceContext,
     maximum: usize,
 ) -> Result<Option<Vec<u8>>> {
     struct Writer<'a> {
-        inv: &'a Invocation,
+        inv: &'a SourceContext,
         bytes: Vec<u8>,
         maximum: usize,
         full: bool,
@@ -90,7 +91,7 @@ fn serialize(
 }
 
 fn identity(
-    inv: &Invocation,
+    inv: &SourceContext,
     source: &SourcePin,
     environment: Option<&SourcePin>,
     index_digest: &str,
@@ -102,8 +103,8 @@ fn identity(
     let result = Ok(
         json!({"schema":SCHEMA,"source":source,"environment":environment,
         "index":{"sha256":index_digest,"fingerprint":index::fingerprint(source)},
-        "implementation":{"sha256":digest,"bytes":bytes,"engine":native::ENGINE_COMMIT,"engineArchive":native::ENGINE_ARCHIVE_SHA256,"enginePatch":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256"),"lock":storage::sha256(native::DEPENDENCY_LOCK)},
-        "rules":{"native":native::RULES_VERSION,"research":native_research::RESEARCH_RULES,"entry":native::ENTRY_RULES,"sourceMap":native::SOURCE_MAP_PROFILE,"xmlSourceMap":crate::xml_inline::SOURCE_MAP_RULES,"xmlProgram":crate::xml_load::RULES,"environment":environment::GENERATOR,"declaration":environment::DECLARATION_RULES},
+        "implementation":{"sha256":digest,"bytes":bytes,"engine":native::ENGINE_COMMIT,"engineArchive":native::ENGINE_ARCHIVE_SHA256,"lock":storage::sha256(native::DEPENDENCY_LOCK)},
+        "rules":{"native":native::NATIVE_RULES,"research":native_research::RESEARCH_RULES,"entry":native::ENTRY_RULES,"sourceMap":native::SOURCE_MAP_PROFILE,"xmlSourceMap":crate::xml_inline::SOURCE_MAP_RULES,"xmlProgram":crate::xml_load::RULES,"environment":environment::GENERATOR,"declaration":environment::DECLARATION_RULES},
         "luac":runtime.manifest(),"limits":native::SourceLimits::research(),"wireBytes":MAX_BYTES}),
     );
     storage::finish_file(file, result, &inv.control)
@@ -137,11 +138,28 @@ fn restore_spans(material: &mut StoredMaterial) -> Result<()> {
     Ok(())
 }
 
+fn observations_by_path<'a>(
+    rows: impl Iterator<Item = &'a Value>,
+    inv: &SourceContext,
+) -> Result<BTreeMap<&'a str, &'a Value>> {
+    let mut observed = BTreeMap::new();
+    for row in rows {
+        inv.control.check()?;
+        let path = row["path"]
+            .as_str()
+            .ok_or_else(|| integrity("Cached research encoding observation has no path"))?;
+        if observed.insert(path, row).is_some() {
+            return Err(integrity("Cached research encoding observation is duplicated"));
+        }
+    }
+    Ok(observed)
+}
+
 fn admit(
     material: &mut StoredMaterial,
     expected: &Value,
     index: &index::Index,
-    inv: &Invocation,
+    inv: &SourceContext,
 ) -> Result<()> {
     inv.control.check()?;
     let luac = &material.snapshot.luac;
@@ -207,28 +225,91 @@ fn admit(
             return Err(integrity("Cached research source path differs"));
         }
     }
-    // The index has already been authenticated. Recheck its available Lua, XML and TOC bytes;
-    // skipped source files and their explicit gaps retain the cold-path meaning.
+    let mut warnings = observations_by_path(material.snapshot.encoding_warnings.iter(), inv)?;
+    let mut encoding_gaps = observations_by_path(
+        material.snapshot.input_gaps.iter().filter(|gap| gap["code"] == "source_encoding_unavailable"),
+        inv,
+    )?;
+    let mut unavailable_files = observations_by_path(
+        material.snapshot.input_gaps.iter().filter(|gap| gap["code"] == "source_file_unavailable"),
+        inv,
+    )?;
+    // Ordinary UTF-8 keeps its original hash fast path. A Lua analysis view
+    // deliberately differs from the original bytes, so authenticate that one
+    // original and reproduce the same cold-path conversion before accepting it.
+    // XML/TOC remain exact UTF-8 originals, never Lua analysis views.
     for document in &index.documents {
         inv.control.check()?;
-        if [".lua", ".xml", ".toc"]
-            .iter()
-            .any(|extension| document.path.to_ascii_lowercase().ends_with(extension))
-        {
-            let raw = files
-                .get(&document.path)
-                .or_else(|| material.snapshot.load_documents.get(&document.path))
-                .ok_or_else(|| integrity("Cached research source is missing"))?;
-            if raw.len() != document.bytes || storage::sha256(raw.as_bytes()) != document.sha256 {
-                return Err(integrity("Cached research source differs from fixed index"));
+        let lower = document.path.to_ascii_lowercase();
+        let lua = lower.ends_with(".lua");
+        if !lua && !lower.ends_with(".xml") && !lower.ends_with(".toc") {
+            continue;
+        }
+        let path = document.path.as_str();
+        let cached = if lua {
+            files.get(path)
+        } else {
+            material.snapshot.load_documents.get(path)
+        };
+        if cached.is_some_and(|text| {
+            text.len() == document.bytes && storage::sha256(text.as_bytes()) == document.sha256
+        }) {
+            if warnings.remove(path).is_some()
+                || encoding_gaps.remove(path).is_some()
+                || unavailable_files.remove(path).is_some()
+            {
+                return Err(integrity("Cached research original has an encoding gap or warning"));
+            }
+            continue;
+        }
+        if !lua {
+            return Err(integrity("Cached research source differs from fixed index"));
+        }
+        // A cold analysis conversion always carries its warning or unavailable
+        // gap. Without either, this is an ordinary source-hash mismatch, not a
+        // request to recover another original. An observation only selects the
+        // verification below; it never authorizes the cached text by itself.
+        if !warnings.contains_key(path) && !encoding_gaps.contains_key(path) {
+            return Err(integrity("Cached research source differs from fixed index"));
+        }
+        let mut originals = index.original_reader();
+        let analysis = (|| {
+            let original = originals.read(document, &inv.control)?;
+            native_research::lua_engine_text(path, original.as_ref())
+        })();
+        match originals.finish(analysis, &inv.control)? {
+            native_research::LuaEngineText::Analysis { text, warning } => {
+                if cached != Some(&text) {
+                    return Err(integrity("Cached research analysis differs from fixed original"));
+                }
+                if warnings.remove(path) != warning.as_ref()
+                    || encoding_gaps.remove(path).is_some()
+                    || unavailable_files.remove(path).is_some()
+                {
+                    return Err(integrity("Cached research encoding warning differs from fixed original"));
+                }
+            }
+            native_research::LuaEngineText::Unavailable { gap } => {
+                if cached.is_some()
+                    || warnings.remove(path).is_some()
+                    || encoding_gaps.remove(path) != Some(&gap)
+                    || unavailable_files.remove(path)
+                        != Some(&json!({"code":"source_file_unavailable","path":path}))
+                {
+                    return Err(integrity("Cached research encoding gap differs from fixed original"));
+                }
             }
         }
     }
+    if !warnings.is_empty() || !encoding_gaps.is_empty() {
+        return Err(integrity("Cached research encoding observation has no fixed original"));
+    }
+    drop((warnings, encoding_gaps, unavailable_files));
     restore_spans(material)?;
     inv.control.check()
 }
 
-fn read(inv: &Invocation, key: &str, identity: &Value) -> Result<Option<StoredMaterial>> {
+fn read(inv: &SourceContext, key: &str, identity: &Value) -> Result<Option<StoredMaterial>> {
     let manifest = match crate::persistence::read::<Value>(&inv.home, key, &inv.control) {
         Ok(value) => value,
         Err(error) if error.code == "vault.record_missing" && error.details.is_null() => {
@@ -259,7 +340,7 @@ fn read(inv: &Invocation, key: &str, identity: &Value) -> Result<Option<StoredMa
 }
 
 pub(crate) fn load_or_build(
-    inv: &Invocation,
+    inv: &SourceContext,
     source: &SourcePin,
     environment_pin: Option<&SourcePin>,
     index: &index::Index,
@@ -379,6 +460,7 @@ mod tests {
         };
         let identity = json!({"source":source,"luac":{"version":luac.version,"platform":luac.platform,"sha256":luac.executable_sha256,"bytes":luac.executable_bytes}});
         let snapshot = native_research::SnapshotRequest {
+            encoding_warnings: vec![],
             environment_documents: BTreeMap::new(),
             load_documents: BTreeMap::from([
                 ("Main.toc".into(), "Entry.lua\nOther.xml\n".into()),
@@ -451,7 +533,7 @@ mod tests {
         )
     }
 
-    fn invocation() -> Invocation {
+    fn context() -> SourceContext {
         let home = std::env::temp_dir().join(format!(
             "lycheedev-research-material-{}-{}",
             std::process::id(),
@@ -461,10 +543,7 @@ mod tests {
                 .as_nanos()
         ));
         lycheedev_core::workspace::initialize(&home).unwrap();
-        Invocation {
-            command: "source refs".into(),
-            positional: None,
-            flags: Default::default(),
+        SourceContext {
             cwd: home.clone(),
             home,
             control: Default::default(),
@@ -474,7 +553,7 @@ mod tests {
     #[test]
     fn research_material_restores_full_inputs_and_admits_actual_source() {
         let (material, index) = fixture();
-        let inv = invocation();
+        let inv = context();
         let raw = serde_json::to_vec(&material).unwrap();
         assert!(serialize(&material, &inv, raw.len() - 1).unwrap().is_none());
         assert_eq!(serialize(&material, &inv, raw.len()).unwrap().unwrap(), raw);
@@ -527,7 +606,7 @@ mod tests {
     #[test]
     fn research_material_cas_reads_full_bytes_and_allows_pruned_miss() {
         let (material, _) = fixture();
-        let inv = invocation();
+        let inv = context();
         let key = "source/research-material/test";
         let raw = serde_json::to_vec(&material).unwrap();
         let blob = cache::publish(&inv.home, &raw, MAX_BYTES, None).unwrap();
@@ -556,6 +635,166 @@ mod tests {
         );
         std::fs::remove_file(path).unwrap();
         assert!(read(&inv, key, &material.identity).unwrap().is_none());
+        std::fs::remove_dir_all(inv.home).unwrap();
+    }
+
+    fn encoded_fixture(raw: &[u8], inv: &SourceContext) -> (StoredMaterial, index::Index) {
+        let (mut material, mut index) = fixture();
+        index.home = inv.home.clone();
+        let document = index.documents.iter_mut().find(|doc| doc.path == "Entry.lua").unwrap();
+        document.bytes = raw.len();
+        document.sha256 = storage::sha256(raw);
+        document.text = Some(raw.to_vec());
+        material.snapshot.files.remove("Entry.lua");
+        match native_research::lua_engine_text("Entry.lua", raw).unwrap() {
+            native_research::LuaEngineText::Analysis { text, warning } => {
+                material.snapshot.files.insert("Entry.lua".into(), text);
+                material.snapshot.encoding_warnings.extend(warning);
+            }
+            native_research::LuaEngineText::Unavailable { gap } => {
+                material.snapshot.input_gaps.push(gap);
+                // snapshot_material adds this second observation after visiting
+                // the fixed tree: the unavailable Lua has no analysis text.
+                material.snapshot.input_gaps.push(json!({"code":"source_file_unavailable","path":"Entry.lua"}));
+            }
+        }
+        (material, index)
+    }
+
+    fn cas_roundtrip(inv: &SourceContext, key: &str, material: &StoredMaterial) -> StoredMaterial {
+        let raw = serialize(material, inv, MAX_BYTES).unwrap().unwrap();
+        let blob = cache::publish_derived_controlled(&inv.home, &raw, MAX_BYTES, &inv.control).unwrap();
+        crate::persistence::put_manifest(
+            &inv.home,
+            key,
+            &json!({"schema":SCHEMA,"identity":material.identity,"blob":blob}),
+            &inv.control,
+        ).unwrap();
+        read(inv, key, &material.identity).unwrap().unwrap()
+    }
+
+    #[test]
+    fn research_material_cas_roundtrip_preserves_comment_analysis_and_original_identity() {
+        for (raw, expected, line) in [
+            (b"function Before() end\n-- Night Web\x92s Hollow\nfunction After() end\n".as_slice(),
+             "function Before() end\n-- Night Web?s Hollow\nfunction After() end\n", 2),
+            (b"\xef\xbb\xbf-- \xe9\x9b\xaa\x92\xe9\x9b\xaa\r\nfunction After() end\r\n".as_slice(),
+             "\u{feff}-- 雪?雪\r\nfunction After() end\r\n", 1),
+        ] {
+            let inv = context();
+            let (material, index) = encoded_fixture(raw, &inv);
+            let offset = raw.iter().position(|byte| *byte == 0x92).unwrap();
+            assert_eq!(material.snapshot.files["Entry.lua"], expected);
+            assert_eq!(expected.len(), raw.len(), "analysis keeps original byte coordinates");
+            assert_eq!(material.snapshot.encoding_warnings[0]["line"], line);
+            assert_eq!(material.snapshot.encoding_warnings[0]["byteOffset"], offset);
+            let mut restored = cas_roundtrip(&inv, "source/research-material/comment", &material);
+            index::take_read_observations();
+            admit(&mut restored, &material.identity, &index, &inv).unwrap();
+            assert_eq!(index::take_read_observations(), vec![("Entry.lua".into(), true)]);
+            assert_eq!(restored.snapshot.files["Entry.lua"], expected);
+            assert_eq!(restored.snapshot.encoding_warnings, material.snapshot.encoding_warnings);
+            let document = index.documents.iter().find(|doc| doc.path == "Entry.lua").unwrap();
+            assert_eq!(index.read_document_controlled(document, Some(&inv.control)).unwrap(), raw);
+            assert_ne!(storage::sha256(expected.as_bytes()), document.sha256);
+            std::fs::remove_dir_all(inv.home).unwrap();
+        }
+    }
+
+    #[test]
+    fn research_material_cas_roundtrip_preserves_unavailable_token_and_string_gaps() {
+        for raw in [b"function Br\x92oken() end\n".as_slice(), b"local value = 'a\x92b'\n".as_slice()] {
+            let inv = context();
+            let (material, index) = encoded_fixture(raw, &inv);
+            assert!(!material.snapshot.files.contains_key("Entry.lua"));
+            assert!(material.snapshot.encoding_warnings.is_empty());
+            let gap = material.snapshot.input_gaps.iter().find(|gap| gap["code"] == "source_encoding_unavailable").unwrap();
+            assert_eq!(gap["path"], "Entry.lua");
+            assert_eq!(gap["line"], 1);
+            assert_eq!(gap["byteOffset"], raw.iter().position(|byte| *byte == 0x92).unwrap());
+            let mut restored = cas_roundtrip(&inv, "source/research-material/unavailable", &material);
+            index::take_read_observations();
+            admit(&mut restored, &material.identity, &index, &inv).unwrap();
+            assert_eq!(index::take_read_observations(), vec![("Entry.lua".into(), true)]);
+            assert!(!restored.snapshot.files.contains_key("Entry.lua"));
+            assert_eq!(restored.snapshot.input_gaps, material.snapshot.input_gaps);
+            let encoded = serde_json::to_vec(&material).unwrap();
+            for (case, replacement) in [
+                ("token", "function Broken() end\n"),
+                ("string", "local value = 'a?b'\n"),
+            ] {
+                let mut changed: StoredMaterial = serde_json::from_slice(&encoded).unwrap();
+                changed.snapshot.files.insert("Entry.lua".into(), replacement.into());
+                let mut restored = cas_roundtrip(&inv, &format!("source/research-material/forged-{case}"), &changed);
+                assert_eq!(admit(&mut restored, &material.identity, &index, &inv).unwrap_err().code, "codebase.source_integrity");
+            }
+            let mut changed: StoredMaterial = serde_json::from_slice(&encoded).unwrap();
+            changed.snapshot.input_gaps.retain(|gap| gap["code"] != "source_encoding_unavailable");
+            let mut restored = cas_roundtrip(&inv, "source/research-material/missing-gap", &changed);
+            assert_eq!(admit(&mut restored, &material.identity, &index, &inv).unwrap_err().code, "codebase.source_integrity");
+            std::fs::remove_dir_all(inv.home).unwrap();
+        }
+    }
+
+    #[test]
+    fn research_material_cas_roundtrip_rejects_changed_analysis_warnings_and_originals() {
+        let inv = context();
+        let raw = b"function Before() end\n-- Night Web\x92s Hollow\nfunction After() end\n";
+        let (material, mut index) = encoded_fixture(raw, &inv);
+        let encoded = serde_json::to_vec(&material).unwrap();
+        for case in 0..5 {
+            let mut changed: StoredMaterial = serde_json::from_slice(&encoded).unwrap();
+            match case {
+                0 => changed.snapshot.files.get_mut("Entry.lua").unwrap().push(' '),
+                1 => changed.snapshot.encoding_warnings[0]["byteOffset"] = json!(0),
+                2 => changed.snapshot.encoding_warnings.clear(),
+                3 => changed.snapshot.encoding_warnings.push(changed.snapshot.encoding_warnings[0].clone()),
+                _ => changed.snapshot.encoding_warnings[0]["path"] = json!("Main.toc"),
+            }
+            // Publish the modified material as a valid CAS object as well:
+            // a matching cache-object digest does not authorize changed source.
+            let mut restored = cas_roundtrip(&inv, &format!("source/research-material/tampered-{case}"), &changed);
+            assert_eq!(admit(&mut restored, &material.identity, &index, &inv).unwrap_err().code, "codebase.source_integrity");
+        }
+        index.documents.iter_mut().find(|doc| doc.path == "Entry.lua").unwrap().text.as_mut().unwrap()[0] ^= 1;
+        let mut restored = cas_roundtrip(&inv, "source/research-material/wrong-original", &material);
+        assert_eq!(admit(&mut restored, &material.identity, &index, &inv).unwrap_err().code, "codebase.source_integrity");
+        std::fs::remove_dir_all(inv.home).unwrap();
+    }
+
+    #[test]
+    fn research_material_cas_roundtrip_keeps_utf8_fast_path_and_strict_xml_toc_bytes() {
+        let inv = context();
+        let (material, mut index) = fixture();
+        index.home = inv.home.clone();
+        let mut restored = cas_roundtrip(&inv, "source/research-material/utf8", &material);
+        index::take_read_observations();
+        admit(&mut restored, &material.identity, &index, &inv).unwrap();
+        assert!(index::take_read_observations().is_empty(), "unchanged UTF-8 inputs need no original reread");
+        let mut changed: StoredMaterial = serde_json::from_slice(&serde_json::to_vec(&material).unwrap()).unwrap();
+        changed.snapshot.files.get_mut("Entry.lua").unwrap().push(' ');
+        let mut restored = cas_roundtrip(&inv, "source/research-material/changed-utf8", &changed);
+        index::take_read_observations();
+        assert_eq!(admit(&mut restored, &material.identity, &index, &inv).unwrap_err().code, "codebase.source_integrity");
+        assert!(index::take_read_observations().is_empty(), "ordinary hash corruption is rejected without source recovery");
+        for path in ["Main.toc", "Other.xml"] {
+            let mut changed: StoredMaterial = serde_json::from_slice(&serde_json::to_vec(&material).unwrap()).unwrap();
+            let original = if path.ends_with(".toc") { b"## Title: Night Web\x92s Hollow\n".as_slice() } else { b"<Ui><!-- Night Web\x92s Hollow --></Ui>\n".as_slice() };
+            let document = index.documents.iter_mut().find(|doc| doc.path == path).unwrap();
+            document.bytes = original.len();
+            document.sha256 = storage::sha256(original);
+            document.text = Some(original.to_vec());
+            changed.snapshot.load_documents.insert(path.into(), crate::encoding::analysis(original).into_owned());
+            let mut restored = cas_roundtrip(&inv, &format!("source/research-material/nonutf8-{path}"), &changed);
+            index::take_read_observations();
+            assert_eq!(admit(&mut restored, &material.identity, &index, &inv).unwrap_err().code, "codebase.source_integrity");
+            assert!(index::take_read_observations().is_empty(), "XML/TOC never use the Lua analysis exception");
+            let document = index.documents.iter_mut().find(|doc| doc.path == path).unwrap();
+            let original = &material.snapshot.load_documents[path];
+            document.bytes = original.len();
+            document.sha256 = storage::sha256(original.as_bytes());
+            document.text = None;
+        }
         std::fs::remove_dir_all(inv.home).unwrap();
     }
 }

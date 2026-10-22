@@ -12,7 +12,7 @@ fn finish<T>(result: Result<T>, cleanup: Result<()>, control: &OperationControl)
     let already_stopped = matches!((&result, &stopped), (Err(first), Err(stop))
         if first.code == stop.code && first.message == stop.message
             && first.exit_code == stop.exit_code && first.details == stop.details);
-    let result = crate::metadata::historical_write::finish_historical(result, cleanup);
+    let result = crate::metadata::owned_write::finish_owned(result, cleanup);
     if already_stopped {
         result
     } else {
@@ -37,10 +37,9 @@ fn read(file: &mut impl Read, control: &OperationControl) -> Result<Vec<u8>> {
     }
     Ok(result)
 }
-// Use the shared validation rules and preserve Go's plain-error messages at
-// this new consumer. Digit-only build admission is stricter than Rust parsing.
+// Validate fixed identities before publication.
 pub(super) fn validate_spec(spec: &SelectionSpec) -> Result<()> {
-    // Source errors precede the other fields in fixed validatePins.
+    // Validate source identity before dependent data identity.
     let mut validation = spec.clone();
     if let Some(data) = validation.data.as_mut() {
         if !data
@@ -81,7 +80,7 @@ pub(super) fn validate_spec(spec: &SelectionSpec) -> Result<()> {
     })
 }
 pub(super) fn stored_pin(raw: &[u8], requested: &str, control: &OperationControl) -> Result<PinnedSet> {
-    let (pin, unmarshal_only) = wire::stored(raw, control)?;
+    let pin = wire::stored(raw, control)?;
     if pin.id != requested
         || pin.schema != "lycheedev.selection.v1"
         || !pin
@@ -92,11 +91,6 @@ pub(super) fn stored_pin(raw: &[u8], requested: &str, control: &OperationControl
         return Err(failed("selection.invalid_pin"));
     }
     validate_spec(&pin.spec)?;
-    if unmarshal_only {
-        return Err(failed(
-            "Time.MarshalJSON: timezone hour outside of range [0,23]",
-        ));
-    }
     if identity(&pin)? != pin.id {
         return Err(failed("selection.pin_integrity"));
     }
@@ -104,7 +98,7 @@ pub(super) fn stored_pin(raw: &[u8], requested: &str, control: &OperationControl
     Ok(pin)
 }
 fn pin(
-    writer: &crate::metadata::historical_write::HistoricalWriter<'_>,
+    writer: &crate::metadata::owned_write::OwnedWriter<'_>,
     decoded: wire::Decoded,
     control: &OperationControl,
     published: &mut Option<String>,
@@ -117,11 +111,6 @@ fn pin(
         inherit_parent(&mut spec, parent).map_err(|error| failed(error.code))?;
     }
     validate_spec(&spec)?;
-    if decoded.time_unmarshal_only {
-        return Err(failed(
-            "Time.MarshalJSON: timezone hour outside of range [0,23]",
-        ));
-    }
     let mut pin = PinnedSet {
         schema: "lycheedev.selection.v1".into(),
         id: String::new(),
@@ -130,14 +119,14 @@ fn pin(
     pin.id = identity(&pin)?;
     let raw = serde_json::to_vec(&pin)?;
     let key = format!("pin/{}", pin.id);
-    match writer.commit(&[crate::metadata::historical_write::HistoricalMutation {
+    match writer.commit(&[crate::metadata::owned_write::OwnedMutation {
         key: &key,
         expected_generation: 0,
         bytes: &raw,
     }]) {
         Ok(()) => *published = Some(pin.id.clone()),
         Err(error) if error.code == "vault.generation_conflict" && error.details.is_null() => {
-            // Fixed Go reads/authenticates the actual persisted winner even on
+            // Read and authenticate the actual persisted winner even on
             // a byte-identical conflict. A corrupt row is never overwritten.
             let winner = writer.document(&key)?;
             let winner = stored_pin(&winner.bytes, &pin.id, control)?;
@@ -167,7 +156,7 @@ pub fn resolve_selection_file_controlled(
         let decoded = wire::decode(&raw, control)?;
         // Go opens writable metadata before resolving parents/validating pins.
         // Keep one checked connection through parent reads, CAS and winner reads.
-        Metadata::with_historical_write(home, control, |writer| {
+        Metadata::with_owned_write(home, control, |writer| {
             pin(writer, decoded, control, &mut published)
         })
     })();

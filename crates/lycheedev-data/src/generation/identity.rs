@@ -1,11 +1,11 @@
 //! Static-table derivation identity. A snapshot label is not enough: source
 //! bytes, selected definition, locale and missing-key coverage remain distinct.
-use crate::{capture, db2::Prepared, fault, resource::Budget};
+use crate::{capture, fault, resource::Budget, table_source::Prepared};
 use lycheedev_core::{Result, selection::DataPin};
 use serde::Serialize;
 use serde_json::Value;
 
-/// Exact borrowed inputs shared by explicit preparation and ordinary SQL.
+/// Exact borrowed inputs shared by explicit preparation and Agent queries.
 #[derive(Clone, Copy)]
 pub(crate) struct StaticSource<'a> {
     pub data: &'a DataPin,

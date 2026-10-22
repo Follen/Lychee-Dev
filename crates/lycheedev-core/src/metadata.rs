@@ -78,62 +78,8 @@ impl Metadata {
         Ok(())
     }
 
-    pub fn open(home: &Path, write: bool) -> Result<Self> {
-        crate::workspace::open(home)?;
-        let path = home.join("state/toolkit.sqlite");
-        if write {
-            std::fs::create_dir_all(path.parent().expect("metadata parent"))?;
-        }
-        if !path.exists() && !write {
-            if evidence_catalog::present(home)? {
-                return evidence_catalog::read_carrier(
-                    home,
-                    &crate::control::OperationControl::default(),
-                    &|| Ok(()),
-                );
-            }
-            return Err(ToolkitError::new(
-                "vault.record_missing",
-                "workspace metadata does not exist",
-                3,
-            ));
-        }
-        let flags = if write {
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
-        } else {
-            OpenFlags::SQLITE_OPEN_READ_ONLY
-        };
-        let connection = Connection::open_with_flags(path, flags)?;
-        connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 1 {
-            return Err(ToolkitError::new(
-                "vault.schema_newer",
-                "workspace schema is newer than this toolkit",
-                4,
-            ));
-        }
-        if version == 0 {
-            if !write {
-                return Err(ToolkitError::new(
-                    "vault.schema_invalid",
-                    "uninitialized workspace schema",
-                    4,
-                ));
-            }
-            connection.execute_batch("PRAGMA synchronous=FULL; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS documents (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>0), value BLOB NOT NULL CHECK(length(value)<=1048576)) WITHOUT ROWID; PRAGMA user_version=1; COMMIT;")?;
-        }
-        if write {
-            connection.pragma_update(None, "synchronous", "FULL")?;
-            connection.execute_batch(DELETED_GENERATIONS_SCHEMA)?;
-        }
-        Ok(Self {
-            connection,
-            home: std::path::absolute(home)?,
-            writable: write,
-            evidence_gate_held: false,
-            catalog_only: false,
-        })
+    pub fn open(home:&Path,write:bool)->Result<Self> {
+        Self::open_controlled(home,write,&crate::control::OperationControl::default())
     }
     /// Read one historical Go document as original bytes. Unlike `read`, this
     /// path never UTF-8/JSON-decodes before the caller's Go-compatible decoder.
@@ -546,14 +492,14 @@ impl Metadata {
                     Ok(())
                 };
                 transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-                historical_write::finish_historical(written, rollback)
+                owned_write::finish_owned(written, rollback)
             })();
             let restore = self
                 .connection
                 .busy_timeout(std::time::Duration::from_secs(5));
-            historical_write::finish_historical(result, restore.map_err(ToolkitError::from))
+            owned_write::finish_owned(result, restore.map_err(ToolkitError::from))
         })();
-        crate::metadata::historical_write::finish_historical(
+        crate::metadata::owned_write::finish_owned(
             result,
             evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
         )
@@ -659,7 +605,7 @@ impl Metadata {
             transaction.commit()?;
             Ok(())
         })();
-        crate::metadata::historical_write::finish_historical(
+        crate::metadata::owned_write::finish_owned(
             result,
             evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
         )
@@ -780,7 +726,7 @@ impl Metadata {
             restore?;
             Ok(())
         })();
-        crate::metadata::historical_write::finish_historical(
+        crate::metadata::owned_write::finish_owned(
             result,
             evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
         )
@@ -864,7 +810,7 @@ impl Metadata {
             transaction.commit()?;
             Ok(deleted)
         })();
-        crate::metadata::historical_write::finish_historical(
+        crate::metadata::owned_write::finish_owned(
             result,
             evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
         )
@@ -1436,7 +1382,7 @@ mod historical_read_tests {
         assert!(!path.exists());
     }
     #[test]
-    fn historical_raw_read_schema_is_readonly_and_fixed_go_error() {
+    fn historical_raw_read_schema_is_readonly_and_reference_error() {
         for version in [0, 2, -1] {
             let f = Fixture::new();
             let connection = Connection::open(f.0.join("state/toolkit.sqlite")).unwrap();
@@ -1455,8 +1401,8 @@ mod historical_read_tests {
     }
 }
 
-pub mod historical_write;
-pub use historical_write::{HistoricalMutation, HistoricalWriter};
+pub mod owned_write;
+pub use owned_write::{OwnedMutation, OwnedWriter};
 
 mod controlled_open;
 

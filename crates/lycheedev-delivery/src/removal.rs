@@ -2,7 +2,8 @@
 //! Every moved and remaining member is revalidated before a resumed move.
 use crate::{deploy, installation, slots};
 use lycheedev_core::{
-    Result, ToolkitError, control::OperationControl, coordination::InstallationGuard, storage,
+    Result, ToolkitError, control::OperationControl, coordination::InstallationMaintenanceLease,
+    storage,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -331,10 +332,10 @@ fn validate_slot(
     {
         return Err(invalid("slot has redirected or unlisted files"));
     }
-    for (name, want) in slots::static_files(index, &pool.version, &pool.schema) {
+    for (name, want) in slots::static_files(index, &pool.version) {
         control.check()?;
         let actual = slots::read_bounded_controlled(&path.join(&name), 16 << 10, control)?;
-        if !slots::static_matches(&name, &actual, &want) {
+        if actual != want {
             return conflict("slot static file differs from removal intent");
         }
     }
@@ -370,7 +371,7 @@ fn addon_with_move(
         move_member,
         |_| {},
         storage::ExclusiveLock::close,
-        InstallationGuard::close,
+        InstallationMaintenanceLease::close,
     )
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -385,7 +386,7 @@ fn addon_with_cleanup(
     move_member: impl FnMut(&Path, &Path) -> Result<()>,
     mut observe: impl FnMut(RemovalStep),
     close_installation: impl FnOnce(storage::ExclusiveLock) -> Result<()>,
-    close_maintenance: impl FnOnce(InstallationGuard) -> Result<()>,
+    close_maintenance: impl FnOnce(InstallationMaintenanceLease) -> Result<()>,
 ) -> Result<Value> {
     control.check()?;
     let target = deploy::destination(target)?;
@@ -397,10 +398,9 @@ fn addon_with_cleanup(
     }
     let archive = deploy::destination(archive)?;
     deploy::outside(parent, &archive)?;
-    let guard = InstallationGuard::acquire_controlled(&target, control)?;
+    let guard = InstallationMaintenanceLease::acquire_controlled(&target, control)?;
     let result = (|| {
         control.check()?;
-        guard.require_idle()?;
         let lock = deploy::installation_lock_controlled(&target, control)?;
         let result = (|| {
             observe(RemovalStep::Locked);
@@ -602,7 +602,7 @@ mod tests {
         let temp = Temp::new();
         let (target, archive) = fixture(&temp.0);
         let control = OperationControl::default();
-        control.cancel_handle().store(true, Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         let error = addon_controlled(&target, &archive, &control).unwrap_err();
         assert_eq!(error.exit_code, 7);
         assert!(target.exists());
@@ -620,7 +620,7 @@ mod tests {
             storage::durable_move_noreplace(source, destination)?;
             moved += 1;
             if moved == 1 {
-                control.cancel_handle().store(true, Ordering::Release);
+                control.tracked_cancel_handle().unwrap().cancel();
             }
             Ok(())
         })
@@ -667,7 +667,7 @@ mod tests {
     }
     #[cfg(windows)]
     #[test]
-    fn go_normal_drive_removal_intent_resumes_under_rust_verbatim_paths() {
+    fn normal_drive_removal_intent_resumes_under_verbatim_paths() {
         let temp = Temp::new();
         let (target, archive) = fixture(&temp.0);
         let parent = target.parent().unwrap();
@@ -697,7 +697,7 @@ mod tests {
     }
     #[cfg(windows)]
     #[test]
-    fn go_unc_identity_preserves_server_share_and_rejects_device_namespaces() {
+    fn unc_identity_preserves_server_share_and_rejects_device_namespaces() {
         let normal = Path::new(r"\\server\share\recovery\addon");
         let verbatim = Path::new(r"\\?\UNC\server\share\recovery\addon");
         assert_eq!(
@@ -722,7 +722,7 @@ mod tests {
         }
     }
     #[test]
-    fn go_removal_decoder_merges_nested_objects_and_pointer_null_exactly() {
+    fn removal_decoder_merges_nested_objects_and_pointer_null_exactly() {
         let intent:Removal=serde_json::from_str(r#"{
             "Schema":"first","schema":null,"SCHEMA":"last","Unknown":{"ignored":true},
             "Pool":{"FILES":[{"Nonce":"first"},{"Nonce":"second"}],"Version":"v"},
@@ -763,7 +763,7 @@ mod tests {
         assert_eq!(receipt.resources[0], empty_resource());
     }
     #[test]
-    fn go_cased_repeated_recovery_intent_resumes_without_relaxing_installed_receipt() {
+    fn cased_repeated_recovery_intent_resumes_without_relaxing_installed_receipt() {
         let temp = Temp::new();
         let (target, archive) = fixture(&temp.0);
         let parent = target.parent().unwrap();
@@ -806,7 +806,7 @@ mod tests {
         assert!(slots::directory(&companion(&archive, ".slots"), 500).exists());
     }
     #[test]
-    fn recovery_resource_bytes_follow_signed_go_int64_sequence_and_conflict_order() {
+    fn recovery_resource_bytes_follow_signed_int64_sequence_and_conflict_order() {
         let valid: Removal =
             serde_json::from_str(r#"{"receipt":{"resources":[{"bytes":-1,"Bytes":10}]}}"#).unwrap();
         assert_eq!(valid.receipt.unwrap().resources[0].bytes, 10);

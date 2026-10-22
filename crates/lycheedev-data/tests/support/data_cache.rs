@@ -60,7 +60,7 @@ impl Cache {
             rows.map(|row| Ok(serde_json::from_slice(&row?)?)).collect()
         })();
         let close = connection.close().map_err(|(_, error)| error.into());
-        lycheedev_core::metadata::historical_write::finish_historical(result, close)
+        lycheedev_core::metadata::owned_write::finish_owned(result, close)
     }
     pub fn delete(&self, key: &str) -> Result<bool> {
         let connection = rusqlite::Connection::open(self.0.join("state/data/cache-v1.sqlite"))?;
@@ -69,6 +69,6 @@ impl Cache {
             .map(|count| count == 1)
             .map_err(Into::into);
         let close = connection.close().map_err(|(_, error)| error.into());
-        lycheedev_core::metadata::historical_write::finish_historical(result, close)
+        lycheedev_core::metadata::owned_write::finish_owned(result, close)
     }
 }

@@ -1,5 +1,4 @@
-//! Actual public CLI and typed Agent diagnostics, not retired SQL grammar.
-//! Old SQL location fixtures remain historical at b42e5b676adc20b28ee435d1eb08cc6e552755db.
+//! Actual public CLI and typed Agent diagnostics, including protocol rejection.
 use serde_json::{Value,json};
 use std::{path::PathBuf,process::Command};
 fn unused_home()->PathBuf{std::env::temp_dir().join(format!("agent-discovery-unused-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()))}
@@ -46,8 +45,23 @@ mod worker {
         let out=thread::spawn(move||{let mut b=Vec::new();stdout.read_to_end(&mut b).unwrap();b});
         let err=thread::spawn(move||{let mut b=Vec::new();stderr.read_to_end(&mut b).unwrap();b});
         fs::write(fx.root.join(format!("{name}.stdin.jsonl")),input).unwrap();let mut stdin=child.stdin.take().unwrap();stdin.write_all(input.as_bytes()).unwrap();drop(stdin);
-        let deadline=Instant::now()+Duration::from_secs(45);let status=loop{if let Some(status)=owned.child.as_mut().unwrap().try_wait().unwrap(){break status;}assert!(Instant::now()<deadline,"independent subprocess deadline");thread::sleep(Duration::from_millis(10));};
-        assert_eq!(owned.job.as_ref().unwrap().memory_accounting().unwrap().active_processes,0);
+        let deadline=Instant::now()+Duration::from_secs(45);
+        let mut status=None;
+        let status=loop {
+            if status.is_none() {
+                status=owned.child.as_mut().unwrap().try_wait().unwrap();
+            }
+            // Process exit and the outer Job's accounting are separate native
+            // observations. Require both within the same original deadline.
+            let active=owned.job.as_ref().unwrap().memory_accounting().unwrap().active_processes;
+            if active==0 {
+                if let Some(status)=status { break status; }
+            }
+            assert!(Instant::now()<deadline,
+                "{name}: independent subprocess deadline; rootExited={}, activeProcesses={active}",
+                status.is_some());
+            thread::sleep(Duration::from_millis(10));
+        };
         let out=out.join().unwrap();let err=err.join().unwrap();fs::write(fx.root.join(format!("{name}.stdout.jsonl")),&out).unwrap();fs::write(fx.root.join(format!("{name}.stderr.jsonl")),&err).unwrap();
         assert_eq!(owned.job.as_ref().unwrap().memory_accounting().unwrap().active_processes,0);
         guarded_spawn::close_child(owned.child.take().unwrap()).unwrap();owned.job.take().unwrap().close().unwrap();(status.code().unwrap(),out,err)

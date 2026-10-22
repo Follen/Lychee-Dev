@@ -6,7 +6,7 @@ use std::{
     net::{Ipv4Addr, TcpListener, TcpStream},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, mpsc},
-    thread::JoinHandle,
+    thread::{JoinHandle, Thread},
     time::{Duration, Instant},
 };
 const FRAME_LIMIT: usize = 1 << 20;
@@ -72,7 +72,11 @@ fn bounded_line(reader: &mut impl BufRead, maximum: usize) -> Result<Option<Vec<
         }
     }
 }
-fn ingress(sender: mpsc::SyncSender<Event>, fatal: Arc<Mutex<Option<ToolkitError>>>) {
+fn ingress(
+    sender: mpsc::SyncSender<Event>,
+    fatal: Arc<Mutex<Option<ToolkitError>>>,
+    supervisor: &Thread,
+) {
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
     let mut last = 0;
@@ -130,12 +134,17 @@ fn ingress(sender: mpsc::SyncSender<Event>, fatal: Arc<Mutex<Option<ToolkitError
             ));
             return;
         }
+        supervisor.unpark();
         if terminal {
             return;
         }
     }
 }
-fn receive(stream: TcpStream, sender: mpsc::SyncSender<Result<(Receipt, Instant)>>) {
+fn receive(
+    stream: TcpStream,
+    sender: mpsc::SyncSender<Result<(Receipt, Instant)>>,
+    supervisor: &Thread,
+) {
     let mut input = BufReader::new(stream);
     loop {
         let result = match bounded_line(&mut input, 1024) {
@@ -146,7 +155,11 @@ fn receive(stream: TcpStream, sender: mpsc::SyncSender<Result<(Receipt, Instant)
             Err(error) => Err(error),
         };
         let failed = result.is_err();
-        if sender.send(result).is_err() || failed {
+        if sender.send(result).is_err() {
+            return;
+        }
+        supervisor.unpark();
+        if failed {
             return;
         }
     }
@@ -258,11 +271,9 @@ fn retire(owned: &mut Owned, deadline: Instant, terminate: bool) -> Result<()> {
     }
 }
 pub(super) fn serve(inv: Invocation) -> Result<()> {
-    if inv.flag("--format").is_some_and(|value| value != "jsonl") {
-        return Err(ToolkitError::arguments("data agent serve requires JSONL"));
-    }
+    let (context, session) = crate::data_cli::admit_session(&inv)?;
     inv.control.check()?;
-    let retained = inv.usize_flag("--max-bytes", 512 << 20, 1 << 20, 2usize << 30)?;
+    let retained = session.retained_bytes;
     let token = lycheedev_windows::random::token().map_err(fault)?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     listener.set_nonblocking(true)?;
@@ -350,7 +361,8 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
         let startup = Startup {
             home: inv.home.clone(),
             cwd: inv.cwd.clone(),
-            flags: inv.flags.clone(),
+            source: context.source,
+            session,
             lifetime_ms: lifetime,
         };
         let mut bytes = serde_json::to_vec(&startup)?;
@@ -393,10 +405,15 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
         stream.set_nonblocking(false)?;
         owned.receipt_socket = Some(stream.try_clone()?);
         let (receipt_sender, receipts) = mpsc::sync_channel(32);
+        let receipt_supervisor = std::thread::current();
         owned.receipts = Some(
             std::thread::Builder::new()
                 .name("data-agent-child-receipts".into())
-                .spawn(move || receive(stream, receipt_sender))?,
+                .spawn(move || {
+                    receive(stream, receipt_sender, &receipt_supervisor);
+                    // receive has dropped its sender before announcing EOF.
+                    receipt_supervisor.unpark();
+                })?,
         );
         let (ready, _) = loop {
             inv.control.check()?;
@@ -418,9 +435,13 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
         let fatal = Arc::new(Mutex::new(None));
         let fatal_reader = fatal.clone();
         let (ingress_sender, ingress_receiver) = mpsc::sync_channel(16);
+        let ingress_supervisor = std::thread::current();
         std::thread::Builder::new()
             .name("data-agent-user-input".into())
-            .spawn(move || ingress(ingress_sender, fatal_reader))?;
+            .spawn(move || {
+                ingress(ingress_sender, fatal_reader, &ingress_supervisor);
+                ingress_supervisor.unpark();
+            })?;
         let mut pending = BTreeMap::<u64, Instant>::new();
         let mut closing: Option<Input> = None;
         let mut eof = false;
@@ -468,11 +489,25 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
             {
                 return Err(ToolkitError{code:"command.deadline".into(),exit_code:7,message:"Agent request deadline expired; owned worker terminated and all session handles invalidated".into(),details:serde_json::json!({"requestId":id,"sessionInvalidated":true,"replayed":false})});
             }
-            if let Some(status) = owned.child.as_mut().unwrap().try_wait()? {
+            let status = if closed_input && receipt_closed {
+                let deadline = pending
+                    .values()
+                    .copied()
+                    .min()
+                    .unwrap_or(inv.control.deadline())
+                    .min(inv.control.deadline());
+                guarded_spawn::wait_child_timeout(
+                    owned.child.as_mut().unwrap(),
+                    POLL.min(deadline.saturating_duration_since(Instant::now())),
+                )?
+            } else {
+                owned.child.as_mut().unwrap().try_wait()?
+            };
+            if let Some(status) = status {
                 // Reaping can race the reader's final already-flushed receipt.
                 // Drain the authenticated channel before classifying the exit.
                 if !receipt_closed {
-                    std::thread::sleep(POLL);
+                    std::thread::park_timeout(POLL);
                     continue;
                 }
                 if status.success() && pending.is_empty() && closed_input {
@@ -487,6 +522,9 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
                     details: serde_json::json!({"exitCode":status.code(),"sessionInvalidated":true,"outstandingRequestIds":pending.keys().collect::<Vec<_>>()}),
                 });
             }
+            if closed_input && receipt_closed {
+                continue;
+            }
             if pending.is_empty() && !closed_input && (eof || closing.is_some()) {
                 if let Some(close) = closing.take() {
                     pending.insert(close.id, close.deadline);
@@ -500,15 +538,15 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
                 closed_input = true;
             }
             if !eof && closing.is_none() && !closed_input {
-                match ingress_receiver.recv_timeout(POLL){
+                match ingress_receiver.try_recv(){
                 Ok(Event::Input(input))=>match input.kind{
                     Kind::Close=>closing=Some(input),
                     Kind::Cancel(target)if pending.contains_key(&target)=>return Err(ToolkitError{code:"command.cancelled".into(),exit_code:7,message:"Request cancellation terminates this bounded Agent worker; all session handles invalidated".into(),details:serde_json::json!({"requestId":target,"cancelRequestId":input.id,"sessionInvalidated":true,"replayed":false})}),
                     _=>{pending.insert(input.id,input.deadline);write_sender.as_ref().unwrap().try_send(input.bytes).map_err(|_|fault("Worker input queue full; no automatic replay"))?;}
-                },Ok(Event::Eof)=>eof=true,Ok(Event::Error(error))=>return Err(error),Err(mpsc::RecvTimeoutError::Timeout)=>{},Err(mpsc::RecvTimeoutError::Disconnected)=>eof=true,
+                },Ok(Event::Eof)=>eof=true,Ok(Event::Error(error))=>return Err(error),Err(mpsc::TryRecvError::Empty)=>std::thread::park_timeout(POLL),Err(mpsc::TryRecvError::Disconnected)=>eof=true,
             }
             } else {
-                std::thread::sleep(POLL);
+                std::thread::park_timeout(POLL);
             }
         }
     })();

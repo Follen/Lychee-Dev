@@ -1,8 +1,8 @@
-//! Fixed Go 3.2.4 TestSlotDriverLuaRecoveryWithoutBusinessReplay, with the real
-//! Rust formal Driver/codec/durable journal and unchanged authenticated Lua.
-//! Physical input, selected HWND, monotonic samples and wall clock are fixtures.
-//! Also covers the fixed memory-record and finite-number host parity tests.
-//! These owned Lua peers do not replace real-client validation.
+//! Current Mailbox v1 bridge regression: the real Rust formal Driver, codec and
+//! durable journal against the real addon Lua writer and the Lua protocol peer
+//! under tests/protocol. Physical input, selected HWND, monotonic samples and
+//! wall clock are fixtures. Also covers the memory-record and finite-number host
+//! parity cases. These owned Lua peers do not replace real-client validation.
 #![forbid(unsafe_code)]
 #[path = "support/formal_lua_fixture.rs"]
 mod formal_lua_fixture;
@@ -14,7 +14,7 @@ use formal_lua_fixture::{
 };
 use formal_lua_peer::{Peer, PeerOwner};
 use lycheedev_core::control::OperationControl;
-use lycheedev_live::go_mailbox_v1::{
+use lycheedev_live::mailbox::{
     Kind, decode_record,
     driver::Driver,
     durable_journal::DurableChannelJournal,
@@ -93,8 +93,7 @@ fn memory_parity(case: &Case) {
         case.root.join("host-parity.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema":"lycheedev.formal-lua-host-parity.v1", "passed":true,
-            "goTest":"TestMemoryRecordLuaParity",
-            "sourceSHA256":"4185e7271a3ef775487ed094d7c7c3d7187cfa1b69e102a84f897f1a2a3c66d2",
+            "case":"memory",
             "recordSHA256":lycheedev_core::storage::sha256(&bytes),
             "payload":"hello", "sequence":17, "nonce":"1".repeat(32),
             "runtime":"2".repeat(32), "ticket":"3".repeat(32), "kind":3, "state":3
@@ -201,8 +200,7 @@ fn numeric_parity(slot: &mut Option<TestDriver>, case: &Case, control: &Operatio
     assert_eq!(read(&case.records.join("executions.txt"), 16), b"1");
     std::fs::write(case.root.join("host-parity.json"), serde_json::to_vec_pretty(&serde_json::json!({
         "schema":"lycheedev.formal-lua-host-parity.v1", "passed":true,
-        "goTest":"TestSlotDriverLuaReportPreservesFiniteNumbers",
-        "sourceSHA256":"f688d2d295cf7037bfe1bbfa06c27b123751f4f09d7ca65944c5ca9873b5574b",
+        "case":"numeric",
         "valueCount":bits.len(), "float64Bits":bits.iter().map(|bits| format!("{bits:016x}")).collect::<Vec<_>>(),
         "reportSHA256":lycheedev_core::storage::sha256(&original),
         "recoveredBytesEqual":true, "completedRetryInputCountUnchanged":true,
@@ -376,8 +374,7 @@ fn run_case(fault: &str) {
     );
     let inputs = Inputs::load();
     let case = inputs.case(fault);
-    let control =
-        OperationControl::new(Instant::now() + Duration::from_secs(20), Default::default());
+    let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(20));
     let mut driver = None;
     let mut owner: Option<PeerOwner> = None;
     let mut launch_intent = false;

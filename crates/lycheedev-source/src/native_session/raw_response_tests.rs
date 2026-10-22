@@ -2,6 +2,51 @@ use super::*;
 use std::io::Cursor;
 
 fn encoded(value:&impl Serialize)->Vec<u8>{serde_json::to_vec(value).unwrap()}
+#[test]
+fn typed_mapping_reply_keeps_bounded_frame_raw_forwarding_and_cached_second_query(){
+    let control=OperationControl::default();
+    let documents=BTreeMap::from([
+        ("z.xml".to_owned(),"<Ui><Script>local z=1</Script></Ui>".to_owned()),
+        ("a.xml".to_owned(),"\u{feff}<Ui>\r\n<Frame><Scripts><OnLoad>local text=&quot;界&quot;\r\n</OnLoad></Scripts></Frame></Ui>".to_owned()),
+    ]);
+    let mut scripts=BTreeMap::new();
+    for (path,text) in &documents {
+        for script in crate::xml_inline::extract(path,text.as_bytes()).unwrap(){scripts.insert(script.key.clone(),script);}
+    }
+    let old_maps=Value::Array(scripts.values().map(crate::xml_inline::Script::mapping_manifest).collect());
+    let snapshot=crate::native_research::SnapshotRequest{encoding_warnings:vec![],
+        files:BTreeMap::from([("target.lua".into(),"function Target() end\n".into())]),load_documents:documents,environment_documents:BTreeMap::new(),
+        source:json!({"repository":"typed-reply-fixture","product":"retail"}),
+        luac:crate::native::LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+        api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]};
+    let query=QueryRequest{symbol:crate::index::Symbol{id:String::new(),kind:"declaration".into(),name:"Target".into(),target:String::new(),category:"function".into(),confidence:String::new(),path:"target.lua".into(),line:1,end_line:1,signature:String::new(),scope:String::new(),ordinal:0},direction:"incoming".into()};
+    let key=snapshot.cache_key(&control).unwrap();let mut cached=None;
+    for (hit,work,reuse) in [
+        (false,Some(WorkerRequest{snapshot,query:query.clone()}),None),
+        (true,None,Some(CachedQuery{key,query})),
+    ] {
+        let reply=execute_cached_query(&mut cached,work,reuse,&control,41,|_,_|{}).unwrap();
+        let write=ResponseWrite{value:Some(&reply),error:None,terminal:None};
+        let bytes=serialize::serialize(&write,RESPONSE_BYTES).unwrap();
+        let mut short=Vec::new();
+        assert_eq!(write_frame(&mut short,&write,bytes.len()-1).unwrap_err().code,"source.native_frame_limit");
+        assert!(short.is_empty(),"no partial frame may be published after bounded serialization fails");
+        let mut wire=Vec::new();write_frame(&mut wire,&write,bytes.len()).unwrap();
+        assert_eq!(read_raw_frame(&mut Cursor::new(wire),RESPONSE_BYTES).unwrap(),bytes);
+        let value=reply.into_value();
+        assert_eq!(value["sourceMaps"],old_maps);
+        assert_eq!(value["environmentManifest"],Value::Null);
+        assert_eq!(value["analysis"]["cacheHit"],hit);
+        assert_eq!(value["nativeSession"]["cacheHit"],hit);
+        assert_eq!(value["nativeSession"]["snapshotTransfer"],if hit{"identity_only"}else{"full"});
+        let expected=encoded(&Response{value:Some(value),error:None,terminal:None});
+        assert_eq!(bytes,expected,"typed writer retains the complete canonical Response<Value> bytes");
+        let raw=receive(bytes).unwrap();assert!(!raw.failed());
+        let mut forwarded=Vec::new();OwnerReply::Forward(raw).write(&mut forwarded).unwrap();
+        let decoded:Response=read_frame(&mut Cursor::new(forwarded),RESPONSE_BYTES).unwrap();
+        assert_eq!(encoded(&decoded),expected);
+    }
+}
 fn receive(raw:Vec<u8>)->Result<RawResponse>{
     let mut framed=Vec::new();write_raw_frame(&mut framed,&raw)?;
     RawResponse::decode(read_raw_frame(&mut Cursor::new(framed),RESPONSE_BYTES)?)
@@ -143,7 +188,7 @@ APIDocumentation:AddDocumentationTable(API)
         let api=environment::build(environment::Identity{repository:"wow-ui-source".into(),commit:"a".repeat(40),client:"retail".into(),dependency_commits:Default::default(),generator_version:environment::GENERATOR.into()},
             &BTreeMap::from([(path.into(),text.as_bytes().to_vec())]),environment::Limits::default(),&control).unwrap();
         assert_eq!(api.facts.iter().find(|record|record.name=="Target").unwrap().payload[0].raw["$serde_json::private::RawValue"],embedded);
-        let snapshot=SnapshotRequest{files:BTreeMap::from([("target.lua".into(),"function Target() end\n".into())]),load_documents:BTreeMap::new(),environment_documents:BTreeMap::from([(path.into(),text)]),
+        let snapshot=SnapshotRequest{encoding_warnings:vec![],files:BTreeMap::from([("target.lua".into(),"function Target() end\n".into())]),load_documents:BTreeMap::new(),environment_documents:BTreeMap::from([(path.into(),text)]),
             source:json!({"repository":"raw-event-test","product":"retail"}),
             luac:crate::native::LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
             api:api.facts,environment_manifest:Some(api.manifest),load_plans:vec![],input_gaps:vec![]};

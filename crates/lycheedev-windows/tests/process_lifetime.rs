@@ -123,7 +123,7 @@ fn pre_cancelled_observation_does_not_promote_owned_child_exit() {
     );
 }
 #[test]
-fn public_utf16_equality_keeps_the_pinned_go_relation() {
+fn public_utf16_equality_keeps_the_pinned_relation() {
     let folded = |left: &str, right: &str| {
         equal_fold_utf16(
             &left.encode_utf16().collect::<Vec<_>>(),

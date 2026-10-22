@@ -163,25 +163,17 @@ fn generic_cache_enumeration_and_prune_inputs_do_not_adopt_data_roots() {
     fs::create_dir_all(body.parent().unwrap()).unwrap();
     fs::write(&body, b"body").unwrap();
     owner.finish(Ok(())).unwrap();
-    let inv = crate::Invocation {
-        home: f.0.clone(),
-        command: "cache status".into(),
-        positional: None,
-        flags: Default::default(),
-        cwd: f.0.clone(),
-        control: OperationControl::default(),
+    let context = crate::request::RequestContext {
+        home: f.0.clone(), cwd: f.0.clone(), control: OperationControl::default(),
     };
-    let status = crate::cache::dispatch(&inv).unwrap();
+    let status = crate::cache::dispatch(&context, crate::cache::CacheRequest::Status).unwrap();
     assert_eq!(status.data["objectBytes"], 0);
-    let inv = crate::Invocation {
-        home: f.0.clone(),
-        command: "cache prune".into(),
-        positional: None,
-        flags: [("--uncommitted".into(), "true".into())].into(),
-        cwd: f.0.clone(),
-        control: OperationControl::default(),
-    };
-    crate::cache::dispatch(&inv).unwrap();
+    crate::cache::dispatch(
+        &context,
+        crate::cache::CacheRequest::Prune {
+            target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: true,
+        },
+    ).unwrap();
     assert_eq!(fs::read(body).unwrap(), b"body");
     resources.close().unwrap();
 }
@@ -244,7 +236,7 @@ fn cancellation_releases_quota_before_reporting_original_stop() {
     let control = OperationControl::default();
     let resources = f.resources(&control);
     let owner = resources.reserve_derived_cache(peak(10)).unwrap();
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(owner.finish(Ok(())).unwrap_err().code, "command.cancelled");
     let lease = ExclusiveLock::resource(&f.0.join("locks"), QUOTA_RESOURCE).unwrap();
     lease.close().unwrap();
@@ -255,7 +247,7 @@ fn original_cancel_before_reservation_does_not_prepare_namespaces() {
     let f = Fixture::new(10);
     let control = OperationControl::default();
     let resources = f.resources(&control);
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(
         resources
             .reserve_derived_cache(peak(10))
@@ -324,7 +316,7 @@ fn checked_cleanup_preserves_repeated_close_events_and_consumes_owners_once() {
             .map(PathBuf::as_path)
             .collect::<Vec<_>>()
     );
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     let mut directory_calls = 0;
     let mut lease_calls = 0;
     let mut closed_directories = Vec::new();

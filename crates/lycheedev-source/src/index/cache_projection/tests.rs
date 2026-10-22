@@ -1,6 +1,7 @@
 use super::*;
 use crate::index::{self, facts_cache_tests::Fixture};
-use lycheedev_core::{Invocation, Outcome, evidence, selection, storage};
+use crate::request::{InspectTarget, QueryRequest, SelectedSource, SourceContext, SourceRequest};
+use lycheedev_core::{Outcome, evidence, selection, storage};
 use serde_json::json;
 use std::{collections::BTreeMap, fs, path::PathBuf};
 fn pin() -> SourcePin {
@@ -185,6 +186,8 @@ fn binary_warm_summary_old_v6_is_a_miss_even_with_unmigrated_dynamic_values() {
         "Main.lua".into(),
         "function NewIndex() end".into(),
     )]));
+    // Intentionally obsolete on-disk layout/schema literals below are negative
+    // cases; they must not be updated with the current schema.
     let old = br#"{"assets":[null,1,true],"summary":{"coverage":null}}"#;
     let (mut manifest, path) = publish(&fixture.home, &pin, old);
     manifest["schema"] = json!("lycheedev.source-index.rust.v6");
@@ -206,13 +209,10 @@ fn binary_warm_summary_old_v6_is_a_miss_even_with_unmigrated_dynamic_values() {
     );
 }
 
-fn invoke(home: &Path, snapshot: &str, command: &str) -> Invocation {
-    Invocation {
+fn context(home: &Path) -> SourceContext {
+    SourceContext {
         home: home.into(),
         cwd: home.into(),
-        command: command.into(),
-        positional: None,
-        flags: BTreeMap::from([("--snapshot".into(), snapshot.into())]),
         control: OperationControl::default(),
     }
 }
@@ -232,7 +232,7 @@ fn assert_capture(home: &Path, outcome: &Outcome, pin: &SourcePin, snapshot: &st
 }
 
 #[test]
-fn warm_summary_cli_cold_then_warm_keeps_full_cache_query_inspect_and_capture_consumers() {
+fn warm_summary_typed_cold_then_warm_keeps_full_cache_query_inspect_and_capture_consumers() {
     let fixture = Fixture::new();
     let source = fixture.pin(&BTreeMap::from([
         (
@@ -249,8 +249,10 @@ fn warm_summary_cli_cold_then_warm_keeps_full_cache_query_inspect_and_capture_co
         },
     )
     .unwrap();
-    let inv = invoke(&fixture.home, &selected.id, "source index");
-    let cold = crate::dispatch(&inv).unwrap();
+    let selection = SelectedSource::new(selected.clone()).unwrap();
+    let ctx = context(&fixture.home);
+    let request = SourceRequest::Index(selection.clone());
+    let cold = crate::dispatch(&ctx, &request).unwrap();
     assert!(cold.data["io"].get("cachedIndex").is_none());
     assert_eq!(cold.data["io"]["parsedDocuments"], 2);
     assert_capture(&fixture.home, &cold, &source, &selected.id, "source-query");
@@ -283,7 +285,7 @@ fn warm_summary_cli_cold_then_warm_keeps_full_cache_query_inspect_and_capture_co
     });
     let full =
         index::build_with_control(&fixture.home, &source, &OperationControl::default()).unwrap();
-    let warm = crate::dispatch(&inv).unwrap();
+    let warm = crate::dispatch(&ctx, &request).unwrap();
     assert_eq!(
         no_elapsed(warm.data.clone()),
         no_elapsed(serde_json::to_value(&full.summary).unwrap())
@@ -295,10 +297,17 @@ fn warm_summary_cli_cold_then_warm_keeps_full_cache_query_inspect_and_capture_co
     assert_eq!(warm.selection, cold.selection);
     assert_eq!(warm.complete, cold.complete);
     assert_capture(&fixture.home, &warm, &source, &selected.id, "source-query");
-    let mut query = invoke(&fixture.home, &selected.id, "source query");
-    query.positional = Some("SummaryProbe".into());
-    query.flags.insert("--mode".into(), "precise".into());
-    let searched = crate::dispatch(&query).unwrap();
+    let query = SourceRequest::Query {
+        selection: selection.clone(),
+        request: QueryRequest {
+            query: "SummaryProbe".into(),
+            mode: "precise".into(),
+            topic: String::new(),
+            limit: 50,
+            cursor: String::new(),
+        },
+    };
+    let searched = crate::dispatch(&context(&fixture.home), &query).unwrap();
     assert!(
         searched.data["results"]
             .as_array()
@@ -313,11 +322,11 @@ fn warm_summary_cli_cold_then_warm_keeps_full_cache_query_inspect_and_capture_co
         &selected.id,
         "source-query",
     );
-    let mut inspect = invoke(&fixture.home, &selected.id, "source inspect");
-    inspect
-        .flags
-        .insert("--symbol".into(), "SummaryProbe".into());
-    let inspected = crate::dispatch(&inspect).unwrap();
+    let inspect = SourceRequest::Inspect {
+        selection,
+        target: InspectTarget::Symbol("SummaryProbe".into()),
+    };
+    let inspected = crate::dispatch(&context(&fixture.home), &inspect).unwrap();
     assert!(
         inspected.data["results"]
             .as_array()

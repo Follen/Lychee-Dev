@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {beginScratch, sha256} from '../../tools/rust-disk.mjs';
 import {hashFile} from '../../tools/rust-build.mjs';
 import {splitIndexEvidence, INDEX_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
-import {verifyGoPackage} from './inputs.mjs';
+import {verifyFixedGoPackage} from './inputs.mjs';
 import {openGoCustody} from './source-pack-custody.mjs';
 import {HISTORICAL_GO_BASELINE, candidateIdentity, verifyCandidateRecord, indexEvidence, evidenceFiles, assertDiskPolicy, RUNNER_FILES} from './source-pack-scenarios.mjs';
 import {readFactDelta, comparedRustIndex} from './read-fact-delta.mjs';
@@ -15,17 +15,16 @@ import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, preparePostcardIndexExport, runP
 
 const exact = (value, keys) => assert.deepEqual(Object.keys(value ?? {}).sort(), [...keys].sort(), 'exact v13 configuration required');
 const save = (file, value) => { const raw = Buffer.from(JSON.stringify(value, null, 2) + '\n'); assert(raw.length <= 16 << 20); fs.writeFileSync(file, raw, {flag: 'wx'}); };
-export const POSTCARD_RUNNER_FILES = [...RUNNER_FILES, 'tests/rust-performance-paired/source-pack-scenarios-postcard.mjs', 'tests/rust-performance-paired/read-fact-delta-postcard.mjs',
-  'tests/rust-parity/formal-lua-3.2.3/assertions.mjs', 'tests/rust-parity/formal-lua-3.2.2/assertions.mjs', 'tests/rust-parity/rust-3.5.0-release-fields.mjs'];
+export const POSTCARD_RUNNER_FILES = [...RUNNER_FILES, 'tests/rust-performance-paired/source-pack-scenarios-postcard.mjs', 'tests/rust-performance-paired/read-fact-delta-postcard.mjs'];
 export const postcardRunnerIdentity = root => Object.fromEntries(POSTCARD_RUNNER_FILES.map(file => [file, hashFile(join(root, file))]));
 export function validatePostcardRequest(value) {
   exact(value, ['schema', 'layout', 'ownerRoot', 'candidate', 'exporter', 'rustHome', 'pin', 'go']);
   assert.equal(value.schema, 'lycheedev.source-postcard-comparison-config.v1'); assert.equal(value.layout, POSTCARD_LAYOUT);
   exact(value.candidate, ['sourceRoot', 'artifactRoot', 'artifact', 'commit', 'artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']); candidateIdentity(value.candidate);
   exact(value.exporter, ['artifact', 'artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']);
-  exact(value.go, ['reference', 'observation', 'observationSHA256', 'packageRoot', 'luaLSArchive', 'packageSHA256']);
+  exact(value.go, ['reference', 'observation', 'observationSHA256', 'referenceRoot', 'packageSHA256']);
   for (const field of [value.go.observationSHA256, value.go.packageSHA256, ...['artifactSHA256', 'binarySHA256', 'sourceTreeSHA256'].map(k => value.exporter[k])]) assert.match(field, /^[a-f0-9]{64}$/);
-  for (const file of [value.ownerRoot, value.rustHome, value.candidate.sourceRoot, value.candidate.artifactRoot, value.candidate.artifact, value.exporter.artifact, value.go.observation, value.go.packageRoot, value.go.luaLSArchive]) assert(typeof file === 'string' && isAbsolute(file), 'absolute Postcard paths required');
+  for (const file of [value.ownerRoot, value.rustHome, value.candidate.sourceRoot, value.candidate.artifactRoot, value.candidate.artifact, value.exporter.artifact, value.go.observation, value.go.referenceRoot]) assert(typeof file === 'string' && isAbsolute(file), 'absolute Postcard paths required');
   assert(value.pin?.source && typeof value.pin.id === 'string'); return structuredClone(value);
 }
 export function authenticatePostcardGo(input) {
@@ -34,7 +33,7 @@ export function authenticatePostcardGo(input) {
   assert.equal(observation.request?.go?.packageSHA256, input.packageSHA256, 'Go observation producer differs');
   const matching = observation.scenarios?.filter(row => row.facts?.goCustody && JSON.stringify(row.facts.goCustody) === JSON.stringify(input.reference));
   assert(matching?.length >= 1, 'Go custody must be retained by the authenticated independent Go observation');
-  const producer = verifyGoPackage(input.packageRoot, input.luaLSArchive, HISTORICAL_GO_BASELINE); assert.equal(producer.packageSHA256, input.packageSHA256);
+  const producer = verifyFixedGoPackage(input.referenceRoot, HISTORICAL_GO_BASELINE); assert.equal(producer.packageSHA256, input.packageSHA256);
   const custody = openGoCustody(input.reference); custody.verify(); custody.reference = input.reference;
   return {custody, provenance: {commit: HISTORICAL_GO_BASELINE.commit, observation: input.observation, observationSHA256: input.observationSHA256, producer, reference: input.reference}};
 }

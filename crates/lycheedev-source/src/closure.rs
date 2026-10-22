@@ -283,16 +283,28 @@ impl Walker<'_> {
                 3,
             ));
         }
-        if std::str::from_utf8(&data).is_err() || data.contains(&0) {
+        if data.contains(&0) {
             self.issue(
                 "error",
                 "source_invalid",
                 name,
                 0,
                 "",
-                "Source must be UTF-8 without NUL",
+                "Source must not contain NUL",
             );
             return Ok(());
+        }
+        // Invalid UTF-8 in a comment or string is a display observation, never a
+        // reason to drop the document or invalidate the addon load.
+        if let Some(warning) = crate::encoding::warning(&data) {
+            self.issue(
+                "warning",
+                "source_encoding",
+                name,
+                warning.line,
+                "",
+                &warning.message(),
+            );
         }
         let facts = match ext.as_str() {
             "lua" => facts::lua(&data, false),
@@ -335,7 +347,7 @@ mod tests {
         ));
         lycheedev_core::workspace::initialize(&home).unwrap();
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/rust-source-data/addon-closure");
+            .join("../../tests/fixtures/source-native/addon-closure");
         let good = Closure::inspect(&home, &root, "main.TOC").unwrap();
         assert!(good.valid, "{:?}", good.issues);
         assert_eq!(
@@ -363,6 +375,57 @@ mod tests {
         assert!(!bad.valid);
         assert!(bad.issues.iter().any(|i| i["code"] == "load_cycle"));
         assert!(bad.issues.iter().any(|i| i["code"] == "load_path_escape"));
+        fs::remove_dir_all(&home).unwrap();
+    }
+    // N11: a non-UTF-8 comment stays a load warning, never an error, and the
+    // archived bytes keep their identity. A non-UTF-8 token keeps the real
+    // syntax error route and invalidates the load.
+    #[test]
+    fn non_utf8_lua_comment_keeps_load_valid_and_a_token_keeps_its_syntax_error() {
+        let home = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../.tmp/rust-source-closure-encoding/{}",
+            std::process::id()
+        ));
+        lycheedev_core::workspace::initialize(&home).unwrap();
+        let root = home.join("addon");
+        fs::create_dir_all(root.join("Code")).unwrap();
+        fs::write(root.join("Main.toc"), "Code/Tutorial.lua\n").unwrap();
+        let mut lua = b"function Tutorial() end\n-- Night Web".to_vec();
+        lua.push(0x92);
+        lua.extend_from_slice(b"s Hollow\n");
+        fs::write(root.join("Code/Tutorial.lua"), &lua).unwrap();
+        let good = Closure::inspect(&home, &root, "Main.toc").unwrap();
+        assert!(good.valid, "{:?}", good.issues);
+        let warning = good
+            .issues
+            .iter()
+            .find(|issue| issue["code"] == "source_encoding")
+            .expect("encoding warning");
+        assert_eq!(warning["severity"], "warning");
+        assert_eq!(warning["path"], "Code/Tutorial.lua");
+        assert_eq!(warning["line"], 2);
+        assert!(warning["message"].as_str().unwrap().contains("0x92"));
+        assert_eq!(good.documents.len(), 2);
+        let document = good
+            .documents
+            .iter()
+            .find(|document| document.path == "Code/Tutorial.lua")
+            .unwrap();
+        assert_eq!(document.bytes, lua);
+        assert_eq!(document.blob["sha256"], storage::sha256(&lua));
+        fs::write(
+            root.join("Code/Tutorial.lua"),
+            b"function Br\x92oken() end\n",
+        )
+        .unwrap();
+        let broken = Closure::inspect(&home, &root, "Main.toc").unwrap();
+        assert!(!broken.valid);
+        assert!(
+            broken
+                .issues
+                .iter()
+                .any(|issue| issue["severity"] == "error" && issue["code"] == "syntax")
+        );
         fs::remove_dir_all(&home).unwrap();
     }
 }

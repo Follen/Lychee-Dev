@@ -1,21 +1,12 @@
 use lycheedev_core::{
     Result, ToolkitError,
-    control::OperationControl,
+    control::{OperationControl, TrackedCancellation},
     evidence::{self, CaptureAccounting, CaptureHeader, CaptureInput},
     metadata::Metadata,
     workspace,
 };
 use serde_json::{Value, json};
-use std::{
-    cell::Cell,
-    fs,
-    io::Read,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::{cell::Cell, fs, io::Read, path::PathBuf};
 
 struct Workspace(PathBuf);
 impl Workspace {
@@ -43,7 +34,7 @@ struct Meter {
     allocated: Cell<usize>,
     maximum_work: usize,
     work: Cell<usize>,
-    cancel: Option<Arc<AtomicBool>>,
+    cancel: Option<TrackedCancellation>,
 }
 impl Meter {
     fn new(maximum: usize) -> Self {
@@ -82,7 +73,7 @@ impl CaptureAccounting for Meter {
         }
         self.work.set(next);
         if let Some(cancel) = &self.cancel {
-            cancel.store(true, Ordering::Release);
+            cancel.cancel();
         }
         Ok(())
     }
@@ -165,8 +156,8 @@ fn cancellation_and_oversize_metadata_never_insert_new_capture_documents() {
     let original =
         evidence::commit_capture_bounded(&home.0, input(bytes, "original"), &control).unwrap();
     let before = captures(&home);
-    let cancel = Arc::new(AtomicBool::new(false));
-    let controlled = OperationControl::new(
+    let cancel = TrackedCancellation::new();
+    let controlled = OperationControl::tracked(
         std::time::Instant::now() + std::time::Duration::from_secs(30),
         cancel.clone(),
     );

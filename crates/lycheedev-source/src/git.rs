@@ -114,7 +114,7 @@ pub fn bytes_with_control(
         cap,
         None,
         control.remaining()?,
-        Some(control.token()),
+        Some(control),
     )
 }
 fn bytes_with_input(
@@ -140,14 +140,15 @@ fn bytes_controlled(
     cap: usize,
     input: Option<Vec<u8>>,
     timeout: Duration,
-    cancel: Option<&std::sync::atomic::AtomicBool>,
+    control: Option<&OperationControl>,
 ) -> Result<Vec<u8>> {
     let cmd = command(directory, args);
-    let out = crate::process::run_with_limits(cmd, cap, 32768, timeout, input, cancel).map_err(
+    let default_control = OperationControl::default();
+    let out = crate::process::run_with_limits(cmd, cap, 32768, timeout, input, control.unwrap_or(&default_control)).map_err(
         |mut error| {
             error.code = match error.code.as_str() {
-                "luals.unavailable" => "codebase.source_not_ready",
-                "luals.input_budget" => "codebase.source_budget",
+                "source.process_unavailable" => "codebase.source_not_ready",
+                "source.process_input_budget" => "codebase.source_budget",
                 "process.cancelled" => "command.cancelled",
                 _ => "codebase.git_failed",
             }
@@ -327,7 +328,7 @@ fn visit_blob_batches_controlled(
             size + (last - first) * 128,
             Some(input),
             deadline.saturating_duration_since(std::time::Instant::now()),
-            control.map(lycheedev_core::control::OperationControl::token),
+            control,
         )?;
         visit(BlobBatchVisit::BatchStart {
             allocation_bytes: data.capacity(),
@@ -609,7 +610,7 @@ fn tree_listing(
             .map(|c| c.remaining())
             .transpose()?
             .unwrap_or(Duration::from_secs(180)),
-        control.map(lycheedev_core::control::OperationControl::token),
+        control,
     )?;
     let mut files = Vec::new();
     let (mut documents, mut assets, mut total) = (0, 0, 0usize);
@@ -861,7 +862,7 @@ fn blob_controlled(
             .map(|c| c.remaining())
             .transpose()?
             .unwrap_or(Duration::from_secs(180)),
-        control.map(lycheedev_core::control::OperationControl::token),
+        control,
     )?;
     let mut at = 0;
     let commit = take_batch_object(&batch, &mut at, &pin.exact_commit, "commit", 1 << 20)?;
@@ -1068,10 +1069,7 @@ mod tests {
                 "command.deadline",
             ),
             (
-                OperationControl::new(
-                    std::time::Instant::now() + Duration::from_secs(60),
-                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-                ),
+                crate::native::stopped_control(false, std::time::Instant::now() + Duration::from_secs(60)),
                 "command.cancelled",
             ),
         ] {
@@ -1335,6 +1333,8 @@ mod tests {
             .unwrap()
             .unwrap()
             .path();
+        // Intentionally obsolete schema/version literals below are negative-case
+        // inputs: they must stay cache misses/rebuilds as the current formats move.
         lycheedev_core::storage::atomic_json(&cache,&serde_json::json!({"schema":"lycheedev.source-facts.rust.v2","facts":{"legacyLayout":true}})).unwrap();
         let mut metadata = lycheedev_core::metadata::Metadata::open(&home, true).unwrap();
         let mut old_index: serde_json::Value = metadata
@@ -1342,6 +1342,7 @@ mod tests {
             .unwrap()
             .pop()
             .unwrap();
+        // A stale index schema literal must be rebuilt, never accepted as ready.
         old_index["schema"] = serde_json::json!("lycheedev.source-index.rust.v3");
         let key = format!(
             "source/rust-index/{}",

@@ -1,14 +1,14 @@
 //! Real public research consumers, including the mutable project-lock boundary.
 use super::*;
 use lycheedev_core::{Outcome, control::OperationControl, metadata::Metadata};
+use lycheedev_source::request::{
+    RelationDirection, RelationRequest, ResearchMode, ResearchSelection, SymbolSelector,
+};
 use serde_json::json;
 use std::{
     path::Path,
     time::{Duration, Instant},
 };
-
-const ARGUMENTS: &str =
-    "source refs/context require --snapshot and exactly one of --symbol-id or --symbol";
 
 fn write_project(f: &Fixture, pin: &str) -> PathBuf {
     let project = f.home.join("project");
@@ -32,20 +32,53 @@ fn write_project(f: &Fixture, pin: &str) -> PathBuf {
     .unwrap();
     project
 }
-fn project_inv(f: &Fixture, command: &str) -> Invocation {
-    let mut inv = invoke(
-        f,
-        command,
-        &[("--symbol", "Target"), ("--static-only", "true")],
-    );
-    inv.flags.remove("--snapshot");
-    inv.cwd = f.home.join("project/nested");
-    inv
+fn project_options(f: &Fixture) -> BTreeMap<String, String> {
+    let mut options = cli_options(f, &[("--symbol", "Target"), ("--static-only", "true")]);
+    options.remove("--snapshot");
+    options
 }
-fn dispatch(inv: &Invocation) -> lycheedev_core::Result<Outcome> {
-    // Same SourceTools/native-services boundary as the public CLI, even in
-    // static mode. No private relation resolver is substituted for the consumer.
-    lycheedev_source::dispatch_with_tools(inv, SourceTools::default())
+fn selected(f: &Fixture, pin: &str) -> ResearchSelection {
+    ResearchSelection {
+        pin: selection::load_pinned(&f.home, pin).unwrap(),
+        environment: None,
+    }
+}
+fn refs_request(selector: &str, limit: usize, cursor: &str) -> RelationRequest {
+    RelationRequest {
+        selector: SymbolSelector::Name(selector.into()),
+        direction: RelationDirection::Both,
+        limit,
+        cursor: cursor.into(),
+    }
+}
+fn typed_refs(
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
+    selector: &str,
+    limit: usize,
+    cursor: &str,
+) -> lycheedev_core::Result<Outcome> {
+    refs::dispatch(
+        ctx,
+        selection,
+        &refs_request(selector, limit, cursor),
+        ResearchMode::Static,
+    )
+}
+fn typed_context(
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
+    selector: &str,
+    limit: usize,
+    max_bytes: usize,
+    cursor: &str,
+) -> lycheedev_core::Result<Outcome> {
+    context::dispatch(
+        ctx,
+        selection,
+        &context_request(selector, limit, max_bytes, 120, 1, cursor, false),
+        ResearchMode::Static,
+    )
 }
 fn assert_capture(f: &Fixture, result: &Outcome, pin: &str) {
     assert_eq!(result.selection["snapshot"], pin);
@@ -95,192 +128,78 @@ fn replacement_pin(f: &Fixture) -> String {
 }
 
 #[test]
-fn project_refs_and_context_match_explicit_snapshot_with_exact_evidence() {
+fn typed_refs_and_context_use_fixed_selection_with_exact_evidence() {
     let f = fixture();
     write_project(&f, &f.pin);
-    for command in ["source refs", "source context"] {
-        let mut inv = project_inv(&f, command);
-        let nearest = dispatch(&inv).unwrap();
-        assert_capture(&f, &nearest, &f.pin);
-        inv.flags.insert("--project".into(), "..".into());
-        let relative = dispatch(&inv).unwrap();
-        assert_eq!(nearest.data, relative.data);
-        inv.flags.insert("--snapshot".into(), f.pin.clone());
-        let explicit = dispatch(&inv).unwrap();
-        assert_eq!(nearest.data, explicit.data);
-        assert!(
-            !nearest.complete,
-            "static candidates cannot claim semantic coverage"
-        );
-        assert_eq!(nearest.data["coverage"]["semantic"], "unavailable");
-    }
+    let selected = selected(&f, &f.pin);
+    let ctx = source_context(&f);
+    let nearest = typed_refs(&ctx, &selected, "Target", 50, "").unwrap();
+    assert_capture(&f, &nearest, &f.pin);
+    assert!(
+        !nearest.complete,
+        "static candidates cannot claim semantic coverage"
+    );
+    assert_eq!(nearest.data["coverage"]["semantic"], "unavailable");
+    let context = typed_context(&ctx, &selected, "Target", 50, 16 << 10, "").unwrap();
+    assert_capture(&f, &context, &f.pin);
+    assert_eq!(context.selection["snapshot"], selected.pin.id);
+    let nested_ctx = SourceContext {
+        cwd: f.home.join("project/nested"),
+        ..ctx
+    };
+    assert_eq!(
+        typed_refs(&nested_ctx, &selected, "Target", 50, "")
+            .unwrap()
+            .data,
+        nearest.data
+    );
 }
 
 #[test]
-fn project_research_explicit_snapshot_ignores_invalid_project_and_nearer_declaration() {
+fn typed_fixed_selection_is_independent_of_nearer_project_files() {
     let f = fixture();
     let project = write_project(&f, &f.pin);
     fs::write(project.join("nested/lycheedev.json"), b"broken").unwrap();
-    for command in ["source refs", "source context"] {
-        let mut inv = project_inv(&f, command);
-        inv.flags.insert("--snapshot".into(), f.pin.clone());
-        inv.flags.insert("--project".into(), "absent".into());
-        let result = dispatch(&inv).unwrap();
-        assert_capture(&f, &result, &f.pin);
-    }
+    let selected = selected(&f, &f.pin);
+    let ctx = source_context(&f);
+    let refs = typed_refs(&ctx, &selected, "Target", 50, "").unwrap();
+    assert_capture(&f, &refs, &f.pin);
+    let context = typed_context(&ctx, &selected, "Target", 50, 16 << 10, "").unwrap();
+    assert_capture(&f, &context, &f.pin);
 }
 
 #[test]
-fn project_research_reselects_new_lock_rejects_old_cursor_and_restores_original() {
+fn typed_selection_identity_rejects_old_cursor_and_restores_original() {
     let f = fixture();
     write_project(&f, &f.pin);
     let replacement = replacement_pin(&f);
-    for command in ["source refs", "source context"] {
-        write_project(&f, &f.pin);
-        let mut inv = project_inv(&f, command);
-        inv.flags.insert("--limit".into(), "1".into());
-        if command == "source context" {
-            inv.flags.insert("--max-bytes".into(), "8".into());
-        }
-        let original = dispatch(&inv).unwrap();
-        let cursor = original.data["nextCursor"]
-            .as_str()
-            .expect("bounded continuation")
-            .to_owned();
-        write_project(&f, &replacement);
-        let changed = dispatch(&inv).unwrap();
-        assert_capture(&f, &changed, &replacement);
-        assert_ne!(changed.data["commit"], original.data["commit"]);
-        inv.flags.insert("--cursor".into(), cursor);
-        assert_eq!(
-            dispatch(&inv).unwrap_err().code,
-            "codebase.invalid_search_cursor"
-        );
-        write_project(&f, &f.pin);
-        let restored = dispatch(&inv).unwrap();
-        assert_capture(&f, &restored, &f.pin);
-        assert_ne!(
-            restored.data, original.data,
-            "restored cursor advances the original query"
-        );
-    }
+    let ctx = source_context(&f);
+    let original_selection = selected(&f, &f.pin);
+    let original = typed_refs(&ctx, &original_selection, "Target", 1, "").unwrap();
+    let cursor = original.data["nextCursor"]
+        .as_str()
+        .expect("bounded continuation")
+        .to_owned();
+    let changed_selection = selected(&f, &replacement);
+    let changed = typed_refs(&ctx, &changed_selection, "Target", 1, "").unwrap();
+    assert_capture(&f, &changed, &replacement);
+    assert_ne!(changed.data["commit"], original.data["commit"]);
+    assert_eq!(
+        typed_refs(&ctx, &changed_selection, "Target", 1, &cursor)
+            .unwrap_err()
+            .code,
+        "codebase.invalid_search_cursor"
+    );
+    let restored = typed_refs(&ctx, &original_selection, "Target", 1, &cursor).unwrap();
+    assert_capture(&f, &restored, &f.pin);
+    assert_ne!(
+        restored.data, original.data,
+        "restored cursor advances the original query"
+    );
 }
 
 #[test]
-fn project_research_nearer_malformed_lock_and_selector_error_priority_are_preserved() {
-    let f = fixture();
-    let project = write_project(&f, &f.pin);
-    fs::write(project.join("nested/lycheedev.json"), b"broken").unwrap();
-    for command in ["source refs", "source context"] {
-        let mut inv = project_inv(&f, command);
-        inv.flags.insert("--symbol-id".into(), "conflicting".into());
-        let error = dispatch(&inv).unwrap_err();
-        assert_eq!(
-            (error.code.as_str(), error.exit_code),
-            ("selection.project_format", 4)
-        );
-        inv.flags.insert("--snapshot".into(), f.pin.clone());
-        let error = dispatch(&inv).unwrap_err();
-        assert_eq!(
-            (error.code.as_str(), error.message.as_str(), error.exit_code),
-            ("command.invalid_arguments", ARGUMENTS, 2)
-        );
-    }
-}
-
-#[test]
-fn project_research_missing_unlocked_and_conflicting_projects_keep_specific_failures() {
-    let f = fixture();
-    for command in ["source refs", "source context"] {
-        let mut inv = project_inv(&f, command);
-        inv.cwd = f.home.clone();
-        let error = dispatch(&inv).unwrap_err();
-        assert_eq!(
-            (error.code.as_str(), error.message.as_str(), error.exit_code),
-            ("command.invalid_arguments", ARGUMENTS, 2)
-        );
-        inv.flags.insert("--project".into(), ".".into());
-        assert_eq!(
-            dispatch(&inv).unwrap_err().code,
-            "selection.project_missing"
-        );
-    }
-    let project = write_project(&f, &f.pin);
-    fs::remove_file(project.join("lycheedev.lock.json")).unwrap();
-    for command in ["source refs", "source context"] {
-        assert_eq!(
-            dispatch(&project_inv(&f, command)).unwrap_err().code,
-            "selection.project_unlocked"
-        );
-    }
-    write_project(&f, &f.pin);
-    fs::write(
-        project.join("lycheedev.json"),
-        br#"{"schema":"lycheedev.project.v1","product":"classic"}"#,
-    )
-    .unwrap();
-    for command in ["source refs", "source context"] {
-        assert_eq!(
-            dispatch(&project_inv(&f, command)).unwrap_err().code,
-            "selection.project_conflict"
-        );
-    }
-}
-
-#[test]
-fn project_context_numeric_errors_precede_malformed_project_selection() {
-    let f = fixture();
-    let project = write_project(&f, &f.pin);
-    fs::write(project.join("lycheedev.json"), b"broken").unwrap();
-    // Fixed Go323 parses these typed options before entry.go selects a project.
-    // Preserve the existing public consumer messages as well as that first error.
-    for (flag, value, message) in [
-        ("--limit", "bad", "--limit requires an integer"),
-        ("--limit", "0", "--limit must be in 1..=200"),
-        ("--limit", "201", "--limit must be in 1..=200"),
-        (
-            "--max-lines",
-            "bad",
-            "--max-lines must be between 1 and 2000",
-        ),
-        ("--max-lines", "0", "--max-lines must be between 1 and 2000"),
-        (
-            "--max-lines",
-            "2001",
-            "--max-lines must be between 1 and 2000",
-        ),
-        (
-            "--max-bytes",
-            "bad",
-            "source context --max-bytes must be between 1 and 1048576",
-        ),
-        (
-            "--max-bytes",
-            "0",
-            "source context --max-bytes must be between 1 and 1048576",
-        ),
-        (
-            "--max-bytes",
-            "1048577",
-            "source context --max-bytes must be between 1 and 1048576",
-        ),
-        ("--depth", "bad", "--depth must be between 0 and 4"),
-        ("--depth", "-1", "--depth must be between 0 and 4"),
-        ("--depth", "5", "--depth must be between 0 and 4"),
-    ] {
-        let mut inv = project_inv(&f, "source context");
-        inv.flags.insert(flag.into(), value.into());
-        let error = dispatch(&inv).unwrap_err();
-        assert_eq!(
-            (error.code.as_str(), error.message.as_str(), error.exit_code),
-            ("command.invalid_arguments", message, 2),
-            "{flag}={value}"
-        );
-    }
-}
-
-#[test]
-fn project_research_authenticates_persisted_pin_instead_of_trusting_lock_copy() {
+fn typed_selection_authenticates_persisted_pin_before_use() {
     let f = fixture();
     write_project(&f, &f.pin);
     let mut pin = selection::load_pinned(&f.home, &f.pin).unwrap();
@@ -290,75 +209,90 @@ fn project_research_authenticates_persisted_pin_instead_of_trusting_lock_copy() 
     let generation = metadata.generation(&key).unwrap();
     metadata.put(&key, &pin, generation).unwrap();
     metadata.close().unwrap();
-    for command in ["source refs", "source context"] {
-        let error = dispatch(&project_inv(&f, command)).unwrap_err();
-        assert_eq!(
-            (error.code.as_str(), error.message.as_str(), error.exit_code),
-            ("command.failed", "selection.pin_integrity", 5)
-        );
-    }
+    assert_eq!(
+        selection::load_pinned(&f.home, &f.pin).unwrap_err().code,
+        "selection.pin_integrity"
+    );
 }
 
 #[test]
-fn project_research_keeps_original_cancel_and_absolute_deadline_before_selection() {
+fn typed_source_context_keeps_cancellation_and_absolute_deadline() {
     let f = fixture();
-    let project = write_project(&f, &f.pin);
-    fs::write(project.join("lycheedev.json"), b"broken").unwrap();
-    for command in ["source refs", "source context"] {
-        let mut inv = project_inv(&f, command);
-        let cancellation = inv.control.tracked_cancel_handle().unwrap();
-        let deadline = inv.control.deadline();
-        cancellation.cancel();
-        assert_eq!(dispatch(&inv).unwrap_err().code, "command.cancelled");
-        assert_eq!(inv.control.deadline(), deadline);
-        inv.control = OperationControl::uncancelable(Instant::now() - Duration::from_secs(1));
-        assert_eq!(dispatch(&inv).unwrap_err().code, "command.deadline");
-    }
+    let selected = selected(&f, &f.pin);
+    let mut ctx = source_context(&f);
+    let cancellation = ctx.control.tracked_cancel_handle().unwrap();
+    let deadline = ctx.control.deadline();
+    cancellation.cancel();
+    assert_eq!(
+        typed_refs(&ctx, &selected, "Target", 50, "")
+            .unwrap_err()
+            .code,
+        "command.cancelled"
+    );
+    assert_eq!(ctx.control.deadline(), deadline);
+    ctx.control = OperationControl::uncancelable(Instant::now() - Duration::from_secs(1));
+    assert_eq!(
+        typed_refs(&ctx, &selected, "Target", 50, "")
+            .unwrap_err()
+            .code,
+        "command.deadline"
+    );
 }
 
 #[test]
-fn project_research_does_not_relax_static_or_provider_constraints() {
+fn typed_static_mode_works_and_native_mode_requires_services() {
     let f = fixture();
     write_project(&f, &f.pin);
-    for command in ["source refs", "source context"] {
-        let mut inv = project_inv(&f, command);
-        inv.flags.insert("--release".into(), "unverified".into());
-        let error = dispatch(&inv).unwrap_err();
-        assert_eq!(error.code, "command.invalid_arguments");
-        assert_eq!(
-            error.message,
-            "--static-only cannot be combined with --release or --session-reuse"
-        );
-        inv.flags.remove("--static-only");
-        assert_eq!(
-            dispatch(&inv).unwrap_err().code,
-            "luals.research_provider_unavailable"
-        );
-        inv.flags.remove("--release");
-        inv.flags.insert("--session-reuse".into(), "true".into());
-        assert_eq!(
-            dispatch(&inv).unwrap_err().code,
-            "luals.session_unavailable"
-        );
-    }
+    let selected = selected(&f, &f.pin);
+    let ctx = source_context(&f);
+    let static_result = typed_refs(&ctx, &selected, "Target", 50, "").unwrap();
+    assert_eq!(static_result.selection["snapshot"], f.pin);
+    assert_eq!(
+        typed_context(&ctx, &selected, "Target", 50, 16 << 10, "")
+            .unwrap()
+            .selection["snapshot"],
+        f.pin
+    );
+    assert_eq!(
+        refs::dispatch(
+            &ctx,
+            &selected,
+            &refs_request("Target", 50, ""),
+            ResearchMode::OneShot,
+        )
+        .unwrap_err()
+        .code,
+        "source.native_unavailable"
+    );
+    assert_eq!(
+        refs::dispatch(
+            &ctx,
+            &selected,
+            &refs_request("Target", 50, ""),
+            ResearchMode::Session,
+        )
+        .unwrap_err()
+        .code,
+        "source.native_unavailable"
+    );
 }
 
-fn cli(executable: &Path, release: &Path, inv: &Invocation) -> Value {
-    cli_envelope(executable, release, inv)["result"].clone()
+fn cli(executable: &Path, release: &Path, f: &Fixture, cwd: &Path, name: &str, options: &BTreeMap<String, String>) -> Value {
+    cli_envelope(executable, release, f, cwd, name, options)["result"].clone()
 }
-pub(super) fn cli_envelope(executable: &Path, release: &Path, inv: &Invocation) -> Value {
+pub(super) fn cli_envelope(executable: &Path, release: &Path, f: &Fixture, cwd: &Path, name: &str, options: &BTreeMap<String, String>) -> Value {
     let mut command = Command::new(executable);
     command
-        .current_dir(&inv.cwd)
-        .args(inv.command.split(' '))
-        .args(["--home", inv.home.to_str().unwrap(), "--format", "json"]);
-    for (key, value) in &inv.flags {
+        .current_dir(cwd)
+        .args(name.split(' '))
+        .args(["--home", f.home.to_str().unwrap(), "--format", "json"]);
+    for (key, value) in options {
         command.arg(key);
         if value != "true" {
             command.arg(value);
         }
     }
-    if !inv.flag_bool("--static-only") {
+    if !options.get("--static-only").is_some_and(|value| value == "true") {
         command.args(["--release", release.to_str().unwrap()]);
     }
     let output = command.output().unwrap();
@@ -389,16 +323,17 @@ fn project_research_actual_cli_static_and_native_use_project_selection_and_resel
     for command in ["source refs", "source context"] {
         for native in [false, true] {
             write_project(&f, &f.pin);
-            let mut inv = project_inv(&f, command);
-            inv.flags.insert("--project".into(), "..".into());
+            let mut options = project_options(&f);
+            let cwd = f.home.join("project/nested");
+            options.insert("--project".into(), "..".into());
             if native {
-                inv.flags.remove("--static-only");
+                options.remove("--static-only");
             }
-            let project = cli(&executable, &release, &inv);
+            let project = cli(&executable, &release, &f, &cwd, command, &options);
             assert_eq!(project["snapshot"], f.pin);
-            inv.flags.insert("--snapshot".into(), f.pin.clone());
-            inv.flags.insert("--project".into(), "absent".into());
-            let explicit = cli(&executable, &release, &inv);
+            options.insert("--snapshot".into(), f.pin.clone());
+            options.insert("--project".into(), "absent".into());
+            let explicit = cli(&executable, &release, &f, &cwd, command, &options);
             for field in [
                 "snapshot",
                 "commit",
@@ -420,10 +355,10 @@ fn project_research_actual_cli_static_and_native_use_project_selection_and_resel
                 assert!(project["semanticAnalysis"].is_object());
                 assert_eq!(project["nativeResearch"]["lifecycle"]["retired"], true);
             }
-            inv.flags.remove("--snapshot");
-            inv.flags.remove("--project");
+            options.remove("--snapshot");
+            options.remove("--project");
             write_project(&f, &replacement);
-            let changed = cli(&executable, &release, &inv);
+            let changed = cli(&executable, &release, &f, &cwd, command, &options);
             assert_eq!(changed["snapshot"], replacement);
             assert_ne!(changed["commit"], project["commit"]);
         }

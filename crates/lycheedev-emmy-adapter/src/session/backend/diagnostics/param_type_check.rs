@@ -8,8 +8,12 @@ mod types;
 
 use super::CheckContext;
 use crate::session::backend::{
-    OwnedQuery, QueryResult, call_access::first_param_is_self, call_unify::Bindings,
+    OwnedQuery, QueryResult,
+    call_access::first_param_is_self,
+    call_unify::Bindings,
+    return_pack::{return_arity, return_expands},
 };
+use crate::session::{BindingCoverage, BindingDecision, SelectedValue};
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
     DiagnosticCode, LuaMemberKey, LuaTupleStatus, LuaType, LuaTypeDeclId, LuaTypeNode,
@@ -22,6 +26,12 @@ use emmylua_parser::{
 struct Mismatch {
     range: rowan::TextRange,
     message: String,
+}
+
+struct ArgumentView {
+    expressions: Vec<LuaExpr>,
+    values: Vec<OwnedValue>,
+    complete: bool,
 }
 
 impl<E> OwnedQuery<'_, '_, E> {
@@ -40,7 +50,74 @@ impl<E> OwnedQuery<'_, '_, E> {
                 continue;
             };
             self.pt_check_call(context, &call)?;
-            self.binding_finish_call_check(&call, "argument_check")?;
+        }
+        Ok(())
+    }
+
+    fn pt_argument_view(
+        &mut self,
+        args: &[LuaExpr],
+        cached: Option<&[OwnedValue]>,
+    ) -> QueryResult<ArgumentView, E> {
+        let mut view = ArgumentView {
+            expressions: Vec::new(),
+            values: Vec::new(),
+            complete: true,
+        };
+        for (index, expression) in args.iter().enumerate() {
+            self.checkpoint()?;
+            let value = match cached.and_then(|values| values.get(index)) {
+                Some(value) => value.clone(),
+                None => self.type_of_expr(expression.get_syntax_id())?,
+            };
+            if return_expands(expression, index + 1 == args.len()) {
+                let observed_arity = match expression {
+                    LuaExpr::CallExpr(call) => self.binding_call_return_arity(call)?,
+                    _ => None,
+                };
+                let Some(arity) = observed_arity.or_else(|| return_arity(value.structural_type()))
+                else {
+                    view.complete = false;
+                    break;
+                };
+                view.complete &= arity.max == Some(arity.min);
+                for slot in 0..arity.min {
+                    self.checkpoint()?;
+                    let Some(value) = self.owned_return_slot(&value, slot)? else {
+                        view.complete = false;
+                        break;
+                    };
+                    view.expressions.push(expression.clone());
+                    view.values.push(value);
+                }
+            } else {
+                view.expressions.push(expression.clone());
+                let value = self.pt_call_argument_type(expression, &value)?;
+                view.values.push(self.owned_return_scalar(&value)?);
+            }
+        }
+        Ok(view)
+    }
+
+    fn pt_record_call_completion(
+        &mut self,
+        call: &LuaCallExpr,
+        complete: bool,
+    ) -> QueryResult<(), E> {
+        if let BindingDecision::Bound(permit) =
+            self.session.context().call(self.site(call.get_syntax_id()))
+        {
+            self.record_check(
+                call.get_syntax_id(),
+                "argument_check",
+                if complete {
+                    "native_checked"
+                } else {
+                    "unavailable"
+                },
+                permit.proof,
+                (!complete).then(|| "native_check_inputs_or_signature_unavailable".into()),
+            )?;
         }
         Ok(())
     }
@@ -69,15 +146,19 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(false);
         }
         let mut best: Option<Vec<Mismatch>> = None;
+        let view = self.pt_argument_view(&args[1..], None)?;
         for candidate in &candidates {
             self.checkpoint()?;
+            let mut complete = view.complete;
             let mismatches = self.pt_check_candidate(
                 candidate,
-                &args[1..],
+                &view.expressions,
                 false,
                 &OwnedValue::plain(LuaType::Unknown),
-                &[],
                 None,
+                &[],
+                Some(&view.values),
+                &mut complete,
             )?;
             if mismatches.is_empty() {
                 return Ok(true);
@@ -141,35 +222,56 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(());
         }
         if candidates.is_empty() {
-            return Ok(());
+            return self.pt_record_call_completion(call, false);
         }
+        let view = self.pt_argument_view(&args, Some(&analysis.arg_types))?;
         let mut ordered: Vec<&OwnedValue> = candidates.iter().collect();
         ordered.sort_by_key(|function| {
             quick_candidate_score(
                 function,
-                &analysis.arg_types,
+                &view.values,
                 analysis.colon_call,
                 &analysis.receiver_ty,
             )
         });
         let mut best: Option<Vec<Mismatch>> = None;
+        let mut best_complete = false;
+        let receiver_range = match &callee {
+            LuaExpr::IndexExpr(index) if analysis.colon_call => {
+                index.get_prefix_expr().map(|prefix| prefix.get_range())
+            }
+            _ => None,
+        };
         for candidate in ordered {
+            let mut complete = view.complete;
             let mismatches = self.pt_check_candidate(
                 candidate,
-                &args,
+                &view.expressions,
                 analysis.colon_call,
                 &analysis.receiver_ty,
+                receiver_range,
                 &analysis.explicit_generics,
-                Some(&analysis.arg_types),
+                Some(&view.values),
+                &mut complete,
             )?;
+            if candidates.len() == 1 {
+                self.pt_record_environment_arguments(
+                    call,
+                    candidate,
+                    &view.expressions,
+                    &view.values,
+                    &analysis.receiver_ty,
+                )?;
+            }
             if mismatches.is_empty() {
-                return Ok(());
+                return self.pt_record_call_completion(call, complete);
             }
             if best
                 .as_ref()
                 .is_none_or(|current| mismatches.len() < current.len())
             {
                 best = Some(mismatches);
+                best_complete = complete;
             }
         }
         if let Some(mismatches) = best {
@@ -194,7 +296,127 @@ impl<E> OwnedQuery<'_, '_, E> {
                 context.add_diagnostic(DiagnosticCode::ParamTypeMismatch, mismatch.range, message);
             }
         }
+        self.pt_record_call_completion(call, best_complete)
+    }
+
+    // These are completion receipts for slots the checker just visited, not
+    // signature-projection receipts. Unknown siblings keep their own partial
+    // status and the existing whole-call completion remains independent.
+    fn pt_record_environment_arguments(
+        &mut self,
+        call: &LuaCallExpr,
+        function: &OwnedValue,
+        args: &[LuaExpr],
+        values: &[OwnedValue],
+        receiver: &OwnedValue,
+    ) -> QueryResult<(), E> {
+        let call_site = self.site(call.get_syntax_id());
+        let BindingDecision::Bound(permit) = self.session.context().call(call_site) else {
+            return Ok(());
+        };
+        let BindingDecision::Bound(bound) = self.session.context().resolve(permit.callee) else {
+            return Ok(());
+        };
+        let SelectedValue::EnvironmentCallable(descriptor) = bound.value else {
+            return Ok(());
+        };
+        let has_self = descriptor.receiver_type_name().is_some();
+        let params = function
+            .function_parameters()
+            .expect("checked function parameters");
+        if has_self && let Some(Some(param)) = params.first() {
+            let receiver_expression = if call.is_colon_call() {
+                call.get_prefix_expr().and_then(|callee| match callee {
+                    LuaExpr::IndexExpr(index) => index.get_prefix_expr(),
+                    _ => None,
+                })
+            } else {
+                args.first().cloned()
+            };
+            let actual = if call.is_colon_call() {
+                Some(receiver)
+            } else {
+                values.first()
+            };
+            if let (Some(argument), Some(actual)) = (receiver_expression, actual) {
+                // Colon compares its implicit self above; dot/aliased methods
+                // compare explicit argument zero in pt_check_arg_pairs.
+                let known = self.argument_pair_is_complete(actual, param)?;
+                self.session.record(
+                    BindingCoverage {
+                        site: call_site,
+                        operation: "argument_check",
+                        state: if known {
+                            "native_checked"
+                        } else {
+                            "unavailable"
+                        },
+                        proof: permit.proof.clone(),
+                        reason: (!known).then(|| "native_receiver_type_unavailable".into()),
+                        parameter: Some("receiver".into()),
+                        parameter_index: None,
+                        argument: Some(self.site(argument.get_syntax_id())),
+                    },
+                    || self.checkpoint(),
+                )?;
+            }
+        }
+        for (index, slot) in descriptor.declaration.parameters.iter().enumerate() {
+            self.checkpoint()?;
+            let parameter = index + usize::from(has_self);
+            let argument = parameter.saturating_sub(usize::from(has_self && call.is_colon_call()));
+            let (Some(Some(param)), Some(arg), Some(actual)) = (
+                params.get(parameter),
+                args.get(argument),
+                values.get(argument),
+            ) else {
+                continue;
+            };
+            let known = self.argument_pair_is_complete(actual, param)?;
+            self.session.record(
+                BindingCoverage {
+                    site: call_site,
+                    operation: "argument_check",
+                    state: if known {
+                        "native_checked"
+                    } else {
+                        "unavailable"
+                    },
+                    proof: permit.proof.clone(),
+                    reason: (!known).then(|| "native_parameter_type_unavailable".into()),
+                    parameter: Some(slot.name.clone()),
+                    parameter_index: Some(index + 1),
+                    argument: Some(self.site(arg.get_syntax_id())),
+                },
+                || self.checkpoint(),
+            )?;
+        }
         Ok(())
+    }
+
+    /// Compatibility and precision are independent. The fixed checker accepts
+    /// a generic Function as a callback, but that value supplies no concrete
+    /// callback parameter/return signature to finish checking.
+    pub(in crate::session::backend) fn argument_pair_is_complete(
+        &mut self,
+        actual: &OwnedValue,
+        expected: &OwnedValue,
+    ) -> QueryResult<bool, E> {
+        self.checkpoint()?;
+        // Use the same callback branch as compatibility, including nilable
+        // signatures; an optional concrete signature still needs precision.
+        if matches!(actual.structural_type(), LuaType::Function)
+            && matches!(
+                effective_param(expected, actual).structural_type(),
+                LuaType::DocFunction(_)
+            )
+        {
+            return Ok(false);
+        }
+        Ok(!self.binding_type_has_unknown(actual)?
+            && !self.binding_type_has_unknown(expected)?
+            && self.structure_allowed(actual)?
+            && self.structure_allowed(expected)?)
     }
 
     fn pt_check_candidate(
@@ -203,8 +425,10 @@ impl<E> OwnedQuery<'_, '_, E> {
         args: &[LuaExpr],
         colon_call: bool,
         receiver: &OwnedValue,
+        receiver_range: Option<rowan::TextRange>,
         explicit_generics: &[LuaSyntaxId],
         arg_types: Option<&[OwnedValue]>,
+        complete: &mut bool,
     ) -> QueryResult<Vec<Mismatch>, E> {
         let LuaType::DocFunction(meta) = function.structural_type() else {
             unreachable!("call candidate")
@@ -229,16 +453,33 @@ impl<E> OwnedQuery<'_, '_, E> {
                 bindings.insert(tpl.get_tpl_id(), OwnedValue::plain(ty));
             }
         }
-        if colon_call && !self_param && !meta.is_colon_define() {
+        if colon_call && (self_param || !meta.is_colon_define()) {
             let mut mismatches = Vec::new();
             if let Some((name, Some(param))) = params.first() {
                 let param = effective_param(param, receiver);
                 let _ = self.unify_call_bindings(&param, receiver, &mut bindings)?;
-                if !self.type_check(receiver, &param)? {
-                    mismatches.push(Mismatch {
-                        range: receiver_range(args),
-                        message: self.pt_mismatch_message(receiver, &param, name),
-                    });
+                let param = self.substitute_owned(param, &bindings)?;
+                let param = self.expand_owned_aliases(param)?;
+                let param = self.eval_owned_conditionals(param)?;
+                // Preserve inferred-self placeholders; explicit receiver types
+                // must be compared even when their parameter is named self.
+                let inferred_self = self_param
+                    && (matches!(
+                        param.structural_type(),
+                        LuaType::Unknown | LuaType::Any | LuaType::SelfInfer
+                    ) || matches!(param.structural_type(), LuaType::Ref(id) if id.get_name() == "self"));
+                if !inferred_self {
+                    *complete &= self.argument_pair_is_complete(receiver, &param)?;
+                    if !self.type_check(receiver, &param)? {
+                        if let Some(range) = receiver_range {
+                            mismatches.push(Mismatch {
+                                range,
+                                message: self.pt_mismatch_message(receiver, &param, name),
+                            });
+                        } else {
+                            *complete = false;
+                        }
+                    }
                 }
             }
             let remainder = if params.is_empty() {
@@ -252,6 +493,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                 meta.is_variadic(),
                 &mut bindings,
                 arg_types,
+                complete,
             )?);
             return Ok(mismatches);
         }
@@ -262,6 +504,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             meta.is_variadic(),
             &mut bindings,
             dot_types,
+            complete,
         )
     }
 
@@ -279,10 +522,6 @@ impl<E> OwnedQuery<'_, '_, E> {
             reason = ""
         )
     }
-}
-
-fn receiver_range(args: &[LuaExpr]) -> rowan::TextRange {
-    args.first().map(|arg| arg.get_range()).unwrap_or_default()
 }
 
 use shapes::has_table_literal_shape;

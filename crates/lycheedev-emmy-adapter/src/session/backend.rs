@@ -30,6 +30,7 @@ mod iteration;
 mod logical;
 mod member;
 mod public;
+mod return_pack;
 pub use member::OwnedMemberInfo;
 mod member_general;
 mod resolver;
@@ -460,6 +461,12 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
     }
     fn plain(&mut self, ty: LuaType) -> OwnedValue {
         OwnedValue::plain(ty)
+    }
+    fn environment_value(
+        &mut self,
+        value: OwnedValue,
+    ) -> ProjectionResult<OwnedValue, Self::Error> {
+        Ok(Ok(value))
     }
     fn expression(
         &mut self,

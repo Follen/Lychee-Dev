@@ -107,7 +107,7 @@ impl PreparedSnapshot {
         }
         let mut owned=(*self.inputs).clone();owned.phase=phase.into();owned.ordered=match &plan{LoadPlan::Known(files)=>files.clone(),LoadPlan::Unknown(_)=>vec![]};owned.load_plan=Some(plan);owned.entry=entry;owned.xml=xml;
         owned.validate_execution()?;owned.refresh_identity(control)?;
-        let result=public_result(self.graph_owned(name,scope,true,Arc::new(owned)),control);control.check()?;result
+        let result=public_result(self.graph_owned(name,scope,Arc::new(owned)),control);control.check()?;result
     }
 }
 impl Builder {

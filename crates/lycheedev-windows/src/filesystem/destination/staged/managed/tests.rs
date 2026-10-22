@@ -22,10 +22,10 @@ fn bytes(kind: ManagedStageKind, slot: u8) -> [u8; 128] {
     use sha2::{Digest, Sha256};
     let mut bytes = [0; 128];
     bytes[..8].copy_from_slice(b"LDST0002");
-    bytes[8] = if kind == ManagedStageKind::Spool {
-        1
-    } else {
-        2
+    bytes[8] = match kind {
+        ManagedStageKind::Spool => 1,
+        ManagedStageKind::Shard => 2,
+        ManagedStageKind::ExternalExport => 3,
     };
     bytes[9] = slot;
     let hash = Sha256::digest(&bytes[..96]);
@@ -177,5 +177,25 @@ fn withdrawal_deletes_only_original_retained_declaration() {
             .exists()
     );
     assert_eq!(fs::read(records.path().join("foreign")).unwrap(), b"keep");
+    records.close().unwrap();
+}
+
+#[test]
+fn external_export_declaration_never_authorizes_a_payload() {
+    let f = Fixture::new();
+    let records = Directory::open(&f.0.join("shared-blobs-v1")).unwrap();
+    let payloads = Directory::open(&f.0).unwrap();
+    let kind = ManagedStageKind::ExternalExport;
+    let mut declaration =
+        ManagedStageDeclaration::create(&records, kind, 0, &mut Uncontrolled).unwrap();
+    let raw = bytes(kind, 0);
+    let name = declaration.persist(&raw, &mut Uncontrolled).unwrap();
+    assert!(ManagedStageDeclaration::payload_name(kind, 0).is_err());
+    assert!(StagedFile::create_predeclared(&payloads, &name, &mut Uncontrolled).is_err());
+    assert!(PrivateSpool::create_predeclared(&payloads, &name, &mut Uncontrolled).is_err());
+    assert_eq!(fs::read_dir(payloads.path()).unwrap().count(), 1);
+    assert!(declaration.withdraw().is_empty());
+    assert_eq!(fs::read_dir(records.path()).unwrap().count(), 0);
+    payloads.close().unwrap();
     records.close().unwrap();
 }

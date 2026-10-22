@@ -1,9 +1,7 @@
 //! Complete named configuration lifecycle, using the same configuration wire
-//! decoder as resolution and the fixed Go document/CAS boundaries.
+//! decoder as resolution and the owned document/CAS boundaries.
 use super::*;
-use crate::metadata::historical_write::{HistoricalMutation, HistoricalWriter};
-use serde::ser::SerializeStruct;
-use serde_json::value::RawValue;
+use crate::metadata::owned_write::{OwnedMutation, OwnedWriter};
 
 trait Pages {
     fn page(
@@ -25,7 +23,7 @@ impl Pages for Metadata {
         self.visit_raw_page_controlled_with_check(prefix, after, 1000, control, || Ok(()), visit)
     }
 }
-impl Pages for HistoricalWriter<'_> {
+impl Pages for OwnedWriter<'_> {
     fn page(
         &self,
         prefix: &str,
@@ -100,86 +98,9 @@ fn choose(mut configs: Vec<TargetConfig>, key: &str) -> Result<TargetConfig> {
         )),
     }
 }
-#[derive(Default)]
-struct Reference {
-    schema: String,
-    name: String,
-    kind: String,
-    id: String,
-    created_at: crate::evidence::GoTimestamp,
-}
-impl Serialize for Reference {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        let mut value = s.serialize_struct("TargetReference", 5)?;
-        value.serialize_field("schema", &self.schema)?;
-        value.serialize_field("name", &self.name)?;
-        value.serialize_field("kind", &self.kind)?;
-        value.serialize_field("id", &self.id)?;
-        let time = self.created_at.canonical().ok_or_else(|| {
-            <S::Error as serde::ser::Error>::custom(
-                "Time.MarshalJSON: timezone hour outside of range [0,23]",
-            )
-        })?;
-        value.serialize_field("createdAt", time)?;
-        value.end()
-    }
-}
-impl<'de> Deserialize<'de> for Reference {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        struct Fields;
-        impl<'de> Visitor<'de> for Fields {
-            type Value = Reference;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a target reference")
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Self::Value, E> {
-                Ok(Reference::default())
-            }
-            fn visit_map<M: MapAccess<'de>>(
-                self,
-                mut m: M,
-            ) -> std::result::Result<Self::Value, M::Error> {
-                let mut out = Reference::default();
-                while let Some(key) = m.next_key::<String>()? {
-                    let field = match folded(&key).as_str() {
-                        "schema" => &mut out.schema,
-                        "name" => &mut out.name,
-                        "kind" => &mut out.kind,
-                        "id" => &mut out.id,
-                        "createdat" => {
-                            let raw = m.next_value::<Box<RawValue>>()?;
-                            if raw.get() != "null" {
-                                let token = raw.get();
-                                let raw = token
-                                    .strip_prefix('"')
-                                    .and_then(|t| t.strip_suffix('"'))
-                                    .ok_or_else(|| {
-                                        serde::de::Error::custom(
-                                            "Time.UnmarshalJSON: input is not a JSON string",
-                                        )
-                                    })?;
-                                out.created_at = crate::evidence::parse_go_timestamp(raw)
-                                    .ok_or_else(|| {
-                                        serde::de::Error::custom("invalid Go reference timestamp")
-                                    })?;
-                            }
-                            continue;
-                        }
-                        _ => {
-                            m.next_value::<IgnoredAny>()?;
-                            continue;
-                        }
-                    };
-                    if let Some(value) = m.next_value::<Option<String>>()? {
-                        *field = value;
-                    }
-                }
-                Ok(out)
-            }
-        }
-        d.deserialize_any(Fields)
-    }
-}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Reference { schema: String, name: String, kind: String, id: String, created_at: String }
 fn references(
     reader: &impl Pages,
     name: &str,
@@ -190,16 +111,12 @@ fn references(
     let mut result = Vec::new();
     loop {
         let (count, last) = reader.page(&prefix, &after, control, &mut |_, _, raw| {
-            if !crate::raw_json::is_valid(raw) {
-                return Err(format("invalid JSON document"));
-            }
-            let normalized = crate::evidence::normalize_go_json_strings(raw, control)?;
-            let reference: Reference = serde_json::from_slice(&normalized).map_err(format)?;
+            let mut reference: Reference = serde_json::from_slice(raw).map_err(format)?;
+            let time = storage::parse_timestamp(&reference.created_at).ok_or_else(|| format("invalid reference timestamp"))?;
+            reference.created_at = storage::timestamp_offset(time);
             if reference.schema != "lycheedev.target-ref.v1" || reference.name != name {
                 return Err(format("reference identity"));
             }
-            // Go validates schema/name only; unknown kind and empty ID remain
-            // historical data, with their original remove/show behavior.
             result.push(reference);
             Ok(())
         })?;
@@ -230,9 +147,9 @@ fn read<T>(
 fn write<T>(
     home: &Path,
     control: &OperationControl,
-    run: impl FnOnce(&HistoricalWriter<'_>) -> Result<T>,
+    run: impl FnOnce(&OwnedWriter<'_>) -> Result<T>,
 ) -> Result<T> {
-    let result = Metadata::with_historical_write(home, control, run);
+    let result = Metadata::with_owned_write(home, control, run);
     super::super::selection_finish(result, control.check())
 }
 fn absolute(path: &Path, cwd: &Path) -> Result<PathBuf> {
@@ -255,77 +172,35 @@ pub(crate) fn list_configurations(home: &Path, control: &OperationControl) -> Re
         other => other,
     }
 }
-fn list(inv: &Invocation) -> Result<Outcome> {
-    Ok(Outcome::new(json!({"targets":list_configurations(&inv.home, &inv.control)?})))
+#[derive(Clone, Debug)]
+pub enum TargetRequest {
+    List,
+    Add { config: TargetConfig, replace: bool },
+    Show { key: String },
+    Remove { key: String },
 }
-
-fn add(inv: &Invocation) -> Result<Outcome> {
-    let name = inv
-        .positional
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| ToolkitError::arguments("target add requires a name argument"))?;
-    let (product, region, locale) = (
-        inv.flag("--product").unwrap_or(""),
-        inv.flag("--region").unwrap_or(""),
-        inv.flag("--locale").unwrap_or(""),
-    );
-    if product.is_empty() || region.is_empty() || locale.is_empty() {
-        return Err(ToolkitError::arguments(
-            "target add requires --product, --region, and --locale",
-        ));
-    }
-    if crate::client::product(product).is_none() {
-        return Err(ToolkitError::arguments(
-            "target add requires a supported --product",
-        ));
-    }
-    if validate_locale(region, locale).is_err() {
-        return Err(ToolkitError::arguments(
-            "target add requires a supported --region and --locale pair",
-        ));
-    }
-    let installation = inv.flag("--installation").unwrap_or("");
-    if inv.flag_bool("--remote") == !installation.is_empty() {
-        return Err(ToolkitError::arguments(
-            "target add requires exactly one of --installation or --remote",
-        ));
-    }
-    let mut config = TargetConfig {
-        schema: "lycheedev.target.v1".into(),
-        name: name.into(),
-        product: product.into(),
-        region: region.into(),
-        locale: locale.into(),
-        full_build: inv.flag("--build").unwrap_or("").into(),
-        source: if inv.flag_bool("--remote") {
-            "remote"
-        } else {
-            "installation"
-        }
-        .into(),
-        installation: installation.into(),
-        definitions: inv.flag("--definitions").unwrap_or("").into(),
-        repository: String::new(),
-    };
+fn list(ctx: &RequestContext) -> Result<Outcome> {
+    Ok(Outcome::new(json!({"targets":list_configurations(&ctx.home, &ctx.control)?})))
+}
+fn add(ctx: &RequestContext, supplied: &TargetConfig, replace: bool) -> Result<Outcome> {
+    let mut config = supplied.clone();
     config.validate()?;
     if config.source == "installation" {
-        config.installation = absolute(Path::new(&config.installation), &inv.cwd)?
-            .to_string_lossy()
-            .into_owned();
+        config.installation = absolute(Path::new(&config.installation), &ctx.cwd)?
+            .to_string_lossy().into_owned();
     }
     let raw = serde_json::to_vec(&config)?;
     let key = format!("target/{}", config.name);
-    write(&inv.home, &inv.control, |writer| {
+    write(&ctx.home, &ctx.control, |writer| {
         let expected = match writer.document(&key) {
-            Ok(_) if !inv.flag_bool("--replace") => {
+            Ok(_) if !replace => {
                 return Err(error("selection.target_exists", "selection.target_exists"));
             }
             Ok(document) => document.generation,
             Err(error) if pure(&error, "vault.record_missing") => 0,
             Err(error) => return Err(error),
         };
-        writer.commit(&[HistoricalMutation {
+        writer.commit(&[OwnedMutation {
             key: &key,
             expected_generation: expected,
             bytes: &raw,
@@ -333,24 +208,16 @@ fn add(inv: &Invocation) -> Result<Outcome> {
     })?;
     Ok(Outcome::new(serde_json::to_value(config)?))
 }
-fn show(inv: &Invocation) -> Result<Outcome> {
-    let key = inv.argument()?;
-    if key.is_empty() {
-        return Err(ToolkitError::arguments(
-            "missing selection file or record ID; use describe",
-        ));
-    }
+fn show(ctx: &RequestContext, key: &str) -> Result<Outcome> {
     if key.starts_with("PIN-") {
         return Ok(Outcome::new(serde_json::to_value(
-            super::super::load_pinned_controlled(&inv.home, key, &inv.control)?,
+            super::super::load_pinned_controlled(&ctx.home, key, &ctx.control)?,
         )?));
     }
-    let result = read(&inv.home, &inv.control, |reader| {
-        let config = choose(configs(reader, &inv.control)?, key)?;
-        let refs = references(reader, &config.name, &inv.control)?;
+    let result = read(&ctx.home, &ctx.control, |reader| {
+        let config = choose(configs(reader, &ctx.control)?, key)?;
+        let refs = references(reader, &config.name, &ctx.control)?;
         let mut value = json!({"config":config});
-        // Serialize only on show: remove may legally consume a timestamp which
-        // Go accepts at Unmarshal but cannot subsequently Marshal.
         value["references"] = serde_json::to_value(&refs)
             .map_err(|e| ToolkitError::new("command.failed", e.to_string(), 5))?;
         let active: Vec<_> = refs
@@ -376,16 +243,10 @@ fn show(inv: &Invocation) -> Result<Outcome> {
         other => other,
     }
 }
-fn remove(inv: &Invocation) -> Result<Outcome> {
-    let key = inv.argument()?;
-    if key.is_empty() {
-        return Err(ToolkitError::arguments(
-            "target remove requires a name argument",
-        ));
-    }
-    write(&inv.home, &inv.control, |writer| {
-        let config = choose(configs(writer, &inv.control)?, key)?;
-        let refs = references(writer, &config.name, &inv.control)?;
+fn remove(ctx: &RequestContext, key: &str) -> Result<Outcome> {
+    write(&ctx.home, &ctx.control, |writer| {
+        let config = choose(configs(writer, &ctx.control)?, key)?;
+        let refs = references(writer, &config.name, &ctx.control)?;
         let active: Vec<_> = refs
             .iter()
             .filter(|r| r.kind == "operation")
@@ -402,7 +263,7 @@ fn remove(inv: &Invocation) -> Result<Outcome> {
         writer.delete(&[(target, generation)])?;
         let mut removals = Vec::new();
         for reference in &refs {
-            inv.control.check()?;
+            ctx.control.check()?;
             let key = format!(
                 "target-ref/{}/{}/{}",
                 config.name, reference.kind, reference.id
@@ -422,16 +283,16 @@ fn remove(inv: &Invocation) -> Result<Outcome> {
         Ok(Outcome::new(value))
     })
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    inv.control.check()?;
-    let result = match inv.command.as_str() {
-        "target list" => list(inv),
-        "target add" => add(inv),
-        "target show" => show(inv),
-        "target remove" => remove(inv),
-        _ => Err(ToolkitError::arguments("unknown target command")),
+pub fn execute(ctx: &RequestContext, request: &TargetRequest) -> Result<Outcome> {
+    ctx.control.check()?;
+    let result = match request {
+        TargetRequest::List => list(ctx),
+        TargetRequest::Add { config, replace } => add(ctx, config, *replace),
+        TargetRequest::Show { key } => show(ctx, key),
+        TargetRequest::Remove { key } => remove(ctx, key),
     };
-    super::super::selection_finish(result, inv.control.check())
+    super::super::selection_finish(result, ctx.control.check())
 }
+
 #[cfg(test)]
 mod tests;

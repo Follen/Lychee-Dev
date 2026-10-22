@@ -186,31 +186,6 @@ impl<R: AsyncRead + Unpin> Gzip<'_, R> {
         }
     }
 }
-pub(super) async fn read_bounded(
-    input: impl AsyncRead + Unpin,
-    maximum: usize,
-    control: &OperationControl,
-    budget: Option<&Budget>,
-    deadline: Instant,
-) -> Result<Vec<u8>> {
-    collect(
-        input,
-        ReadLimit::Complete(maximum),
-        control,
-        budget,
-        deadline,
-    )
-    .await
-}
-pub(super) async fn collect(
-    input: impl AsyncRead + Unpin,
-    limit: ReadLimit,
-    control: &OperationControl,
-    budget: Option<&Budget>,
-    deadline: Instant,
-) -> Result<Vec<u8>> {
-    collect_admitted(input, limit, control, budget, deadline, &mut |_| Ok(())).await
-}
 pub(super) async fn collect_admitted(
     input: impl AsyncRead + Unpin,
     limit: ReadLimit,

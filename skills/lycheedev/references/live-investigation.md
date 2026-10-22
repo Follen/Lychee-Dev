@@ -40,9 +40,8 @@ Read three independent facts:
 
 A verified Lua error is evidence; pending cleanup still needs recovery on the
 same CON. Exact completed-request replay reads retained bytes without rerunning
-Lua; changed code/arguments are not that replay. Native work needs no legacy
-OP/BTP ACK, finish or hide sequence. Capacity recovery may reload, so scene-
-dependent probes must reconstruct prerequisites or record their absence.
+Lua; changed code/arguments are not that replay. Capacity recovery may reload,
+so scene-dependent probes must reconstruct prerequisites or record their absence.
 
 Disconnect at the end unless continued use is needed. Closed records durable
 connection closure; it does not prove the ownership claim was released. Check

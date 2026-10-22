@@ -1,13 +1,13 @@
 use super::*;
-use crate::metadata::historical_write::finish_historical;
+use crate::metadata::owned_write::finish_owned;
 fn observed<T>(result: Result<T>, control: &OperationControl) -> Result<T> {
     finish(result, control)
 }
-pub(super) fn metadata(inv: &Invocation) -> Result<Value> {
+pub(super) fn metadata(inv: &RequestContext) -> Result<Value> {
     let result = (|| {
         let metadata = Metadata::open_controlled(&inv.home, false, &inv.control)?;
         let version = metadata.schema_version_controlled(&inv.control);
-        let result = finish_historical(version, metadata.close());
+        let result = finish_owned(version, metadata.close());
         observed(result, &inv.control)
     })();
     let result = diagnostic(result, &inv.control)?;
@@ -89,7 +89,7 @@ fn cleanup(
     }
     Err(first)
 }
-pub(super) fn writable(inv: &Invocation) -> Result<Value> {
+pub(super) fn writable(inv: &RequestContext) -> Result<Value> {
     use lycheedev_windows::filesystem::owned_cleanup::OwnedTemporary;
     inv.control.check()?;
     let path = inv.home.join("tmp/.lycheedev-write-probe");
@@ -153,7 +153,7 @@ pub(super) fn writable(inv: &Invocation) -> Result<Value> {
         ),
     })
 }
-pub(super) fn hygiene(inv: &Invocation) -> Result<Vec<Value>> {
+pub(super) fn hygiene(inv: &RequestContext) -> Result<Vec<Value>> {
     let mut locks = 0usize;
     let _ = cache::walk_files(&inv.home.join("locks"), &inv.control, |_, _| {
         locks += 1;
@@ -224,7 +224,7 @@ pub(super) fn hygiene(inv: &Invocation) -> Result<Vec<Value>> {
         ),
     ])
 }
-pub(super) fn cache(inv: &Invocation) -> Result<Value> {
+pub(super) fn cache(inv: &RequestContext) -> Result<Value> {
     let result = diagnostic(cache::verify(&inv.home, &inv.control), &inv.control)?;
     Ok(match result {
         Ok(report) => check(
@@ -259,7 +259,7 @@ pub(super) fn cache(inv: &Invocation) -> Result<Value> {
         ),
     })
 }
-pub(super) fn archive(inv: &Invocation) -> Result<Value> {
+pub(super) fn archive(inv: &RequestContext) -> Result<Value> {
     let result = diagnostic(
         crate::archive::journal_controlled(&inv.home, &inv.control),
         &inv.control,

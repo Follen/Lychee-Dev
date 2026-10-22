@@ -32,7 +32,7 @@ impl Identity {
         }
     }
     fn key(&self, budget: &Budget) -> Result<String> {
-        Ok(storage::sha256(&go_bytes(self, budget, 1 << 20)?))
+        Ok(storage::sha256(&wire_bytes(self, budget, 1 << 20)?))
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -295,24 +295,24 @@ fn pure(e: &ToolkitError, code: &str) -> bool {
     e.code == code && e.details.is_null()
 }
 fn load(
-    inv: &Invocation,
+    ctx: &DataContext,
     identity: &Identity,
     budget: &Budget,
 ) -> Result<Option<(Receipt, Vec<u8>)>> {
-    check_scope(inv, budget)?;
+    check_scope(ctx, budget)?;
     let key = format!("hotfix-wago-page/{}", identity.key(budget)?);
     let result = (|| {
         let raw = match DataCacheMetadata::read_document_raw_controlled_with_check(
-            &inv.home,
+            &ctx.home,
             &key,
-            &inv.control,
+            &ctx.control,
             || budget.check(),
         ) {
             Ok(v) => v.bytes,
             Err(e) if pure(&e, "vault.record_missing") => return Ok(None),
             Err(e) => return Err(e),
         };
-        let receipt = receipt_wire::decode(&raw, inv, budget).map_err(|e| {
+        let receipt = receipt_wire::decode(&raw, ctx, budget).map_err(|e| {
             if terminal(&e) {
                 e
             } else {
@@ -329,18 +329,18 @@ fn load(
             ));
         }
         let raw = evidence::read_blob_bounded_with_check(
-            &inv.home,
+            &ctx.home,
             &receipt.response,
             PAGE_BYTES,
-            &inv.control,
+            &ctx.control,
             || budget.check(),
         )
         .map_err(corrupted)?;
         Ok(Some((receipt, raw)))
     })();
     crate::remote::cache::Store {
-        home: &inv.home,
-        control: &inv.control,
+        home: &ctx.home,
+        control: &ctx.control,
         budget: Some(budget),
     }
     .finish(result, Ok(()))
@@ -348,10 +348,10 @@ fn load(
 fn same_receipt(
     document: &[u8],
     receipt: &Receipt,
-    inv: &Invocation,
+    ctx: &DataContext,
     budget: &Budget,
 ) -> Result<bool> {
-    match receipt_wire::decode(document, inv, budget) {
+    match receipt_wire::decode(document, ctx, budget) {
         Ok(existing) => Ok(existing.schema == CACHE_SCHEMA
             && existing.response == receipt.response
             && existing.identity.key(budget)? == receipt.identity.key(budget)?),
@@ -360,7 +360,7 @@ fn same_receipt(
     }
 }
 fn store(
-    inv: &Invocation,
+    ctx: &DataContext,
     identity: Identity,
     request_url: String,
     raw: &[u8],
@@ -368,15 +368,15 @@ fn store(
     captured_at: String,
     budget: &Budget,
 ) -> Result<Receipt> {
-    check_scope(inv, budget)?;
+    check_scope(ctx, budget)?;
     // Private metadata operations own and close their quota independently of
     // blob publication. Historical shared evidence remains untouched.
     let result = (|| {
         let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
-            &inv.home,
+            &ctx.home,
             raw,
             PAGE_BYTES,
-            &inv.control,
+            &ctx.control,
             &|| budget.check(),
         )
         .and_then(|blob| serde_json::to_value(blob).map_err(Into::into))
@@ -395,9 +395,9 @@ fn store(
             next_page_url: page.next_page_url.clone(),
         };
         let observed = match DataCacheMetadata::read_document_raw_controlled_with_check(
-            &inv.home,
+            &ctx.home,
             &key,
-            &inv.control,
+            &ctx.control,
             || budget.check(),
         ) {
             Ok(v) => Some(v),
@@ -405,26 +405,26 @@ fn store(
             Err(e) => return Err(e),
         };
         if let Some(document) = &observed {
-            if same_receipt(&document.bytes, &receipt, inv, budget)? {
+            if same_receipt(&document.bytes, &receipt, ctx, budget)? {
                 return Ok(receipt);
             }
         }
         let published = if let Some(document) = observed {
             DataCacheMetadata::put_controlled_with_check(
-                &inv.home,
+                &ctx.home,
                 &key,
                 &receipt,
                 Some(document.generation),
-                &inv.control,
+                &ctx.control,
                 || budget.check(),
             )
         } else {
             DataCacheMetadata::put_controlled_with_check(
-                &inv.home,
+                &ctx.home,
                 &key,
                 &receipt,
                 None,
-                &inv.control,
+                &ctx.control,
                 || budget.check(),
             )
         };
@@ -432,13 +432,13 @@ fn store(
             Ok(()) => {}
             Err(e) if pure(&e, "vault.generation_conflict") => {
                 let winner = DataCacheMetadata::read_document_raw_controlled_with_check(
-                    &inv.home,
+                    &ctx.home,
                     &key,
-                    &inv.control,
+                    &ctx.control,
                     || budget.check(),
                 );
                 match winner {
-                    Ok(winner) if same_receipt(&winner.bytes, &receipt, inv, budget)? => {}
+                    Ok(winner) if same_receipt(&winner.bytes, &receipt, ctx, budget)? => {}
                     Ok(_) => {
                         return Err(error(
                             "page_drift",
@@ -467,25 +467,25 @@ fn store(
         Ok(receipt)
     })();
     crate::remote::cache::Store {
-        home: &inv.home,
-        control: &inv.control,
+        home: &ctx.home,
+        control: &ctx.control,
         budget: Some(budget),
     }
     .finish(result, Ok(()))
 }
 mod receipt_wire;
 fn read_page<'a>(
-    inv: &Invocation,
+    ctx: &DataContext,
     identity: Identity,
     state: &mut FetchBudget,
     budget: &'a Budget,
     fetcher: &impl Fetcher,
     base: &str,
 ) -> Result<Option<Fetched<'a>>> {
-    let (receipt, raw, from_cache) = if let Some((receipt, raw)) = load(inv, &identity, budget)? {
+    let (receipt, raw, from_cache) = if let Some((receipt, raw)) = load(ctx, &identity, budget)? {
         (receipt, raw, true)
     } else {
-        if inv.flag_bool("--offline") {
+        if ctx.source.offline {
             return Err(error(
                 "offline",
                 3,
@@ -496,7 +496,7 @@ fn read_page<'a>(
             return Ok(None);
         }
         let request_url = url(base, &identity.search, identity.page);
-        let raw = fetcher.fetch(&request_url, &inv.control, budget)?;
+        let raw = fetcher.fetch(&request_url, &ctx.control, budget)?;
         let captured_at = storage::utc_now();
         if raw.len() > PAGE_BYTES {
             return Err(error(
@@ -514,7 +514,7 @@ fn read_page<'a>(
                 format!("byte budget {} exhausted", state.max_bytes),
             ));
         }
-        let page = parse::parse(&raw, budget, &inv.control)?;
+        let page = parse::parse(&raw, budget, &ctx.control)?;
         if page.current_page != identity.page {
             return Err(error(
                 "page_drift",
@@ -526,7 +526,7 @@ fn read_page<'a>(
             ));
         }
         let receipt = store(
-            inv,
+            ctx,
             identity.clone(),
             request_url,
             &raw,
@@ -536,7 +536,7 @@ fn read_page<'a>(
         )?;
         (receipt, raw, false)
     };
-    let page = parse::parse(&raw, budget, &inv.control)
+    let page = parse::parse(&raw, budget, &ctx.control)
         .map_err(|e| if from_cache { corrupted(e) } else { e })?;
     if page.current_page != identity.page {
         return Err(error(
@@ -566,19 +566,11 @@ fn read_page<'a>(
         from_cache,
     }))
 }
-fn option(inv: &Invocation, key: &str, default: i64) -> Result<i64> {
-    let v = inv
-        .flag(key)
-        .map(str::parse::<i64>)
-        .transpose()
-        .map_err(|_| error("budget", 3, "budgets must be positive"))?
-        .unwrap_or(0);
-    Ok(if v == 0 { default } else { v })
-}
 pub(super) fn query(
-    inv: &Invocation,
+    ctx: &DataContext,
     q: Query,
     configured: FetchBudget,
+    max_pages: i64,
     budget: &Budget,
     fetcher: &impl Fetcher,
     base: &str,
@@ -591,7 +583,6 @@ pub(super) fn query(
             "wago rows carry table names; select the table name instead",
         ));
     }
-    let max_pages = option(inv, "--max-pages", 2048)?;
     if !(1..=2048).contains(&max_pages) {
         return Err(error("budget", 3, "max pages must be 1..2048"));
     }
@@ -661,13 +652,13 @@ pub(super) fn query(
     let mut captured = String::new();
     let mut captured_instant = None;
     loop {
-        check_scope(inv, budget)?;
+        check_scope(ctx, budget)?;
         if walked >= max_pages {
             stop = "page_budget";
             break;
         }
         let Some(fetched) = read_page(
-            inv,
+            ctx,
             Identity::new(&q, page_number),
             &mut state,
             budget,
@@ -707,7 +698,7 @@ pub(super) fn query(
             parse::sequence(last.as_ref().unwrap(), page)?;
         }
         for r in &page.records {
-            check_scope(inv, budget)?;
+            check_scope(ctx, budget)?;
             if r.id != 0 && seen.contains(&r.id) {
                 return Err(error(
                     "page_drift",
@@ -730,7 +721,7 @@ pub(super) fn query(
         scanned += page.records.len();
         let mut full = false;
         for record in fetched.page.records {
-            check_scope(inv, budget)?;
+            check_scope(ctx, budget)?;
             if !(1..=4).contains(&record.status) {
                 unknown.insert(record.status);
             }
@@ -761,10 +752,12 @@ pub(super) fn query(
         if fetched.from_cache {
             hits += 1;
         }
-        let stamp = evidence::parse_go_timestamp(&fetched.captured_at)
-            .ok_or_else(|| error("cache_corrupt", 4, "invalid receipt timestamp"))?;
-        if captured_instant.is_none_or(|instant| stamp.instant() > instant) {
-            captured_instant = Some(stamp.instant());
+        let stamp = chrono::DateTime::parse_from_rfc3339(&fetched.captured_at)
+            .map_err(|_| error("cache_corrupt", 4, "invalid receipt timestamp"))?;
+        if captured_instant
+            .is_none_or(|instant| (stamp.timestamp(), stamp.timestamp_subsec_nanos()) > instant)
+        {
+            captured_instant = Some((stamp.timestamp(), stamp.timestamp_subsec_nanos()));
             captured = fetched.captured_at;
         }
         chain = storage::sha256(
@@ -837,7 +830,7 @@ pub(super) fn query(
     window.truncate(q.limit);
     let mut records = window.into_iter().map(|(r, _)| r).collect::<Vec<_>>();
     if let Some(definition) = &q.definition {
-        super::decode::apply_with_check(&mut records, definition, budget, || inv.control.check())?;
+        super::decode::apply_with_check(&mut records, definition, budget, || ctx.control.check())?;
     }
     let truncated = !stop.is_empty();
     let complete = !truncated && last.page == last.last_page;

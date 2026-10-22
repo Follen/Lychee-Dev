@@ -1,12 +1,8 @@
 #![cfg(windows)]
-use lycheedev_windows::{
-    Process,
-    broker::{NativeSourcePeer, retire_native_source_peer},
-};
+use lycheedev_windows::{Process, broker::NativeSourcePeer};
 use std::{
     os::windows::process::CommandExt,
     process::{Command, Stdio},
-    sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
 
@@ -29,14 +25,18 @@ fn native_owner_retirement_checks_creation_and_reaps_exact_process() {
     let created = owner.identity().created;
     let deadline = Instant::now() + Duration::from_secs(3);
     assert_eq!(
-        retire_native_source_peer(child.id(), created + 1, &executable, deadline).unwrap_err(),
+        NativeSourcePeer::open(child.id(), created + 1, &executable)
+            .and_then(|peer| peer.retire(deadline))
+            .unwrap_err(),
         "source.owner_identity_changed"
     );
     assert!(child.try_wait().unwrap().is_none());
-    retire_native_source_peer(child.id(), created, &executable, deadline).unwrap();
+    NativeSourcePeer::open(child.id(), created, &executable)
+        .and_then(|peer| peer.retire(deadline))
+        .unwrap();
     assert_eq!(child.wait().unwrap().code(), Some(5));
     assert_eq!(
-        owner.wait_exit(deadline, &AtomicBool::new(false)).unwrap(),
+        owner.wait_exit_with_control(deadline, || Ok(())).unwrap(),
         5
     );
 }

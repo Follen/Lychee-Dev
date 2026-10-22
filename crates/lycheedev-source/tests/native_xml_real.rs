@@ -1,7 +1,8 @@
-use lycheedev_core::{Invocation, control::OperationControl, selection, storage};
+use lycheedev_source::request::{AddonValidationRequest, SelectedSource, SourceContext, SourceRequest};
+use lycheedev_core::{control::OperationControl, selection, storage};
 use lycheedev_source::{SourceTools, closure::Closure, luac, native::*, xml_inline, xml_load};
 use serde_json::{Value,json};
-use std::{collections::BTreeMap, fs, path::{Path,PathBuf}, sync::Arc};
+use std::{fs, path::{Path,PathBuf}, sync::Arc};
 
 const METHODS:&str="---@param flag boolean\nfunction Check(flag) end\nM={flag=true}\nfunction M:Run() Check(self.flag) end\nfunction Callback(self) Check(self.flag) end\n";
 
@@ -65,8 +66,20 @@ fn run_xml_case(selected:&str){
         fs::write(addon.join("Main.toc"),format!("## Interface: {}\nui.xml\n",selection::source_interface(pin.source.as_ref().unwrap()).unwrap())).unwrap();
         fs::write(addon.join("defs.lua"),METHODS).unwrap();fs::write(addon.join("rewrite.lua"),rewrite).unwrap();fs::write(addon.join("ui.xml"),xml).unwrap();
         fs::write(addon.join("part.xml"),"<Ui><Frame name=\"Repeated\" mixin=\"M\"><Scripts><OnLoad method=\"Run\"/></Scripts></Frame></Ui>").unwrap();
-        let inv=Invocation{command:"source validate".into(),positional:None,home:home.clone(),cwd:addon.clone(),flags:BTreeMap::from([("--path".into(),addon.to_string_lossy().into()),("--toc".into(),"Main.toc".into()),("--snapshot".into(),pin_id.clone()),("--semantic".into(),"true".into())]),control:Default::default()};
-        let (report,error)=match lycheedev_source::dispatch_with_tools(&inv,SourceTools{luac:Some(&compiler),luals:None}){
+        let ctx = SourceContext {
+            home: home.clone(),
+            cwd: addon.clone(),
+            control: Default::default(),
+        };
+        let request = SourceRequest::Validate(AddonValidationRequest {
+            selection: SelectedSource::new(pin.clone()).unwrap(),
+            root: addon.clone(),
+            toc: "Main.toc".into(),
+            semantic: true,
+            environment: None,
+            locator: format!("{}/Main.toc", addon.display()),
+        });
+        let (report,error)=match lycheedev_source::dispatch_with_tools(&ctx, &request,SourceTools{luac:Some(&compiler)}){
             Ok(outcome)=>(outcome.data,None),
             Err(error)=>(error.details["result"].clone(),Some((error.code,error.exit_code))),
         };

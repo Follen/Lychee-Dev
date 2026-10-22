@@ -4,22 +4,24 @@
 #![cfg(windows)]
 #[path = "support/native_session_faults.rs"]
 mod native_session_faults;
+#[allow(dead_code)]
+#[path = "support/data_agent_supervisor.rs"]
+mod data_supervisor;
+#[path = "support/independent_owners.rs"]
+mod independent_owners;
 use lycheedev_core::{
-    Invocation,
     control::OperationControl,
     evidence,
     selection::{self, SelectionSpec, SourcePin},
-    workspace,
 };
-use lycheedev_source::{environment, git, index, luac, native_research};
+use lycheedev_source::{environment, git, index, luac, native_research, request::SourceContext};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
     sync::atomic::AtomicBool,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 fn git_run(root: &Path, args: &[&str]) -> String {
@@ -42,6 +44,7 @@ fn git_run(root: &Path, args: &[&str]) -> String {
 fn cli(home: &Path, args: &[&str]) -> Value {
     let output = Command::new(env!("CARGO_BIN_EXE_lycheedev"))
         .args(args)
+        .current_dir(home.parent().unwrap())
         .args(["--home", home.to_str().unwrap(), "--format", "json"])
         .output()
         .unwrap();
@@ -165,16 +168,13 @@ fn public_native_session_reuses_exact_snapshot_and_retires_on_close() {
             .or_else(|| std::env::var_os("LYCHEEDEV_SOURCE_FLOW_RELEASE"))
             .expect("verified release root"),
     );
-    let root = std::env::temp_dir().join(format!(
-        "lycheedev-public-native-session-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let home = root.join("home");
-    workspace::initialize(&home).unwrap();
+    // Owned TEMP already separates controller runs. A short fixture basename
+    // leaves room for Git's long API-documentation path on Windows.
+    let root = std::env::temp_dir().join(format!("ns-{}", std::process::id()));
+    // Keep the original short ns root: Windows Git needs the remaining path.
+    // One authenticated synthetic Data fixture owns the same investigation/home.
+    let data_fixture = data_supervisor::fixture_at(root.clone(), 512, &"x".repeat(4096));
+    let home = data_fixture.home.clone();
     let _cleanup = Fixture {
         root: root.clone(),
         home: home.clone(),
@@ -304,6 +304,13 @@ APIDocumentation:AddDocumentationTable(API)
             .any(|api| api["name"] == "C_Native.Value" && api["returns"][0]["type"] == "number")
     );
     captured(&home, &refs);
+    let independent_data_failure = independent_owners::data_failure(&data_fixture);
+    owner.verify().unwrap();
+    first_analysis.verify().unwrap();
+    assert_eq!(lycheedev_windows::process::observe_lifetime(owner.identity(), || Ok(())).unwrap(),
+        lycheedev_windows::process::ProcessLifetime::Running, "Data failure must leave the retained Source owner alive");
+    // The existing context request below must reuse this same owner, original
+    // creation time and same real analysis child with an identity-only warm hit.
     let context = cli(
         &home,
         &[
@@ -361,26 +368,24 @@ APIDocumentation:AddDocumentationTable(API)
     assert_eq!(third["nativeSession"]["snapshotTransfer"], "full");
     assert_ne!(third["inputIdentity"], first["inputIdentity"]);
     captured(&home, &changed);
-    first_analysis.wait_exit(Instant::now()+Duration::from_secs(2),&AtomicBool::new(false)).unwrap();
+    first_analysis.wait_exit_with_control(Instant::now()+Duration::from_secs(2),||Ok(())).unwrap();
     assert_ne!(analysis_child(&home,pid).identity(),&first_analysis_identity);
-    let inv = Invocation {
-        command: "source refs".into(),
-        positional: None,
-        flags: BTreeMap::new(),
-        home: home.clone(),
-        cwd: repository.clone(),
-        control: OperationControl::default(),
-    };
+    let source_context = SourceContext { home: home.clone(), cwd: repository.clone(), control: OperationControl::default() };
     let source = first_pin.source.as_ref().unwrap();
-    let indexed = index::build_with_control(&home, source, &inv.control).unwrap();
-    let environment = environment::from_pin(&home, source, &inv.control).unwrap();
+    let indexed = index::build_with_control(&home, source, &source_context.control).unwrap();
+    let environment = environment::from_pin(&home, source, &source_context.control).unwrap();
     let manifest: luac::Manifest =
         serde_json::from_slice(&fs::read(release.join("payload/tool/luac/runtime.json")).unwrap())
             .unwrap();
     let runtime = luac::Runtime::verified(&release.join("payload/tool/luac"), manifest).unwrap();
-    let snapshot =
-        native_research::snapshot_request(&inv, source, &indexed, Some(&environment), &runtime)
-            .unwrap();
+    let snapshot = native_research::snapshot_request(
+        &source_context,
+        source,
+        &indexed,
+        Some(&environment),
+        &runtime,
+    )
+    .unwrap();
     let query = native_research::QueryRequest {
         symbol: indexed
             .symbols
@@ -419,9 +424,9 @@ APIDocumentation:AddDocumentationTable(API)
     assert_eq!(closed["result"]["state"], "closed");
     assert_ne!(lycheedev_windows::process::observe_lifetime(recovered_analysis.identity(),||Ok(())).unwrap(),lycheedev_windows::process::ProcessLifetime::Running);
     let worker_exit = owner
-        .wait_exit(
+        .wait_exit_with_control(
             Instant::now() + Duration::from_secs(5),
-            &AtomicBool::new(false),
+            ||Ok(()),
         )
         .unwrap();
     assert_eq!(worker_exit, 0);
@@ -447,7 +452,7 @@ APIDocumentation:AddDocumentationTable(API)
     // Real warm analysis must retire on the original 60-second idle trigger.
     // Waiting observes the fixed owner lifecycle; it grants no request grace.
     let idle_begun=Instant::now();
-    let idle_exit=reopened_owner.wait_exit(idle_begun+Duration::from_secs(65),&AtomicBool::new(false)).unwrap();
+    let idle_exit=reopened_owner.wait_exit_with_control(idle_begun+Duration::from_secs(65),||Ok(())).unwrap();
     let idle_elapsed=idle_begun.elapsed();
     assert_eq!(idle_exit,0);
     assert!(idle_elapsed>=Duration::from_secs(58),"warm owner retired before its idle boundary");
@@ -460,7 +465,7 @@ APIDocumentation:AddDocumentationTable(API)
         fs::write(root.join("report.json"), serde_json::to_vec_pretty(&json!({"home":home,"pin":first_pin,"changedPin":second_pin,
             "release":release,"cli":env!("CARGO_BIN_EXE_lycheedev"),"workerRequestPath":worker_request,
             "workerPid":pid,"workerCreated":created,"analysisIdentity":first_analysis_identity,"closedAnalysisIdentity":recovered_analysis.identity(),"workerExit":worker_exit,"before":before,"refs":refs,"context":context,
-            "status":status,"changed":changed,"faults":faults,"recovered":recovered,"closed":closed,"after":after,"reopened":reopened,"reopenedStatus":reopened_status,"idleAnalysisIdentity":idle_analysis.identity(),"idleExit":idle_exit,"idleElapsedMs":idle_elapsed.as_millis(),"finalStatus":final_status})).unwrap()).unwrap();
+            "status":status,"independentDataFailure":independent_data_failure,"changed":changed,"faults":faults,"recovered":recovered,"closed":closed,"after":after,"reopened":reopened,"reopenedStatus":reopened_status,"idleAnalysisIdentity":idle_analysis.identity(),"idleExit":idle_exit,"idleElapsedMs":idle_elapsed.as_millis(),"finalStatus":final_status})).unwrap()).unwrap();
         println!("{}", root.display());
     }
 }

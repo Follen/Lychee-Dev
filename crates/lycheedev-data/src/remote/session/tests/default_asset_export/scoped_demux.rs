@@ -19,11 +19,9 @@ fn avi() -> Vec<u8> {
 #[test]
 fn default_cdn_demux_uses_offline_authenticated_session_through_manifest_publication() {
     let f = AssetFixture::new(avi());
-    let mut inv = f.invocation("unused");
-    inv.command = "asset demux".into();
-    inv.flags
-        .insert("--output".into(), f.output.to_str().unwrap().into());
-    let outcome = crate::migration_oracle::dispatch(&inv).unwrap();
+    let ctx = f.context();
+    let request = DemuxRequest::new(DemuxInput::Casc { file_id: 7 }, f.output.clone());
+    let outcome = assets::demux::run(&ctx, &request).unwrap();
     assert_eq!(outcome.data["source"]["kind"], "casc");
     assert_eq!(outcome.data["source"]["fileDataID"], 7);
     assert_eq!(outcome.provenance.len(), 4);
@@ -45,18 +43,16 @@ fn default_cdn_demux_uses_offline_authenticated_session_through_manifest_publica
         json!([outcome.provenance[0]["id"]])
     );
     assert!(f.source.backend.calls.lock().unwrap().is_empty());
-    assert_eq!(inv.control.stop_cause().unwrap(), None);
+    assert_eq!(ctx.control.stop_cause().unwrap(), None);
     f.close();
 }
 #[test]
 fn default_cdn_demux_existing_manifest_precedes_all_source_and_capture_work() {
     let f = AssetFixture::new(avi());
     std::fs::write(f.output.join("demux-manifest.json"), b"existing").unwrap();
-    let mut inv = f.invocation("unused");
-    inv.command = "asset demux".into();
-    inv.flags
-        .insert("--output".into(), f.output.to_str().unwrap().into());
-    let error = crate::migration_oracle::dispatch(&inv).unwrap_err();
+    let ctx = f.context();
+    let request = DemuxRequest::new(DemuxInput::Casc { file_id: 7 }, f.output.clone());
+    let error = assets::demux::run(&ctx, &request).unwrap_err();
     assert_eq!(error.code, "records.export_conflict");
     assert!(f.captures().is_empty());
     assert!(f.source.backend.calls.lock().unwrap().is_empty());

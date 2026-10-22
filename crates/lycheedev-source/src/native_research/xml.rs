@@ -114,11 +114,12 @@ impl XmlResearch {
         }
         Ok(owners)
     }
+    #[cfg(test)]
     pub fn mapping_manifests(&self)->Vec<Value>{self.scripts.values().map(xml_inline::Script::mapping_manifest).collect()}
     pub fn identity(&self,control:&OperationControl)->Result<Value>{self.identity_with_rules(xml_load::RULES,xml_inline::SOURCE_MAP_RULES,control)}
     fn identity_with_rules(&self,program_rules:&str,map_rules:&str,control:&OperationControl)->Result<Value>{
         let documents=hash_sequence(&json!(["xml-original-documents-v1",program_rules,map_rules]),self.documents.iter().map(|(path,text)|(path,storage::sha256(text.as_bytes()))),control)?;
-        let maps=hash_sequence(&json!(["xml-source-maps-v1",program_rules,map_rules]),self.scripts.iter().map(|(key,script)|(key,script.mapping_manifest())),control)?;
+        let maps=hash_sequence(&json!(["xml-source-maps-v1",program_rules,map_rules]),self.scripts.iter().map(|(key,script)|(key,script.mapping_manifest_view())),control)?;
         let contexts=hash_sequence(&json!(["xml-load-contexts-v1",program_rules]),self.programs.iter().map(|program|(&program.manifest,&program.context)),control)?;
         Ok(json!({"schema":"lycheedev.source-xml-input-identity.v1","programRules":program_rules,"mapRules":map_rules,
             "documentsSHA256":documents,"documentCount":self.documents.len(),"mapsSHA256":maps,"mapCount":self.scripts.len(),
@@ -202,17 +203,7 @@ impl XmlResearch {
     }
 
     // Prior eager predicates remain a test oracle for the path-only shortcut.
-    #[cfg(test)]
-    pub(crate) fn eager_matches_location(&self,prepared:&PreparedSnapshot,symbol:&index::Symbol,site:&Site)->Result<bool>{let(path,line)=self.line(prepared,site)?;Ok(path==symbol.path&&line==symbol.line)}
-    #[cfg(test)]
-    pub(crate) fn eager_matches_function(&self,prepared:&PreparedSnapshot,symbol:&index::Symbol,site:&Site)->Result<bool>{
-        let(path,line)=self.line(prepared,site)?;Ok(path==symbol.path&&line==symbol.line&&site.text(prepared.inputs())?==symbol.name)
-    }
-    #[cfg(test)]
-    pub(crate) fn eager_within(&self,prepared:&PreparedSnapshot,symbol:&index::Symbol,site:&Site)->Result<bool>{
-        if self.owners.get(&site.file).is_some_and(|owners|owners.iter().any(|(name,origin)|name==&symbol.name&&self.matches_origin(symbol,origin))){return Ok(true);}
-        let(path,line)=self.line(prepared,site)?;Ok(path==symbol.path&&line>=symbol.line&&line<=symbol.end_line.max(symbol.line))
-    }
+
 }
 
 /// Stream a canonical sequence into SHA256. Only one item is materialized at a
@@ -291,7 +282,7 @@ mod tests{
         let before=crate::xml_program::catalog_verifications();
         XmlResearch::prepare(&mut BTreeMap::new(),BTreeMap::new(),&[],&json!({}),&control).unwrap();
         assert_eq!(crate::xml_program::catalog_verifications(),before);
-        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         let error=XmlResearch::prepare(&mut BTreeMap::new(),BTreeMap::from([("x.xml".into(),"<Ui/>".into())]),&[],&json!({}),&control).err().unwrap();
         assert_eq!(error.code,"command.cancelled");
         assert_eq!(crate::xml_program::catalog_verifications(),before);
@@ -301,7 +292,7 @@ mod tests{
         let program=crate::xml_program::extract_production("Frame.xml",b"<Ui><Frame name=\"A\" virtual=\"true\"><Scripts><OnLoad>Own()</OnLoad></Scripts></Frame></Ui>").unwrap();
         let objects=crate::xml_program::catalog().unwrap().object_elements();
         let control=OperationControl::default();
-        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(XmlResearch::declaration_owners(&program,&objects,&control).unwrap_err().code,"command.cancelled");
     }
     #[test]
@@ -350,6 +341,24 @@ mod tests{
         let rules=xml.identity_with_rules(xml_load::RULES,"changed-map-rules",&control).unwrap();
         assert_ne!(rules["documentsSHA256"],identity["documentsSHA256"]);assert_ne!(rules["mapsSHA256"],identity["mapsSHA256"]);
         assert_eq!(xml.identity(&control).unwrap(),identity);
+    }
+    #[test]
+    fn streamed_mapping_identity_matches_original_manifest_sequence(){
+        let control=OperationControl::default();
+        let documents=BTreeMap::from([
+            ("z.xml".into(),"<Ui><Script>local z=1</Script></Ui>".into()),
+            ("a.xml".into(),"\u{feff}<Ui>\r\n<Frame><Scripts><OnLoad>local text=&quot;界&quot;\r\n</OnLoad></Scripts></Frame></Ui>".into()),
+        ]);
+        let xml=XmlResearch::prepare(&mut BTreeMap::new(),documents,&[],&json!({}),&control).unwrap();
+        let header=json!(["xml-source-maps-v1",xml_load::RULES,xml_inline::SOURCE_MAP_RULES]);
+        let old=hash_sequence(&header,xml.scripts.iter().map(|(key,script)|(key,script.mapping_manifest())),&control).unwrap();
+        assert_eq!(xml.identity(&control).unwrap()["mapsSHA256"],old);
+        let old=serde_json::to_vec(&xml.mapping_manifests()).unwrap();
+        assert_eq!(serde_json::to_vec(&ResearchSourceMaps(&xml)).unwrap(),old);
+        let empty=XmlResearch::prepare(&mut BTreeMap::new(),BTreeMap::new(),&[],&json!({}),&control).unwrap();
+        let old=hash_sequence::<Value>(&header,[],&control).unwrap();
+        assert_eq!(empty.identity(&control).unwrap()["mapsSHA256"],old);
+        assert_eq!(serde_json::to_vec(&ResearchSourceMaps(&empty)).unwrap(),b"[]");
     }
     #[test]
     fn streamed_xml_digest_matches_canonical_json_sequence(){

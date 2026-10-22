@@ -6,23 +6,49 @@ use std::{
         io::{AsRawHandle, IntoRawHandle},
         process::CommandExt,
     },
-    process::{Child, Command},
+    process::{Child, Command, ExitStatus},
     time::{Duration, Instant},
 };
 use windows::Win32::{
-    Foundation::{CloseHandle, ERROR_NO_MORE_FILES, FILETIME, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
+    Foundation::{CloseHandle, ERROR_NO_MORE_ITEMS, FILETIME, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
     System::{
-        Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+        Diagnostics::ProcessSnapshotting::{
+            HPSS, HPSSWALK, PSS_CAPTURE_THREADS, PSS_THREAD_ENTRY, PSS_WALK_THREADS,
+            PssCaptureSnapshot, PssFreeSnapshot, PssWalkMarkerCreate, PssWalkMarkerFree,
+            PssWalkSnapshot,
         },
         Threading::{
-            CREATE_NO_WINDOW, CREATE_SUSPENDED, GetProcessIdOfThread, GetProcessTimes, GetThreadId,
-            OpenThread, ResumeThread, THREAD_QUERY_LIMITED_INFORMATION, THREAD_SUSPEND_RESUME,
-            WaitForSingleObject,
+            CREATE_NO_WINDOW, CREATE_SUSPENDED, GetCurrentProcess, GetProcessIdOfThread,
+            GetProcessTimes, GetThreadId, OpenThread, ResumeThread,
+            THREAD_QUERY_LIMITED_INFORMATION, THREAD_SUSPEND_RESUME, WaitForSingleObject,
         },
     },
 };
 struct Handle(HANDLE);
+
+/// Wait on the already-owned process handle for one finite caller-owned slice.
+/// The caller retains its deadline, cancellation and retirement policy.
+pub fn wait_child_timeout(
+    child: &mut Child,
+    timeout: Duration,
+) -> std::io::Result<Option<ExitStatus>> {
+    // SAFETY: Child holds the process handle throughout this mutable borrow.
+    // Keep the timeout finite, including when the caller supplied a large value.
+    let state = unsafe {
+        WaitForSingleObject(
+            HANDLE(child.as_raw_handle()),
+            timeout.as_millis().min(u32::MAX as u128 - 1) as u32,
+        )
+    };
+    if state == WAIT_OBJECT_0 {
+        child.try_wait()
+    } else if state == WAIT_TIMEOUT {
+        Ok(None)
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
 impl Drop for Handle {
     fn drop(&mut self) {
         unsafe {
@@ -270,47 +296,135 @@ fn check(deadline: Instant, cancel: &mut impl FnMut() -> bool) -> Result<(), Str
     }
     Ok(())
 }
+// Both PSS resources belong to this calling process. Normal/error returns
+// explicitly check both frees; Drop only protects unwinding before that point.
+struct ThreadSnapshot {
+    snapshot: Option<HPSS>,
+    marker: Option<HPSSWALK>,
+}
+impl ThreadSnapshot {
+    fn capture(process: HANDLE) -> Result<Self, String> {
+        let mut snapshot = HPSS::default();
+        // SAFETY: the caller holds this process handle. Capture only its thread
+        // list, without VA cloning, memory reads or thread contexts.
+        let status =
+            unsafe { PssCaptureSnapshot(process, PSS_CAPTURE_THREADS, None, &mut snapshot) };
+        if status != 0 {
+            return Err(format!("startup.thread_snapshot_capture:{status}"));
+        }
+        Ok(Self {
+            snapshot: Some(snapshot),
+            marker: None,
+        })
+    }
+    fn unique_thread(
+        &mut self,
+        pid: u32,
+        deadline: Instant,
+        cancel: &mut impl FnMut() -> bool,
+    ) -> Result<u32, String> {
+        const MAX_THREADS: usize = 65536;
+        check(deadline, cancel)?;
+        let mut marker = HPSSWALK::default();
+        // SAFETY: PSS creates one local walk marker with its default allocator.
+        let status = unsafe { PssWalkMarkerCreate(None, &mut marker) };
+        if status != 0 {
+            return Err(format!("startup.thread_snapshot_marker:{status}"));
+        }
+        self.marker = Some(marker);
+        let (mut selected, mut entries) = (None, 0usize);
+        loop {
+            check(deadline, cancel)?;
+            let mut entry = std::mem::MaybeUninit::<PSS_THREAD_ENTRY>::uninit();
+            // SAFETY: the generated repr(C) type supplies native alignment and
+            // size. Initialize padding too, before exposing its entire storage
+            // as PssWalkSnapshot's byte buffer. Read fields only on success.
+            let status = unsafe {
+                let pointer = entry.as_mut_ptr().cast::<u8>();
+                std::ptr::write_bytes(pointer, 0, std::mem::size_of::<PSS_THREAD_ENTRY>());
+                let bytes = std::slice::from_raw_parts_mut(
+                    pointer,
+                    std::mem::size_of::<PSS_THREAD_ENTRY>(),
+                );
+                PssWalkSnapshot(
+                    self.snapshot.expect("owned thread snapshot"),
+                    PSS_WALK_THREADS,
+                    marker,
+                    Some(bytes),
+                )
+            };
+            if status == ERROR_NO_MORE_ITEMS.0 {
+                break;
+            }
+            if status != 0 {
+                return Err(format!("startup.thread_snapshot_walk:{status}"));
+            }
+            // SAFETY: a successful walk filled the initialized native entry.
+            let entry = unsafe { entry.assume_init() };
+            entries += 1;
+            if entries > MAX_THREADS {
+                return Err("startup.thread_inventory_budget".into());
+            }
+            if entry.ProcessId != pid || entry.ThreadId == 0 {
+                return Err("startup.thread_identity_changed".into());
+            }
+            if selected.replace(entry.ThreadId).is_some() {
+                return Err("startup.primary_thread_ambiguous".into());
+            }
+        }
+        selected.ok_or_else(|| "startup.primary_thread_missing".into())
+    }
+    fn finish(mut self, result: Result<u32, String>) -> Result<u32, String> {
+        let mut errors = Vec::new();
+        if let Some(marker) = self.marker.take() {
+            // SAFETY: take transfers the sole local marker for one free attempt.
+            let status = unsafe { PssWalkMarkerFree(marker) };
+            if status != 0 {
+                errors.push(format!("startup.thread_snapshot_marker_free:{status}"));
+            }
+        }
+        if let Some(snapshot) = self.snapshot.take() {
+            // SAFETY: capture placed this snapshot in the current process,
+            // even though the captured target was the held child process.
+            let status = unsafe { PssFreeSnapshot(GetCurrentProcess(), snapshot) };
+            if status != 0 {
+                errors.push(format!("startup.thread_snapshot_free:{status}"));
+            }
+        }
+        if errors.is_empty() {
+            return result;
+        }
+        match result {
+            Ok(_) => Err(errors.join("; ")),
+            Err(primary) => Err(format!("{primary}; {}", errors.join("; "))),
+        }
+    }
+}
+impl Drop for ThreadSnapshot {
+    fn drop(&mut self) {
+        // Unwind fallback only; explicit finish consumes both handles before
+        // checking statuses, so even a failed free is never retried by Drop.
+        unsafe {
+            if let Some(marker) = self.marker.take() {
+                let _ = PssWalkMarkerFree(marker);
+            }
+            if let Some(snapshot) = self.snapshot.take() {
+                let _ = PssFreeSnapshot(GetCurrentProcess(), snapshot);
+            }
+        }
+    }
+}
 fn original_primary_thread(
     child: &Child,
     created: u64,
     deadline: Instant,
     cancel: &mut impl FnMut() -> bool,
 ) -> Result<Handle, String> {
-    const MAX_THREADS: usize = 65536;
-    let snapshot = Handle(unsafe {
-        CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0).map_err(|error| error.to_string())?
-    });
-    let mut entry = THREADENTRY32 {
-        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
-        ..Default::default()
-    };
-    unsafe {
-        Thread32First(snapshot.0, &mut entry).map_err(|error| error.to_string())?;
-    }
-    let (mut selected, mut entries) = (None, 0usize);
-    loop {
-        check(deadline, cancel)?;
-        entries += 1;
-        if entries > MAX_THREADS {
-            return Err("startup.thread_inventory_budget".into());
-        }
-        if entry.th32OwnerProcessID == child.id() {
-            if selected.is_some() {
-                return Err("startup.primary_thread_ambiguous".into());
-            }
-            selected = Some(entry.th32ThreadID);
-        }
-        match unsafe { Thread32Next(snapshot.0, &mut entry) } {
-            Ok(()) => {}
-            Err(error)
-                if error.code() == windows::core::HRESULT::from_win32(ERROR_NO_MORE_FILES.0) =>
-            {
-                break;
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    let tid = selected.ok_or("startup.primary_thread_missing")?;
+    check(deadline, cancel)?;
+    let mut snapshot = ThreadSnapshot::capture(HANDLE(child.as_raw_handle()))?;
+    let selected = snapshot.unique_thread(child.id(), deadline, cancel);
+    let tid = snapshot.finish(selected)?;
+    check(deadline, cancel)?;
     let thread = Handle(unsafe {
         OpenThread(
             THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
@@ -504,3 +618,55 @@ fn spawn_with_probe_until(
 #[cfg(test)]
 #[path = "guarded_spawn_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod thread_snapshot_tests {
+    use super::*;
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+
+    #[test]
+    fn target_snapshot_refuses_multiple_threads() {
+        // Keep a second real thread alive through capture: the caller cannot
+        // pass unique-primary admission just because the snapshot is targeted.
+        let (stop, wait) = std::sync::mpsc::sync_channel(0);
+        let parked = std::thread::spawn(move || wait.recv().unwrap());
+        let result = (|| {
+            // SAFETY: pseudo handles and IDs refer only to this test process.
+            let mut snapshot = ThreadSnapshot::capture(unsafe { GetCurrentProcess() })?;
+            let selected = snapshot.unique_thread(
+                unsafe { GetCurrentProcessId() },
+                Instant::now() + Duration::from_secs(5),
+                &mut || false,
+            );
+            snapshot.finish(selected)
+        })();
+        stop.send(()).unwrap();
+        parked.join().unwrap();
+        assert_eq!(result.unwrap_err(), "startup.primary_thread_ambiguous");
+    }
+
+    #[test]
+    fn target_snapshot_preserves_cancellation_and_deadline() {
+        // SAFETY: capture/read only this test process's thread identities.
+        let mut snapshot = ThreadSnapshot::capture(unsafe { GetCurrentProcess() }).unwrap();
+        let mut checks = 0;
+        let selected = snapshot.unique_thread(
+            unsafe { GetCurrentProcessId() },
+            Instant::now() + Duration::from_secs(5),
+            &mut || {
+                checks += 1;
+                // Enter the walk and read its first item before cancellation.
+                checks == 3
+            },
+        );
+        assert_eq!(snapshot.finish(selected).unwrap_err(), "startup.cancelled");
+
+        let mut snapshot = ThreadSnapshot::capture(unsafe { GetCurrentProcess() }).unwrap();
+        let selected = snapshot.unique_thread(
+            unsafe { GetCurrentProcessId() },
+            Instant::now(),
+            &mut || false,
+        );
+        assert_eq!(snapshot.finish(selected).unwrap_err(), "startup.deadline");
+    }
+}

@@ -3,10 +3,11 @@
 use super::{FileScope, Scope};
 use crate::{
     blte::DecodePolicy,
-    local_query::{File, sql_reader::Reader},
+    query_source::{File, reader::Reader},
     resource::Budget,
 };
-use lycheedev_core::{Invocation, Result, selection::DataPin};
+use crate::request::DataContext;
+use lycheedev_core::{Result, selection::DataPin};
 use std::sync::Arc;
 
 pub(super) struct Session<'a, 'scope> {
@@ -60,7 +61,7 @@ impl FileScope for Session<'_, '_> {
         self.scope.check()?;
         self.reader.verify_source()
     }
-    fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()> {
+    fn check_consumer(&self, invocation: &DataContext, budget: &Arc<Budget>) -> Result<()> {
         self.scope.check_consumer(invocation, budget)?;
         self.reader.check_source()
     }

@@ -21,7 +21,7 @@ function requestAt(directory) {
   const artifact = join(directory, 'artifacts/artifact.json'); fs.writeFileSync(artifact, '{}');
   return {schema: 'lycheedev.source-postcard-fresh-config.v1', layout: POSTCARD_LAYOUT, ownerRoot: directory,
     candidate: {sourceRoot: join(directory, 'source'), artifactRoot: join(directory, 'artifacts'), artifact, commit: '8c9a1bccd543b8e7d605d1f791a34f7d3aa713f8', artifactSHA256: 'a'.repeat(64), binarySHA256: 'b'.repeat(64), sourceTreeSHA256: 'c'.repeat(64)},
-    go: {sourceRoot: join(directory, 'go'), packageRoot: join(directory, 'go'), luaLSArchive: join(directory, 'luals.zip'), packageSHA256: 'd'.repeat(64)},
+    go: {referenceRoot: join(directory, 'go'), packageSHA256: 'd'.repeat(64)},
     exporter: {mode: 'existing', artifact: join(directory, 'exporter/artifact.json'), artifactSHA256: 'e'.repeat(64), binarySHA256: 'f'.repeat(64), sourceTreeSHA256: 'c'.repeat(64)}};
 }
 function temporary(t) { const directory = fs.mkdtempSync(join(tmpdir(), 'postcard-fresh-')); t.after(() => { if (t.passed) fs.rmSync(directory, {recursive: true, force: true}); else t.diagnostic(`Retained fixture: ${directory}`); }); return directory; }
@@ -42,7 +42,7 @@ async function controller(t, fault = {}) {
   const oracle = JSON.parse(fs.readFileSync(join(root, 'tests/rust-source-full-corpus/retail-oracle.json'))), basePin = {id: 'PIN-base', source: {exactCommit: BASE_COMMIT}};
   let calls = 0, identities = 0;
   const services = {
-    runnerIdentity: () => inputs, verifyCandidateRecord: () => ({sourceBinary: 'rust.exe'}), verifyGoPackage: () => ({binary: 'go.exe', packageSHA256: request.go.packageSHA256}),
+    runnerIdentity: () => inputs, verifyCandidateRecord: () => ({sourceBinary: 'rust.exe'}), verifyFixedGoPackage: () => ({binary: 'go.exe', packageSHA256: request.go.packageSHA256}),
     verifyAdditionalIdentity() { identities++; if (fault.identityAt === identities) throw new Error('same-source exporter changed'); },
     beginScratch: ownerFactory(directory, owners, events), admission(_root, options) { admissions.push(options); }, metadataPageSize: () => 4096,
     prepareSeeds(homes) { for (const home of Object.values(homes)) fs.mkdirSync(home); return {pin: basePin, rows: []}; },

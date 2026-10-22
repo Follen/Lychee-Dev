@@ -60,7 +60,7 @@ fn public_http_third_redirect_is_rejected_after_qualified_drain() {
     assert_eq!(budget.snapshot().unwrap().network_bytes, 9);
 }
 #[test]
-fn public_http_redirect_guard_uses_exact_go_host_not_normalized_host() {
+fn public_http_redirect_guard_uses_exact_wire_host_not_normalized_host() {
     for location in ["http://raw.githubusercontent.com/x", "https://RAW.githubusercontent.com/x",
         "https://raw.githubusercontent.com:443/x", "https://raw.githubusercontent.com./x", "https://else.test/x"] {
         let script = Script::new(vec![response(302, Some(location), b"abc".to_vec())]);
@@ -190,14 +190,14 @@ fn public_fetcher_preserves_original_first_stop_in_both_orders_and_transport_cau
 }
 #[test]
 fn public_fetcher_original_stop_precedes_independent_budget_stop_but_keeps_both() {
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    use lycheedev_core::control::TrackedCancellation;
     let deadline = Instant::now() + Duration::from_secs(10);
     let control = OperationControl::uncancelable(deadline);
     let cancel = control.tracked_cancel_handle().unwrap();
-    let budget_cancel = Arc::new(AtomicBool::new(false));
+    let budget_cancel = TrackedCancellation::new();
     let budget = Budget::new(Cost::defaults(), deadline, Some(budget_cancel.clone()));
     let sender = OnSend { calls: std::cell::Cell::new(0), action: |_: &OperationControl, _: Instant| {
-        budget_cancel.store(true, Ordering::Release);
+        budget_cancel.cancel();
         cancel.cancel();
         Err(transport_failure())
     }};
@@ -208,12 +208,12 @@ fn public_fetcher_original_stop_precedes_independent_budget_stop_but_keeps_both(
 }
 #[test]
 fn public_fetcher_independent_budget_stop_precedes_transport_classification() {
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    use lycheedev_core::control::TrackedCancellation;
     let (control, _) = scope();
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel = TrackedCancellation::new();
     let budget = Budget::new(Cost::defaults(), control.deadline(), Some(cancel.clone()));
     let sender = OnSend { calls: std::cell::Cell::new(0), action: |_: &OperationControl, _: Instant| {
-        cancel.store(true, Ordering::Release);
+        cancel.cancel();
         Err(transport_failure())
     }};
     let failure = PublicFetcher.fetch_with(&sender, &control, Some(&budget), control.deadline()).unwrap_err();
@@ -387,9 +387,11 @@ fn public_context_memoizes_corrected_public_fetcher_first_failure_with_all_cause
     let deadline = Instant::now() + Duration::from_millis(200);
     let control = OperationControl::uncancelable(deadline);
     let cancel = control.tracked_cancel_handle().unwrap();
-    let inv = Invocation { command: "records file".into(), positional: None,
-        flags: std::collections::BTreeMap::new(), home: home.0.clone(), cwd: home.0.clone(), control: control.clone() };
-    let mut context = Context::prepare(&inv, deadline).unwrap();
+    let request = crate::request::DataContext {
+        home: home.0.clone(), cwd: home.0.clone(), control: control.clone(),
+        source: Default::default(),
+    };
+    let mut context = Context::prepare(&request, deadline).unwrap();
     let sender = OnSend { calls: std::cell::Cell::new(0), action: |_: &OperationControl, _: Instant| {
         sleep_past(deadline);
         cancel.cancel();

@@ -1,21 +1,14 @@
 //! Controlled immutable definition revision resolution for remote target preparation.
-//! The legacy entry point remains unchanged; this path keeps its caller's deadline.
+//! Every request retains its caller's deadline.
 use super::*;
 use crate::{
     remote::{
-        cache::{
-            Store, pure_expected,
-            wire::{Object, ObjectSeed, folded, scalar},
-        },
+        cache::{Store, pure_expected},
         transport::{self, BodyPolicy, GetPolicy, LocatorPolicy},
     },
     resource::Budget,
 };
 use lycheedev_core::ToolkitError;
-use serde::{
-    Deserializer,
-    de::{DeserializeSeed, IgnoredAny, MapAccess},
-};
 
 fn identity() -> ToolkitError {
     fault(
@@ -30,33 +23,11 @@ pub(crate) fn normalized_reference(value: &str) -> Result<&str> {
     }
     reference(value).ok_or_else(identity)
 }
-#[derive(Default, Serialize)]
+#[derive(Default, Serialize, Deserialize)]
 struct Remembered {
     reference: String,
     commit: String,
 }
-impl Object for Remembered {
-    fn fields<'de, A: MapAccess<'de>>(&mut self, mut map: A) -> std::result::Result<(), A::Error> {
-        while let Some(key) = map.next_key::<String>()? {
-            match folded(&key).as_str() {
-                "reference" => scalar(&mut map, &mut self.reference)?,
-                "commit" => scalar(&mut map, &mut self.commit)?,
-                _ => {
-                    map.next_value::<IgnoredAny>()?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-impl<'de> Deserialize<'de> for Remembered {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let mut value = Self::default();
-        ObjectSeed(&mut value).deserialize(d)?;
-        Ok(value)
-    }
-}
-
 fn cache_error(error: ToolkitError) -> ToolkitError {
     if pure_expected(&error, "records.remote_identity") {
         identity()

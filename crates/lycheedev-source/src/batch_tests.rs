@@ -10,18 +10,34 @@ use std::{
     process::{Command, Stdio},
 };
 
-fn invocation(home: PathBuf) -> Invocation {
-    Invocation {
-        command: "source batch".into(),
-        positional: None,
-        flags: BTreeMap::new(),
+fn source_context(home: PathBuf) -> SourceContext {
+    SourceContext {
         cwd: home.clone(),
         home,
         control: OperationControl::default(),
     }
 }
+fn unprepared_selection() -> ResearchSelection {
+    ResearchSelection {
+        pin: selection::PinnedSet {
+            schema: "lycheedev.selection.v1".into(),
+            id: "absent-pin".into(),
+            spec: SelectionSpec {
+                source: Some(SourcePin {
+                    repository: "elvui".into(),
+                    product: "main".into(),
+                    requested_ref: "refs/heads/main".into(),
+                    exact_commit: "a".repeat(40),
+                    parser_revision: "source-v1".into(),
+                }),
+                ..Default::default()
+            },
+        },
+        environment: None,
+    }
+}
 #[test]
-fn fixed_go_batch_json_admission_and_known_field_merging() {
+fn reference_batch_json_admission_and_known_field_merging() {
     for raw in [
         r#"{"requests":[]}"#,
         r#"{"requests":[{}]}"#,
@@ -61,7 +77,7 @@ fn fixed_go_batch_json_admission_and_known_field_merging() {
     assert!(!merged.needs_research());
 }
 #[test]
-fn go_json_reuses_request_elements_and_replaces_invalid_unicode() {
+fn wire_json_reuses_request_elements_and_replaces_invalid_unicode() {
     let merged = parse(br#"{"requests":[{"id":"first","query":{"text":"Foo"}}],"requests":[{"query":{"limit":1}}]}"#).unwrap();
     assert_eq!(merged.requests[0].id, "first");
     assert_eq!(merged.requests[0].query.as_ref().unwrap().text, "Foo");
@@ -84,8 +100,8 @@ fn go_json_reuses_request_elements_and_replaces_invalid_unicode() {
 #[test]
 fn every_item_is_validated_before_preparation_or_runtime_admission() {
     let home = unique_home("invalid");
-    let mut inv = invocation(home.clone());
-    inv.flags.insert("--snapshot".into(), "absent-pin".into());
+    let ctx = source_context(home.clone());
+    let selected = unprepared_selection();
     let request = BatchRequest {
         requests: vec![
             BatchItem {
@@ -105,7 +121,15 @@ fn every_item_is_validated_before_preparation_or_runtime_admission() {
             },
         ],
     };
-    let error = dispatch_request(&inv, request, SourceTools::default()).unwrap_err();
+    let error = dispatch_request(
+        &ctx,
+        &selected,
+        request,
+        ResearchMode::Static,
+        false,
+        SourceTools::default(),
+    )
+    .unwrap_err();
     assert_eq!(error.code, "codebase.invalid_query");
     assert_eq!(error.exit_code, 2);
     assert!(error.message.contains("request 2"));
@@ -114,19 +138,26 @@ fn every_item_is_validated_before_preparation_or_runtime_admission() {
 #[test]
 fn frozen_json_defaults_and_invalid_queries_are_distinct_from_cli_defaults() {
     let request = parse(br#"{"requests":[{"query":{"text":" Foo ","limit":-5}},{"refs":{"symbol":"Foo"}},{"context":{"symbol":"Foo"}}]}"#).unwrap();
-    let inv = invocation(PathBuf::new());
-    let calls = request
-        .requests
-        .iter()
-        .map(|item| item_invocation(&inv, item).unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(calls[0].flag("--limit"), Some("10"));
-    assert_eq!(calls[0].argument().unwrap(), "Foo");
-    assert_eq!(calls[1].flag("--limit"), Some("25"));
-    assert_eq!(calls[2].flag("--limit"), Some("25"));
-    assert_eq!(calls[2].flag("--max-lines"), Some("80"));
-    assert_eq!(calls[2].flag("--max-bytes"), Some("16384"));
-    assert_eq!(calls[2].flag("--depth"), Some("0"));
+    let calls = prepare_calls(&request, false).unwrap();
+    let Operation::Query(query) = &calls[0] else {
+        panic!("query operation")
+    };
+    assert_eq!(query.limit, 10);
+    assert_eq!(query.text, "Foo");
+    let Operation::Refs(refs) = &calls[1] else {
+        panic!("refs operation")
+    };
+    assert_eq!(refs.limit, 25);
+    assert_eq!(refs.selector, SymbolSelector::Name("Foo".into()));
+    assert_eq!(refs.direction, RelationDirection::Both);
+    let Operation::Context(context) = &calls[2] else {
+        panic!("context operation")
+    };
+    assert_eq!(context.limit, 25);
+    assert_eq!(context.max_lines, 80);
+    assert_eq!(context.max_bytes, 16384);
+    assert_eq!(context.depth, 0);
+    assert!(!context.flow);
     for (body, code) in [
         (json!({"query":{"text":""}}), "codebase.invalid_query"),
         (
@@ -179,24 +210,22 @@ fn frozen_json_defaults_and_invalid_queries_are_distinct_from_cli_defaults() {
     }
 }
 #[test]
-fn static_options_and_expired_controls_fail_before_preparation() {
+fn expired_control_fails_before_preparation() {
     let request = parse(br#"{"requests":[{"query":{"text":"Foo"}}]}"#).unwrap();
     let home = unique_home("stopped");
-    let mut inv = invocation(home.clone());
-    inv.flags.insert("--static-only".into(), "true".into());
-    inv.flags.insert("--session-reuse".into(), "true".into());
+    let mut ctx = source_context(home.clone());
+    ctx.control = OperationControl::uncancelable(Instant::now());
     assert_eq!(
-        dispatch_request(&inv, request.clone(), SourceTools::default())
-            .unwrap_err()
-            .code,
-        "command.invalid_arguments"
-    );
-    inv.flags.clear();
-    inv.control = OperationControl::uncancelable(Instant::now());
-    assert_eq!(
-        dispatch_request(&inv, request, SourceTools::default())
-            .unwrap_err()
-            .code,
+        dispatch_request(
+            &ctx,
+            &unprepared_selection(),
+            request,
+            ResearchMode::Static,
+            false,
+            SourceTools::default()
+        )
+        .unwrap_err()
+        .code,
         "command.deadline"
     );
     assert!(!home.exists());
@@ -204,17 +233,18 @@ fn static_options_and_expired_controls_fail_before_preparation() {
 #[test]
 fn batch_deadline_retains_live_caller_cancellation_for_owned_processes() {
     let parent = OperationControl::default();
-    let token = parent.cancel_handle();
-    let batch = parent.child(
-        Instant::now() + Duration::from_secs(90),
-        parent.cancel_handle(),
-    );
+    let parent_signal = parent.tracked_cancel_handle().unwrap();
+    let batch = parent
+        .ordered_child(Instant::now() + Duration::from_secs(90))
+        .unwrap();
     assert!(batch.deadline() <= parent.deadline());
-    // The process owner polls the token while its caller is blocked, so this
-    // must be visible without calling batch.check() to copy a parent signal.
-    let process_token = batch.token();
-    token.store(true, std::sync::atomic::Ordering::Release);
-    assert!(process_token.load(std::sync::atomic::Ordering::Acquire));
+    // The process owner polls the control while its caller is blocked, so the
+    // parent stop must be visible without copying a signal into the child.
+    parent_signal.cancel();
+    assert_eq!(
+        batch.stop_cause().unwrap(),
+        Some(lycheedev_core::control::StopCause::Cancelled)
+    );
     assert_eq!(batch.check().unwrap_err().code, "command.cancelled");
 }
 
@@ -229,12 +259,13 @@ fn unique_home(name: &str) -> PathBuf {
     ))
 }
 struct Fixture {
-    inv: Invocation,
+    ctx: SourceContext,
+    selection: ResearchSelection,
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
         if std::env::var_os("LYCHEEDEV_RESEARCH_KEEP_FIXTURE").is_none() {
-            let _ = fs::remove_dir_all(&self.inv.home);
+            let _ = fs::remove_dir_all(&self.ctx.home);
         }
     }
 }
@@ -310,36 +341,44 @@ fn fixture() -> Fixture {
         },
     )
     .unwrap();
-    let mut inv = invocation(home);
-    inv.flags.insert("--snapshot".into(), pin.id);
-    inv.flags.insert("--static-only".into(), "true".into());
-    Fixture { inv }
+    Fixture {
+        ctx: source_context(home),
+        selection: ResearchSelection {
+            pin,
+            environment: None,
+        },
+    }
 }
 #[test]
 fn one_capture_shared_snapshot_and_independent_pages_match_single_evaluators() {
     let f = fixture();
     let request=parse(br#"{"requests":[{"id":"find","query":{"text":"Caller","limit":1}},{"id":"uses","refs":{"symbol":"Target","limit":1}},{"id":"read","context":{"symbol":"Caller","limit":1,"maxBytes":12,"depth":1}}]}"#).unwrap();
-    let result = dispatch_request(&f.inv, request.clone(), SourceTools::default()).unwrap();
+    let result = dispatch_request(
+        &f.ctx,
+        &f.selection,
+        request.clone(),
+        ResearchMode::Static,
+        false,
+        SourceTools::default(),
+    )
+    .unwrap();
     assert_eq!(result.provenance.len(), 1);
     assert_eq!(
-        lycheedev_core::metadata::Metadata::open(&f.inv.home, false)
+        lycheedev_core::metadata::Metadata::open(&f.ctx.home, false)
             .unwrap()
             .list::<Value>("capture/", 100)
             .unwrap()
             .len(),
         1
     );
-    assert_eq!(
-        result.selection,
-        json!({"snapshot":f.inv.flag("--snapshot").unwrap()})
-    );
+    assert_eq!(result.selection, json!({"snapshot":f.selection.pin.id}));
     assert_eq!(result.data["snapshot"], result.selection["snapshot"]);
     assert_eq!(result.data["results"].as_array().unwrap().len(), 3);
     assert_eq!(result.data["complete"], false);
     assert_eq!(result.data["truncated"], true);
-    let pin = selection::resolve_pinned(&f.inv).unwrap();
+    let pin = &f.selection.pin;
     let source = pin.source.as_ref().unwrap();
-    let index = index::build_with_control(&f.inv.home, source, &f.inv.control).unwrap();
+    let index = index::build_with_control(&f.ctx.home, source, &f.ctx.control).unwrap();
     let query = index
         .search(source, &pin.id, "Caller", "", "", 1, "")
         .unwrap();
@@ -352,11 +391,19 @@ fn one_capture_shared_snapshot_and_independent_pages_match_single_evaluators() {
         .remove("io");
     query["coverage"].as_object_mut().unwrap().remove("io");
     assert_eq!(batch_query, query);
+    let calls = prepare_calls(&request, false).unwrap();
+    let Operation::Refs(refs_request) = &calls[1] else {
+        panic!("refs operation")
+    };
     let refs =
-        crate::refs::dispatch(&item_invocation(&f.inv, &request.requests[1]).unwrap()).unwrap();
+        crate::refs::dispatch(&f.ctx, &f.selection, refs_request, ResearchMode::Static).unwrap();
     assert_eq!(result.data["results"][1]["refs"], refs.data);
+    let Operation::Context(context_request) = &calls[2] else {
+        panic!("context operation")
+    };
     let context =
-        crate::context::dispatch(&item_invocation(&f.inv, &request.requests[2]).unwrap()).unwrap();
+        crate::context::dispatch(&f.ctx, &f.selection, context_request, ResearchMode::Static)
+            .unwrap();
     assert_eq!(result.data["results"][2]["context"], context.data);
     let mut continued = request.clone();
     continued.requests[1].refs.as_mut().unwrap().cursor =
@@ -369,7 +416,15 @@ fn one_capture_shared_snapshot_and_independent_pages_match_single_evaluators() {
             .as_str()
             .unwrap()
             .into();
-    let next = dispatch_request(&f.inv, continued, SourceTools::default()).unwrap();
+    let next = dispatch_request(
+        &f.ctx,
+        &f.selection,
+        continued,
+        ResearchMode::Static,
+        false,
+        SourceTools::default(),
+    )
+    .unwrap();
     assert_eq!(next.provenance.len(), 1);
     assert_ne!(
         next.data["results"][1]["refs"]["relations"],
@@ -383,14 +438,21 @@ fn one_capture_shared_snapshot_and_independent_pages_match_single_evaluators() {
 #[test]
 fn query_only_needs_no_runtime_and_failed_later_item_never_publishes_a_batch() {
     let f = fixture();
-    let mut inv = f.inv.clone();
-    inv.flags.remove("--static-only");
-    inv.flags
-        .insert("--release".into(), "does-not-exist".into());
+    let ctx = &f.ctx;
     let request = parse(br#"{"requests":[{"query":{"text":"Caller"}}]}"#).unwrap();
-    assert!(dispatch_request(&inv, request, SourceTools::default()).is_ok());
+    assert!(
+        dispatch_request(
+            ctx,
+            &f.selection,
+            request,
+            ResearchMode::OneShot,
+            false,
+            SourceTools::default()
+        )
+        .is_ok()
+    );
     let captures = || {
-        lycheedev_core::metadata::Metadata::open(&inv.home, false)
+        lycheedev_core::metadata::Metadata::open(&ctx.home, false)
             .unwrap()
             .list::<Value>("capture/", 100)
             .unwrap()
@@ -401,15 +463,30 @@ fn query_only_needs_no_runtime_and_failed_later_item_never_publishes_a_batch() {
         parse(br#"{"requests":[{"query":{"text":"Caller"}},{"refs":{"symbol":"Target"}}]}"#)
             .unwrap();
     assert_eq!(
-        dispatch_request(&inv, request, SourceTools::default())
-            .unwrap_err()
-            .code,
+        dispatch_request(
+            ctx,
+            &f.selection,
+            request,
+            ResearchMode::OneShot,
+            false,
+            SourceTools::default()
+        )
+        .unwrap_err()
+        .code,
         "source.native_unavailable"
     );
     let request =
         parse(br#"{"requests":[{"query":{"text":"Caller"}},{"refs":{"symbolId":"absent"}}]}"#)
             .unwrap();
-    let error = dispatch_request(&f.inv, request, SourceTools::default()).unwrap_err();
+    let error = dispatch_request(
+        &f.ctx,
+        &f.selection,
+        request,
+        ResearchMode::Static,
+        false,
+        SourceTools::default(),
+    )
+    .unwrap_err();
     assert_eq!(error.code, "codebase.invalid_symbol");
     assert!(error.message.contains("request 2"));
     assert_eq!(
@@ -421,6 +498,7 @@ fn query_only_needs_no_runtime_and_failed_later_item_never_publishes_a_batch() {
 #[test]
 fn request_scoped_native_batch_uses_one_prepared_session_and_preserves_typed_error() {
     let fixture = || native_research::SnapshotRequest {
+        encoding_warnings: vec![],
         files: BTreeMap::from([(
             "a.lua".into(),
             "function Caller() Target() end\nfunction Target() end\n".into(),
@@ -511,9 +589,7 @@ fn request_scoped_native_batch_uses_one_prepared_session_and_preserves_typed_err
 #[test]
 fn implicit_unavailable_runtime_warns_and_keeps_static_and_flow_evidence_partial() {
     let f = fixture();
-    let mut inv = f.inv.clone();
-    inv.flags.remove("--static-only");
-    inv.flags.insert("--session-reuse".into(), "true".into());
+    let ctx = &f.ctx;
     let request = parse(
         br#"{"requests":[{"refs":{"symbol":"Target"}},{"context":{"symbol":"Caller","depth":1}}]}"#,
     )
@@ -525,7 +601,8 @@ fn implicit_unavailable_runtime_warns_and_keeps_static_and_flow_evidence_partial
             4,
         )
     };
-    let result = dispatch_unavailable(&inv, request.clone(), unavailable()).unwrap();
+    let result =
+        dispatch_unavailable(ctx, &f.selection, request.clone(), false, unavailable()).unwrap();
     assert_eq!(result.warnings.len(), 1);
     assert!(
         result.warnings[0]
@@ -544,8 +621,8 @@ fn implicit_unavailable_runtime_warns_and_keeps_static_and_flow_evidence_partial
             .get("nativeResearch")
             .is_none()
     );
-    inv.flags.insert("--flow".into(), "true".into());
-    let flow = dispatch_unavailable(&inv, request.clone(), unavailable()).unwrap();
+    let flow =
+        dispatch_unavailable(ctx, &f.selection, request.clone(), true, unavailable()).unwrap();
     assert_eq!(
         flow.data["results"][1]["context"]["flow"]["complete"],
         false
@@ -553,26 +630,6 @@ fn implicit_unavailable_runtime_warns_and_keeps_static_and_flow_evidence_partial
     assert_eq!(
         flow.data["results"][1]["context"]["flow"]["gaps"][0]["code"],
         "flow.compiler_unavailable"
-    );
-    inv.flags
-        .insert("--release".into(), "explicit-release".into());
-    assert_eq!(
-        dispatch_unavailable(&inv, request.clone(), unavailable())
-            .unwrap_err()
-            .code,
-        "delivery.release_integrity"
-    );
-    inv.flags.remove("--release");
-    let mut conflicting = inv.clone();
-    conflicting
-        .flags
-        .insert("--static-only".into(), "true".into());
-    assert_eq!(
-        dispatch_unavailable(&conflicting, request.clone(), unavailable())
-            .unwrap_err()
-            .code,
-        "command.invalid_arguments",
-        "fallback must not remove a conflicting session-reuse flag before admission"
     );
     for code in [
         "command.cancelled",
@@ -586,7 +643,7 @@ fn implicit_unavailable_runtime_warns_and_keeps_static_and_flow_evidence_partial
             if code == "command.deadline" { 5 } else { 7 },
         );
         assert_eq!(
-            dispatch_unavailable(&inv, request.clone(), error)
+            dispatch_unavailable(ctx, &f.selection, request.clone(), true, error)
                 .unwrap_err()
                 .code,
             code
@@ -597,22 +654,25 @@ fn implicit_unavailable_runtime_warns_and_keeps_static_and_flow_evidence_partial
 fn cancellation_inside_batch_literal_scan_has_no_capture_and_can_recover() {
     let f = fixture();
     // Warm index preparation is outside the observed query cancellation point.
-    let pin = selection::resolve_pinned(&f.inv).unwrap();
-    index::build_with_control(&f.inv.home, pin.source.as_ref().unwrap(), &f.inv.control).unwrap();
+    let pin = &f.selection.pin;
+    index::build_with_control(&f.ctx.home, pin.source.as_ref().unwrap(), &f.ctx.control).unwrap();
     let request =
         parse(br#"{"requests":[{"query":{"text":"absent-literal","mode":"exploratory"}}]}"#)
             .unwrap();
-    let cancellation = f.inv.control.cancel_handle();
+    let cancellation = f.ctx.control.tracked_cancel_handle().unwrap();
     let mut reached = false;
     let error = dispatch_observed(
-        &f.inv,
+        &f.ctx,
+        &f.selection,
         request.clone(),
+        ResearchMode::Static,
+        false,
         SourceTools::default(),
         None,
         &mut |phase, number| {
             if phase == "line" && number == 1 {
                 reached = true;
-                cancellation.store(true, std::sync::atomic::Ordering::Release);
+                cancellation.cancel();
             }
         },
     )
@@ -620,39 +680,49 @@ fn cancellation_inside_batch_literal_scan_has_no_capture_and_can_recover() {
     assert!(reached, "query never reached literal scan");
     assert_eq!(error.code, "command.cancelled");
     assert!(
-        lycheedev_core::metadata::Metadata::open(&f.inv.home, false)
+        lycheedev_core::metadata::Metadata::open(&f.ctx.home, false)
             .unwrap()
             .list::<Value>("capture/", 100)
             .unwrap()
             .is_empty()
     );
-    let mut recovered = f.inv.clone();
+    let mut recovered = f.ctx.clone();
     recovered.control = OperationControl::default();
     assert_eq!(
-        dispatch_request(&recovered, request, SourceTools::default())
-            .unwrap()
-            .provenance
-            .len(),
+        dispatch_request(
+            &recovered,
+            &f.selection,
+            request,
+            ResearchMode::Static,
+            false,
+            SourceTools::default()
+        )
+        .unwrap()
+        .provenance
+        .len(),
         1
     );
 }
 #[test]
 fn deadline_inside_query_scan_has_no_capture_and_leaves_index_reusable() {
     let mut f = fixture();
-    let pin = selection::resolve_pinned(&f.inv).unwrap();
+    let pin = &f.selection.pin;
     let source = pin.source.as_ref().unwrap();
-    let index = index::build_with_control(&f.inv.home, source, &f.inv.control).unwrap();
+    let index = index::build_with_control(&f.ctx.home, source, &f.ctx.control).unwrap();
     let request =
         parse(br#"{"requests":[{"query":{"text":"absent-literal","mode":"exploratory"}}]}"#)
             .unwrap();
     // Warm preparation is outside the deadline; the actual batch dispatcher
     // must reach its query scan before the original one-second budget expires.
-    f.inv.control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(1));
-    let deadline = f.inv.control.deadline();
+    f.ctx.control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(1));
+    let deadline = f.ctx.control.deadline();
     let mut reached = false;
     let error = dispatch_observed(
-        &f.inv,
+        &f.ctx,
+        &f.selection,
         request.clone(),
+        ResearchMode::Static,
+        false,
         SourceTools::default(),
         None,
         &mut |phase, number| {
@@ -668,7 +738,7 @@ fn deadline_inside_query_scan_has_no_capture_and_leaves_index_reusable() {
     assert!(reached, "batch query never reached literal scan");
     assert_eq!(error.code, "command.deadline");
     assert!(
-        lycheedev_core::metadata::Metadata::open(&f.inv.home, false)
+        lycheedev_core::metadata::Metadata::open(&f.ctx.home, false)
             .unwrap()
             .list::<Value>("capture/", 100)
             .unwrap()
@@ -687,13 +757,20 @@ fn deadline_inside_query_scan_has_no_capture_and_leaves_index_reusable() {
         )
         .unwrap();
     assert!(!recovered["results"].as_array().unwrap().is_empty());
-    let mut recovered_inv = f.inv.clone();
-    recovered_inv.control = OperationControl::default();
+    let mut recovered_ctx = f.ctx.clone();
+    recovered_ctx.control = OperationControl::default();
     assert_eq!(
-        dispatch_request(&recovered_inv, request, SourceTools::default())
-            .unwrap()
-            .provenance
-            .len(),
+        dispatch_request(
+            &recovered_ctx,
+            &f.selection,
+            request,
+            ResearchMode::Static,
+            false,
+            SourceTools::default()
+        )
+        .unwrap()
+        .provenance
+        .len(),
         1
     );
 }
@@ -786,8 +863,8 @@ fn aggregate_measurement_matches_exact_wire_and_keeps_control_errors() {
             .code,
         "source.native_budget"
     );
-    let token = control.cancel_handle();
-    token.store(true, std::sync::atomic::Ordering::Release);
+    let token = control.tracked_cancel_handle().unwrap();
+    token.cancel();
     assert_eq!(
         admit_json(&reply, &control, 0, true).unwrap_err().code,
         "command.cancelled"
@@ -799,19 +876,44 @@ fn aggregate_measurement_matches_exact_wire_and_keeps_control_errors() {
     );
 }
 
-
 #[test]
 fn cold_context_multiple_sites_borrow_each_original_once() {
     let f = fixture();
     let request = parse(br#"{"requests":[{"context":{"symbol":"Target","depth":1,"limit":25,"maxLines":120,"maxBytes":16384}}]}"#).unwrap();
     crate::index::take_read_observations();
-    let result = dispatch_request(&f.inv, request, SourceTools::default()).unwrap();
+    let result = dispatch_request(
+        &f.ctx,
+        &f.selection,
+        request,
+        ResearchMode::Static,
+        false,
+        SourceTools::default(),
+    )
+    .unwrap();
     let reads = crate::index::take_read_observations();
-    let snippets = result.data["results"][0]["context"]["snippets"].as_array().unwrap();
-    assert!(snippets.len() > 1, "fixture must exercise distinct same-file sites");
+    let snippets = result.data["results"][0]["context"]["snippets"]
+        .as_array()
+        .unwrap();
+    assert!(
+        snippets.len() > 1,
+        "fixture must exercise distinct same-file sites"
+    );
     assert!(snippets.iter().all(|snippet| snippet["path"] == "a.lua"));
-    assert_eq!(reads, vec![("a.lua".to_owned(), true)], "cold bytes stay borrowed and per-path memoized");
-    for text in ["## Interface: 120100\na.lua\n", "function Unicode()\n return '汉字🙂abcdef'\nend\n"] {
-        assert!(!f.inv.home.join("cache/source-originals-rust").join(lycheedev_core::storage::sha256(text.as_bytes())).exists());
+    assert_eq!(
+        reads,
+        vec![("a.lua".to_owned(), true)],
+        "cold bytes stay borrowed and per-path memoized"
+    );
+    for text in [
+        "## Interface: 120100\na.lua\n",
+        "function Unicode()\n return '汉字🙂abcdef'\nend\n",
+    ] {
+        assert!(
+            !f.ctx
+                .home
+                .join("cache/source-originals-rust")
+                .join(lycheedev_core::storage::sha256(text.as_bytes()))
+                .exists()
+        );
     }
 }

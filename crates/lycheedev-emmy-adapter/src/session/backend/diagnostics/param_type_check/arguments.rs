@@ -25,6 +25,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         is_variadic: bool,
         bindings: &mut Bindings,
         arg_types: Option<&[OwnedValue]>,
+        complete: &mut bool,
     ) -> QueryResult<Vec<Mismatch>, E> {
         let mut out = Vec::new();
         for (index, (name, param)) in params.iter().enumerate() {
@@ -45,7 +46,12 @@ impl<E> OwnedQuery<'_, '_, E> {
                             for (offset, _) in rest.iter().enumerate() {
                                 let ty =
                                     self.pt_cached_arg_type(args, arg_types, rest_start + offset)?;
-                                rest_types.push(self.pt_normalize_arg(&ty)?);
+                                let ty = self.pt_normalize_arg(&ty)?;
+                                *complete &= self.argument_pair_is_complete(
+                                    &ty,
+                                    &self.owned_child(&param, 0, base),
+                                )?;
+                                rest_types.push(ty);
                             }
                             let tuple = OwnedValue::tuple_checked(
                                 rest_types,
@@ -71,6 +77,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                             if slot.structural_type().contains_tpl_node()
                                 && !self.unify_call_bindings(&slot, &arg_ty, bindings)?
                             {
+                                *complete &= self.argument_pair_is_complete(&arg_ty, &slot)?;
                                 out.push(Mismatch {
                                     range: arg.get_range(),
                                     message: self.pt_mismatch_message(&arg_ty, &slot, name),
@@ -79,6 +86,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                             }
                             slot = self.substitute_owned(slot, bindings)?;
                             slot = self.expand_owned_aliases(slot)?;
+                            *complete &= self.argument_pair_is_complete(&arg_ty, &slot)?;
                             if self.structure_allowed(&arg_ty)?
                                 && self.structure_allowed(&slot)?
                                 && (arg_ty == slot
@@ -101,6 +109,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                             let original = param.clone();
                             let unified = self.unify_call_bindings(&original, &arg_ty, bindings)?;
                             if original.structural_type().contains_tpl_node() && !unified {
+                                *complete &= self.argument_pair_is_complete(&arg_ty, &original)?;
                                 out.push(Mismatch {
                                     range: arg.get_range(),
                                     message: self.pt_mismatch_message(&arg_ty, &original, name),
@@ -108,6 +117,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                                 continue;
                             }
                             let expected = self.substitute_owned(original, bindings)?;
+                            *complete &= self.argument_pair_is_complete(&arg_ty, &expected)?;
                             if self.structure_allowed(&arg_ty)?
                                 && self.structure_allowed(&expected)?
                                 && (arg_ty == expected
@@ -122,18 +132,41 @@ impl<E> OwnedQuery<'_, '_, E> {
                             });
                         }
                     }
+                } else if !rest.is_empty() {
+                    *complete = false;
                 }
                 break;
             }
-            let Some(param) = param else { continue };
+            let Some(param) = param else {
+                if args.get(index).is_some() {
+                    *complete = false;
+                }
+                continue;
+            };
             let Some(arg) = args.get(index) else { continue };
             let arg_ty = self.pt_cached_arg_type(args, arg_types, index)?;
             let arg_ty = self.pt_normalize_arg(&arg_ty)?;
-            let call_arg = self.pt_call_argument_type(arg, &arg_ty)?;
+            // A projected return slot already carries the authoritative value.
+            // Re-reading its call syntax would replace it with the whole pack.
+            let call_arg = if arg_types.is_some() {
+                arg_ty.clone()
+            } else {
+                self.pt_call_argument_type(arg, &arg_ty)?
+            };
             let call_arg = self.pt_normalize_arg(&call_arg)?;
             let param = self.substitute_owned(param.clone(), bindings)?;
             let param = self.expand_owned_aliases(param)?;
             let param = self.eval_owned_conditionals(param)?;
+            *complete &= self.argument_pair_is_complete(&call_arg, &param)?;
+            if call_arg.nominal_identity().is_some() || param.nominal_identity().is_some() {
+                if !self.type_check(&call_arg, &param)? {
+                    out.push(Mismatch {
+                        range: arg.get_range(),
+                        message: self.pt_mismatch_message(&call_arg, &param, name),
+                    });
+                }
+                continue;
+            }
             if !self.binding_manages(arg.get_syntax_id())?
                 && let LuaExpr::IndexExpr(index) = arg
                 && self.pt_member_missing_in_union(index)?

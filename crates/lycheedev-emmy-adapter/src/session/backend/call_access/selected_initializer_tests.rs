@@ -1,24 +1,35 @@
 //! Public ingestion -> actual owned query/43-checker regressions for initializer
 //! provenance. Expected types and diagnostics are independent source contracts.
 use crate::session::{
-    BindingContext, BindingCoverage, BindingDecision, BindingSite, BoundValue, Diagnostic,
-    DiagnosticRun, FunctionRef, OwnedBindingSession, OwnedQuery, OwnedQueryFailure, SelectedValue,
+    BindingContext, BindingCoverage, BindingDecision, BindingSite, BoundValue, CallPermit,
+    Diagnostic, DiagnosticRun, FunctionRef, OwnedBindingSession, OwnedQuery, OwnedQueryFailure,
+    SelectedValue,
 };
 use crate::{IngestedBatch, ingest_public_batch};
 use emmylua_code_analysis::{CheckConfig, DiagnosticCode, EmmyLuaAnalysis, Emmyrc, LuaType};
-use emmylua_parser::{LuaAstNode, LuaExpr};
+use emmylua_parser::{LuaAstNode, LuaExpr, LuaReturnStat};
 use std::{collections::HashMap, sync::Arc};
 
 #[derive(Default)]
-struct Context(HashMap<BindingSite, BindingDecision<BoundValue>>);
+struct Context {
+    values: HashMap<BindingSite, BindingDecision<BoundValue>>,
+    calls: HashMap<BindingSite, CallPermit>,
+}
 impl BindingContext for Context {
     fn identity(&self) -> &str {
         "selected-initializer-callable"
     }
     fn resolve(&self, site: BindingSite) -> BindingDecision<BoundValue> {
-        self.0
+        self.values
             .get(&site)
             .cloned()
+            .unwrap_or(BindingDecision::NotManaged)
+    }
+    fn call(&self, site: BindingSite) -> BindingDecision<CallPermit> {
+        self.calls
+            .get(&site)
+            .cloned()
+            .map(BindingDecision::Bound)
             .unwrap_or(BindingDecision::NotManaged)
     }
 }
@@ -170,7 +181,10 @@ fn diagnostics(run: &DiagnosticRun, code: DiagnosticCode) -> Vec<&Diagnostic> {
         .collect()
 }
 fn context(site: BindingSite, value: BindingDecision<BoundValue>) -> Context {
-    Context(HashMap::from([(site, value)]))
+    Context {
+        values: HashMap::from([(site, value)]),
+        ..Default::default()
+    }
 }
 const OLD: &str = "function(old) return old end";
 const NEW: &str = "function(value) return value end";
@@ -263,7 +277,39 @@ fn selected_call_matches_direct_native(
         );
         assert_native_diagnostic(owned, direct);
     }
-    assert_eq!(rows, expected_rows);
+    let mut diagnostic_rows = expected_rows.to_vec();
+    let closures = if fixture.batch.file_ids[file] == origin.file_id {
+        vec![OLD, NEW]
+    } else {
+        vec![NEW]
+    };
+    for text in closures {
+        let closure = fixture.expr(file, text);
+        let returned = closure
+            .syntax()
+            .descendants()
+            .find_map(LuaReturnStat::cast)
+            .unwrap();
+        for (syntax, operation) in [
+            (returned.get_syntax_id(), "return_count_check"),
+            (closure.get_syntax_id(), "return_flow_check"),
+        ] {
+            diagnostic_rows.push(BindingCoverage {
+                site: BindingSite {
+                    file_id: fixture.batch.file_ids[file],
+                    syntax,
+                },
+                operation,
+                state: "native_checked",
+                proof: String::new(),
+                reason: None,
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            });
+        }
+    }
+    assert_eq!(rows, diagnostic_rows);
 }
 
 #[test]
@@ -434,6 +480,591 @@ fn return_count_uses_actual_selected_function_arity() {
     assert_eq!(
         errors[0].message,
         "Annotations specify that at least 2 return value(s) are required, found 1 returned here instead."
+    );
+}
+
+#[test]
+fn selected_count_and_callable_receipts_use_shape_not_value_types() {
+    for (source, closure, call, ready, redundant) in [
+        (
+            "local selected=function(...) end\nselected(1,2,3)\n",
+            "function(...) end",
+            "selected(1,2,3)",
+            true,
+            false,
+        ),
+        (
+            "---@return UnknownValue\nlocal selected=function(value) return value end\nselected(1)\n",
+            "function(value) return value end",
+            "selected(1)",
+            true,
+            false,
+        ),
+        (
+            "local selected=function(value) end\nselected(External())\n",
+            "function(value) end",
+            "selected(External())",
+            false,
+            false,
+        ),
+        (
+            "local selected=function() end\nselected(1,External())\n",
+            "function() end",
+            "selected(1,External())",
+            false,
+            true,
+        ),
+    ] {
+        let fixture = Fixture::new(&[("main.lua", source)]);
+        let callee = fixture.site(0, "selected");
+        let call = fixture.site(0, call);
+        let mut context = context(callee, fixture.function(0, closure));
+        context.calls.insert(
+            call,
+            CallPermit {
+                callee,
+                proof: "count-permit".into(),
+                capability_profile: "typed-call-v1".into(),
+            },
+        );
+        let (run, rows) = fixture.diagnose(
+            context,
+            &[
+                DiagnosticCode::MissingParameter,
+                DiagnosticCode::RedundantParameter,
+                DiagnosticCode::CallNonCallable,
+            ],
+        );
+        for code in [
+            DiagnosticCode::MissingParameter,
+            DiagnosticCode::RedundantParameter,
+            DiagnosticCode::CallNonCallable,
+        ] {
+            assert_eq!(
+                !diagnostics(&run, code).is_empty(),
+                redundant && code == DiagnosticCode::RedundantParameter,
+                "{source}: {:?}",
+                run.diagnostics
+            );
+        }
+        let counts = rows
+            .iter()
+            .filter(|row| row.site == call && row.operation == "argument_count_check")
+            .collect::<Vec<_>>();
+        assert_eq!(counts.len(), 1, "{source}: {rows:?}");
+        assert_eq!(
+            counts[0].state,
+            if ready {
+                "native_checked"
+            } else {
+                "unavailable"
+            }
+        );
+        assert_eq!(counts[0].proof, "count-permit");
+        assert!(
+            rows.iter().any(|row| row.site == call
+                && row.operation == "callable_check"
+                && row.state == "native_checked"),
+            "{source}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn environment_required_unknown_slot_keeps_exact_arity() {
+    use crate::session::{
+        EnvironmentCallable, EnvironmentOrigin, EnvironmentRecord, EnvironmentSlot,
+        EnvironmentTypeCatalog,
+    };
+    let callable = Arc::new(EnvironmentCallable {
+        origin: EnvironmentOrigin {
+            material: "api.json".into(),
+            material_sha256: "a".repeat(64),
+            pointer: "/functions/0".into(),
+            identity: "fixed-api".into(),
+        },
+        declaration: EnvironmentRecord {
+            kind: "function".into(),
+            name: "Api".into(),
+            parameters: vec![EnvironmentSlot {
+                index: 1,
+                name: "unit".into(),
+                type_name: "UnprojectedUnitToken".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        types: Arc::new(EnvironmentTypeCatalog {
+            identity: "fixed-api-types".into(),
+            ..Default::default()
+        }),
+    });
+    for (source, call, diagnostic) in [
+        ("Api()\n", "Api()", Some(DiagnosticCode::MissingParameter)),
+        ("Api(1)\n", "Api(1)", None),
+        (
+            "Api(1,2)\n",
+            "Api(1,2)",
+            Some(DiagnosticCode::RedundantParameter),
+        ),
+    ] {
+        let fixture = Fixture::new(&[("main.lua", source)]);
+        let callee = fixture.site(0, "Api");
+        let call = fixture.site(0, call);
+        let mut context = context(
+            callee,
+            BindingDecision::Bound(BoundValue {
+                identity: "api-selected".into(),
+                proof: "api-proof".into(),
+                value: SelectedValue::EnvironmentCallable(Arc::clone(&callable)),
+            }),
+        );
+        context.calls.insert(
+            call,
+            CallPermit {
+                callee,
+                proof: "api-permit".into(),
+                capability_profile: "authenticated_environment_signature_v1".into(),
+            },
+        );
+        let (run, rows) = fixture.diagnose(
+            context,
+            &[
+                DiagnosticCode::MissingParameter,
+                DiagnosticCode::RedundantParameter,
+            ],
+        );
+        for code in [
+            DiagnosticCode::MissingParameter,
+            DiagnosticCode::RedundantParameter,
+        ] {
+            assert_eq!(
+                !diagnostics(&run, code).is_empty(),
+                diagnostic == Some(code),
+                "{source}: {:?}",
+                run.diagnostics
+            );
+        }
+        assert!(
+            rows.iter().any(|row| row.site == call
+                && row.operation == "argument_count_check"
+                && row.state == "native_checked"),
+            "{source}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn callback_count_receipt_and_excess_parameter_keep_the_selected_call_owner() {
+    let source = "---@param callback fun()\nlocal selected=function(callback) end\nselected(function(extra) end)\n";
+    let fixture = Fixture::new(&[("main.lua", source)]);
+    let callee = fixture.site(0, "selected");
+    let call = fixture.site(0, "selected(function(extra) end)");
+    let mut context = context(callee, fixture.function(0, "function(callback) end"));
+    context.calls.insert(
+        call,
+        CallPermit {
+            callee,
+            proof: "callback-permit".into(),
+            capability_profile: "typed-call-v1".into(),
+        },
+    );
+    let (run, rows) = fixture.diagnose(context, &[DiagnosticCode::RedundantParameter]);
+    let errors = diagnostics(&run, DiagnosticCode::RedundantParameter);
+    assert_eq!(errors.len(), 1, "{:?}", run.diagnostics);
+    assert_eq!(
+        usize::from(errors[0].range.start()),
+        source.find("extra").unwrap()
+    );
+    assert_eq!(
+        usize::from(errors[0].range.end()),
+        source.find("extra").unwrap() + 5
+    );
+    let owner = &errors[0].data.as_ref().unwrap()["bindingCheckOwner"];
+    assert_eq!(owner["start"], u32::from(call.syntax.get_range().start()));
+    assert_eq!(owner["end"], u32::from(call.syntax.get_range().end()));
+    assert!(
+        rows.iter().any(|row| row.site == call
+            && row.operation == "callback_count_check"
+            && row.state == "native_checked"
+            && row.proof == "callback-permit"),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn return_receipts_follow_actual_counts_and_flow_without_claiming_unknown_tails() {
+    for (source, operation, ready, diagnostic) in [
+        (
+            "---@return number\nlocal function subject() return 1 end\n",
+            "return_count_check",
+            true,
+            None,
+        ),
+        (
+            "---@return number\nlocal function subject() return end\n",
+            "return_count_check",
+            true,
+            Some(DiagnosticCode::MissingReturnValue),
+        ),
+        (
+            "---@return number\nlocal function subject() end\n",
+            "return_flow_check",
+            true,
+            Some(DiagnosticCode::MissingReturn),
+        ),
+        (
+            "---@return number?\nlocal function subject() end\n",
+            "return_flow_check",
+            true,
+            None,
+        ),
+        (
+            "---@return nil\nlocal function subject() end\n",
+            "return_flow_check",
+            true,
+            None,
+        ),
+        (
+            "---@return number\nlocal function subject() return External() end\n",
+            "return_count_check",
+            false,
+            None,
+        ),
+        (
+            "---@return UndeclaredReturnType\nlocal function subject() end\n",
+            "return_count_check",
+            false,
+            None,
+        ),
+        (
+            "local function pair() return 1,2 end\n---@return number, number\nlocal function subject() return pair(),3 end\n",
+            "return_count_check",
+            true,
+            None,
+        ),
+        (
+            "local function empty() end\n---@return number\nlocal function subject() return empty() end\n",
+            "return_count_check",
+            true,
+            Some(DiagnosticCode::MissingReturnValue),
+        ),
+    ] {
+        let fixture = Fixture::new(&[("main.lua", source)]);
+        let (run, rows) = fixture.diagnose(
+            Context::default(),
+            &[
+                DiagnosticCode::MissingReturnValue,
+                DiagnosticCode::RedundantReturnValue,
+                DiagnosticCode::MissingReturn,
+            ],
+        );
+        for code in [
+            DiagnosticCode::MissingReturnValue,
+            DiagnosticCode::RedundantReturnValue,
+            DiagnosticCode::MissingReturn,
+        ] {
+            assert_eq!(
+                !diagnostics(&run, code).is_empty(),
+                diagnostic == Some(code),
+                "{source}: {:?}",
+                run.diagnostics
+            );
+        }
+        let start = source.find("local function subject").unwrap();
+        let receipts = rows
+            .iter()
+            .filter(|row| {
+                row.operation == operation
+                    && u32::from(row.site.syntax.get_range().start()) as usize >= start
+            })
+            .collect::<Vec<_>>();
+        assert!(!receipts.is_empty(), "{source}: {rows:?}");
+        assert!(
+            receipts.iter().all(|row| row.state
+                == if ready {
+                    "native_checked"
+                } else {
+                    "unavailable"
+                }),
+            "{source}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn return_type_checks_align_scalar_tail_tuple_and_variadic_slots() {
+    for (source, errors) in [
+        (
+            "---@return number, number\nlocal function subject() return 1,2 end\n",
+            0,
+        ),
+        (
+            "local function pair() return 1,2 end\n---@return number, number\nlocal function subject() return pair(),3 end\n",
+            0,
+        ),
+        (
+            "local function pair() return 1,2 end\n---@return number, number\nlocal function subject() return pair() end\n",
+            0,
+        ),
+        (
+            "local function pair() return 1,2 end\n---@return number\nlocal function subject() return (pair()) end\n",
+            0,
+        ),
+        (
+            "---@return number, string\nlocal function subject() return 1,2 end\n",
+            1,
+        ),
+        (
+            "local function pair() return 1,2 end\n---@return string, string\nlocal function subject() return pair() end\n",
+            2,
+        ),
+        (
+            "---@return number, string...\nlocal function subject() return 1,'a','b' end\n",
+            0,
+        ),
+        (
+            "---@return number, string...\nlocal function subject() return 1,'a',2 end\n",
+            1,
+        ),
+        (
+            "---@param value [number, string]\n---@return [number, string]\nlocal function subject(value) return value end\n",
+            0,
+        ),
+        (
+            "---@param value [number, number]\n---@return [number, string]\nlocal function subject(value) return value end\n",
+            1,
+        ),
+        (
+            "---@return number[]\nlocal function subject() return {1,2} end\n",
+            0,
+        ),
+        (
+            "---@return number, string\nlocal function subject() return 1,External() end\n",
+            0,
+        ),
+        (
+            "---@return string, string\nlocal function subject() return 1,External() end\n",
+            1,
+        ),
+        (
+            "---@generic T\n---@param value T\n---@return T\nlocal function subject(value) return value end\n",
+            0,
+        ),
+        (
+            "---@return never\nlocal function subject() return 1 end\n",
+            1,
+        ),
+    ] {
+        let fixture = Fixture::new(&[("main.lua", source)]);
+        let (run, _) = fixture.diagnose(Context::default(), &[DiagnosticCode::ReturnTypeMismatch]);
+        let found = diagnostics(&run, DiagnosticCode::ReturnTypeMismatch);
+        assert_eq!(found.len(), errors, "{source}: {:?}", run.diagnostics);
+        let expression_start = source.rfind("return ").unwrap() + "return ".len();
+        for diagnostic in found {
+            assert!(
+                u32::from(diagnostic.range.start()) as usize >= expression_start,
+                "{source}: {diagnostic:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn typed_open_return_tails_compare_elements_without_claiming_fixed_cardinality() {
+    use emmylua_code_analysis::VariadicType;
+    for (annotation, prefix, element, expected, errors) in [
+        ("number...", false, LuaType::Number, "number, number", 0),
+        ("number...", false, LuaType::Number, "number, string", 1),
+        ("number...", false, LuaType::Number, "number...", 0),
+        ("number...", false, LuaType::Number, "string...", 1),
+        ("number...", false, LuaType::Number, "number, string...", 1),
+        (
+            "number, string...",
+            true,
+            LuaType::String,
+            "number, string, string",
+            0,
+        ),
+        (
+            "number, string...",
+            true,
+            LuaType::String,
+            "number, number, string",
+            1,
+        ),
+        (
+            "number, string...",
+            true,
+            LuaType::String,
+            "number, string...",
+            0,
+        ),
+        (
+            "number, string...",
+            true,
+            LuaType::String,
+            "number, number...",
+            1,
+        ),
+        (
+            "number, string...",
+            true,
+            LuaType::String,
+            "number, number, string...",
+            1,
+        ),
+        ("unknown...", false, LuaType::Unknown, "number, string", 0),
+        ("any...", false, LuaType::Any, "string...", 0),
+        (
+            "number, unknown...",
+            true,
+            LuaType::Unknown,
+            "number, string, string",
+            0,
+        ),
+        ("number, any...", true, LuaType::Any, "string, string...", 1),
+    ] {
+        let source = format!(
+            "---@return {annotation}\nlocal generated=function() end\n---@return {expected}\nlocal function subject() return generated() end\n"
+        );
+        let fixture = Fixture::new(&[("main.lua", &source)]);
+        let callee = fixture.site(0, "generated");
+        let call = fixture.site(0, "generated()");
+        let make_context = || {
+            let mut context = context(callee, fixture.function(0, "function() end"));
+            context.calls.insert(
+                call,
+                CallPermit {
+                    callee,
+                    proof: "open-return-permit".into(),
+                    capability_profile: "typed-call-v1".into(),
+                },
+            );
+            context
+        };
+        // Assert the actual input of the checker, rather than relying on a
+        // fixture name to imply that an open return pack was produced.
+        let (actual, _) = fixture.run(0, make_context(), |query| {
+            query
+                .type_of_expr_at(call.syntax, call.syntax.get_range().start().into())
+                .unwrap()
+        });
+        let LuaType::Variadic(pack) = actual.structural_type() else {
+            panic!("{source}: expected an actual variadic pack, got {actual:?}");
+        };
+        assert_eq!(pack.get_max_len(), None, "{source}: {actual:?}");
+        let tail = if prefix {
+            let VariadicType::Multi(types) = pack.as_ref() else {
+                panic!("{source}: expected Multi(prefix, Base<T>), got {actual:?}");
+            };
+            assert_eq!(types.len(), 2, "{source}: {actual:?}");
+            assert_eq!(types[0], LuaType::Number);
+            let LuaType::Variadic(tail) = &types[1] else {
+                panic!("{actual:?}");
+            };
+            assert_eq!(pack.get_min_len(), Some(1));
+            tail
+        } else {
+            assert_eq!(pack.get_min_len(), None);
+            pack
+        };
+        assert!(
+            matches!(tail.as_ref(), VariadicType::Base(ty) if ty == &element),
+            "{source}: {actual:?}"
+        );
+        let (run, rows) = fixture.diagnose(make_context(), &[DiagnosticCode::ReturnTypeMismatch]);
+        let found = diagnostics(&run, DiagnosticCode::ReturnTypeMismatch);
+        assert_eq!(found.len(), errors, "{source}: {:?}", run.diagnostics);
+        for error in found {
+            assert_eq!(error.range, call.syntax.get_range(), "{source}: {error:?}");
+        }
+        let return_rows = rows
+            .iter()
+            .filter(|row| row.site == call && row.operation == "return_check")
+            .collect::<Vec<_>>();
+        assert_eq!(return_rows.len(), 1, "{source}: {rows:?}");
+        assert_eq!(return_rows[0].state, "unavailable", "{source}: {rows:?}");
+        assert_eq!(return_rows[0].proof, "open-return-permit");
+        let subject_start = source.find("local function subject").unwrap();
+        let counts = rows
+            .iter()
+            .filter(|row| {
+                row.operation == "return_count_check"
+                    && u32::from(row.site.syntax.get_range().start()) as usize >= subject_start
+            })
+            .collect::<Vec<_>>();
+        assert!(!counts.is_empty(), "{source}: {rows:?}");
+        assert!(
+            counts.iter().all(|row| row.state == "unavailable"),
+            "{source}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn authenticated_environment_return_pack_is_checked_against_the_declared_slot() {
+    use crate::session::{
+        EnvironmentCallable, EnvironmentOrigin, EnvironmentRecord, EnvironmentSlot,
+        EnvironmentTypeCatalog,
+    };
+    let source = "---@return string\nlocal function subject() return Api() end\n";
+    let fixture = Fixture::new(&[("main.lua", source)]);
+    let callee = fixture.site(0, "Api");
+    let call = fixture.site(0, "Api()");
+    let callable = Arc::new(EnvironmentCallable {
+        origin: EnvironmentOrigin {
+            material: "api.json".into(),
+            material_sha256: "a".repeat(64),
+            pointer: "/functions/0".into(),
+            identity: "fixed-return-api".into(),
+        },
+        declaration: EnvironmentRecord {
+            kind: "function".into(),
+            name: "Api".into(),
+            returns: vec![EnvironmentSlot {
+                index: 1,
+                name: "value".into(),
+                type_name: "number".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        types: Arc::new(EnvironmentTypeCatalog {
+            identity: "fixed-return-types".into(),
+            ..Default::default()
+        }),
+    });
+    let mut context = context(
+        callee,
+        BindingDecision::Bound(BoundValue {
+            identity: "api-return-selected".into(),
+            proof: "api-return-proof".into(),
+            value: SelectedValue::EnvironmentCallable(callable),
+        }),
+    );
+    context.calls.insert(
+        call,
+        CallPermit {
+            callee,
+            proof: "api-return-permit".into(),
+            capability_profile: "authenticated_environment_signature_v1".into(),
+        },
+    );
+    let (run, rows) = fixture.diagnose(context, &[DiagnosticCode::ReturnTypeMismatch]);
+    let errors = diagnostics(&run, DiagnosticCode::ReturnTypeMismatch);
+    assert_eq!(errors.len(), 1, "{:?}", run.diagnostics);
+    assert_eq!(errors[0].range, call.syntax.get_range());
+    assert!(
+        errors[0].message.contains("string") && errors[0].message.contains("number"),
+        "{:?}",
+        errors[0]
+    );
+    assert!(
+        rows.iter().any(|row| row.site == call
+            && row.operation == "return_check"
+            && row.state == "native_checked"),
+        "{rows:?}"
     );
 }
 
@@ -629,4 +1260,419 @@ fn cached_initializer_selection_still_checks_the_original_control() {
         session.coverage_checked(|| Ok::<_, ()>(())).unwrap(),
         before
     );
+}
+
+#[test]
+fn return_count_keeps_required_open_prefix_and_vararg_scalar_positions() {
+    for (source, expected, checked) in [
+        (
+            "---@return number, string...\nlocal function subject() end\n",
+            Some(DiagnosticCode::MissingReturn),
+            true,
+        ),
+        (
+            "---@return number, string...\nlocal function subject() return end\n",
+            Some(DiagnosticCode::MissingReturnValue),
+            true,
+        ),
+        (
+            "---@return number, string...\nlocal function subject() return 1 end\n",
+            None,
+            true,
+        ),
+        (
+            "---@return number?, string...\nlocal function subject() end\n",
+            None,
+            true,
+        ),
+        (
+            "---@param ... number\n---@return number, number\nlocal function subject(...) return (...) end\n",
+            Some(DiagnosticCode::MissingReturnValue),
+            true,
+        ),
+        (
+            "---@param ... number\n---@return number\nlocal function subject(...) return (...) end\n",
+            None,
+            true,
+        ),
+        (
+            "---@param ... number\n---@return number, number\nlocal function subject(...) return ..., 3 end\n",
+            None,
+            true,
+        ),
+        (
+            "---@param ... number\n---@return number, number\nlocal function subject(...) return ... end\n",
+            None,
+            false,
+        ),
+    ] {
+        let fixture = Fixture::new(&[("main.lua", source)]);
+        let (run, rows) = fixture.diagnose(
+            Context::default(),
+            &[
+                DiagnosticCode::MissingReturn,
+                DiagnosticCode::MissingReturnValue,
+                DiagnosticCode::RedundantReturnValue,
+                DiagnosticCode::ReturnTypeMismatch,
+            ],
+        );
+        for code in [
+            DiagnosticCode::MissingReturn,
+            DiagnosticCode::MissingReturnValue,
+            DiagnosticCode::RedundantReturnValue,
+            DiagnosticCode::ReturnTypeMismatch,
+        ] {
+            assert_eq!(
+                !diagnostics(&run, code).is_empty(),
+                expected == Some(code),
+                "{source}: {:?}",
+                run.diagnostics
+            );
+        }
+        let start = source.find("local function subject").unwrap();
+        let operation = if source.contains("return ...")
+            || source.contains("return (")
+            || source.contains("return end")
+            || source.contains("return 1")
+        {
+            "return_count_check"
+        } else {
+            "return_flow_check"
+        };
+        let found = rows
+            .iter()
+            .filter(|row| {
+                row.operation == operation
+                    && u32::from(row.site.syntax.get_range().start()) as usize >= start
+            })
+            .collect::<Vec<_>>();
+        assert!(!found.is_empty(), "{source}: {rows:?}");
+        assert!(
+            found.iter().all(|row| row.state
+                == if checked {
+                    "native_checked"
+                } else {
+                    "unavailable"
+                }),
+            "{source}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn return_pack_unions_keep_branch_arity_slots_and_typed_tails() {
+    use crate::session::OwnedValue;
+    use crate::session::backend::return_pack::{
+        ReturnArity, return_arity, return_has_typed_open_tail,
+    };
+    use emmylua_code_analysis::{LuaTupleStatus, LuaTupleType, VariadicType};
+    let base = |ty| OwnedValue::plain(LuaType::Variadic(Arc::new(VariadicType::Base(ty))));
+    let fixture = Fixture::new(&[("main.lua", "local value=1")]);
+    let number = OwnedValue::plain(LuaType::Number);
+    let string = OwnedValue::plain(LuaType::String);
+    let known_unknown = OwnedValue::pack(vec![number.clone(), OwnedValue::plain(LuaType::Unknown)]);
+    let union = |values| OwnedValue::union_checked(values, || Ok::<_, ()>(())).unwrap();
+    let same = union(vec![
+        OwnedValue::pack(vec![number.clone(), string.clone()]),
+        OwnedValue::pack(vec![number.clone(), number.clone()]),
+    ]);
+    let different = union(vec![
+        number.clone(),
+        OwnedValue::pack(vec![number.clone(), string.clone()]),
+    ]);
+    let open = union(vec![
+        base(LuaType::String),
+        OwnedValue::pack(vec![number.clone(), base(LuaType::Number)]),
+    ]);
+    assert_eq!(
+        return_arity(known_unknown.structural_type()),
+        Some(ReturnArity::fixed(2))
+    );
+    assert_eq!(
+        return_arity(same.structural_type()),
+        Some(ReturnArity::fixed(2))
+    );
+    assert_eq!(
+        return_arity(different.structural_type()),
+        Some(ReturnArity {
+            min: 1,
+            max: Some(2)
+        })
+    );
+    assert_eq!(
+        return_arity(open.structural_type()),
+        Some(ReturnArity { min: 0, max: None })
+    );
+    assert!(return_has_typed_open_tail(open.structural_type()));
+    assert_eq!(return_arity(&LuaType::Never), None);
+    let tuple = LuaType::Tuple(Arc::new(LuaTupleType::new(
+        vec![LuaType::Number, LuaType::String],
+        LuaTupleStatus::DocResolve,
+    )));
+    assert_eq!(return_arity(&tuple), Some(ReturnArity::fixed(1)));
+    assert_eq!(
+        return_arity(base(tuple).structural_type()),
+        Some(ReturnArity::fixed(2))
+    );
+    let ((known_second, absent, open_second), _) = fixture.run(0, Context::default(), |query| {
+        (
+            query.owned_return_slot(&known_unknown, 1).unwrap().unwrap(),
+            query.owned_return_slot(&different, 1).unwrap().unwrap(),
+            query.owned_return_slot(&open, 1).unwrap().unwrap(),
+        )
+    });
+    assert_eq!(known_second.structural_type(), &LuaType::Unknown);
+    assert_eq!(
+        absent.structural_type(),
+        &LuaType::from_vec(vec![LuaType::Nil, LuaType::String])
+    );
+    assert_eq!(
+        open_second.structural_type(),
+        &LuaType::from_vec(vec![LuaType::String, LuaType::Number])
+    );
+}
+
+#[test]
+fn never_return_does_not_claim_one_value_or_complete_count_comparison() {
+    let source = "---@return never\nlocal generated=function() end\n---@return number, number\nlocal function subject() return generated() end\n";
+    let fixture = Fixture::new(&[("main.lua", source)]);
+    let callee = fixture.site(0, "generated");
+    let call = fixture.site(0, "generated()");
+    let mut selected = context(callee, fixture.function(0, "function() end"));
+    selected.calls.insert(
+        call,
+        CallPermit {
+            callee,
+            proof: "never-permit".into(),
+            capability_profile: "typed-call-v1".into(),
+        },
+    );
+    let (run, rows) = fixture.diagnose(
+        selected,
+        &[
+            DiagnosticCode::ReturnTypeMismatch,
+            DiagnosticCode::MissingReturnValue,
+        ],
+    );
+    let start = source.find("local function subject").unwrap();
+    assert!(
+        run.diagnostics
+            .iter()
+            .filter(|row| u32::from(row.range.start()) as usize >= start)
+            .all(|row| !matches!(
+                row.code,
+                DiagnosticCode::ReturnTypeMismatch | DiagnosticCode::MissingReturnValue
+            )),
+        "{:?}",
+        run.diagnostics
+    );
+    assert!(
+        rows.iter().any(|row| row.operation == "return_count_check"
+            && row.state == "unavailable"
+            && u32::from(row.site.syntax.get_range().start()) as usize >= start),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn inferred_return_signature_applies_vararg_list_adjustment_and_keeps_union_rows() {
+    use crate::session::backend::return_pack::{ReturnArity, return_arity};
+    for (body, expected) in [
+        ("return ...", ReturnArity { min: 0, max: None }),
+        ("return (...)", ReturnArity::fixed(1)),
+        ("return ..., 3", ReturnArity::fixed(2)),
+    ] {
+        let source = format!("---@param ... number\nlocal generated=function(...) {body} end\n");
+        let fixture = Fixture::new(&[("main.lua", &source)]);
+        let closure = fixture.site(0, &format!("function(...) {body} end"));
+        let (actual, _) = fixture.run(0, Context::default(), |query| {
+            query.return_type(closure.syntax).unwrap().unwrap()
+        });
+        assert_eq!(
+            return_arity(actual.structural_type()),
+            Some(expected),
+            "{source}: {actual:?}"
+        );
+    }
+    let source = "local generated=function(flag) if flag then return 1,'a' end return 2,'b' end\n";
+    let fixture = Fixture::new(&[("main.lua", source)]);
+    let closure = fixture.site(
+        0,
+        "function(flag) if flag then return 1,'a' end return 2,'b' end",
+    );
+    let (actual, _) = fixture.run(0, Context::default(), |query| {
+        query.return_type(closure.syntax).unwrap().unwrap()
+    });
+    assert!(
+        matches!(actual.structural_type(), LuaType::Union(_)),
+        "{actual:?}"
+    );
+    assert_eq!(
+        return_arity(actual.structural_type()),
+        Some(ReturnArity::fixed(2))
+    );
+}
+
+#[test]
+fn return_pack_slot_keeps_selected_nominal_identity() {
+    use crate::session::OwnedValue;
+    let fixture = Fixture::new(&[("main.lua", "local value=1")]);
+    fixture.run(0, Context::default(), |query| {
+        let selected = OwnedValue::nominal(query.session, "fixed-catalog", "Duration");
+        let pack = OwnedValue::pack(vec![OwnedValue::plain(LuaType::Number), selected.clone()]);
+        let actual = query.owned_return_slot(&pack, 1).unwrap().unwrap();
+        assert_eq!(actual, selected);
+        assert_ne!(actual, OwnedValue::plain(actual.structural_type().clone()));
+    });
+}
+
+#[test]
+fn return_union_rows_reach_type_and_count_consumers_without_fixed_arity_claims() {
+    use crate::session::backend::return_pack::{ReturnArity, return_arity};
+    for (producer, expected, arity, mismatches, redundant, checked) in [
+        (
+            "local generated=function(flag) if flag then return 1,2 end return 3,4 end",
+            "number",
+            ReturnArity::fixed(2),
+            0,
+            true,
+            true,
+        ),
+        (
+            "local generated=function(flag) if flag then return 1 end return 3,4 end",
+            "number",
+            ReturnArity {
+                min: 1,
+                max: Some(2),
+            },
+            0,
+            false,
+            false,
+        ),
+        (
+            "---@return string...\nlocal tail=function() end\nlocal generated=function(flag,...) if flag then return tail() end return 'prefix',tail() end",
+            "number, number",
+            ReturnArity { min: 0, max: None },
+            2,
+            false,
+            false,
+        ),
+    ] {
+        let source = format!(
+            "{producer}\n---@return {expected}\nlocal function subject(flag,...) return generated(flag,...) end\n"
+        );
+        let fixture = Fixture::new(&[("main.lua", &source)]);
+        let call = fixture.site(0, "generated(flag,...)");
+        let (actual, _) = fixture.run(0, Context::default(), |query| {
+            query
+                .type_of_expr_at(call.syntax, call.syntax.get_range().start().into())
+                .unwrap()
+        });
+        assert!(
+            matches!(actual.structural_type(), LuaType::Union(_)),
+            "{source}: {actual:?}"
+        );
+        assert_eq!(
+            return_arity(actual.structural_type()),
+            Some(arity),
+            "{source}: {actual:?}"
+        );
+        let (run, rows) = fixture.diagnose(
+            Context::default(),
+            &[
+                DiagnosticCode::ReturnTypeMismatch,
+                DiagnosticCode::RedundantReturnValue,
+                DiagnosticCode::MissingReturnValue,
+            ],
+        );
+        let start = source.find("local function subject").unwrap();
+        let subject_diagnostics = |code| {
+            run.diagnostics
+                .iter()
+                .filter(move |row| {
+                    row.code == code && u32::from(row.range.start()) as usize >= start
+                })
+                .count()
+        };
+        assert_eq!(
+            subject_diagnostics(DiagnosticCode::ReturnTypeMismatch),
+            mismatches,
+            "{source}: {:?}",
+            run.diagnostics
+        );
+        assert_eq!(
+            subject_diagnostics(DiagnosticCode::RedundantReturnValue),
+            usize::from(redundant),
+            "{source}: {:?}",
+            run.diagnostics
+        );
+        assert_eq!(
+            subject_diagnostics(DiagnosticCode::MissingReturnValue),
+            0,
+            "{source}: {:?}",
+            run.diagnostics
+        );
+        let counts = rows
+            .iter()
+            .filter(|row| {
+                row.operation == "return_count_check"
+                    && u32::from(row.site.syntax.get_range().start()) as usize >= start
+            })
+            .collect::<Vec<_>>();
+        assert!(!counts.is_empty(), "{source}: {rows:?}");
+        assert!(
+            counts.iter().all(|row| row.state
+                == if checked {
+                    "native_checked"
+                } else {
+                    "unavailable"
+                }),
+            "{source}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn known_return_prefix_reports_excess_without_inventing_unknown_tail_length() {
+    for (expected, excess) in [("number", true), ("number, number, number", false)] {
+        let source = format!(
+            "---@return {expected}\nlocal function subject() return 1, 2, External() end\n"
+        );
+        let fixture = Fixture::new(&[("main.lua", &source)]);
+        let (run, rows) = fixture.diagnose(
+            Context::default(),
+            &[
+                DiagnosticCode::MissingReturnValue,
+                DiagnosticCode::RedundantReturnValue,
+            ],
+        );
+        assert!(
+            diagnostics(&run, DiagnosticCode::MissingReturnValue).is_empty(),
+            "{source}: {:?}",
+            run.diagnostics
+        );
+        let found = diagnostics(&run, DiagnosticCode::RedundantReturnValue);
+        assert_eq!(
+            found.len(),
+            usize::from(excess),
+            "{source}: {:?}",
+            run.diagnostics
+        );
+        if excess {
+            assert_eq!(found[0].range, fixture.site(0, "2").syntax.get_range());
+        }
+        let start = source.find("local function subject").unwrap();
+        let counts = rows
+            .iter()
+            .filter(|row| {
+                row.operation == "return_count_check"
+                    && u32::from(row.site.syntax.get_range().start()) as usize >= start
+            })
+            .collect::<Vec<_>>();
+        assert!(!counts.is_empty(), "{rows:?}");
+        assert!(
+            counts.iter().all(|row| row.state == "unavailable"),
+            "{rows:?}"
+        );
+    }
 }

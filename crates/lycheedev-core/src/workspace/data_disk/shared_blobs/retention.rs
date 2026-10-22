@@ -6,7 +6,7 @@ use super::*;
 pub(crate) fn protects_evidence_body(
     home: &Path,
     digest: &str,
-    signed_bytes: i64,
+    bytes: u64,
     control: &OperationControl,
 ) -> Result<bool> {
     let checks = Checks {
@@ -33,7 +33,7 @@ pub(crate) fn protects_evidence_body(
         &["indexes", "data-derived-v1", "shared-blobs-v1"],
         home,
         &digest,
-        signed_bytes,
+        bytes,
         &checks,
     );
     join(result, close_directory(root), &checks)
@@ -44,11 +44,11 @@ fn descend(
     components: &[&str],
     home: &Path,
     digest: &str,
-    signed_bytes: i64,
+    bytes: u64,
     checks: &Checks<'_>,
 ) -> Result<bool> {
     let Some((name, tail)) = components.split_first() else {
-        return inspect_reference(parent, home, digest, signed_bytes, checks);
+        return inspect_reference(parent, home, digest, bytes, checks);
     };
     // Native optional entry acquisition alone proves absence. An attribute-only
     // original handle is returned before the post-open check, so every acquired
@@ -74,7 +74,7 @@ fn descend(
         },
         Err(error) => return join(Err(error), closed.err(), checks),
     };
-    let result = descend(&directory, tail, home, digest, signed_bytes, checks);
+    let result = descend(&directory, tail, home, digest, bytes, checks);
     join(result, close_directory(directory), checks)
 }
 
@@ -82,7 +82,7 @@ fn inspect_reference(
     directory: &Directory,
     home: &Path,
     digest: &str,
-    signed_bytes: i64,
+    bytes: u64,
     checks: &Checks<'_>,
 ) -> Result<bool> {
     let name = format!("{digest}.intent");
@@ -101,7 +101,7 @@ fn inspect_reference(
         };
     };
     let reference = decode(&name, &raw)?;
-    if u64::try_from(signed_bytes).ok() != Some(reference.bytes)
+    if bytes != reference.bytes
         || complete
             .as_ref()
             .is_some_and(|done| done.as_slice() != completion(&raw))

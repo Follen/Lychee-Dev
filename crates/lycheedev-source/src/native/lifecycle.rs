@@ -35,12 +35,6 @@ impl Graph {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum EvaluatorProfile {
-    Native,
-    LegacyV7,
-}
-
 /// Text conversion shares the caller's original cancellation/deadline checks.
 /// The owned-process hard deadline still bounds any individual synchronous stage.
 /// No executable/config loader or implicit standard library is used here.
@@ -136,7 +130,6 @@ impl PreparedSnapshot {
     pub fn build(
         &self,
         name: &str,
-        profile: EvaluatorProfile,
         scope: Option<&str>,
         control: &OperationControl,
     ) -> lycheedev_core::Result<Graph> {
@@ -151,7 +144,6 @@ impl PreparedSnapshot {
                 &self.inputs.phase,
                 &ordered,
                 scope,
-                matches!(profile, EvaluatorProfile::Native),
             ),
             &self.control,
         );
@@ -165,7 +157,6 @@ impl PreparedSnapshot {
         name: &str,
         phase: &str,
         ordered: &[&str],
-        profile: EvaluatorProfile,
         scope: Option<&str>,
         control: &OperationControl,
     ) -> lycheedev_core::Result<Graph> {
@@ -179,7 +170,6 @@ impl PreparedSnapshot {
                 phase,
                 ordered,
                 scope,
-                matches!(profile, EvaluatorProfile::Native),
             ),
             &self.control,
         );
@@ -301,7 +291,7 @@ fn require_same_control(
     saved.check()?;
     provided.check()?;
     if saved.deadline() != provided.deadline()
-        || !Arc::ptr_eq(&saved.cancel_handle(), &provided.cancel_handle())
+        || !saved.same_scope(provided)
     {
         return Err(input_error(
             "single-operation native snapshots require the original admission deadline and cancellation token",

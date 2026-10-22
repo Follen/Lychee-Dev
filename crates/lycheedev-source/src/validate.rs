@@ -106,7 +106,6 @@ fn semantic(
             )
         })?
     };
-    #[cfg(feature = "emmy-prototype")]
     {
         if prepared.syntax["passed"] == true {
             // Native XML profile authentication belongs to an explicit
@@ -129,19 +128,7 @@ fn semantic(
             )
         }
     }
-    #[cfg(not(feature = "emmy-prototype"))]
-    {
-        let engine = tools.luals.ok_or_else(|| {
-            ToolkitError::new(
-                "luals.unavailable",
-                "Semantic validation requires a verified bundled LuaLS runtime",
-                3,
-            )
-        })?;
-        let (inputs, inline) = crate::xml_inline::inputs(&prepared.closure.documents)?;
-        control.check()?;
-        crate::semantic::check(home, client, snapshot, engine, &inputs, &inline, control)
-    }
+
 }
 
 fn diagnostics(prepared: &Prepared, matrix: bool) -> Vec<Value> {
@@ -201,20 +188,15 @@ pub fn addon_with_environment(
             && prepared.syntax["passed"] == true
             && (!requested || semantic["passed"] == true)
     );
-    // Go's semantic assessment never certifies complete WoW/runtime coverage.
-    // Native checker-family coverage remains available in its own exact report.
+    // Syntax validity and semantic coverage are independent native results.
     result["complete"] =
-        json!(result["complete"] == true && prepared.syntax["passed"] == true && !requested);
+        json!(result["complete"] == true && prepared.syntax["passed"] == true && (!requested || semantic["complete"] == true));
     result["load"]["compatibilityComplete"] = result["complete"].clone();
     if requested {
         result["checks"]
             .as_array_mut()
             .expect("check list")
-            .push(json!(if cfg!(feature = "emmy-prototype") {
-                "emmy-native-frozen-closure"
-            } else {
-                "luals-frozen-closure"
-            }));
+            .push(json!("emmy-native-frozen-closure"));
     }
     result["diagnostics"] = json!(diagnostics(&prepared, false));
     result["syntaxCompilation"] = prepared.syntax;

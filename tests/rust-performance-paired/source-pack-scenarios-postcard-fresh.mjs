@@ -7,7 +7,7 @@ import {performance} from 'node:perf_hooks';
 import {beginScratch, contained, sha256} from '../../tools/rust-disk.mjs';
 import {hashFile, runCargo} from '../../tools/rust-build.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
-import {processPassed, processReaped} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
+import {processPassed, processReaped} from './owned-proof.mjs';
 import {splitIndexEvidence, verifyParts} from '../../tools/rust-source-pack-evidence.mjs';
 import {semantic} from './contract.mjs';
 import {sourcePhaseEnvironment, validateConditions} from './source-candidates.mjs';

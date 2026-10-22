@@ -1,378 +1,84 @@
 // Static/checker regressions only; these successes do not claim Lua was run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE, PREVIOUS_BASE, HISTORICAL_BASE, CHANGED_FIXTURES, CHANGED_ADDON, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, fixturePath, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
-import { ownedUserEnvironment, sourceDigest } from './rust-build.mjs';
-import { SUPPORT as RUNNER_SUPPORT, verifyCandidateArtifact } from './rust-formal-lua.mjs';
-import * as historical from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
-import * as original from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const fixed = authenticate(root), plan = cases(fixed);
-const proof = () => ({ rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false, outputLimit: false });
-const result = row => ({ status: 0, handlesReaped: true, proof: proof(), stdout: Buffer.from(row.completion), stderr: Buffer.alloc(0), logs: ['owned-process.receipt.json'] });
-function scratch(fn) { const dir = mkdtempSync(join(tmpdir(), 'lycheedev-formal-lua-checker-')); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } }
-function copied(fn) { return scratch(dir => { for (const base of [BASE, PREVIOUS_BASE, HISTORICAL_BASE]) cpSync(join(root, base), join(dir, base), { recursive: true }); cpSync(join(root, 'addon'), join(dir, 'addon'), { recursive: true }); return fn(dir); }); }
+import { ownedUserEnvironment } from './rust-build.mjs';
+import { SUPPORT, cleanLuaEnvironment, hash, regular, verifyCandidateArtifact, verifyInterpreter, preserveInterpreterEvidence, verifyInterpreterEvidence } from './rust-formal-lua.mjs';
 
-test('owned Lua environment reuses Cargo isolation while keeping explicit fixture inputs and offline compiler caches', () => scratch(directory => {
-  const parent = {PATH: 'system', HOME: 'foreign-home', userprofile: 'foreign-user', CODEX_HOME: 'foreign-agent',
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const scratch = join(root, '.tmp', `formal-lua-tool-test-${process.pid}`);
+function withScratch(fn) {
+  rmSync(scratch, { recursive: true, force: true });
+  mkdirSync(scratch, { recursive: true });
+  try { return fn(scratch); } finally { rmSync(scratch, { recursive: true, force: true }); }
+}
+function file(path, value) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, Buffer.isBuffer(value) || typeof value === 'string' ? value : JSON.stringify(value)); return path; }
+
+test('owned Lua environment reuses Cargo isolation, then strips every LUA setting', () => {
+  const parent = { PATH: 'system', HOME: 'foreign-home', userprofile: 'foreign-user', CODEX_HOME: 'foreign-agent',
     APPDATA: 'foreign-apps', LOCALAPPDATA: 'foreign-local', TEMP: 'foreign-temp', TMP: 'foreign-tmp',
     CARGO_HOME: 'offline-cargo', RUSTUP_HOME: 'offline-rustup', LYCHEEDEV_BIN: 'foreign-cli', LYCHEEDEV_HOME: 'foreign-workspace',
-    LYCHEEDEV_LUA51: 'fixed-lua', LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION: 'owned-admission', LUA_INIT: 'foreign()', LUA_PATH: 'foreign/?.lua'};
-  const before = structuredClone(parent), env = cleanLuaEnvironment(ownedUserEnvironment(directory, parent));
+    LYCHEEDEV_LUA51: 'fixed-lua', LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION: 'owned-admission', LUA_INIT: 'foreign()', LUA_PATH: 'foreign/?.lua', lua_cpath: 'foreign-cpath' };
+  const before = structuredClone(parent), owned = ownedUserEnvironment(scratch, parent), env = cleanLuaEnvironment(owned);
   assert.deepEqual(parent, before);
-  for (const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP','LYCHEEDEV_HOME']) assert(env[key].startsWith(directory));
-  for (const key of ['HOME','TEMP','APPDATA','LOCALAPPDATA']) assert(existsSync(env[key]));
-  assert.equal(env.userprofile, undefined); assert.equal(env.LYCHEEDEV_BIN, undefined); assert.equal(env.LUA_INIT, undefined);
-  for (const key of ['PATH','CARGO_HOME','RUSTUP_HOME','LYCHEEDEV_LUA51','LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION']) assert.equal(env[key], parent[key]);
-  assert.equal(env.LUA_PATH, ''); assert.equal(env.LUA_CPATH, '');
-}));
-
-test('manifest and all 113 source records match immutable Git objects byte for byte', () => {
-  const m = manifest(root); assert.equal(hash(readFileSync(join(root, BASE, 'manifest.json'))), MANIFEST_SHA256);
-  for (const row of [...m.fixtures, ...m.candidateAddon]) {
-    const bytes = execFileSync('git', ['--no-pager', '--no-optional-locks', '-c', 'core.fsmonitor=false', 'cat-file', 'blob', `${ORACLE}:${row.path}`], { cwd: root, timeout: 10000, maxBuffer: LIMITS.file });
-    assert.equal(bytes.length, row.bytes, row.path); assert.equal(hash(bytes), row.sha256, row.path); assert.equal(gitBlob(bytes), row.gitBlob, row.path);
-  }
-});
-test('all original fixture directories and the complete 55-file addon set are retained', () => {
-  const m = manifest(root);
-  for (const [prefix, expected] of [['tests/addon/', 39], ['tests/protocol/', 13], ['tests/lib/', 1], ['tests/baseline/probes/', 4], ['internal/testkit/lua.go', 1], ['addon/', 55]]) {
-    const actual = [...m.fixtures, ...m.candidateAddon].filter(row => row.path.startsWith(prefix)).map(row => row.path);
-    const original = execFileSync('git', ['ls-tree', '--full-tree', '-r', '--name-only', ORACLE, `:(top)${prefix}`], { cwd: root, timeout: 10000, maxBuffer: 65536 }).toString().trim().split('\n');
-    assert.equal(actual.length, expected); assert.deepEqual(actual, original);
-  }
-});
-test('every addon fixture runs independently under all six exact profiles', () => {
-  assert.equal(plan.length, 220); assert.equal(new Set(plan.map(row => row.id)).size, 220);
-  for (const profile of PROFILES) {
-    const rows = plan.filter(row => row.profile === profile); assert.equal(rows.length, 36);
-    for (const row of rows) assert.deepEqual(row.args, ['run.lua', row.id.split('/')[2], profile, '../../addon']);
-  }
-  assert.equal(plan.filter(row => row.kind === 'protocol').length, 4);
-  assert(!plan.some(row => row.args.includes('slot_server.lua')));
-});
-test('staging contains current authenticated addon plus exact frozen fixture dependencies', () => scratch(dir => {
-  const target = join(dir, 'staged'); materialize(root, target, fixed); verifyMaterial(target, fixed); verifyUnifiedTOC(target);
-  assert.equal(readFileSync(join(target, 'tests/baseline/probes/sync.lua')).toString(), readFileSync(fixturePath(root, 'tests/baseline/probes/sync.lua')).toString());
-  // The current delivery retired the 21 historical addon extras; their frozen
-  // source evidence remains separate from the exact staged addon inventory.
-  assert.deepEqual(fixed.historicalAddonExtras, []);
-}));
-test('fixture mutation, current addon mutation, missing source and unexpected fixture fail authentication', () => {
-  for (const mutate of [
-    dir => writeFileSync(fixturePath(dir, 'tests/addon/t_bootstrap.lua'), '-- old legacy test\n'),
-    dir => writeFileSync(join(dir, 'addon/Bridge/SlotRuntime.lua'), '-- wrong protocol\n'),
-    dir => rmSync(fixturePath(dir, 'tests/addon/t_input_mailbox.lua')),
-    dir => writeFileSync(join(dir, BASE, 'oracle/tests/addon/t_unreviewed.lua'), 'assert(true)\n'),
-  ]) copied(dir => { mutate(dir); assert.throws(() => authenticate(dir)); });
-});
-test('self-consistent rewritten manifest cannot authorize a substituted fixture', () => copied(dir => {
-  const file = join(dir, BASE, 'manifest.json'), m = JSON.parse(readFileSync(file)); m.fixtures[0].sha256 = '0'.repeat(64); writeFileSync(file, JSON.stringify(m));
-  assert.throws(() => authenticate(dir), /manifest_identity/);
-}));
-test('symlink fixture cannot escape the authenticated tree', () => copied(dir => {
-  const path = join(dir, BASE, 'oracle/tests/addon'); rmSync(path, { recursive: true }); symlinkSync(join(root, BASE, 'oracle/tests/addon'), path, process.platform === 'win32' ? 'junction' : 'dir');
-  assert.throws(() => authenticate(dir), /reparse/);
-}));
-test('symlink ancestors cannot substitute the manifest or full oracle directory', () => copied(dir => {
-  const path = join(dir, BASE, 'oracle'); rmSync(path, { recursive: true }); symlinkSync(join(root, BASE, 'oracle'), path, process.platform === 'win32' ? 'junction' : 'dir');
-  assert.throws(() => authenticate(dir), /reparse/);
-}));
-test('staged modification and unexpected extra are rejected after execution', () => scratch(dir => {
-  const target = join(dir, 'stage'); materialize(root, target, fixed);
-  writeFileSync(join(target, 'addon/Bridge/SlotRuntime.lua'), 'assert(true)'); assert.throws(() => verifyMaterial(target, fixed));
-}));
-test('completion text alone and zero exit alone cannot pass a Lua case', () => {
-  const row = plan[0], good = result(row); assert.equal(evaluate(row, good).state, 'passed');
-  for (const bad of [{ ...good, status: 1 }, { ...good, error: new Error('failed') }, { ...good, handlesReaped: false }, { ...good, proof: undefined }, { ...good, stdout: Buffer.from('PASS unrelated\n') }]) assert.equal(evaluate(row, bad).state, 'failed');
-});
-test('every required owned cleanup proof is necessary; forced/output/active cases fail', () => {
-  for (const key of ['rootReaped', 'treeReaped', 'handlesClosed', 'toolIdentityLocksClosed', 'outputReadersComplete']) {
-    const r = result(plan[0]); r.proof[key] = false; assert.equal(processPassed(r), false, key);
-  }
-  for (const [key, value] of [['forced', true], ['outputLimit', true], ['activeProcesses', 1], ['deadlineHit', true], ['error', 'fault']]) {
-    const r = result(plan[0]); r.proof[key] = value; assert.equal(processPassed(r), false, key);
-  }
-});
-test('writer has exact original output condition; CRLF is accepted without weakening bytes', () => {
-  const row = plan.at(-1); assert.equal(evaluate(row, result(row)).state, 'passed');
-  assert.equal(evaluate(row, { ...result(row), stdout: Buffer.from(row.completion.replaceAll('\n', '\r\n')) }).state, 'passed');
-  assert.equal(evaluate(row, { ...result(row), stdout: Buffer.from(`prefix ${row.completion}`) }).state, 'failed');
-});
-test('ordinary failed fixture does not prevent any of the remaining 219 executions', () => {
-  let launches = 0;
-  const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute(row) { launches++; return { ...result(row), status: launches === 1 ? 1 : 0 }; } });
-  assert.equal(launches, 220); assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'passed'));
-});
-test('unverified process cleanup blocks all later launches and preserves 220 explicit outcomes', () => {
-  let launches = 0;
-  const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute(row) { launches++; return { ...result(row), handlesReaped: false }; } });
-  assert.equal(launches, 1); assert.equal(rows.length, 220); assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'not_run'));
-});
-test('contradictory handlesReaped boolean cannot override failed process proof', () => {
-  let launches = 0;
-  const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute(row) { launches++; return { ...result(row), proof: { ...proof(), rootReaped: false } }; } });
-  assert.equal(launches, 1); assert.equal(rows[0].handlesReaped, false); assert(rows.slice(1).every(row => row.state === 'not_run'));
-});
-test('controller throw without receipt blocks later cases instead of pretending cleanup', () => {
-  let launches = 0;
-  const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute() { launches++; throw new Error('launch transport lost'); } });
-  assert.equal(launches, 1); assert.equal(rows[0].handlesReaped, false); assert(rows.slice(1).every(row => row.reason === 'formal-lua.execution_unverified'));
-});
-test('identity mutation after one case fails that case and records all subsequent not_run', () => {
-  let checks = 0, launches = 0;
-  const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() { if (++checks === 2) throw new Error('changed'); }, execute(row) { launches++; return result(row); } });
-  assert.equal(launches, 1); assert.equal(rows[0].state, 'failed'); assert.equal(rows[0].identityError, 'changed'); assert(rows.slice(1).every(row => row.state === 'not_run'));
-});
-test('total time reserve and cumulative output budget reject launch rather than reset budgets', () => {
-  for (const config of [{ deadline: LIMITS.cleanupMs + 1000, now: () => 0 }, { deadline: 1000000, now: () => 0, evidenceBytes: () => LIMITS.evidence - LIMITS.nextProcessReserve + 1 }]) {
-    let launches = 0;
-    const rows = runCases(plan, { checkIdentity() {}, execute(row) { launches++; return result(row); }, ...config });
-    assert.equal(launches, 0); assert(rows.every(row => row.state === 'not_run'));
-  }
-});
-test('case timeout is bounded by remaining aggregate time minus cleanup reserve', () => {
-  const observed = [];
-  runCases(plan.slice(0, 1), { deadline: 70000, now: () => 0, checkIdentity() {}, execute(row, timeout) { observed.push(timeout); return result(row); } });
-  assert.deepEqual(observed, [5000]);
-});
-test('Lua init and search hook environment never enters interpreter processes', () => {
-  assert.deepEqual(cleanLuaEnvironment({ PATH: 'system', LUA_INIT: 'evil()', lua_init_5_1: 'evil()', LUA_PATH: 'external/?.lua', LUA_CPATH: 'external/?.dll', NORMAL: 'keep' }), { PATH: 'system', NORMAL: 'keep', LUA_PATH: '', LUA_CPATH: '' });
-});
-test('all original Go functions are explicitly mapped; three bridge gaps cannot count as passed', () => {
-  const map = JSON.parse(readFileSync(join(root, BASE, 'go-test-map.json')));
-  const originals = fixed.fixtures.filter(row => row.path.endsWith('_test.go')).flatMap(row => [...readFileSync(fixturePath(root, row.path)).toString().matchAll(/^func (Test\w+)\(t \*testing.T\)/gm)].map(match => match[1])).sort();
-  assert.deepEqual(map.tests.map(row => row.goTest).sort(), originals); assert.equal(map.tests.length, 9);
-  assert.deepEqual(map.tests.filter(row => row.mode === 'deferred-rust-host-integration').map(row => row.goTest).sort(), BRIDGE_GAPS.map(row => row.test).sort());
-  assert(BRIDGE_GAPS.every(row => row.state === 'not_run')); assert.equal(map.executionCases, plan.length);
-});
-test('build uses official MSVC interpreter sources and reuses owned controller, not Cargo or raw spawn', () => {
-  const source = readFileSync(join(root, 'tools/rust-formal-lua.mjs')).toString();
-  assert.match(source, /from '\.\/rust-owned-process\.mjs'/); assert.match(source, /from '\.\/luac\.mjs'/);
-  assert.match(source, /msvcCompile/); assert.match(source, /cargoBuild: false/);
-  assert(!source.includes('node:child_process')); assert(!source.includes('buildLuac(')); assert(!source.includes('writeIdentity'));
-  assert.match(source, /'lua\.c'/); assert.match(source, /!\['luac\.c', 'print\.c'\]\.includes\(name\)/);
+  for (const key of ['HOME', 'USERPROFILE', 'CODEX_HOME', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'LYCHEEDEV_HOME']) assert(owned[key].startsWith(scratch));
+  for (const key of ['HOME', 'TEMP', 'APPDATA', 'LOCALAPPDATA']) assert(existsSync(owned[key]));
+  assert.equal(owned.userprofile, undefined); assert.equal(owned.LYCHEEDEV_BIN, undefined);
+  assert.equal(owned.LUA_PATH, 'foreign/?.lua');
+  assert.equal(env.LUA_PATH, ''); assert.equal(env.LUA_CPATH, ''); assert.equal(env.LUA_INIT, undefined);
+  for (const key of Object.keys(env)) assert.equal(key.toUpperCase() === 'LUA_PATH' || key.toUpperCase() === 'LUA_CPATH' || !key.toUpperCase().startsWith('LUA'), true, key);
+  for (const key of ['PATH', 'CARGO_HOME', 'RUSTUP_HOME', 'LYCHEEDEV_LUA51', 'LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION']) assert.equal(env[key], owned[key]);
 });
 
-test('slow identity validation never launches after exhausting the durable deadline', () => {
-  let time = 0, launches = 0;
-  const rows = runCases(plan, { deadline: 100000, now: () => time, checkIdentity() { time = 110000; }, execute(row, timeout) { launches++; assert(timeout > 0); return result(row); } });
-  assert.equal(launches, 0); assert(rows.every(row => row.state === 'not_run' && row.reason === 'formal-lua.total_deadline'));
-});
-test('real deadlineHit, forced retirement and cancellation stop all subsequent fixtures', () => {
-  for (const flags of [{ deadlineHit: true }, { forced: true }, { forced: true, knownAuxiliaryCleanup: true }, { cancelled: true }, { canceled: true }]) {
-    let launches = 0;
-    const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute(row) { launches++; return { ...result(row), proof: { ...proof(), ...flags } }; } });
-    assert.equal(launches, 1); assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'not_run' && row.reason === 'formal-lua.process_interrupted'));
+test('runner support is a current, self-contained tool set', () => {
+  assert.ok(SUPPORT.includes('tools/rust-formal-lua.mjs'));
+  assert.ok(SUPPORT.includes('tools/rust-formal-lua-bridge.mjs'));
+  assert.ok(SUPPORT.includes('release/tools/luac.json'));
+  for (const path of SUPPORT) {
+    assert.equal(path.includes('tests/rust-parity'), false, path);
+    assert.equal(path.includes('formal-lua-3.2'), false, path);
+    assert.ok(existsSync(join(root, path)), path);
   }
-  const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute(row) { return { ...result(row), signal: 'SIGTERM' }; } });
-  assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'not_run'));
-});
-function sealedFixture(directory, owner = 'formal-lua-build') {
-  const id = '11111111-2222-4333-8444-555555555555', evidence = join(directory, '.tmp/rust-disk/evidence', id);
-  mkdirSync(evidence, { recursive: true });
-  const stem = join(evidence, 'process-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
-  const request = { command: owner === 'rust-build' ? 'cargo' : 'lua.exe', args: ['build', '--locked'], cwd: directory, cargoBuild: owner === 'rust-build', msvcCompile: false,
-    stdout: stem + '.stdout.bin', stderr: stem + '.stderr.bin', receipt: stem + '.receipt.json' };
-  const json = (path, value) => writeFileSync(path, JSON.stringify(value) + '\n');
-  json(stem + '.request.json', request); json(stem + '.request.json.wrapper.json', { status: 0, signal: null });
-  json(request.receipt, { ...proof(), schema: 'lycheedev.owned-process.v1', exitCode: 0, deadlineHit: false });
-  writeFileSync(request.stdout, 'build output'); writeFileSync(request.stderr, '');
-  const receipt = { schema: 'lycheedev.disk-owner.v1', id, owner, category: 'scratch', directory: join(directory, '.tmp/rust-scratch', id), state: 'retired', activePid: null, handlesReaped: true,
-    sealedAt: '2026-10-14T00:00:00Z', command: [request.command, ...request.args], inputHashes: {} };
-  const receiptPath = join(evidence, 'receipt.json');
-  function seal() {
-    const names = ['.request.json', '.request.json.wrapper.json', '.stdout.bin', '.stderr.bin', '.receipt.json'].map(suffix => stem + suffix);
-    if (owner === 'rust-build') names.push(join(evidence, 'command.json'));
-    receipt.commandSHA256 = hash(Buffer.from(JSON.stringify(receipt.command)));
-    receipt.sealedLogs = names.map(path => ({ path, original: path, sha256: hash(readFileSync(path)) }));
-    receipt.logHashes = Object.fromEntries(receipt.sealedLogs.map(row => [relative(directory, row.path), row.sha256])); json(receiptPath, receipt);
-  }
-  if (owner !== 'rust-build') seal();
-  return { evidence, stem, request, json, receipt, receiptPath, seal };
-}
-test('all sealed build evidence, not just the report, is hash authenticated', () => scratch(directory => {
-  const f = sealedFixture(directory); assert.equal(verifyOwnerEvidence(directory, f.receiptPath, 'formal-lua-build').processes.length, 1);
-  writeFileSync(f.request.stdout, 'modified compiler log'); assert.throws(() => verifyOwnerEvidence(directory, f.receiptPath, 'formal-lua-build'), /sealed_log_identity/);
-}));
-test('missing, omitted, duplicate, extra and cross-owner build evidence is rejected', () => {
-  for (const mutate of [
-    f => rmSync(f.request.stderr),
-    f => { f.receipt.sealedLogs = f.receipt.sealedLogs.filter(row => row.path !== f.request.receipt); },
-    f => { f.receipt.sealedLogs.push(f.receipt.sealedLogs[0]); },
-    f => writeFileSync(join(f.evidence, 'unsealed.txt'), 'not sealed'),
-    f => { f.receipt.sealedLogs[0].path = join(dirname(f.evidence), 'another-owner', 'borrowed.json'); },
-  ]) scratch(directory => { const f = sealedFixture(directory); mutate(f); f.json(f.receiptPath, f.receipt); assert.throws(() => verifyOwnerEvidence(directory, f.receiptPath, 'formal-lua-build')); });
-});
-test('sealed process outputs and receipts must remain within their exact request group', () => scratch(directory => {
-  const f = sealedFixture(directory); f.request.stdout = f.request.stderr; f.json(f.stem + '.request.json', f.request); f.seal();
-  assert.throws(() => verifyOwnerEvidence(directory, f.receiptPath, 'formal-lua-build'), /process_log_target/);
-}));
-test('even rehashed failed or unreaped build receipts cannot authenticate an artifact', () => {
-  for (const bad of [{ exitCode: 1 }, { deadlineHit: true }, { rootReaped: false }, { forced: true }, { outputLimit: true }]) scratch(directory => {
-    const f = sealedFixture(directory); f.json(f.request.receipt, { ...proof(), schema: 'lycheedev.owned-process.v1', exitCode: 0, ...bad }); f.seal();
-    assert.throws(() => verifyOwnerEvidence(directory, f.receiptPath, 'formal-lua-build'));
-  });
-});
-function candidateFixture(directory) {
-  for (const name of ['crates', 'release', '.cargo']) mkdirSync(join(directory, name));
-  writeFileSync(join(directory, 'Cargo.toml'), '[workspace]\n'); writeFileSync(join(directory, 'Cargo.lock'), '# fixture\n');
-  const f = sealedFixture(directory, 'rust-build'), sourceTree = sourceDigest(directory), environmentSHA256 = 'a'.repeat(64);
-  f.receipt.inputHashes = { sourceTree };
-  f.json(join(f.evidence, 'command.json'), { command: 'cargo', args: f.request.args, cwd: directory, exit: 0, inputHashes: { sourceTree }, environmentSHA256 }); f.seal();
-  const sourceBinary = join(directory, 'candidate.exe'); writeFileSync(sourceBinary, 'synthetic Node identity fixture, never executable');
-  const artifact = { schema: 'lycheedev.rust-build-artifact.v1', sourceRoot: directory, sourceBinary, binarySHA256: hash(readFileSync(sourceBinary)), sameInvocation: true,
-    command: ['cargo', ...f.request.args], inputHashes: { sourceTree }, environmentSHA256, buildEvidence: f.receiptPath };
-  const artifactPath = join(directory, 'artifact.json'); f.json(artifactPath, artifact);
-  return { ...f, artifact, artifactPath };
-}
-test('candidate source tree and exact successful build evidence authenticate together', () => scratch(directory => {
-  const f = candidateFixture(directory); assert.equal(verifyCandidateArtifact(directory, f.artifactPath).sourceTree, sourceDigest(directory));
-  writeFileSync(join(directory, 'Cargo.toml'), '[workspace]\n# changed after build\n');
-  assert.throws(() => verifyCandidateArtifact(directory, f.artifactPath), /candidate_source_changed/);
-}));
-test('matching executable hash cannot bypass missing receipt or a different sourceRoot', () => {
-  for (const mutate of [
-    f => { f.artifact.buildEvidence = join(dirname(f.evidence), 'nonexistent', 'receipt.json'); },
-    f => { f.artifact.sourceRoot = dirname(f.artifact.sourceRoot); },
-    f => { f.artifact.inputHashes.sourceTree = '0'.repeat(64); },
-    f => { f.artifact.command = ['build', '--different']; },
-  ]) scratch(directory => {
-    const f = candidateFixture(directory); mutate(f); f.json(f.artifactPath, f.artifact);
-    assert.throws(() => verifyCandidateArtifact(directory, f.artifactPath));
-  });
+  const formal = readFileSync(join(root, 'tools/rust-formal-lua.mjs'), 'utf8');
+  for (const forbidden of ['tests/rust-parity', 'formal-lua-3.2', 'go-test-map', 'fixed Go', 'runAcceptance']) assert.equal(formal.includes(forbidden), false, forbidden);
 });
 
-test('artifact command uses the actual producer cargo prefix exactly once', () => {
-  const producer = readFileSync(join(root, 'tools/rust-build.mjs'), 'utf8');
-  assert.match(producer, /sameInvocation:true,command:\['cargo',\.\.\.args\],buildEvidence:invocation\.buildEvidence/);
-  scratch(directory => {
-    const f = candidateFixture(directory);
-    assert.deepEqual(f.artifact.command, ['cargo', ...f.request.args]);
-    assert.deepEqual(f.receipt.command, f.artifact.command);
-    verifyCandidateArtifact(directory, f.artifactPath);
-  });
-  for (const command of [['build', '--locked'], ['cargo', 'cargo', 'build', '--locked'], ['rustc', 'build', '--locked']]) scratch(directory => {
-    const f = candidateFixture(directory); f.artifact.command = command; f.json(f.artifactPath, f.artifact);
-    assert.throws(() => verifyCandidateArtifact(directory, f.artifactPath));
-  });
-});
-
-// Current release authentication never weakens source-byte custody.
-test('3.2.4 has two exact 3.5.0 release allowances without relabeling historical manifests', () => {
-  const m = manifest(root);
-  assert.equal(m.oracle.commit, '29bdbdaff5f064ec212ff2064380b1ccac652eda');
-  assert.equal(m.previousOracle.commit, historical.ORACLE);
-  assert.equal(hash(readFileSync(join(root, PREVIOUS_BASE, 'manifest.json'))), historical.MANIFEST_SHA256);
-  assert.deepEqual(m.retainedReleaseFields.map(row => row.path), ['addon/Core/Runtime.lua', 'addon/Lychee Dev.toc']);
-  assert.equal(hash(readFileSync(join(root, 'tests/rust-parity/formal-lua/manifest.json'))), original.manifest(root).historicalOracle.manifestSHA256);
-  assert.deepEqual(fixed.retainedReleaseFields, m.retainedReleaseFields);
-});
-test('retained release allowance rejects every additional source edit', () => copied(dir => {
-  for (const row of manifest(dir).retainedReleaseFields) {
-    const path = join(dir, row.path), original = readFileSync(path);
-    writeFileSync(path, Buffer.concat([original, Buffer.from('\n-- changed business bytes\n')]));
-    assert.throws(() => authenticate(dir), /retained_release_identity/);
-    writeFileSync(path, original);
+test('interpreters are admitted only through the sealed reporter', () => withScratch(directory => {
+  const report = file(join(directory, 'build-report.json'), { schema: 'lycheedev.formal-lua-interpreter.v1', version: '5.1.5', platform: 'windows-amd64', executable: file(join(directory, 'lua.exe'), Buffer.from('MZ fake').toString()), executableSHA256: hash(Buffer.from('MZ fake')), executableBytes: 7, source: { url: 'x', sha256: 'y', archive: join(directory, 'source.tar.gz') }, license: { path: join(directory, 'LICENSE'), sha256: 'z' }, toolchain: { family: 'msvc', version: '1.0.0', sdkVersion: '1.0.0.0' }, support: {}, imports: [], buildEvidence: join(directory, 'receipt.json') });
+  for (const [name, value] of [['wrong schema', { ...JSON.parse(readFileSync(report)), schema: 'other' }], ['wrong version', { ...JSON.parse(readFileSync(report)), version: '5.4.0' }], ['missing receipt', JSON.parse(readFileSync(report))]]) {
+    writeFileSync(report, JSON.stringify(value));
+    assert.throws(() => verifyInterpreter(report), undefined, name);
   }
-  authenticate(dir);
 }));
-test('current static TOC requires both Retail interfaces and original client gate covers both', () => copied(dir => {
-  const path = join(dir, 'addon/Lychee Dev.toc');
-  writeFileSync(path, readFileSync(path, 'utf8').replace('120105, ', ''));
-  assert.throws(() => verifyUnifiedTOC(dir), /interface_missing: 120105/);
-  const gate = readFileSync(fixturePath(root, 'tests/addon/t_client_gate.lua'), 'utf8');
-  assert(gate.includes('Env.testBuilds.retail'));
-  assert(gate.includes('12.1.0'));
-  assert(readFileSync(fixturePath(root, 'tests/addon/env.lua'), 'utf8').includes('120105'));
+test('regular files reject missing, oversized and non-regular inputs', () => withScratch(directory => {
+  assert.throws(() => regular(join(directory, 'missing.bin')));
+  file(join(directory, 'big.bin'), Buffer.alloc(17));
+  assert.throws(() => regular(join(directory, 'big.bin'), 16), /invalid_file/);
+}));
+test('candidate artifacts are admitted only from this source tree', () => withScratch(directory => {
+  const artifact = file(join(directory, 'artifact.json'), { schema: 'lycheedev.rust-build-artifact.v1' });
+  assert.throws(() => verifyCandidateArtifact(root, artifact));
+}));
+test('hash and regular helpers are byte exact', () => withScratch(directory => {
+  const path = file(join(directory, 'bytes.bin'), Buffer.from('abc'));
+  assert.equal(hash(readFileSync(path)), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  assert.deepEqual(regular(path), Buffer.from('abc'));
 }));
 
-test('the 3.2.4 increment contains only the exact combat change and four version literals', () => {
-  const current = manifest(root), previous = historical.manifest(root);
-  for (const key of ['fixtures', 'candidateAddon']) {
-    const changed = [];
-    for (const row of current[key]) {
-      const old = previous[key].find(old => old.path === row.path);
-      if (row.sha256 === old.sha256) { assert.deepEqual(row, old); continue; }
-      changed.push(row.path);
-      const bytes = execFileSync('git', ['cat-file', 'blob', `${ORACLE}:${row.path}`], { cwd: root, timeout: 10000, maxBuffer: LIMITS.file });
-      const text = bytes.toString('utf8');
-      if (['tests/addon/env.lua', 'tests/addon/t_about.lua', 'addon/Core/Runtime.lua', 'addon/Lychee Dev.toc'].includes(row.path)) {
-        assert.equal(text.split('3.2.4').length, 2, row.path);
-        const restored = Buffer.from(text.replace('3.2.4', '3.2.3'));
-        assert.equal(restored.length, old.bytes); assert.equal(hash(restored), old.sha256); assert.equal(gitBlob(restored), old.gitBlob);
-      } else {
-        assert(['tests/addon/t_focus_bindings.lua', 'addon/Bridge/FocusBindings.lua', 'addon/Bridge/InputState.lua'].includes(row.path));
-        assert.deepEqual(bytes, readFileSync(join(root, row.path)), row.path);
-      }
-    }
-    assert.deepEqual(changed, key === 'fixtures' ? CHANGED_FIXTURES : CHANGED_ADDON);
-  }
-  assert.equal(current.increment.authenticatedGitObjects, 113);
-  assert.equal(current.increment.reusedFixtures, 55); assert.equal(current.increment.unchangedAddon, 51);
-});
-test('current materialization stages original 3.2.4 fixtures and preserves historical 3.2.3 bytes', () => scratch(dir => {
-  const target = join(dir, 'stage'); materialize(root, target, fixed);
-  for (const row of fixed.fixtures) {
-    const staged = readFileSync(join(target, row.path));
-    assert.equal(hash(staged), row.sha256); assert.equal(gitBlob(staged), row.gitBlob);
-    assert.deepEqual(staged, readFileSync(fixturePath(root, row.path)));
-    if (CHANGED_FIXTURES.includes(row.path)) {
-      const previous = readFileSync(historical.fixturePath(root, row.path));
-      if (row.path !== 'tests/addon/t_focus_bindings.lua') {
-        assert(previous.includes('3.2.3')); assert(staged.includes('3.2.4'));
-      }
-      assert.notDeepEqual(previous, staged);
-    }
-  }
-  for (const field of fixed.retainedReleaseFields) {
-    assert(readFileSync(join(target, field.path)).includes(field.retainedText));
-    assert(field.expectedText.includes('3.2.4')); assert(field.retainedText.includes('3.5.0'));
-  }
-  assert.deepEqual(cases(fixed), historical.cases({fixtures: historical.manifest(root).fixtures}));
-  assert.equal(runCases, historical.runCases); assert.equal(verifyMaterial, historical.verifyMaterial);
+test('portable interpreter evidence preserves original bytes and verifies without historical paths',()=>withScratch(directory=>{
+ const original=join(directory,'original-owner'),output=join(directory,'runtime');mkdirSync(original);mkdirSync(output);
+ const report={schema:'lycheedev.formal-lua-interpreter.v1',version:'5.1.5',platform:'windows-amd64',buildEvidence:join(output,'evidence/receipt.json')},bytes=Buffer.from(JSON.stringify(report)+'\n');
+ const logs=[['interpreter-report.json',bytes],['process.stdout.bin',Buffer.from('original sealed compiler log')]];
+ const receipt={schema:'lycheedev.disk-owner.v1',owner:'formal-lua-build',category:'scratch',state:'retired',handlesReaped:true,activePid:null,sealedLogs:logs.map(([name,value])=>({path:join(original,name),sha256:hash(value)}))};
+ for(const[name,value]of logs)file(join(original,name),value);
+ const originalReceipt=Buffer.from(JSON.stringify(receipt,null,2)+'\n');file(join(original,'receipt.json'),originalReceipt);
+ preserveInterpreterEvidence(join(original,'receipt.json'),output);
+ assert.deepEqual(readFileSync(report.buildEvidence),originalReceipt);
+ for(const[name,value]of logs)assert.deepEqual(readFileSync(join(output,'evidence',name)),value);
+ rmSync(original,{recursive:true});
+ assert.equal(verifyInterpreterEvidence(report,bytes).buildReceiptSHA256,hash(originalReceipt));
+ appendFileSync(join(output,'evidence/process.stdout.bin'),'changed');
+ assert.throws(()=>verifyInterpreterEvidence(report,bytes),/sealed_log_corrupt/);
 }));
-test('new and reused fixture custody rejects rollback, tampering, omission, additions and rewritten overlays', () => {
-  for (const mutate of [
-    dir => cpSync(join(dir, PREVIOUS_BASE, 'oracle/tests/addon/env.lua'), fixturePath(dir, 'tests/addon/env.lua')),
-    dir => writeFileSync(fixturePath(dir, 'tests/addon/t_about.lua'), '-- changed current assertion\n'),
-    dir => rmSync(fixturePath(dir, 'tests/addon/env.lua')),
-    dir => cpSync(fixturePath(dir, 'tests/addon/run.lua'), join(dir, BASE, 'oracle/tests/addon/run.lua')),
-    dir => writeFileSync(join(dir, PREVIOUS_BASE, 'oracle/tests/addon/env.lua'), '-- cannot rewrite old identity\n'),
-    dir => writeFileSync(join(dir, PREVIOUS_BASE, 'oracle/tests/addon/new.lua'), '-- cannot extend inherited set\n'),
-    dir => writeFileSync(join(dir, PREVIOUS_BASE, 'manifest.json'), '{}\n'),
-    dir => writeFileSync(join(dir, BASE, 'release-fields.json'), '[]\n'),
-  ]) copied(dir => { mutate(dir); assert.throws(() => authenticate(dir)); });
-});
-test('materialization refuses a caller-supplied stale or forged identity before creating the target', () => scratch(dir => {
-  const stale = {...fixed, oracle: historical.ORACLE, manifestSHA256: historical.MANIFEST_SHA256, fixtures: historical.manifest(root).fixtures};
-  assert.throws(() => materialize(root, join(dir, 'old'), stale), /materialize_input_identity/);
-  assert.throws(() => materialize(root, join(dir, 'forged'), { ...fixed, oracle: historical.ORACLE }), /materialize_input_identity/);
-  const target = join(dir, 'current'); materialize(root, target, fixed);
-  writeFileSync(join(target, 'unexpected.lua'), 'assert(true)');
-  assert.throws(() => verifyMaterial(target, fixed), /staged_identity/);
-}));
-test('current test map binds all original Go functions and only current not-run execution claims', () => {
-  const map = JSON.parse(readFileSync(join(root, BASE, 'go-test-map.json')));
-  assert.deepEqual(map.oracle, manifest(root).oracle); assert.equal(map.manifestSHA256, MANIFEST_SHA256);
-  for (const entry of map.tests) {
-    const source = fixed.fixtures.find(row => row.path === entry.goSource);
-    assert.equal(entry.sourceSHA256, source.sha256); assert.equal(entry.sourceGitBlob, source.gitBlob);
-    assert.equal(entry.executionEvidence, 'NOT_RUN for Go 3.2.4 until actual current-oracle execution is sealed');
-  }
-});
-test('interpreter support binds both identity generations and the new exact release overlay', () => {
-  assert(ORACLE_SUPPORT.every(path => RUNNER_SUPPORT.includes(path)));
-  assert.equal(new Set(RUNNER_SUPPORT).size, RUNNER_SUPPORT.length);
-  assert.equal(hash(readFileSync(join(root, BASE, 'release-fields.json'))), RELEASE_FIELDS_SHA256);
-  for (const path of [`${BASE}/assertions.mjs`, `${BASE}/manifest.json`, `${BASE}/release-fields.json`, `${BASE}/go-test-map.json`, `${PREVIOUS_BASE}/assertions.mjs`, `${PREVIOUS_BASE}/manifest.json`]) assert(RUNNER_SUPPORT.includes(path), path);
-  const source = readFileSync(join(root, 'tools/rust-formal-lua.mjs'), 'utf8');
-  assert.match(source, /report\.oracle, ORACLE/); assert.match(source, /report\.manifestSHA256, MANIFEST_SHA256/);
-  assert.match(source, /receipt\.inputHashes\.oracle, ORACLE/);
-  assert.match(source, /scope: '216 fixed Go 3\.2\.4 addon Lua suite\/profile executions plus four/);
-});

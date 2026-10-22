@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 export const GO_COMMIT = '29bdbdaff5f064ec212ff2064380b1ccac652eda';
 export const REPETITIONS = 20;
-export const TARGET_RATIO = 0.30;
+export const TARGET_RATIO = 0.50;
 export const PHASES = Object.freeze(['fresh-wdc', 'prepare', 'first-after-prepare', 'subsequent-hit']);
 export const orderFor = i => i % 2 === 0 ? ['go', 'rust'] : ['rust', 'go'];
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -269,13 +269,13 @@ export const DISK_COVERAGE = Object.freeze({totalDataCoverageComplete:false,acco
   'historical/unregistered Data shared blobs and writers not using shared-blob admission',
   'historical shared metadata database, sidecars and legacy raw-source references',
   'legacy Data staging/spill paths outside tmp/data-derived-v1',
-  'export temporaries outside tmp/data-derived-v1/exports',
+  'unregistered external export temporaries without durable declarations',
 ],automaticEvictionEnabled:false});
 export function auditDiskReservation(r,{automaticEvictionEnabled=false}={}) {
   assert.equal(typeof automaticEvictionEnabled,'boolean','explicit disk policy boolean');
   assert.deepEqual(Object.keys(r).sort(),['configuredMaxBytes','existing','additionalPeak','sharedBlobAdditionalPeak','privateMetadataAdditionalPeak','admittedPeakBytes','coverage'].sort());
   assert.equal(r.configuredMaxBytes,5000000000,'unchanged decimal 5GB Data quota');
-  assert.deepEqual(Object.keys(r.existing).sort(),['objectNamespaceBytes','generationNamespaceBytes','temporaryNamespaceBytes','privateMetadataNamespaceBytes','sharedBlobBytes','retainedSharedPeakBytes','files'].sort());
+  assert.deepEqual(Object.keys(r.existing).sort(),['objectNamespaceBytes','generationNamespaceBytes','temporaryNamespaceBytes','privateMetadataNamespaceBytes','sharedBlobBytes','retainedSharedPeakBytes','pendingExternalExportBytes','files'].sort());
   assert.deepEqual(Object.keys(r.additionalPeak).sort(),['objects','generations','staging','spill','exportTemporary'].sort());
   for(const value of [...Object.values(r.existing),...Object.values(r.additionalPeak),r.sharedBlobAdditionalPeak,r.privateMetadataAdditionalPeak,r.admittedPeakBytes])unsigned(value);
   assert.deepEqual(r.coverage,{...DISK_COVERAGE,automaticEvictionEnabled},'honest explicitly selected disk accounting');

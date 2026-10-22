@@ -46,7 +46,7 @@ export const RUNNER_FILES = Object.freeze([
   'tools/rust-source-candidate-diagnostics.mjs', 'tests/rust-performance-paired/source-candidates.mjs',
   'tests/rust-performance-paired/read-fact-delta.mjs', 'tests/rust-performance-paired/inputs.mjs',
   'tests/rust-performance-paired/contract.mjs', 'tests/rust-source-full-corpus/assertions.mjs',
-  'tests/rust-source-full-corpus/retail-oracle.json', 'tests/rust-parity/describe-contract.mjs', 'tests/rust-parity/oracle.mjs',
+  'tests/rust-source-full-corpus/retail-oracle.json', 'tests/rust-performance-paired/owned-proof.mjs',
   'tools/rust-build.mjs', 'tools/rust-disk.mjs', 'tools/rust-emmy-identity.mjs',
   'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-owned-memory.mjs',
   'tools/rust-build-auxiliary.json', 'tools/zip.mjs', 'release/rust-disk-policy.json',

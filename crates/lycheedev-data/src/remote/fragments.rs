@@ -3,10 +3,7 @@
 //! belongs to the encoded/index/decoded consumer, never to this cache entry.
 use super::{
     availability_failure,
-    cache::{
-        self, CachedBlob, MetadataFetcher, PublicMetadata, Route, Store, pure_expected,
-        wire::{Object, ObjectSeed, folded, scalar},
-    },
+    cache::{self, BlobRef, MetadataFetcher, PublicMetadata, Route, Store, pure_expected},
     catalog, invalid, limit, target,
     transport::{self, RangeReply, RangeRequest},
 };
@@ -16,13 +13,9 @@ use crate::{
     resource::{Budget, RetainedReservation},
 };
 use lycheedev_core::{
-    Result, ToolkitError, control::OperationControl, evidence::GoSignedInteger, selection::DataPin,
-    storage,
+    Result, ToolkitError, control::OperationControl, selection::DataPin, storage,
 };
-use serde::{
-    Deserialize, Deserializer, Serialize,
-    de::{DeserializeSeed, IgnoredAny, MapAccess},
-};
+use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Arc};
 
 pub(crate) trait RangeFetcher: Sync {
@@ -66,38 +59,12 @@ fn context(mut error: ToolkitError, object: &str) -> ToolkitError {
     error
 }
 
-#[derive(Default, Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedRange {
     object_bytes: i64,
-    blob: CachedBlob,
+    blob: BlobRef,
 }
-impl Object for SavedRange {
-    fn fields<'de, A: MapAccess<'de>>(&mut self, mut map: A) -> std::result::Result<(), A::Error> {
-        while let Some(key) = map.next_key::<String>()? {
-            match folded(&key).as_str() {
-                "objectbytes" => {
-                    let mut n = GoSignedInteger(self.object_bytes);
-                    scalar(&mut map, &mut n)?;
-                    self.object_bytes = n.0;
-                }
-                "blob" => map.next_value_seed(ObjectSeed(&mut self.blob))?,
-                _ => {
-                    map.next_value::<IgnoredAny>()?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-impl<'de> Deserialize<'de> for SavedRange {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let mut value = Self::default();
-        ObjectSeed(&mut value).deserialize(d)?;
-        Ok(value)
-    }
-}
-
 // The retained reservation travels with the bytes and is refunded on Drop.
 // No bare Vec conversion detaches the allocation from its safety owner.
 pub(crate) struct Fragment<'a> {
@@ -182,23 +149,6 @@ impl<'a> Fragments<'a> {
         }
     }
 
-    pub fn prepare(
-        home: &'a Path,
-        pin: &DataPin,
-        offline: bool,
-        control: &'a OperationControl,
-        budget: Option<&'a Budget>,
-    ) -> Result<(Self, Arc<BuildMetadata>)> {
-        Self::prepare_with(
-            home,
-            pin,
-            offline,
-            control,
-            budget,
-            &PublicMetadata,
-            &PublicRanges,
-        )
-    }
     #[allow(clippy::too_many_arguments)]
     pub(super) fn prepare_with(
         home: &'a Path,
@@ -352,7 +302,7 @@ impl<'a> Fragments<'a> {
                 || saved.object_bytes > transport::MAX_OBJECT_BYTES
                 || request.offset > saved.object_bytes
                 || request.length > saved.object_bytes - request.offset
-                || saved.blob.bytes != request.length
+                || saved.blob.bytes != request.length as u64
                 || request.total != 0 && request.total != saved.object_bytes
             {
                 return Err(range());
@@ -431,8 +381,7 @@ impl<'a> Fragments<'a> {
                 }
                 let blob = self
                     .store
-                    .publish_blob(&reply.bytes, request.length as usize)?
-                    .try_into()?;
+                    .publish_blob(&reply.bytes, request.length as usize)?;
                 self.store.put(
                     key,
                     &SavedRange {

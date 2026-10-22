@@ -288,6 +288,7 @@ impl TrustedHostEnvironment {
         let material = self.host_material(reference)?;
         Ok(EnvironmentEvidence { material: material.name.clone(), material_sha256: material.sha256.clone(), pointer: reference.pointer.clone(), identity: identity.to_owned() })
     }
+    #[cfg(test)]
     fn identity_value(&self, control: &OperationControl) -> lycheedev_core::Result<Value> {
         require_same_control(&self.admission_control, control)?;
         let mut value = json!({"profile": self.data.profile, "closed": self.data.closed, "materials": self.data.materials, "intrinsics": self.data.intrinsics});
@@ -303,6 +304,37 @@ impl TrustedHostEnvironment {
         }
         control.check()?;
         Ok(value)
+    }
+}
+
+// The old Value identity sorted every object recursively. Retain authenticated
+// host data and canonicalize one record at a time instead of retaining a second
+// complete bindings/descriptor tree. Control belongs to the current writer,
+// never to this immutable view shared across research requests.
+struct CanonicalHostEnvironment<'a>(&'a HostEnvironmentData);
+impl Serialize for CanonicalHostEnvironment<'_> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeMap;
+        let data=self.0;
+        let mut map=serializer.serialize_map(Some(if data.bindings.is_empty(){4}else{5}))?;
+        if !data.bindings.is_empty(){map.serialize_entry("bindings",&CanonicalHostRecords(&data.bindings))?;}
+        map.serialize_entry("closed",&data.closed)?;
+        map.serialize_entry("intrinsics",&CanonicalHostRecords(&data.intrinsics))?;
+        map.serialize_entry("materials",&data.materials)?;
+        map.serialize_entry("profile",&data.profile)?;
+        map.end()
+    }
+}
+struct CanonicalHostRecords<'a,T>(&'a [T]);
+impl<T:Serialize> Serialize for CanonicalHostRecords<'_,T> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq=serializer.serialize_seq(Some(self.0.len()))?;
+        for record in self.0 {
+            let canonical=serde_json::to_value(record).map_err(serde::ser::Error::custom)?;
+            seq.serialize_element(&canonical)?;
+        }
+        seq.end()
     }
 }
 

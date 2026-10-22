@@ -36,9 +36,9 @@ fn query_allocation_observation_keeps_original_cancellation() {
         let mut session=context_projection_fixture();
         let control=session.prepared.operation_control().clone();
         let query=planned_query("Target","target.lua",2,5,"function","incoming");
-        let cancel=control.cancel_handle();let mut seen=false;
+        let cancel=control.tracked_cancel_handle().unwrap();let mut seen=false;
         let error=session.query_observed(query,&control,|phase|{
-            if phase==stop {seen=true;cancel.store(true,std::sync::atomic::Ordering::Release);}
+            if phase==stop {seen=true;cancel.cancel();}
         }).unwrap_err();
         assert!(seen,"phase did not execute: {stop}");
         assert_eq!(error.code,"command.cancelled");
@@ -71,6 +71,7 @@ fn shared_analysis_two_real_scopes_keep_full_rows_answers_and_last_analysis() {
     let control=OperationControl::default();
     let query=planned_query("Target","target.lua",1,1,"function","incoming");
     let snapshot=SnapshotRequest{
+        encoding_warnings:vec![],
         files:BTreeMap::from([("target.lua".into(),"function Target() end\n".into()),("caller.lua".into(),"Target()\n".into())]),
         load_documents:BTreeMap::from([("A.toc".into(),"target.lua\ncaller.lua\n".into()),("B.toc".into(),"target.lua\n".into())]),
         environment_documents:BTreeMap::new(),source:json!({"repository":"shared-analysis-two-scopes","product":"retail"}),
@@ -82,9 +83,9 @@ fn shared_analysis_two_real_scopes_keep_full_rows_answers_and_last_analysis() {
     let mut expected_scopes=Vec::new();let mut expected_references=Vec::new();let mut expected_rows=Vec::new();
     for program in &session.xml.programs {
         let graph=session.prepared.build_xml_plan("source-research-load",program.clone(),None,&control).unwrap();
-        let legacy=session.prepared.full_scan_research_relations(&query.symbol,"incoming",Some(&graph),&session.xml).unwrap();
+        let legacy=session.prepared.research_relations(&query.symbol,"incoming",Some(&graph),&session.xml).unwrap();
         let mut projection=session.prepared.research_relations(&query.symbol,"incoming",Some(&graph),&session.xml).unwrap();
-        assert_eq!(serde_json::to_vec(&original_call_labels(projection.clone())).unwrap(),serde_json::to_vec(&legacy).unwrap());
+        assert_eq!(serde_json::to_vec(&projection.clone()).unwrap(),serde_json::to_vec(&legacy).unwrap());
         let scope=json!({"manifest":program.manifest,"loadContext":program.context,"snapshot":graph.snapshot_key,"entries":graph.native_invocations.as_ref().map(|facts|&facts.entries),"kind":"alternative_manifest_hypothetical_after_load"});
         // The previous full-buffer hash is an independent byte oracle for the
         // actual native rows, not a second call to the new streaming digest.
@@ -124,13 +125,13 @@ fn shared_control_same_graph_both_directions_and_distinct_graphs_preserve_wire()
         for direction in ["incoming","both"] {
             let query=planned_query("Target","target.lua",2,5,"function",direction);
             let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-            let expected=session.prepared.full_scan_research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
+            let expected=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
             let before=session.prepared.research_steps();
             let fresh=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
             let cost=session.prepared.research_steps()-before;
             // The frozen oracle predates only incoming caller labels. Preserve
             // its exact existing inverse; all analysis/coverage stays untouched.
-            assert_eq!(serde_json::to_vec(&original_call_labels(fresh.clone())).unwrap(),serde_json::to_vec(&expected).unwrap());
+            assert_eq!(serde_json::to_vec(&fresh.clone()).unwrap(),serde_json::to_vec(&expected).unwrap());
             let expected=fresh;
             let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,None).unwrap().consume(&plan).unwrap();
             let shared=answers[0].analysis_control().unwrap();
@@ -153,6 +154,7 @@ fn shared_control_survives_real_large_projection_fallback_without_missing_rows()
     let control=OperationControl::default();
     let callers=format!("{}-callers.lua","a".repeat(100));
     let session=ResearchSession::prepare(SnapshotRequest{
+        encoding_warnings:vec![],
         files:BTreeMap::from([("target.lua".into(),"function Target() end\n".into()),(callers,"Target()\n".repeat(2500))]),
         // The other file still has complete source-candidate rows even though
         // it is not loaded. Avoid inventing execution evidence for those calls.
@@ -165,11 +167,11 @@ fn shared_control_survives_real_large_projection_fallback_without_missing_rows()
     for direction in ["incoming","both"] {
         let query=planned_query("Target","target.lua",1,1,"function",direction);
         let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-        let expected=session.prepared.full_scan_research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
+        let expected=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
         let before=session.prepared.research_steps();
         let fresh=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
         let cost=session.prepared.research_steps()-before;
-        assert_eq!(serde_json::to_vec(&original_call_labels(fresh.clone())).unwrap(),serde_json::to_vec(&expected).unwrap());
+        assert_eq!(serde_json::to_vec(&fresh.clone()).unwrap(),serde_json::to_vec(&expected).unwrap());
         let expected=fresh;
         let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,None).unwrap().consume(&plan).unwrap();
         assert!(projection.is_none(),"whole incoming and retained context rows exceed the unchanged 1 MiB limit");
@@ -217,4 +219,83 @@ fn shared_control_preserves_original_near_reserve_reconstruction_and_errors() {
             assert_eq!(actual.2,1,"the reserve boundary still reconstructs rows: {direction}, {offset}");
         }
     }
+}
+
+// Exercise the production syntax -> load graph -> relation/receipt projection.
+// Studied Lua is abstractly analyzed, never executed by a Lua interpreter.
+fn write_projection_fixture(source:&str,loaded:bool)->ResearchSession {
+    let control=OperationControl::default();
+    let files=BTreeMap::from([("logic.lua".into(),source.into()),("empty.lua".into(),"-- empty load\n".into())]);
+    ResearchSession::prepare(SnapshotRequest{encoding_warnings:vec![],files,
+        load_documents:BTreeMap::from([("Main.toc".into(),if loaded{"logic.lua\n"}else{"empty.lua\n"}.into())]),
+        environment_documents:BTreeMap::new(),source:json!({"repository":"write-projection-test","product":"retail"}),
+        luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+        api:vec![],environment_manifest:None,
+        load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![if loaded{"logic.lua"}else{"empty.lua"}.into()],issues:vec![]}],input_gaps:vec![]},&control).unwrap()
+}
+
+#[test]
+fn executed_global_declaration_writes_keep_real_observations_and_complete_references() {
+    let source="function Caller()\n Target()\n Target()\nend\nfunction Target() return 1 end\nCaller()\n";
+    for direction in ["incoming","both"] {
+        let mut session=write_projection_fixture(source,true);
+        let control=session.prepared.operation_control().clone();
+        let value=session.query(planned_query("Target","logic.lua",5,5,"function",direction),&control).unwrap();
+        assert_eq!(value["analysis"]["state"],"complete");
+        assert_eq!(value["analysis"]["unresolvedRelations"],0);
+        assert_eq!(value["semanticExecution"]["receipt"]["uncertain_answers"],0);
+        let rows=value["relations"].as_array().unwrap();
+        let write=rows.iter().find(|row|row["kind"]=="write"&&row["path"]=="logic.lua"&&row["line"]==5).unwrap();
+        assert_eq!(write["state"],"resolved");
+        assert_eq!(write["lexical"]["state"],"not_applicable","global execution is not a lexical-local guess");
+        let site=&write["site"];
+        assert_eq!(&source[site["start"].as_u64().unwrap()as usize..site["end"].as_u64().unwrap()as usize],"Target");
+        let observations=write["observations"].as_array().unwrap();
+        assert_eq!(observations.len(),1);
+        let observed=&observations[0];
+        assert_eq!(observed["selected"]["state"],"known");
+        assert!(!observed["context"].as_str().unwrap().is_empty());
+        assert_ne!(observed["occurrence"]["kind"],"syntax_only");
+        assert!(observed["selected"]["value"]["writes"].as_array().unwrap().contains(&observed["proof"]));
+        assert_eq!(rows.iter().filter(|row|row["kind"]=="call"&&row["target"]=="Target"&&row["state"]=="resolved").count(),2);
+        let reference=&value["semanticExecution"]["answers"][0]["operations"][0];
+        assert_eq!(reference["kind"],"references");assert_eq!(reference["state"],"known");
+    }
+}
+
+#[test]
+fn write_projection_keeps_unexecuted_conditional_and_incomplete_writes_as_candidates() {
+    for (source,line,loaded,observed) in [
+        ("function Target() return 1 end\n",1,false,false),
+        ("if Flag then\n function Target() return 1 end\nend\n",2,true,true),
+        ("function Target() Target() end\nTarget()\n",1,true,true),
+    ] {
+        let mut session=write_projection_fixture(source,loaded);
+        let control=session.prepared.operation_control().clone();
+        let value=session.query(planned_query("Target","logic.lua",line,line,"function","incoming"),&control).unwrap();
+        let write=value["relations"].as_array().unwrap().iter().find(|row|row["kind"]=="write"&&row["path"]=="logic.lua"&&row["line"]==line).unwrap();
+        assert_eq!(write["state"],"static_candidate","{source}");
+        assert_eq!(value["analysis"]["state"],"partial","{source}");
+        assert_eq!(!write["observations"].as_array().unwrap().is_empty(),observed,"executed prefixes retain their actual write evidence");
+        if source.contains("Target() Target()") {assert_eq!(value["analysis"]["graphControl"]["complete"],false);}
+    }
+}
+
+#[test]
+fn known_declaration_write_never_proves_later_unknown_reads_calls_or_assignments() {
+    let source="function Target() return 1 end\nTarget = Missing\nTarget = Target\nTarget()\n";
+    let mut session=write_projection_fixture(source,true);
+    let control=session.prepared.operation_control().clone();
+    let value=session.query(planned_query("Target","logic.lua",1,1,"function","incoming"),&control).unwrap();
+    let rows=value["relations"].as_array().unwrap();
+    assert_eq!(rows.iter().find(|row|row["kind"]=="write"&&row["line"]==1).unwrap()["state"],"resolved");
+    for (kind,line) in [("write",2),("write",3),("reference",3),("call",4)] {
+        let row=rows.iter().find(|row|row["kind"]==kind&&row["line"]==line).unwrap();
+        assert_eq!(row["state"],"static_candidate","{kind} at {line}");
+        let observations=row["observations"].as_array().unwrap();
+        assert!(!observations.is_empty(),"real unavailable observation must remain visible");
+        assert!(observations.iter().all(|row|row["selected"]["state"]=="unavailable"));
+    }
+    assert_eq!(value["analysis"]["state"],"partial");
+    assert!(value["semanticExecution"]["receipt"]["uncertain_answers"].as_u64().unwrap()>0);
 }

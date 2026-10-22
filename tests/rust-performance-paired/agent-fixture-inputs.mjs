@@ -1,5 +1,5 @@
 import {preparationEnvironmentPolicy} from './agent-environment.mjs';
-// Bounded readers for these three existing synthetic fixture families only.
+// Bounded readers for the existing synthetic fixture families only.
 import assert from 'node:assert/strict';
 import {existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
@@ -225,8 +225,6 @@ export async function validateDataOutput({entry, fixture, engine, cacheMode, env
 
 // Independent optional NumericSample CSV oracle; the existing Rust exporter
 // constructs the actual CASC/WDC fixture. Default B04 readers are unchanged.
-export const NUMERIC_LAYOUT_SOURCE_SHA256 = 'bfc67a8ac470bb89df3630d91b600c940453b296ca9c61f63bac69e2cdae1e35';
-export const CSV_CARGO_LOCK_SHA256 = '48a75745057d65173a19e63bbb434daae290ed979b0c9bfed76427d523dc4055';
 export const CSV_ROWS = 16384;
 export const CSV_COLUMNS = Object.freeze(['ID', 'F0', 'F1', 'F2', 'F3']);
 export const CSV_SQL = 'SELECT ID, F0, F1, F2, F3 FROM NumericSample ORDER BY ID';
@@ -245,17 +243,13 @@ export function expectedNumericCSV() {
   const bytes = Buffer.from(rows.join(''));
   assert.equal(bytes.length, CSV_BYTES); assert.equal(digest(bytes), CSV_SHA256); return bytes;
 }
-export function removedNumericLayoutCost(abi) {
+function validateNumericABI(abi) {
   assert.deepEqual(Object.keys(abi ?? {}).sort(), ['stringNumberLayoutBytes', 'usizeNumberLayoutBytes']);
   for (const bytes of Object.values(abi)) assert(Number.isSafeInteger(bytes) && bytes >= 16 && bytes <= 256 && bytes % 8 === 0, 'bounded Windows x64 tuple ABI');
   assert.equal(abi.stringNumberLayoutBytes - abi.usizeNumberLayoutBytes, 16, 'Windows x64 String versus usize tuple');
-  const nodes = (entries, tupleBytes) => (Math.ceil(entries / 5) + 2) * (16 * tupleBytes + 128);
-  const retainedBytes = CSV_ROWS * nodes(4, abi.usizeNumberLayoutBytes) + nodes(CSV_ROWS, abi.usizeNumberLayoutBytes)
-    + 2 * nodes(3, abi.stringNumberLayoutBytes) + nodes(1, abi.stringNumberLayoutBytes) + 128;
-  return {retainedBytes, decodeWork: CSV_ROWS * 5, abi: {...abi}};
 }
 export function auditNumericCSVFixture(identity, payloads, blobs) {
-  removedNumericLayoutCost(identity.numericCsvABI);
+  validateNumericABI(identity.numericCsvABI);
   assert.deepEqual(identity.tables, [{name: 'NumericSample', fileDataID: 404, layout: 0xabcd0194, bytes: WDC_BYTES, sha256: WDC_SHA256, dbdSHA256: DBD_SHA256}]);
   const body = payloads.get(WDC_SHA256); assert(body, 'numeric WDC object missing');
   const raw = body.raw; assert.equal(raw.length, WDC_BYTES); assert.equal(digest(raw), WDC_SHA256);
@@ -270,9 +264,24 @@ export function auditNumericCSVFixture(identity, payloads, blobs) {
   assert.equal(definition.raw.toString(), 'COLUMNS\nint ID\nfloat F0\nfloat F1\nfloat F2\nfloat F3\n\nBUILD 12.1.0.69933\nLAYOUT ABCD0194\n$id$ID<u32>\nF0<32>\nF1<32>\nF2<32>\nF3<32>\n');
 }
 
+// Explicit current fixture producers, shared by invocation and receipt replay.
+export const fixturePreparers = Object.freeze([
+  {kind: 'catalog', target: 'agent_fixture_prepare', test: 'prepare_catalog_agent_fixture', variable: 'LYCHEEDEV_CATALOG_FIXTURE'},
+  {kind: 'content', target: 'content_budget', test: 'prepare_compressed_content_public_fixture', variable: 'LYCHEEDEV_CONTENT_BUDGET_FIXTURE'},
+  {kind: 'images', target: 'image_export_business', test: 'prepare_large_image_export_public_fixture', variable: 'LYCHEEDEV_IMAGE_EXPORT_FIXTURE'},
+  {kind: 'csv-numeric', target: 'agent_fixture_prepare', test: 'prepare_numeric_agent_fixture', variable: 'LYCHEEDEV_NUMERIC_CSV_FIXTURE'},
+]);
+export function fixturePreparationRecipe(kind) {
+  const entry = fixturePreparers.find(entry => entry.kind === kind);
+  assert(entry, `missing current fixture producer for ${kind}; prepare and connect the current independent fixture before measuring`);
+  return entry;
+}
+export const fixtureArgs = entry => ['test', '--locked', '--offline', '-j', '1', '-p', 'lycheedev-data', '--test', entry.target, entry.test, '--', '--ignored', '--exact', '--nocapture', '--test-threads=1'];
+
 export function loadOwnedAgentFixture(spec,kind){
+ const args=fixtureArgs(fixturePreparationRecipe(kind));
  assert.deepEqual(Object.keys(spec).sort(),['directory','preparation','preparationSHA256']);const raw=bounded(spec.preparation,4<<20);assert.equal(digest(raw),spec.preparationSHA256);const report=parse(raw);assert.equal(report.schema,'lycheedev.paired-agent-inputs.recovered.v1');assert.equal(report.inputs.environmentPolicy,preparationEnvironmentPolicy);assert.deepEqual(report.inputs.environmentOverrides,[]);assert.equal(report.state,'prepared_synthetic_inputs');assert.equal(report.handlesReaped,true);const owner=parse(bounded(report.owner,4<<20));assert.equal(owner.schema,'lycheedev.disk-owner.v1');assert.equal(owner.owner,'paired-data-fixtures');assert.equal(owner.retention,'evidence');assert(['succeeded','retired'].includes(owner.state));assert.equal(owner.handlesReaped,true);assert.equal(owner.activePid,null);assert.equal(owner.directory,report.directory);assert.deepEqual(owner.inputHashes,report.inputs);assert.equal(owner.sealedLogs.filter(row=>resolve(row.path)===resolve(spec.preparation)).length,1);assert.equal(owner.sealedLogs.find(row=>resolve(row.path)===resolve(spec.preparation)).sha256,spec.preparationSHA256);
- assert.equal(report.fixtures[kind],spec.directory);const calls=report.calls.filter(row=>row.kind===kind);assert.equal(calls.length,1);const call=calls[0];assert.equal(call.destination,spec.directory);assert(call.launched&&call.process.handlesReaped&&call.process.exit===0&&!call.process.error);assert.equal(digest(bounded(call.buildEvidence,4<<20)),call.cargoReceiptSHA256);assert.deepEqual(parse(bounded(call.buildEvidence,4<<20)),call.cargoReceipt);assert.equal(call.cargoReceipt.handlesReaped,true);assert(['succeeded','retired'].includes(call.cargoReceipt.state));assert.equal(call.cargoReceipt.inputHashes.sourceTree,report.inputs.sourceTree);assert.equal(call.invocation.inputHashes.sourceTree,report.inputs.sourceTree);assert(call.args.includes('--locked')&&call.args.includes('--offline')&&call.args.includes('migration-oracle')&&call.args.includes('--test-threads=1'));assert.equal(call.args[call.args.indexOf('-j')+1],'1');const proof=call.process.proof;for(const key of ['rootReaped','treeReaped','handlesClosed','toolIdentityLocksClosed','outputReadersComplete'])assert.equal(proof[key],true);assert.equal(proof.activeProcesses,0);assert(!proof.error&&!proof.deadlineHit&&!proof.outputLimit);
- const recipes={catalog:['catalog_navigation_parity','prepare_catalog_public_fixture'],content:['content_budget_parity','prepare_compressed_content_public_fixture'],images:['image_export_business','prepare_large_image_export_public_fixture'],'csv-numeric':['catalog_navigation_parity','prepare_numeric_csv_public_fixture']};assert(recipes[kind]);const[target,test]=recipes[kind],args=['test','--locked','--offline','-j','1','-p','lycheedev-data','--features','migration-oracle','--test',target,test,'--','--ignored','--exact','--nocapture','--test-threads=1'];assert.deepEqual(call.args,args);assert.deepEqual(call.cargoReceipt.command,['cargo',...args]);const evidence=dirname(call.buildEvidence),sealedBuild=name=>{const path=join(evidence,name),log=call.cargoReceipt.sealedLogs.find(l=>l.path===path);assert(log);assert.equal(digest(bounded(path,16<<20)),log.sha256);return path;},command=parse(bounded(sealedBuild('command.json'),4<<20));assert.deepEqual(command.args,args);assert.equal(command.command,'cargo');assert.equal(command.oneShot,false);assert.equal(command.exit,0);assert.equal(command.inputHashes.sourceTree,report.inputs.sourceTree);for(const [path,sha]of Object.entries(report.inputs.files))assert.equal(digest(bounded(join(command.cwd,path),16<<20)),sha,'preparation tool closure changed');for(const path of ['tests/rust-performance-paired/agent-custody.mjs','tests/rust-performance-paired/agent-environment.mjs','tests/rust-performance-paired/agent-tool-identity.mjs','tools/rust-owned-memory.mjs'])assert(report.inputs.files[path]);assert(Number.isSafeInteger(call.actualTimeoutMs)&&call.actualTimeoutMs>=1000&&call.actualTimeoutMs<=600000);const nativeRequest=join(evidence,'process-'+proof.runId+'.request.json'),native=parse(bounded(nativeRequest,1<<20));assert.equal(native.timeoutMs,call.actualTimeoutMs);const verified=authenticate({...call.process,binary:'cargo',args,stdoutSHA256:call.process.stdoutSHA256,stderrSHA256:call.process.stderrSHA256},{owner:call.cargoReceipt,receipt:call.buildEvidence,root:command.cwd,binary:'cargo',args,inputs:report.inputs.files,ids:new Set(),outer:{pid:native.coordinatorPid,timing:proof.timing},measured:false,maximumTimeout:call.actualTimeoutMs,cargoBuild:true,allowStderr:true,resolvedIdentity:report.inputs.cargoIdentity});assert.equal(digest(verified.stdout),call.process.stdoutSHA256);
+ assert.equal(report.fixtures[kind],spec.directory);const calls=report.calls.filter(row=>row.kind===kind);assert.equal(calls.length,1);const call=calls[0];assert.equal(call.destination,spec.directory);assert(call.launched&&call.process.handlesReaped&&call.process.exit===0&&!call.process.error);assert.equal(digest(bounded(call.buildEvidence,4<<20)),call.cargoReceiptSHA256);assert.deepEqual(parse(bounded(call.buildEvidence,4<<20)),call.cargoReceipt);assert.equal(call.cargoReceipt.handlesReaped,true);assert(['succeeded','retired'].includes(call.cargoReceipt.state));assert.equal(call.cargoReceipt.inputHashes.sourceTree,report.inputs.sourceTree);assert.equal(call.invocation.inputHashes.sourceTree,report.inputs.sourceTree);assert(call.args.includes('--locked')&&call.args.includes('--offline')&&call.args.includes('--test-threads=1'));assert.equal(call.args[call.args.indexOf('-j')+1],'1');const proof=call.process.proof;for(const key of ['rootReaped','treeReaped','handlesClosed','toolIdentityLocksClosed','outputReadersComplete'])assert.equal(proof[key],true);assert.equal(proof.activeProcesses,0);assert(!proof.error&&!proof.deadlineHit&&!proof.outputLimit);
+ assert.deepEqual(call.args,args);assert.deepEqual(call.cargoReceipt.command,['cargo',...args]);const evidence=dirname(call.buildEvidence),sealedBuild=name=>{const path=join(evidence,name),log=call.cargoReceipt.sealedLogs.find(l=>l.path===path);assert(log);assert.equal(digest(bounded(path,16<<20)),log.sha256);return path;},command=parse(bounded(sealedBuild('command.json'),4<<20));assert.deepEqual(command.args,args);assert.equal(command.command,'cargo');assert.equal(command.oneShot,false);assert.equal(command.exit,0);assert.equal(command.inputHashes.sourceTree,report.inputs.sourceTree);for(const [path,sha]of Object.entries(report.inputs.files))assert.equal(digest(bounded(join(command.cwd,path),16<<20)),sha,'preparation tool closure changed');for(const path of ['tests/rust-performance-paired/agent-custody.mjs','tests/rust-performance-paired/agent-environment.mjs','tests/rust-performance-paired/agent-tool-identity.mjs','tools/rust-owned-memory.mjs'])assert(report.inputs.files[path]);assert(Number.isSafeInteger(call.actualTimeoutMs)&&call.actualTimeoutMs>=1000&&call.actualTimeoutMs<=600000);const nativeRequest=join(evidence,'process-'+proof.runId+'.request.json'),native=parse(bounded(nativeRequest,1<<20));assert.equal(native.timeoutMs,call.actualTimeoutMs);const verified=authenticate({...call.process,binary:'cargo',args,stdoutSHA256:call.process.stdoutSHA256,stderrSHA256:call.process.stderrSHA256},{owner:call.cargoReceipt,receipt:call.buildEvidence,root:command.cwd,binary:'cargo',args,inputs:report.inputs.files,ids:new Set(),outer:{pid:native.coordinatorPid,timing:proof.timing},measured:false,maximumTimeout:call.actualTimeoutMs,cargoBuild:true,allowStderr:true,resolvedIdentity:report.inputs.cargoIdentity});assert.equal(digest(verified.stdout),call.process.stdoutSHA256);
  const fixture=loadAgentDataFixture(spec.directory,kind);assert.deepEqual(fixture.receipt,report.fixtureIdentity[kind]);return fixture;
 }

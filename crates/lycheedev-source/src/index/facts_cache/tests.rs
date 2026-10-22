@@ -459,10 +459,7 @@ fn cohort_reader_and_writer_keep_the_original_cancel_and_deadline() {
     let index = index::build_uncached(&fixture.home, &pin, &live).unwrap();
     let doc = &index.documents[0];
     for control in [
-        OperationControl::new(
-            Instant::now() + Duration::from_secs(60),
-            Arc::new(AtomicBool::new(true)),
-        ),
+        crate::native::stopped_control(false, Instant::now() + Duration::from_secs(60)),
         OperationControl::uncancelable(Instant::now() - Duration::from_secs(1)),
     ] {
         assert!(
@@ -924,10 +921,7 @@ fn exact_pack_leaf_boundary_skips_real_asset_and_oversized_document_before_next_
 fn path_leaf_planning_keeps_original_cancellation_deadline_and_rejects_unsorted_inputs() {
     let files = tree_inputs((0..1024).map(|i| format!("D{i:04}.lua")));
     for control in [
-        OperationControl::new(
-            Instant::now() + Duration::from_secs(60),
-            Arc::new(AtomicBool::new(true)),
-        ),
+        crate::native::stopped_control(false, Instant::now() + Duration::from_secs(60)),
         OperationControl::uncancelable(Instant::now() - Duration::from_secs(1)),
     ] {
         assert!(leaf_end(&files, 0, None, &control).is_err());
@@ -940,81 +934,6 @@ fn path_leaf_planning_keeps_original_cancellation_deadline_and_rejects_unsorted_
             .code,
         "input.invalid"
     );
-}
-
-#[test]
-fn legacy_ordinal_pack_and_v13_index_keep_identity_while_current_default_rebuilds() {
-    let fixture = Fixture::new();
-    let raw = files(3);
-    let pin = fixture.pin(&raw);
-    let control = OperationControl::default();
-    let mut old = index::build_uncached(&fixture.home, &pin, &control).unwrap();
-    let expected = all_facts(&old);
-    let current_pack = pack(
-        &fixture.home,
-        old.documents[0].facts_locator.as_ref().unwrap(),
-    );
-    let old_pack_bytes = fs::read(&current_pack).unwrap();
-    let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
-    let mut hash = Sha256::new();
-    hash.update(b"facts-pack-v1\0facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0");
-    for file in &inputs {
-        for value in [file.path.as_bytes(), file.object.as_bytes()] {
-            hash.update((value.len() as u64).to_le_bytes());
-            hash.update(value);
-        }
-        hash.update((file.bytes as u64).to_le_bytes());
-    }
-    let old_group: [u8; 32] = hash.finalize().into();
-    for doc in &mut old.documents {
-        doc.facts_locator.as_mut().unwrap().group = old_group;
-    }
-    let old_pack = pack(
-        &fixture.home,
-        old.documents[0].facts_locator.as_ref().unwrap(),
-    );
-    assert_ne!(old_pack, current_pack);
-    fs::write(&old_pack, &old_pack_bytes).unwrap();
-    fs::remove_file(&current_pack).unwrap();
-    for doc in &old.documents {
-        assert_eq!(
-            serde_json::to_value(
-                read_locator(
-                    &fixture.home,
-                    doc.facts_locator.as_ref().unwrap(),
-                    &doc.path,
-                    &doc.sha256,
-                    &control
-                )
-                .unwrap()
-                .unwrap()
-            )
-            .unwrap(),
-            serde_json::to_value(&doc.facts).unwrap()
-        );
-    }
-    let old_identity = storage::sha256(format!("rust-index-v13\0facts-pack-v1\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes());
-    assert_ne!(old_identity, index::fingerprint(&pin));
-    let old_bytes = serde_json::to_vec(&old).unwrap();
-    let old_blob = lycheedev_core::cache::publish_derived_controlled(
-        &fixture.home,
-        &old_bytes,
-        128 << 20,
-        &control,
-    )
-    .unwrap();
-    let old_key = format!("source/rust-index/{old_identity}");
-    let manifest = serde_json::json!({"schema":"lycheedev.source-index.rust.v6","identity":old_identity,"blob":old_blob});
-    crate::persistence::put_manifest(&fixture.home, &old_key, &manifest, &control).unwrap();
-    assert!(!index::is_ready_with_control(&fixture.home, &pin, &control).unwrap());
-    let rebuilt = index::build_with_control(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(rebuilt.summary.io["parsedDocuments"], 3);
-    assert_eq!(rebuilt.summary.io["cachedFacts"], 0);
-    assert_eq!(all_facts(&rebuilt), expected);
-    assert_eq!(fs::read(old_pack).unwrap(), old_pack_bytes);
-    let warm = index::build_with_control(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(warm.summary.io["cachedIndex"], true);
-    assert_eq!(warm.summary.io["cachedFacts"], 3);
 }
 
 #[test]
@@ -1406,55 +1325,41 @@ fn cache_aware_non_worker_rows_and_corrupt_record_keep_original_order() {
 }
 
 #[test]
-fn cache_aware_current_retention_and_encoding_prelude_precedes_deferred_cache_error() {
+fn cache_aware_current_retention_prelude_precedes_deferred_cache_error() {
     use facts_pipeline::Admission;
-    for overflow in [false, true] {
-        let fixture = Fixture::new();
-        let raw = files(2);
-        let pin = fixture.pin(&raw);
-        let control = OperationControl::default();
-        let profile = Profile::enabled(true);
-        let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
-        let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
-        let body = raw[&inputs[0].path].as_bytes();
-        let key = facts_cache_key(&inputs[0].path, &storage::sha256(body));
-        fs::create_dir(
-            fixture
-                .home
-                .join("cache/source-facts-rust")
-                .join(format!("{key}.json")),
-        )
-        .unwrap();
-        let mut groups = Groups::new(&cache, &inputs, &control, &profile);
-        let mut docs = Vec::new();
-        if overflow {
-            assert!(matches!(
-                groups.admit(&inputs[0], body, true),
-                Admission::Barrier
-            ));
-            assert!(groups.admission_error.is_some());
-        } else {
-            // Invalid UTF-8 itself is a barrier and never probes the bad cache.
-            assert!(matches!(
-                groups.admit(&inputs[0], b"\xff", true),
-                Admission::Barrier
-            ));
-            assert!(groups.admission_error.is_none());
-        }
-        let mut retained = if overflow { 256 << 20 } else { 0 };
-        let data: &[u8] = if overflow { body } else { b"\xff" };
-        // This is the same prelude invoked by the default index consumer,
-        // using a synthetic retained counter rather than allocating 256 MiB.
-        let result = index::document_input_sha(&inputs[0], data, &mut retained)
-            .and_then(|sha| groups.document(&inputs[0], data, &sha, None, &mut docs));
-        let expected = if overflow {
-            "codebase.source_budget"
-        } else {
-            "command.failed"
-        };
-        assert_eq!(result.as_ref().unwrap_err().code, expected);
-        assert_eq!(groups.finish(result).unwrap_err().code, expected);
-        cache.finish(Ok(()), &control).unwrap();
-        assert_eq!(profile.calls(Phase::FactsParse), 0);
-    }
+    let fixture = Fixture::new();
+    let raw = files(2);
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let profile = Profile::enabled(true);
+    let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+    let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+    let body = raw[&inputs[0].path].as_bytes();
+    let key = facts_cache_key(&inputs[0].path, &storage::sha256(body));
+    fs::create_dir(
+        fixture
+            .home
+            .join("cache/source-facts-rust")
+            .join(format!("{key}.json")),
+    )
+    .unwrap();
+    let mut groups = Groups::new(&cache, &inputs, &control, &profile);
+    let mut docs = Vec::new();
+    assert!(matches!(
+        groups.admit(&inputs[0], body, true),
+        Admission::Barrier
+    ));
+    assert!(groups.admission_error.is_some());
+    let mut retained = 256 << 20;
+    // This is the same retention prelude invoked by the default index consumer,
+    // using a synthetic retained counter rather than allocating 256 MiB. A
+    // non-UTF-8 comment is no longer a prelude failure; only the retention
+    // budget still precedes the deferred cache error.
+    let result = index::document_input_sha(&inputs[0], body, &mut retained)
+        .and_then(|sha| groups.document(&inputs[0], body, &sha, None, &mut docs));
+    let expected = "codebase.source_budget";
+    assert_eq!(result.as_ref().unwrap_err().code, expected);
+    assert_eq!(groups.finish(result).unwrap_err().code, expected);
+    cache.finish(Ok(()), &control).unwrap();
+    assert_eq!(profile.calls(Phase::FactsParse), 0);
 }

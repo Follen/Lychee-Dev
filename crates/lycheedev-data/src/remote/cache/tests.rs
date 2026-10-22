@@ -1,4 +1,5 @@
 use super::*;
+use lycheedev_core::control::TrackedCancellation;
 use md5::{Digest, Md5};
 use std::{
     cell::RefCell,
@@ -305,11 +306,11 @@ fn observation_rejects_zero_instant_in_every_offset_spelling() {
         product_code: "wow".into(),
         region: "cn".into(),
         observed_at: ObservationTime::default(),
-        versions: CachedBlob {
+        versions: BlobRef {
             sha256: "a".repeat(64),
             bytes: 1,
         },
-        distribution: CachedBlob {
+        distribution: BlobRef {
             sha256: "b".repeat(64),
             bytes: 1,
         },
@@ -402,119 +403,6 @@ fn expected_miss_conflict_and_busy_never_hide_composite_cleanup() {
 }
 
 #[test]
-fn observation_go_time_reads_raw_tokens_and_defers_marshal_failure() {
-    for (stamp, canonical) in [
-        (
-            "2026-10-14T2:00:00,123456789012Z",
-            Some("2026-10-14T02:00:00.123456789Z"),
-        ),
-        (
-            "2026-10-14T22:00:00+00:60",
-            Some("2026-10-14T22:00:00+01:00"),
-        ),
-        ("2026-10-14T22:00:00+24:00", None),
-    ] {
-        let raw = format!(r#"{{"productCode":"wow","region":"cn","observedAt":"{stamp}"}}"#);
-        let value: Observation = serde_json::from_str(&raw).unwrap();
-        value.validate("wow", "cn").unwrap();
-        assert_eq!(value.observed_at.canonical(), canonical);
-        assert_eq!(serde_json::to_vec(&value).is_ok(), canonical.is_some());
-    }
-    for stamp in [
-        "2026-10-14 22:00:00Z",
-        "2026-10-14T22:00:00UTC",
-        " 2026-10-14T22:00:00Z",
-        r"2026-10-14T22:00:00\u005a",
-    ] {
-        let raw = format!(r#"{{"observedAt":"{stamp}"}}"#);
-        assert!(
-            serde_json::from_str::<Observation>(&raw).is_err(),
-            "{stamp}"
-        );
-    }
-}
-
-#[test]
-fn observation_go_duplicate_case_null_and_nested_merge_are_preserved() {
-    let raw = r#"{"ProductCode":"wrong","productCode":"wow","PRODUCTCODE":null,"region":"cn","observedAt":"2026-10-14T22:00:00Z","ObservedAt":null,"versions":{"sha256":"first","bytes":-2},"verſions":{"SHA256":"last"},"VERSIONS":null,"distribution":null,"ignored":{"foo":1}}"#;
-    let value: Observation = serde_json::from_str(raw).unwrap();
-    value.validate("wow", "cn").unwrap();
-    assert_eq!(value.versions.sha256, "last");
-    assert_eq!(value.versions.bytes, -2);
-    assert_eq!(value.distribution.bytes, 0);
-    assert_eq!(value.distribution.sha256, "");
-    for raw in ["null", "{}", r#"{"observedAt":null}"#] {
-        let value: Observation = serde_json::from_str(raw).unwrap();
-        assert!(value.observed_at.is_zero());
-    }
-    for raw in [
-        r#"{"versions":{"bytes":1.0}}"#,
-        r#"{"versions":{"bytes":1e0}}"#,
-        r#"{"observedAt":42}"#,
-        r#"{"observedAt":"bad","observedAt":"2026-10-14T22:00:00Z"}"#,
-    ] {
-        assert!(serde_json::from_str::<Observation>(raw).is_err(), "{raw}");
-    }
-}
-
-#[test]
-fn route_fallback_accepts_zero_time_and_unused_negative_invalid_version_reference() {
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    let mut observed = observation(&store, "tpr/first");
-    observed.observed_at = ObservationTime::default();
-    observed.versions = CachedBlob {
-        sha256: "not-a-digest".into(),
-        bytes: -1,
-    };
-    store.put("remote-catalog/wow/cn", &observed, None).unwrap();
-    let fetch = Fetch::default();
-    let route = Route::prepare(&store, "wow", "cn", "wow", true, &fetch).unwrap();
-    assert_eq!(route.current.path, "tpr/first");
-    assert!(fetch.calls.borrow().is_empty());
-    assert_eq!(
-        store.observation("wow", "cn").unwrap_err().code,
-        "records.remote_identity"
-    );
-}
-
-#[test]
-fn target_observation_validates_identity_time_before_consumed_blob_references() {
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    let mut observed = observation(&store, "tpr/first");
-    observed.versions = CachedBlob {
-        sha256: "invalid".into(),
-        bytes: -1,
-    };
-    observed.distribution.bytes = i64::MAX;
-    store.put("remote-catalog/wow/cn", &observed, None).unwrap();
-    let (value, _) = store.observation("wow", "cn").unwrap().unwrap();
-    assert!(
-        store
-            .read_blob(&value.versions, catalog::MAX_BYTES)
-            .is_err()
-    );
-    assert!(
-        store
-            .read_blob(&value.distribution, catalog::MAX_BYTES)
-            .is_err()
-    );
-}
-
-#[test]
-fn raw_cached_observation_normalizes_strings_without_unescaping_time() {
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    let raw = serde_json::value::RawValue::from_string(r#"{"ProductCode":"wow","region":"cn","observedAt":"2026-10-14T22:00:00\u005a","extra":"\ud800"}"#.into()).unwrap();
-    store.put("remote-catalog/wow/cn", &raw, None).unwrap();
-    assert_eq!(
-        store.observation("wow", "cn").unwrap_err().code,
-        "records.remote_identity"
-    );
-}
-
-#[test]
 fn cache_put_held_data_quota_is_bounded_by_independent_budget_deadline() {
     let fixture = Fixture::new();
     let guard = fixture.store().lease("data-derived-v1:quota").unwrap();
@@ -575,7 +463,7 @@ fn cache_put_held_data_quota_observes_independent_budget_cancellation() {
     for tracked in [false, true] {
         let fixture = Fixture::new();
         let guard = fixture.store().lease("data-derived-v1:quota").unwrap();
-        let raw = Arc::new(AtomicBool::new(false));
+        let raw = TrackedCancellation::new();
         let other = OperationControl::default();
         let cancellation = other.tracked_cancel_handle().unwrap();
         let budget = if tracked {
@@ -599,7 +487,7 @@ fn cache_put_held_data_quota_observes_independent_budget_cancellation() {
                 if tracked {
                     cancellation.cancel();
                 } else {
-                    raw.store(true, Ordering::Release);
+                    raw.cancel();
                 }
             });
             let result = store.put("remote-config/held/independent-cancel", &true, None);
@@ -692,44 +580,6 @@ fn post_close_stop_and_full_cleanup_cause_are_retained_without_retry() {
 }
 
 #[test]
-fn cached_unknown_fields_follow_go_ten_thousand_structural_depth_limit() {
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    for depth in [9999, 10000, 10001] {
-        // Root object itself counts toward Go's structural depth.
-        let raw = format!(
-            r#"{{"productCode":"wow","region":"cn","observedAt":"2026-10-14T22:00:00Z","unknown":{}0{}}}"#,
-            "[".repeat(depth - 1),
-            "]".repeat(depth - 1)
-        );
-        let raw = serde_json::value::RawValue::from_string(raw).unwrap();
-        let key = format!("remote-catalog/depth/{depth}");
-        store.put(&key, &raw, None).unwrap();
-        let result = store.read::<Observation>(&key);
-        if depth <= 10000 {
-            let (observed, _) = result.unwrap().unwrap();
-            observed.validate("wow", "cn").unwrap();
-        } else {
-            assert_eq!(result.unwrap_err().code, "records.remote_identity");
-        }
-    }
-}
-#[test]
-fn raw_admission_ignores_escaped_string_delimiters_in_cached_unknown_fields() {
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    let value = serde_json::json!({"productCode":"wow","region":"cn","observedAt":"2026-10-14T22:00:00Z","unknown": "[{}]\\\"".repeat(10001)});
-    store
-        .put("remote-catalog/escaped-depth", &value, None)
-        .unwrap();
-    let (observed, _) = store
-        .read::<Observation>("remote-catalog/escaped-depth")
-        .unwrap()
-        .unwrap();
-    observed.validate("wow", "cn").unwrap();
-}
-
-#[test]
 fn refresh_reads_only_generation_of_changed_alias_but_initial_prepare_validates_it() {
     let fixture = Fixture::new();
     let store = fixture.store();
@@ -761,7 +611,7 @@ fn refresh_reads_only_generation_of_changed_alias_but_initial_prepare_validates_
     assert_eq!(route.current.path, "tpr/refreshed");
     assert!(!route.refresh(&store, &fetch).unwrap());
     assert_eq!(fetch.calls.borrow().len(), 2);
-    let (reference, _) = store.read::<CachedBlob>(key).unwrap().unwrap();
+    let (reference, _) = store.read::<BlobRef>(key).unwrap().unwrap();
     assert_eq!(
         store.read_blob(&reference, catalog::MAX_BYTES).unwrap(),
         cdns("tpr/refreshed")

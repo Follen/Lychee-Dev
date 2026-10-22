@@ -472,7 +472,7 @@ fn stream_source_discard_and_file_close_failures_retain_all_three_causes() {
         .with_details(serde_json::json!({"source":"original"}));
     let discard = ToolkitError::new("external.io", "discard failed", 5);
     let close = ToolkitError::new("external.io", "close failed", 5);
-    let result = crate::metadata::historical_write::finish_historical::<()>(
+    let result = crate::metadata::owned_write::finish_owned::<()>(
         Err(source.clone()),
         Err(discard.clone()),
     );

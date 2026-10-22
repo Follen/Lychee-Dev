@@ -2,7 +2,7 @@
   "name": "lycheedev",
   "version": "3.5.0",
   "private": false,
-  "description": "Unified native World of Warcraft development toolkit",
+  "description": "Rust-native WoW source, data, asset and live investigation toolkit with an Agent-first CLI",
   "license": "MIT",
   "type": "module",
   "bin": { "lycheedev": "bin/lycheedev.mjs" },

@@ -22,6 +22,16 @@ fn atomic_decision_boundaries_and_exact_unavailable_reasons() {
             .unwrap();
         let rows = session.coverage_checked(|| Ok::<_, Stop>(())).unwrap();
         assert_case(&case, &value, &rows, query);
+        if matches!(
+            case.name.as_str(),
+            "environment-opaque-nominal" | "environment-inner-table"
+        ) {
+            let Some(LuaType::DocFunction(function)) = &value else {
+                panic!("partial signature");
+            };
+            assert_eq!(function.get_params()[0].1, Some(LuaType::Unknown));
+            assert!(!function.get_ret().is_unknown());
+        }
         if case.name == "derived-finite" {
             assert_eq!(value, Some(LuaType::FloatConst(2.5)));
         }

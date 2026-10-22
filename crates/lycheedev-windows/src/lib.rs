@@ -1,23 +1,17 @@
 //! Windows-only, read-only process capabilities and directed input. No game business.
 pub mod broker;
 pub mod cancellation;
-pub mod capture;
 pub mod data_lease;
 pub mod detached;
 pub mod filesystem;
-pub mod geometry;
 pub mod guarded_spawn;
-pub mod input;
 pub mod inventory;
 pub mod job;
-pub mod legacy_digest;
 pub mod mailbox_input;
 pub mod memory;
 pub mod process;
 pub mod random;
-pub mod watch;
 pub use filesystem::durable_replace;
 pub use job::{BrokerJob, JobGuard};
-pub use process::{NamedLock, Process, ProcessIdentity, WindowIdentity};
-pub use watch::ChangeWatch;
+pub use process::{Process, ProcessIdentity, WindowIdentity};
 pub type Result<T> = std::result::Result<T, String>;

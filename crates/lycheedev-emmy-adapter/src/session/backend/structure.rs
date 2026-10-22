@@ -21,6 +21,14 @@ impl<E> OwnedQuery<'_, '_, E> {
                 return Ok(false);
             }
             if let Node::Owned(value) = &node
+                && value.nominal_identity().is_some()
+            {
+                if !value.nominal_belongs_to(self.session) {
+                    return Ok(false);
+                }
+                continue;
+            }
+            if let Node::Owned(value) = &node
                 && let Some(metadata) = value.object_info()
             {
                 let valid = value.object_belongs_to(self.session) && metadata.complete;

@@ -31,7 +31,7 @@ fn admit(f: &Fixture, bytes: u64) -> Result<Option<DerivedRetirementReport>> {
             |_| {},
         )
         .and_then(|(owner, report)| owner.finish(Ok(report)));
-    crate::metadata::historical_write::finish_historical(result, resources.close())
+    crate::metadata::owned_write::finish_owned(result, resources.close())
 }
 
 #[test]

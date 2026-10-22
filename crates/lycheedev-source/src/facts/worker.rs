@@ -15,7 +15,7 @@ use std::{cell::Cell, mem::size_of, time::Instant};
 /// another allowance. TOC does not parse Lua, but keeps the same admission.
 /// These are requested Rust allocations, not allocator overhead or an RSS cap.
 /// Tree-sitter's opaque parser/tree/cursor C allocations have no safe allocation
-/// cap; input <=64 KiB and the caller's worker-count limit bound their exposure.
+/// cap; input <=128 KiB and the caller's worker-count limit bound their exposure.
 pub(crate) struct WorkerGuard<'a> {
     control: &'a OperationControl,
     limit: usize,

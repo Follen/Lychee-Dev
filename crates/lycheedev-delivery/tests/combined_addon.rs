@@ -1,4 +1,4 @@
-use lycheedev_core::{control::OperationControl, coordination::InstallationGuard, storage};
+use lycheedev_core::{control::OperationControl, coordination::InstallationMaintenanceLease, storage};
 use lycheedev_delivery::{
     addon_transaction::{self, Request},
     installation, slots,
@@ -45,7 +45,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     candidate(&old, "3.0.2", b"-- fixture old runtime\n");
     candidate(&next, "3.1.2", b"-- fixture new runtime\n");
     let control = OperationControl::default();
-    let guard = InstallationGuard::acquire(&target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&target).unwrap();
     let original = addon_transaction::apply(
         &target,
         Request {

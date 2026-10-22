@@ -6,20 +6,20 @@ use bounded::lifecycle::PathControl;
 fn finish_directory<T>(mut result: Result<T>, directory: Directory) -> Result<T> {
     if let Err(errors) = directory.close() {
         for error in errors {
-            result = finish_historical(result, Err(error.into()));
+            result = finish_owned(result, Err(error.into()));
         }
     }
     result
 }
 pub(super) fn remove(
     home: &Path,
-    capture: &GoCaptureDecode,
+    capture: &CaptureRef,
     control: &OperationControl,
     disposition: &mut Option<&'static str>,
 ) -> Result<()> {
     control.check()?;
-    let (digest, bytes) = capture.signed_blob();
-    if bytes < 0 || !valid_digest(digest, 64) {
+    let (digest, bytes) = capture.blob_identity();
+    if !valid_digest(digest, 64) {
         return Err(ToolkitError::new(
             "vault.blob_integrity",
             "vault.blob_integrity",
@@ -69,7 +69,7 @@ pub(super) fn remove(
             },
             Err(error) => {
                 return crate::selection::selection_finish(
-                    finish_historical(Err(error), closed),
+                    finish_owned(Err(error), closed),
                     control.check(),
                 );
             }
@@ -96,9 +96,9 @@ pub(super) fn remove(
             }
             // A successful disposition is retained even if close/control fails.
             #[cfg(test)]
-            let closed = finish_historical(closed, super::tests::after_blob_close());
+            let closed = finish_owned(closed, super::tests::after_blob_close());
             crate::selection::selection_finish(
-                finish_historical(removed.map_err(Into::into), closed),
+                finish_owned(removed.map_err(Into::into), closed),
                 control.check(),
             )
         })();

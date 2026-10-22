@@ -99,10 +99,7 @@ fn no_inherit_releases_parent_pipe_before_owned_child_exit_and_preserves_identit
     );
     assert_eq!(
         process
-            .wait_exit(
-                Instant::now() + Duration::from_secs(1),
-                &std::sync::atomic::AtomicBool::new(false)
-            )
+            .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
             .unwrap(),
         7
     );
@@ -135,26 +132,19 @@ fn failed_startup_drop_reaps_exact_owned_child_and_bounds_reject_before_spawn() 
     assert!(process.verify().is_err());
     assert!(
         process
-            .wait_exit(
-                Instant::now() + Duration::from_secs(1),
-                &std::sync::atomic::AtomicBool::new(false)
-            )
+            .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
             .is_ok()
     );
     let own = Process::open(std::process::id()).unwrap();
     assert!(
-        own.wait_exit(
-            Instant::now() + Duration::from_millis(5),
-            &std::sync::atomic::AtomicBool::new(false)
-        )
-        .unwrap_err()
-        .starts_with("command.deadline")
+        own.wait_exit_with_control(Instant::now() + Duration::from_millis(5), || Ok(()))
+            .unwrap_err()
+            .starts_with("command.deadline")
     );
     assert!(
-        own.wait_exit(
-            Instant::now() + Duration::from_secs(1),
-            &std::sync::atomic::AtomicBool::new(true)
-        )
+        own.wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Err(
+            "command.cancelled".into()
+        ))
         .unwrap_err()
         .starts_with("command.cancelled")
     );

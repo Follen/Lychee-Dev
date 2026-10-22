@@ -367,7 +367,7 @@ fn original_scope_cancellation_stops_all_started_workers_before_return() {
             move |row| {
                 barrier.wait();
                 if row == 0 {
-                    control.cancel_handle().store(true, Ordering::Release);
+                    control.tracked_cancel_handle().unwrap().cancel();
                 }
                 barrier.wait();
                 completed.fetch_add(1, Ordering::SeqCst);

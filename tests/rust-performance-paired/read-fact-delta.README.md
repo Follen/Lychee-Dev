@@ -13,7 +13,7 @@ match. Zero or multiple exact matches are a blocker to report.
 
 ```sh
 node --check tests/rust-performance-paired/read-fact-delta.mjs
-node --test tests/rust-performance-paired/read-fact-delta.test.mjs
+node --test tests/rust-performance-paired/read-fact-delta-postcard.test.mjs
 node tests/rust-performance-paired/read-fact-delta.mjs "GO_HOME" "RUST_HOME" "GO_RECORDS_JSONL" > "NEW_EVIDENCE_DIR/static-fact-delta.json"
 ```
 
@@ -203,8 +203,7 @@ The exact configuration fields are:
     "reference": { "directory": "ABSOLUTE_CUSTODY_DIRECTORY", "catalog": "ABSOLUTE_GO_CUSTODY_JSON", "catalogSHA256": "EXACT_64_HEX_SHA" },
     "observation": "ABSOLUTE_ORIGINAL_SOURCE_PACK_SCENARIOS_REPORT",
     "observationSHA256": "EXACT_64_HEX_SHA",
-    "packageRoot": "ABSOLUTE_FIXED_GO323_PACKAGE",
-    "luaLSArchive": "ABSOLUTE_FIXED_LUALS_ARCHIVE",
+    "referenceRoot": "ABSOLUTE_EXTERNAL_FIXED_GO_PACKAGE_DIRECTORY",
     "packageSHA256": "EXACT_AUTHENTICATED_PACKAGE_SHA"
   }
 }
@@ -214,7 +213,10 @@ The placeholder `pin` above must be replaced by the **complete original pin
 object**, not merely those two illustrative fields. `go.reference` must equal
 an original scenario's recorded `facts.goCustody`; its archived bytes are
 authenticated again and matched to the actual full-array comparison sources.
-The existing Go package verifier authenticates the fixed v3.2.3 producer.
+The existing external Go package verifier byte-authenticates the fixed v3.2.3
+producer package from the explicit `referenceRoot` directory (`release.json`,
+native executable, complete payload resources). No repository-internal Go build,
+Go source checkout or Lua runtime payload assertion is used.
 
 Prepare the exporter outside this comparison with the new, narrowly scoped
 `prepareFreshPostcardExporter` helper and a validated fresh configuration
@@ -258,7 +260,7 @@ index evidence, build/process identities and comparison report before cleanup.
 Focused offline verification (no Rust compilation or product execution):
 
 ```sh
-node --test tests/rust-performance-paired/read-fact-delta.test.mjs tests/rust-performance-paired/read-fact-delta-postcard.test.mjs tests/rust-performance-paired/source-candidates.test.mjs tests/rust-performance-paired/source-pack-scenarios.test.mjs tests/rust-performance-paired/source-pack-custody.test.mjs tests/rust-performance-paired/source-pack-resume.test.mjs tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.test.mjs
+node --test tests/rust-performance-paired/read-fact-delta-postcard.test.mjs tests/rust-performance-paired/source-pack-scenarios.test.mjs tests/rust-performance-paired/source-pack-custody.test.mjs tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.test.mjs
 ```
 
 The v13 tests use the frozen Rust empty-wire golden and a clearly labeled
@@ -305,9 +307,7 @@ recorded hashes rather than placeholders:
     "sourceTreeSHA256": "EXACT_64_HEX_SHA"
   },
   "go": {
-    "sourceRoot": "ABSOLUTE_CLEAN_GO323_CHECKOUT",
-    "packageRoot": "ABSOLUTE_FIXED_GO323_PACKAGE",
-    "luaLSArchive": "ABSOLUTE_FIXED_LUALS_ARCHIVE",
+    "referenceRoot": "ABSOLUTE_EXTERNAL_FIXED_GO_PACKAGE_DIRECTORY",
     "packageSHA256": "EXACT_AUTHENTICATED_PACKAGE_SHA"
   },
   "exporter": {

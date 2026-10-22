@@ -1,18 +1,17 @@
-//! Explicit one-table preparation through the real admitted provider. This
-//! command does not alter existing JSONL callbacks or prefetch other tables.
-use crate::phase_profile::Phase;
+//! Explicit one-table preparation through the admitted provider.
 use super::{ImportLimits, StaticIdentity, TableImporter};
+use crate::phase_profile::Phase;
 use crate::{
-    capture, db2, fault,
+    capture, fault,
     remote::provider::{FileScope, OpenedScope},
     resource::{Budget, Cost, OwnedRetainedReservation, RetainedReservation},
-    table,
+    table, table_source,
 };
 use arrow_array::{ArrayRef, RecordBatch};
 use arrow_ipc::writer::{DictionaryTracker, FileWriter, IpcDataGenerator, IpcWriteOptions};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError, selection,
+    Outcome, Result, ToolkitError, selection,
     workspace::data_disk::{AdditionalPeak, DerivedObject, DerivedReservation, ReservationReport},
 };
 use serde::Serialize;
@@ -20,7 +19,7 @@ use serde_json::json;
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 const MANIFEST_MAXIMUM: usize = 1 << 20;
@@ -212,7 +211,7 @@ pub(super) struct Manifest<'a> {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn manifest<'a>(
-    prepared: &'a db2::Prepared,
+    prepared: &'a table_source::Prepared,
     identity: &StaticIdentity<'_>,
     identity_sha256: &'a str,
     schema_sha256: &'a str,
@@ -277,42 +276,39 @@ pub(super) fn manifest_source<'a>(
     }
 }
 
-pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    dispatch_after_encode(inv, &mut || Ok(()))
+pub(crate) fn dispatch(inv: &crate::request::DataContext, request: &crate::request::CachePrepareRequest) -> Result<Outcome> {
+    dispatch_after_encode(inv, request, &mut || Ok(()))
 }
 
 pub(super) fn dispatch_after_encode(
-    inv: &Invocation,
+    inv: &crate::request::DataContext,
+    request: &crate::request::CachePrepareRequest,
     after_encode: &mut dyn FnMut() -> Result<()>,
 ) -> Result<Outcome> {
-    dispatch_after_hooks(inv, after_encode, &mut |result| result)
+    dispatch_after_hooks(inv, request, after_encode, &mut |result| result)
 }
 
 pub(super) fn dispatch_after_hooks(
-    inv: &Invocation,
+    inv: &crate::request::DataContext,
+    request: &crate::request::CachePrepareRequest,
     after_encode: &mut dyn FnMut() -> Result<()>,
     after_finish: &mut dyn FnMut(Result<Outcome>) -> Result<Outcome>,
 ) -> Result<Outcome> {
-    dispatch_with_read_hook(inv, after_encode, after_finish, &mut || Ok(()))
+    dispatch_with_read_hook(inv, request, after_encode, after_finish, &mut || Ok(()))
 }
 
 pub(super) fn dispatch_with_read_hook(
-    inv: &Invocation,
+    inv: &crate::request::DataContext,
+    request: &crate::request::CachePrepareRequest,
     after_encode: &mut dyn FnMut() -> Result<()>,
     after_finish: &mut dyn FnMut(Result<Outcome>) -> Result<Outcome>,
     after_read: &mut dyn FnMut() -> Result<()>,
 ) -> Result<Outcome> {
     inv.control.check()?;
-    let name = inv.argument()?;
-    if !crate::definitions::valid_name(name) {
-        return Err(ToolkitError::arguments(
-            "data cache prepare requires one valid table name",
-        ));
-    }
-    let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
-    let maximum = inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
+    let name = request.table.as_str();
+    let maximum = inv.source.max_file_bytes;
     let budget = Arc::new(Budget::query_controlled(
-        Instant::now() + Duration::from_secs(timeout as u64),
+        Instant::now() + request.timeout,
         inv.control.clone(),
     ));
     let _prepare_phase = budget.phase(Phase::GenerationPrepare);
@@ -329,8 +325,13 @@ pub(super) fn dispatch_with_read_hook(
             .as_ref()
             .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
         let mut run = |reader: &mut dyn FileScope| {
-            let prepared =
-                db2::prepare_scoped(inv, name, &budget, Some(&mut *reader), Some(pin.clone()))?;
+            let prepared = table_source::prepare_scoped(
+                inv,
+                name,
+                &budget,
+                Some(&mut *reader),
+                Some(pin.clone()),
+            )?;
             reader.check_consumer(inv, &budget)?;
             let identity = StaticIdentity::from_prepared(&prepared)?;
             let view = table::open_budgeted(
@@ -484,7 +485,7 @@ pub(super) fn dispatch_with_read_hook(
             });
             reservation.finish(result)
         };
-        if inv.flag_bool("--cdn") {
+        if inv.source.cdn {
             scope.with_session(data, |reader| run(reader))
         } else {
             scope.with_local_session(data, |reader| run(reader))
@@ -518,9 +519,9 @@ pub(super) fn dispatch_with_read_hook(
 
 #[allow(clippy::too_many_arguments)]
 fn write_generation(
-    inv: &Invocation,
+    inv: &crate::request::DataContext,
     reader: &dyn FileScope,
-    prepared: &db2::Prepared,
+    prepared: &table_source::Prepared,
     identity: &StaticIdentity<'_>,
     identity_sha256: &str,
     schema_sha256: &str,
@@ -648,6 +649,7 @@ fn write_generation(
 #[cfg(test)]
 mod schema_eligibility_tests {
     use super::*;
+    use std::time::Duration;
     fn budget() -> Budget {
         Budget::new(
             Cost::defaults(),
@@ -699,9 +701,7 @@ mod schema_eligibility_tests {
         );
         assert_eq!(narrow.refundable_retained_bytes(), 0);
         let control = lycheedev_core::control::OperationControl::default();
-        control
-            .cancel_handle()
-            .store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         let stopped = Budget::controlled(Cost::defaults(), control.deadline(), control);
         assert_eq!(
             physical_schema_digest_if_supported(&large(), &stopped)

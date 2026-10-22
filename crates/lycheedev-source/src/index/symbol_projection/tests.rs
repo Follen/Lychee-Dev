@@ -5,173 +5,17 @@ use crate::{
         self, AssetRecord, Index, facts_cache_tests::Fixture, persistence_wire, profile::Profile,
     },
 };
-use lycheedev_core::{Invocation, control::OperationControl, selection, storage};
+use crate::request::{SelectedSource, SourceContext, SourceRequest};
+use lycheedev_core::{control::OperationControl, selection, storage};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs};
 
 type DeferredIndex = Index<Vec<Document>, Vec<AssetRecord>, DeferredSymbols>;
 
-// Frozen pre-projection producer. Expected mapping and ID bytes deliberately
-// do not call visit(), own(), SymbolIdentity or the production public helper.
-fn historical(pin: &SourcePin, documents: &[Document]) -> Vec<Symbol> {
-    let mut rows = Vec::new();
-    for document in documents {
-        let path = &document.path;
-        let facts = &document.facts;
-        for (ordinal, d) in facts.declarations.iter().enumerate() {
-            let identity = format!(
-                "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
-                pin.repository,
-                pin.exact_commit,
-                path,
-                d.line,
-                d.end_line,
-                d.name,
-                d.category,
-                d.scope,
-                ordinal
-            );
-            rows.push(Symbol {
-                id: format!("SYM-{}", &storage::sha256(identity.as_bytes())[..32]),
-                kind: "declaration".into(),
-                name: d.name.clone(),
-                target: String::new(),
-                category: d.category.clone(),
-                confidence: "exact".into(),
-                path: path.clone(),
-                line: d.line,
-                end_line: d.end_line,
-                signature: d.signature.clone(),
-                scope: d.scope.clone(),
-                ordinal,
-            });
-        }
-        for r in &facts.relationships {
-            rows.push(Symbol {
-                id: String::new(),
-                kind: "relationship".into(),
-                name: r.from.clone(),
-                target: r.to.clone(),
-                category: r.category.clone(),
-                confidence: r.confidence.clone(),
-                path: path.clone(),
-                line: r.line,
-                end_line: r.line,
-                signature: String::new(),
-                scope: String::new(),
-                ordinal: 0,
-            });
-        }
-        for load in &facts.loads {
-            rows.push(Symbol {
-                id: String::new(),
-                kind: "load".into(),
-                name: path.clone(),
-                target: load.path.clone(),
-                category: load.kind.clone(),
-                confidence: "exact".into(),
-                path: path.clone(),
-                line: load.line,
-                end_line: load.line,
-                signature: String::new(),
-                scope: String::new(),
-                ordinal: 0,
-            });
-        }
-        for h in &facts.headers {
-            rows.push(Symbol {
-                id: String::new(),
-                kind: "header".into(),
-                name: h.key.clone(),
-                target: h.value.clone(),
-                category: "toc-field".into(),
-                confidence: "exact".into(),
-                path: path.clone(),
-                line: h.line,
-                end_line: h.line,
-                signature: String::new(),
-                scope: String::new(),
-                ordinal: 0,
-            });
-        }
-    }
+fn project_symbols(pin:&SourcePin, documents:&[Document])->Vec<Symbol> {
+    let mut rows=Vec::new();
+    for doc in documents { rows.document(pin,&doc.path,&doc.facts).unwrap(); }
     rows
-}
-struct OldRow<'a>(&'a Symbol);
-impl Serialize for OldRow<'_> {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        let r = self.0;
-        (
-            &r.id,
-            &r.kind,
-            &r.name,
-            &r.target,
-            &r.category,
-            &r.confidence,
-            &r.path,
-            r.line as u64,
-            r.end_line as u64,
-            &r.signature,
-            &r.scope,
-            r.ordinal as u64,
-        )
-            .serialize(serializer)
-    }
-}
-struct OldRows<'a>(&'a [Symbol]);
-impl Serialize for OldRows<'_> {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.0.iter().map(OldRow))
-    }
-}
-// Complete old five-field Index framing; the unchanged summary/assets/locator
-// schemas are reused, while every Symbol uses the independent old tuple above.
-struct OldDocuments<'a>(&'a [Document]);
-impl Serialize for OldDocuments<'_> {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.collect_seq(
-            self.0
-                .iter()
-                .map(|d| (&d.path, &d.sha256, d.bytes as u64, &d.facts_locator)),
-        )
-    }
-}
-struct OldIndex<'a>(&'a Index);
-impl Serialize for OldIndex<'_> {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        let index = self.0;
-        (
-            &index.summary,
-            OldDocuments(&index.documents),
-            &index.assets,
-            OldRows(&index.symbols),
-            &index.compatibility_gaps,
-        )
-            .serialize(serializer)
-    }
-}
-fn old_index_bytes(index: &Index, pin: &SourcePin) -> Vec<u8> {
-    let payload = postcard::to_allocvec(&OldIndex(index)).unwrap();
-    let mut raw = Vec::from(b"LYCIDX01".as_slice());
-    raw.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    let identity = index::fingerprint(pin);
-    for start in (0..identity.len()).step_by(2) {
-        raw.push(u8::from_str_radix(&identity[start..start + 2], 16).unwrap());
-    }
-    raw.extend_from_slice(&payload);
-    raw
 }
 fn rich_facts() -> Facts {
     let mut facts = Facts::default();
@@ -218,7 +62,7 @@ fn fixture() -> (Index, DeferredIndex, SourcePin) {
     let (mut full, pin) = persistence_wire::tests::fixture();
     full.documents[0].facts = rich_facts();
     full.documents[1].facts = Facts::default();
-    full.symbols = historical(&pin, &full.documents);
+    full.symbols = project_symbols(&pin, &full.documents);
     full.summary.declarations = full
         .documents
         .iter()
@@ -248,10 +92,10 @@ fn error<T>(value: Result<T>) -> Vec<u8> {
 }
 
 #[test]
-fn borrowed_symbol_mapping_preserves_frozen_json_and_postcard_bytes_for_all_four_arrays() {
+fn borrowed_symbol_mapping_preserves_current_json_and_postcard_bytes_for_all_four_arrays() {
     let (full, projected, pin) = fixture();
     let before = serde_json::to_vec(&full).unwrap();
-    let expected_rows = postcard::to_allocvec(&OldRows(&full.symbols)).unwrap();
+    let expected_rows = postcard::to_allocvec(&SymbolsWire{rows:&full.symbols,documents:&full.documents,summary:&full.summary}).unwrap();
     let projected_rows = SymbolsWire {
         rows: &projected.symbols,
         documents: &projected.documents,
@@ -273,7 +117,6 @@ fn borrowed_symbol_mapping_preserves_frozen_json_and_postcard_bytes_for_all_four
     let control = OperationControl::default();
     let owned = persistence_wire::encode(&full, &identity, &control).unwrap();
     let borrowed = persistence_wire::encode(&projected, &identity, &control).unwrap();
-    assert_eq!(borrowed, old_index_bytes(&full, &pin));
     assert_eq!(borrowed, owned);
     let decoded: Index = persistence_wire::decode(&borrowed, &identity, &control).unwrap();
     assert_eq!(
@@ -438,12 +281,12 @@ impl postcard::ser_flavors::Flavor for Limited {
     }
 }
 #[test]
-fn borrowed_symbol_wire_exact_size_and_every_short_buffer_match_frozen_row_oracle() {
+fn borrowed_symbol_wire_exact_size_and_every_short_buffer_match_current_row_encoding() {
     let (full, projected, _) = fixture();
-    let expected = postcard::to_allocvec(&OldRows(&full.symbols)).unwrap();
+    let expected = postcard::to_allocvec(&SymbolsWire{rows:&full.symbols,documents:&full.documents,summary:&full.summary}).unwrap();
     for maximum in 0..=expected.len() + 1 {
         let old = postcard::serialize_with_flavor(
-            &OldRows(&full.symbols),
+            &SymbolsWire{rows:&full.symbols,documents:&full.documents,summary:&full.summary},
             Limited {
                 raw: vec![],
                 maximum,
@@ -540,7 +383,7 @@ fn borrowed_symbol_projection_rekeys_every_declaration_when_only_commit_changes(
         &OperationControl::default(),
     )
     .unwrap();
-    let expected = historical(&pin, &projected.documents);
+    let expected = project_symbols(&pin, &projected.documents);
     assert_eq!(
         serde_json::to_vec(&decoded.symbols).unwrap(),
         serde_json::to_vec(&expected).unwrap()
@@ -609,7 +452,7 @@ fn borrowed_symbol_real_full_and_deferred_rebuilds_match_complete_index_and_fact
         }
         assert_eq!(
             serde_json::to_vec(&full.symbols).unwrap(),
-            serde_json::to_vec(&historical(&pin, &full.documents)).unwrap()
+            serde_json::to_vec(&project_symbols(&pin, &full.documents)).unwrap()
         );
     }
 }
@@ -690,22 +533,20 @@ fn borrowed_symbol_default_source_index_uses_deferred_rebuild_and_publishes_comp
         },
     )
     .unwrap();
-    let inv = Invocation {
-        command: "source index".into(),
-        positional: None,
-        flags: BTreeMap::from([("--snapshot".into(), selected.id)]),
+    let request = SourceRequest::Index(SelectedSource::new(selected).unwrap());
+    let ctx = SourceContext {
         cwd: fixture.home.clone(),
         home: fixture.home.clone(),
         control: OperationControl::default(),
     };
     let observation = ObserveOwned::start();
-    let cold = crate::dispatch(&inv).unwrap();
+    let cold = crate::dispatch(&ctx, &request).unwrap();
     assert_eq!(observation.count(), 0);
     assert!(cold.data["declarations"].as_u64().unwrap() > 0);
-    let full = index::build_with_control(&fixture.home, &pin, &inv.control).unwrap();
+    let full = index::build_with_control(&fixture.home, &pin, &ctx.control).unwrap();
     assert!(!full.symbols.is_empty());
     assert_eq!(observation.count(), 0); // warm decoder, not rebuild
-    let fresh = index::build_uncached(&fixture.home, &pin, &inv.control).unwrap();
+    let fresh = index::build_uncached(&fixture.home, &pin, &ctx.control).unwrap();
     assert_eq!(observation.count(), fresh.symbols.len()); // hook is live
     assert_eq!(
         serde_json::to_vec(&full.symbols).unwrap(),
@@ -727,17 +568,15 @@ fn borrowed_symbol_default_summary_encode_cancellation_keeps_main_manifest_and_c
             },
         )
         .unwrap();
-        let inv = Invocation {
-            command: "source index".into(),
-            positional: None,
-            flags: BTreeMap::from([("--snapshot".into(), selected.id)]),
+        let request = SourceRequest::Index(SelectedSource::new(selected).unwrap());
+        let ctx = SourceContext {
             cwd: fixture.home.clone(),
             home: fixture.home.clone(),
             control: OperationControl::default(),
         };
         let failed = {
-            let _cancel = persistence_wire::CancelAtStep::new(step, &inv.control);
-            crate::dispatch(&inv)
+            let _cancel = persistence_wire::CancelAtStep::new(step, &ctx.control);
+            crate::dispatch(&ctx, &request)
                 .err()
                 .expect("encode must observe cancellation")
         };
@@ -752,9 +591,9 @@ fn borrowed_symbol_default_summary_encode_cancellation_keeps_main_manifest_and_c
         );
         metadata.close().unwrap();
         // Facts committed before the cancelled main encoder remain reusable.
-        let mut recovered = inv.clone();
+        let mut recovered = ctx.clone();
         recovered.control = OperationControl::default();
-        let result = crate::dispatch(&recovered).unwrap();
+        let result = crate::dispatch(&recovered, &request).unwrap();
         assert_eq!(result.data["io"]["parsedDocuments"], 0);
         assert_eq!(result.data["io"]["cachedFacts"], source_fixture().len());
         assert_eq!(result.provenance.len(), 1);

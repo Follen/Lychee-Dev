@@ -52,7 +52,7 @@ fn record(f: &Fixture, digest: &str, extension: &str) -> PathBuf {
         .join(format!("{digest}.{extension}"))
 }
 fn recovery(f: &Fixture, id: &str) -> Option<RawDocument> {
-    Metadata::with_historical_write(&f.home, &OperationControl::default(), |writer| {
+    Metadata::with_owned_write(&f.home, &OperationControl::default(), |writer| {
         optional(writer.document(&format!("evidence/remove/{id}")))
     })
     .unwrap()
@@ -68,14 +68,14 @@ fn store_historical_reference(
     f: &Fixture,
     template: &Value,
     digest: &str,
-    signed_bytes: i64,
+    signed_bytes: u64,
 ) -> (String, Vec<u8>) {
     let control = OperationControl::default();
     let mut value = template.clone();
     value["id"] = json!("");
     value["blob"] = json!({"sha256":digest,"bytes":signed_bytes});
     let unsigned =
-        dependencies::decode_capture_projection(&serde_json::to_vec(&value).unwrap(), &control)
+        dependencies::decode_capture_ref(&serde_json::to_vec(&value).unwrap(), &control)
             .unwrap();
     let id = format!(
         "CAP-{}",
@@ -83,8 +83,8 @@ fn store_historical_reference(
     );
     value["id"] = json!(id);
     let raw = serde_json::to_vec(&value).unwrap();
-    let signed = dependencies::inspect_capture_projection(&raw, &id, &control).unwrap();
-    assert_eq!(signed.signed_blob(), (digest, signed_bytes));
+    let signed = dependencies::inspect_capture_ref(&raw, &id, &control).unwrap();
+    assert_eq!(signed.blob_identity(), (digest, signed_bytes));
     f.raw(&format!("capture/{id}"), &raw);
     (id, raw)
 }
@@ -128,7 +128,7 @@ fn decoded_stream_capture_remove_retains_data_body_and_admission_with_or_without
         assert_eq!(before.shared_blob_bytes, 4);
         assert_eq!(before.total().unwrap(), 84);
         let receipt = if active_reader {
-            let result = run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap();
+            let result = run(&f.home, id(&capture), &f.control()).unwrap();
             blob.rewind().unwrap();
             let mut bytes = [0; 4];
             assert_eq!(blob.read_checked(&mut bytes).unwrap(), 4);
@@ -137,12 +137,12 @@ fn decoded_stream_capture_remove_retains_data_body_and_admission_with_or_without
             result
         } else {
             blob.close().unwrap();
-            run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap()
+            run(&f.home, id(&capture), &f.control()).unwrap()
         };
         assert_shared(&receipt, id(&capture));
         assert!(read_capture(&f.home, id(&capture)).is_err());
         assert_eq!(
-            run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap(),
+            run(&f.home, id(&capture), &f.control()).unwrap(),
             receipt
         );
         assert_eq!(
@@ -179,7 +179,7 @@ fn data_pending_attribution_preserves_body_and_retained_peak_on_capture_remove()
     let before = usage(&f);
     assert_eq!(before.shared_blob_bytes, 0);
     assert_eq!(before.retained_shared_peak_bytes, 8);
-    let receipt = run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap();
+    let receipt = run(&f.home, id(&capture), &f.control()).unwrap();
     assert_shared(&receipt, id(&capture));
     assert_eq!(
         fs::read(blob_path(&f.home, &reference.sha256).unwrap()).unwrap(),
@@ -212,7 +212,7 @@ fn absent_data_attribution_preserves_real_deletion_without_creating_ownership_re
         assert!(!paths.shared_blobs().exists());
         let capture = f.capture(b"body", "not-data-owned");
         let path = blob_path(&f.home, capture["blob"]["sha256"].as_str().unwrap()).unwrap();
-        let receipt = run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap();
+        let receipt = run(&f.home, id(&capture), &f.control()).unwrap();
         assert_eq!(receipt["blobRemoved"], true);
         assert_eq!(receipt["blobShared"], false);
         assert!(!path.exists());
@@ -254,7 +254,7 @@ fn invalid_data_attribution_or_body_preserves_capture_and_never_prepares_removal
             "body-length" => fs::write(&body, b"bad").unwrap(),
             _ => fs::remove_file(&body).unwrap(),
         }
-        let error = run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap_err();
+        let error = run(&f.home, id(&capture), &f.control()).unwrap_err();
         assert_eq!(error.code, "vault.data_shared_blob_integrity", "{fault}");
         assert!(read_capture(&f.home, id(&capture)).is_ok(), "{fault}");
         assert!(recovery(&f, id(&capture)).is_none(), "{fault}");
@@ -273,7 +273,7 @@ fn data_retention_does_not_claim_content_health_or_remove_same_length_corruption
     fs::write(&path, b"evil").unwrap();
     // A valid independent owner protects its bytes even when content is bad.
     // Removing a CAP only removes that reference, not the other owner's body.
-    let receipt = run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap();
+    let receipt = run(&f.home, id(&capture), &f.control()).unwrap();
     assert_shared(&receipt, id(&capture));
     assert_eq!(fs::read(&path).unwrap(), b"evil");
     assert_eq!(usage(&f), before);
@@ -301,20 +301,20 @@ fn pending_removal_rechecks_data_reference_added_after_prepare_and_preserves_rep
     let f = Fixture::new();
     let capture = f.capture(b"body", "prepare-first");
     let id = id(&capture);
-    let control = f.inv(id).control;
+    let control = f.control();
     let key = format!("evidence/remove/{id}");
     let mut progress = Progress::default();
-    Metadata::with_historical_write(&f.home, &control, |writer| {
+    Metadata::with_owned_write(&f.home, &control, |writer| {
         writer.with_write_lease(|writer| {
             let row = writer.document(&format!("capture/{id}"))?;
-            let capture = dependencies::inspect_capture_projection(&row.bytes, id, &control)?;
-            let lease = historical_lease(
+            let capture = dependencies::inspect_capture_ref(&row.bytes, id, &control)?;
+            let lease = owned_lease(
                 &f.home,
-                &format!("blob:{}", capture.signed_blob().0),
+                &format!("blob:{}", capture.blob_identity().0),
                 &control,
             )?;
             let result = prepare(&f.home, writer, &key, id, &capture, &control, &mut progress);
-            finish_historical(result, lease.close())
+            finish_owned(result, lease.close())
         })
     })
     .unwrap();
@@ -371,7 +371,7 @@ fn active_original_intent_fails_closed_then_closed_intent_protects_under_catalog
         Instant::now() + Duration::from_secs(5),
         TrackedCancellation::new(),
     );
-    let quota = historical_lease(&f.home, "data-derived-v1:quota", &control).unwrap();
+    let quota = owned_lease(&f.home, "data-derived-v1:quota", &control).unwrap();
     let directory = Directory::open_shared_controlled(
         &DataCachePaths::new(&f.home).shared_blobs(),
         &mut Native(&control),
@@ -438,7 +438,7 @@ fn uppercase_historical_capture_uses_canonical_data_blob_lease_and_signed_identi
     let old = f.capture(b"body", "uppercase");
     let mut capture: CaptureRef = serde_json::from_value(old.clone()).unwrap();
     assert_eq!(
-        run(&f.home, id(&old), &f.inv(id(&old)).control).unwrap()["blobRemoved"],
+        run(&f.home, id(&old), &f.control()).unwrap()["blobRemoved"],
         true
     );
     let reference = publish(&f, b"body");
@@ -453,7 +453,7 @@ fn uppercase_historical_capture_uses_canonical_data_blob_lease_and_signed_identi
     let intent = fs::read(record(&f, &reference.sha256, "intent")).unwrap();
     let complete = fs::read(record(&f, &reference.sha256, "complete")).unwrap();
     let control = OperationControl::default();
-    let lease = historical_lease(&f.home, &format!("blob:{}", reference.sha256), &control).unwrap();
+    let lease = owned_lease(&f.home, &format!("blob:{}", reference.sha256), &control).unwrap();
     let waiting = OperationControl::tracked(
         Instant::now() + Duration::from_secs(5),
         TrackedCancellation::new(),
@@ -494,11 +494,11 @@ fn uppercase_historical_capture_uses_canonical_data_blob_lease_and_signed_identi
             .code,
         "vault.blob_integrity"
     );
-    let receipt = run(&f.home, &capture.id, &f.inv(&capture.id).control).unwrap();
+    let receipt = run(&f.home, &capture.id, &f.control()).unwrap();
     assert_shared(&receipt, &capture.id);
     assert!(read_capture(&f.home, &capture.id).is_err());
     assert_eq!(
-        run(&f.home, &capture.id, &f.inv(&capture.id).control).unwrap(),
+        run(&f.home, &capture.id, &f.control()).unwrap(),
         receipt
     );
     assert_eq!(
@@ -529,10 +529,9 @@ fn uppercase_historical_capture_uses_canonical_data_blob_lease_and_signed_identi
 }
 
 #[test]
-fn canonical_data_lookup_preserves_signed_length_and_rejects_invalid_or_unowned_keys() {
+fn canonical_data_lookup_rejects_invalid_or_unowned_keys() {
     for fault in [
         "mixed-case",
-        "negative-length",
         "wrong-length",
         "short-digest",
         "non-hex",
@@ -548,7 +547,6 @@ fn canonical_data_lookup_preserves_signed_length_and_rejects_invalid_or_unowned_
         let mut signed_bytes = 4;
         match fault {
             "mixed-case" => digest.replace_range(..32, &reference.sha256[..32]),
-            "negative-length" => signed_bytes = -1,
             "wrong-length" => signed_bytes = 5,
             "short-digest" => {
                 digest.pop();
@@ -557,13 +555,13 @@ fn canonical_data_lookup_preserves_signed_length_and_rejects_invalid_or_unowned_
             _ => (),
         }
         let (id, original) = store_historical_reference(&f, &template, &digest, signed_bytes);
-        let control = f.inv(&id).control;
+        let control = f.control();
         let result = run(&f.home, &id, &control);
         if fault == "mixed-case" {
             assert_shared(&result.unwrap(), &id);
             assert!(read_capture(&f.home, &id).is_err());
         } else {
-            let code = if matches!(fault, "negative-length" | "wrong-length") {
+            let code = if fault == "wrong-length" {
                 "vault.data_shared_blob_integrity"
             } else {
                 "vault.blob_integrity"
@@ -588,23 +586,23 @@ fn canonical_data_lookup_preserves_signed_length_and_rejects_invalid_or_unowned_
 }
 
 #[test]
-fn canonical_data_lookup_keeps_retention_metadata_exactly_signed() {
+fn canonical_data_lookup_keeps_typed_retention_metadata_exact() {
     for fault in ["exact", "canonical-digest", "length"] {
         let f = Fixture::new();
         let template = f.capture(b"body", fault);
         let reference = publish(&f, b"body");
         let digest = reference.sha256.to_ascii_uppercase();
         let (id, original) = store_historical_reference(&f, &template, &digest, 4);
-        let mut keep = json!({"captureId":id,"blob":{"sha256":digest,"bytes":4}});
+        let mut keep = json!({"schema":"lycheedev.evidence-retention.v1","captureId":id,"blob":{"sha256":digest,"bytes":4},"keptAt":"2026-10-15T00:00:00Z"});
         match fault {
             "canonical-digest" => keep["blob"]["sha256"] = json!(reference.sha256),
-            "length" => keep["blob"]["bytes"] = json!(-1),
+            "length" => keep["blob"]["bytes"] = json!(5),
             _ => (),
         }
         let keep_key = format!("evidence/keep/{id}");
         let keep_raw = serde_json::to_vec(&keep).unwrap();
         f.raw(&keep_key, &keep_raw);
-        let control = f.inv(&id).control;
+        let control = f.control();
         let result = run(&f.home, &id, &control);
         if fault == "exact" {
             let expected = json!({"captureId":id,"manifestRemoved":true,"retentionRemoved":true,

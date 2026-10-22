@@ -1,7 +1,12 @@
-//! Authenticated, runner-owned inputs only. No PATH lookup or user source execution.
+//! Current addon/test-protocol inputs for the formal Mailbox v1 bridge. The
+//! runner admits only authenticated, runner-owned paths: it never looks up a
+//! PATH Lua, never executes arbitrary user Lua, and never builds a second peer.
 #![forbid(unsafe_code)]
+// Support module compiled into several test targets; performance-only and
+// host-parity-only inputs are legitimately unused in the narrower targets.
+#![allow(dead_code)]
 use lycheedev_core::{control::OperationControl, storage};
-use lycheedev_live::go_mailbox_v1::{
+use lycheedev_live::mailbox::{
     Identity, SCHEMA,
     driver::{Clock, TokenSource},
     durable_journal::{ChannelPaths, DurableChannelJournal, WindowOwner},
@@ -16,19 +21,20 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub const ORACLE: &str = "29bdbdaff5f064ec212ff2064380b1ccac652eda";
-pub const MANIFEST_SHA256: &str =
-    "fb48cb3d55f22b553881bece10be49d451418cdc137814ec05e2964aae93baf6";
-pub const RELEASE_FIELDS_SHA256: &str =
-    "c459550c8f467a1978303aa401d6f3aba5f5ed5f43e77111802d7e78bc3060e4";
-const RELEASE_FIELDS: &[u8] =
-    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.4/release-fields.json");
-const MANIFEST: &[u8] =
-    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.4/manifest.json");
+pub const ADMISSION_SCHEMA: &str = "lycheedev.formal-lua-bridge-admission.v2";
+pub const INTERPRETER_SCHEMA: &str = "lycheedev.formal-lua-interpreter.v1";
+/// Inputs the authenticated peer actually loads. The admission records their
+/// exact bytes; the current addon is the product input, never a frozen oracle.
+pub const BRIDGE_INPUTS: &[&str] = &[
+    "addon/Bridge/CaptureWriter.lua",
+    "addon/Bridge/MemoryProtocol.lua",
+    "addon/Bridge/SlotProtocol.lua",
+    "tests/protocol/slot_server.lua",
+];
 pub const CODE: &str = "return { message = \"荔枝\\n\\000123\", quoted = [=[x\\y]=] }";
 pub const BROKEN_CODE: &str = "return { broken =";
-// Exact finite-number set from Go324 TestSlotDriverLuaReportPreservesFiniteNumbers.
-// This is the only extra business source admitted by the host parity fixtures.
+// Exact finite-number set from the existing host parity case. This is the only
+// extra business source admitted by the host parity fixtures.
 pub const NUMERIC_CODE: &str = concat!(
     "return {0,-1 / math.huge,",
     "0.1,-0.1,0.5,-0.5,1,-1,1.2345678901234567,-1.2345678901234567,",
@@ -82,9 +88,6 @@ pub fn read(path: &Path, cap: usize) -> Vec<u8> {
     assert_eq!(bytes.len() as u64, metadata.len(), "fixture file changed");
     bytes
 }
-fn json(path: &Path, cap: usize) -> Value {
-    serde_json::from_slice(&read(path, cap)).unwrap()
-}
 fn string<'a>(value: &'a Value, key: &str) -> &'a str {
     value[key].as_str().expect(key)
 }
@@ -98,16 +101,6 @@ fn descendant(root: &Path, path: &Path) -> PathBuf {
         "fixture outside owner"
     );
     path
-}
-fn row_path(root: &Path, value: &Value) -> PathBuf {
-    let relative = Path::new(string(value, "path"));
-    assert!(
-        relative
-            .components()
-            .all(|part| matches!(part, Component::Normal(_))),
-        "fixture relative path"
-    );
-    descendant(root, &root.join(relative))
 }
 /// Lua 5.1 uses legacy C file APIs and appends slash-separated suffixes.
 /// Keep canonical verbatim paths for Rust custody; convert only at the Lua
@@ -139,9 +132,9 @@ pub fn write_new(path: &Path, bytes: &[u8]) {
     lycheedev_windows::filesystem::close_file(file).unwrap();
 }
 
-/// Written by the existing formal-Lua controller after verifyInterpreter,
-/// authenticate and materialize; every field is independently rechecked here.
-/// These tests fail if admission is absent. They never silently skip Lua.
+/// Written by the current owned formal-Lua controller after interpreter
+/// authentication and materialization; every field is independently rechecked
+/// here. These tests fail if admission is absent. They never silently skip Lua.
 #[derive(Clone)]
 pub struct Inputs {
     pub fixture: PathBuf,
@@ -154,6 +147,7 @@ pub struct Inputs {
     receipt_path: PathBuf,
     receipt_hash: String,
     lua_hash: String,
+    files: Vec<(PathBuf, String, u64)>,
 }
 impl Inputs {
     pub fn load() -> Self {
@@ -163,70 +157,81 @@ impl Inputs {
         );
         let bytes = read(&path, 64 << 10);
         let value: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(value["fixture"]["oracle"], ORACLE);
-        assert_eq!(value["fixture"]["manifestSHA256"], MANIFEST_SHA256);
-        assert_eq!(
-            value["fixture"]["releaseFieldsSHA256"],
-            RELEASE_FIELDS_SHA256
-        );
-        let owner_path = PathBuf::from(string(&value["scratch"], "receipt"));
-        let owner = json(&owner_path, 1 << 20);
-        assert_eq!(owner["schema"], "lycheedev.disk-owner.v1");
-        assert_eq!(owner["category"], "scratch");
-        assert_eq!(owner["state"], "active");
-        assert!(owner["activePid"].as_u64().is_some_and(|pid| pid > 0));
-        let owner_root = PathBuf::from(string(&owner, "directory"));
-        descendant(&owner_root, &path);
-        let fixture = descendant(&owner_root, Path::new(string(&value["fixture"], "root")));
-        let cases = descendant(&owner_root, Path::new(string(&value["scratch"], "cases")));
-        assert!(!cases.starts_with(&fixture) && !fixture.starts_with(&cases));
+        assert_eq!(value["schema"], ADMISSION_SCHEMA);
+        let scratch = &value["scratch"];
+        let scratch_receipt_path = PathBuf::from(string(scratch, "receipt"));
+        let scratch_receipt: Value =
+            serde_json::from_slice(&read(&scratch_receipt_path, 1 << 20)).unwrap();
+        assert_eq!(scratch_receipt["schema"], "lycheedev.disk-owner.v1");
+        assert_eq!(scratch_receipt["category"], "scratch");
+        assert_eq!(scratch_receipt["state"], "active");
+        assert!(scratch_receipt["activePid"].as_u64().is_some_and(|pid| pid > 0));
+        assert!(scratch_receipt["directory"].as_str().is_some());
+        let cases = PathBuf::from(string(scratch, "cases"));
+        ordinary(&cases);
+        assert!(fs::metadata(&cases).unwrap().is_dir(), "case owner");
         let report_path = PathBuf::from(string(&value["interpreter"], "report"));
         let report_bytes = read(&report_path, 1 << 20);
         let report_hash = string(&value["interpreter"], "reportSHA256").to_owned();
         assert_eq!(storage::sha256(&report_bytes), report_hash);
         let report: Value = serde_json::from_slice(&report_bytes).unwrap();
-        assert_eq!(report["schema"], "lycheedev.formal-lua-interpreter.v1");
-        assert_eq!(report["oracle"], ORACLE);
-        assert_eq!(report["manifestSHA256"], MANIFEST_SHA256);
+        assert_eq!(report["schema"], INTERPRETER_SCHEMA);
         assert_eq!(report["version"], "5.1.5");
-        assert_eq!(report["platform"], "windows-amd64");
-        assert_eq!(
-            report["source"]["sha256"],
-            "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333"
-        );
-        assert_eq!(report["interpreterProbe"], "formal-lua-interpreter-ok");
+        // The running case owner is mutable; only the sealed interpreter build
+        // receipt is bound by buildReceiptSHA256 and retained by verify().
         let receipt_path = PathBuf::from(string(&report, "buildEvidence"));
-        let receipt_hash = string(&value["interpreter"], "buildReceiptSHA256").to_owned();
         let receipt_bytes = read(&receipt_path, 1 << 20);
+        let receipt_hash = string(&value["interpreter"], "buildReceiptSHA256").to_owned();
         assert_eq!(storage::sha256(&receipt_bytes), receipt_hash);
         let receipt: Value = serde_json::from_slice(&receipt_bytes).unwrap();
         assert_eq!(receipt["schema"], "lycheedev.disk-owner.v1");
-        assert_eq!(receipt["owner"], "formal-lua-build");
         assert_eq!(receipt["category"], "scratch");
-        assert!(matches!(
-            receipt["state"].as_str(),
-            Some("succeeded" | "retired")
-        ));
-        assert_eq!(receipt["handlesReaped"], true);
+        assert!(receipt["handlesReaped"].as_bool() == Some(true));
         assert!(receipt["activePid"].is_null());
-        // Full source/compiler/process custody belongs to the existing Node
-        // verifyInterpreter. This narrow check binds its exact sealed report;
-        // it intentionally does not reimplement that verifier's policy.
-        let sealed = receipt_path
-            .parent()
-            .unwrap()
-            .join("interpreter-report.json");
-        assert_eq!(read(&sealed, 1 << 20), report_bytes);
-        assert!(
-            receipt["sealedLogs"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|row| row["path"].as_str() == sealed.to_str() && row["sha256"] == report_hash)
-        );
+        assert_eq!(report["platform"], "windows-amd64");
         let lua = PathBuf::from(string(&report, "executable"));
         let lua_hash = string(&report, "executableSHA256").to_owned();
         assert_eq!(storage::sha256(&read(&lua, 16 << 20)), lua_hash);
+        let fixture = PathBuf::from(string(&value["fixture"], "root"));
+        ordinary(&fixture);
+        assert!(fixture.is_dir());
+        let rows = value["fixture"]["files"]
+            .as_array()
+            .expect("authenticated input rows");
+        assert!(
+            (BRIDGE_INPUTS.len()..=16).contains(&rows.len()),
+            "input row budget"
+        );
+        let mut files = Vec::new();
+        let mut total = 0usize;
+        for row in rows {
+            let relative = Path::new(string(row, "path"));
+            assert!(
+                relative
+                    .components()
+                    .all(|part| matches!(part, Component::Normal(_))),
+                "fixture relative path"
+            );
+            let path = descendant(&fixture, &fixture.join(relative));
+            let bytes = read(&path, 2 << 20);
+            total += bytes.len();
+            assert!(total <= 8 << 20, "fixture input byte budget");
+            assert_eq!(bytes.len() as u64, row["bytes"].as_u64().unwrap());
+            assert_eq!(storage::sha256(&bytes), string(row, "sha256"));
+            files.push((path, string(row, "sha256").to_owned(), bytes.len() as u64));
+        }
+        for required in BRIDGE_INPUTS {
+            assert!(
+                files
+                    .iter()
+                    .any(|(path, _, _)| path.ends_with(Path::new(required))),
+                "missing authenticated input: {required}"
+            );
+        }
+        assert!(
+            fixture.join("addon/Lychee Dev.toc").is_file(),
+            "current addon TOC"
+        );
         let inputs = Self {
             fixture,
             cases,
@@ -238,6 +243,7 @@ impl Inputs {
             receipt_path,
             receipt_hash,
             lua_hash,
+            files,
         };
         inputs.verify();
         inputs
@@ -253,53 +259,30 @@ impl Inputs {
             self.receipt_hash
         );
         assert_eq!(storage::sha256(&read(&self.lua, 16 << 20)), self.lua_hash);
-        assert_eq!(storage::sha256(MANIFEST), MANIFEST_SHA256);
-        let manifest: Value = serde_json::from_slice(MANIFEST).unwrap();
-        assert_eq!(manifest["oracle"]["commit"], ORACLE);
-        // The complete current Go manifest and exact two-field candidate
-        // overlay are pinned separately. Historical manifests stay unchanged;
-        // inspecting these JSON bytes never executes studied source.
-        assert_eq!(storage::sha256(RELEASE_FIELDS), RELEASE_FIELDS_SHA256);
-        let retained: Vec<Value> = serde_json::from_slice(RELEASE_FIELDS).unwrap();
-        assert_eq!(retained.len(), 2);
-        assert_eq!(retained[0]["path"], "addon/Core/Runtime.lua");
-        assert_eq!(retained[1]["path"], "addon/Lychee Dev.toc");
-        let mut count = 0;
-        let mut total = 0;
-        for key in ["fixtures", "candidateAddon"] {
-            for row in manifest[key].as_array().unwrap() {
-                let bytes = read(&row_path(&self.fixture, row), 2 << 20);
-                total += bytes.len();
-                count += 1;
-                assert!(count <= 256 && total <= 16 << 20);
-                if let Some(field) = retained.iter().find(|field| field["path"] == row["path"]) {
-                    assert_eq!(field["expected"]["bytes"], row["bytes"]);
-                    assert_eq!(field["expected"]["sha256"], row["sha256"]);
-                    assert_eq!(
-                        bytes.len() as u64,
-                        field["retained"]["bytes"].as_u64().unwrap()
-                    );
-                    assert_eq!(storage::sha256(&bytes), field["retained"]["sha256"]);
-                    let text = std::str::from_utf8(&bytes).unwrap();
-                    let from = string(field, "retainedText");
-                    assert_eq!(
-                        text.matches(from).count(),
-                        1,
-                        "release substitution cardinality"
-                    );
-                    let restored = text.replacen(from, string(field, "expectedText"), 1);
-                    assert_eq!(
-                        storage::sha256(restored.as_bytes()),
-                        row["sha256"],
-                        "only approved release label may differ from Go"
-                    );
-                } else {
-                    assert_eq!(bytes.len() as u64, row["bytes"].as_u64().unwrap());
-                    assert_eq!(storage::sha256(&bytes), row["sha256"]);
-                }
-            }
+        for (path, digest, len) in &self.files {
+            let bytes = read(path, 2 << 20);
+            assert_eq!(
+                bytes.len() as u64,
+                *len,
+                "input changed: {}",
+                path.display()
+            );
+            assert_eq!(
+                storage::sha256(&bytes),
+                *digest,
+                "input changed: {}",
+                path.display()
+            );
         }
-        assert_eq!(count, 113);
+    }
+    pub fn addon_root(&self) -> PathBuf {
+        self.fixture.join("addon")
+    }
+    pub fn protocol_directory(&self) -> PathBuf {
+        self.fixture.join("tests/protocol")
+    }
+    pub fn protocol_file(&self, name: &str) -> PathBuf {
+        self.protocol_directory().join(name)
     }
     pub fn case(&self, name: &str) -> Case {
         assert!(matches!(

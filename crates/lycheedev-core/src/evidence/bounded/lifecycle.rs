@@ -45,7 +45,7 @@ pub(super) fn close_blob<T>(
     control: Option<&OperationControl>,
     supplemental: &mut impl FnMut() -> Result<()>,
 ) -> Result<T> {
-    let result = crate::metadata::historical_write::finish_historical(
+    let result = crate::metadata::owned_write::finish_owned(
         result,
         storage::close_file(opened.file).map_err(Into::into),
     );
@@ -220,7 +220,7 @@ fn publish_stage<C: FnMut() -> Result<()>>(
         settlement.stage_closed(cleanup.is_empty());
         for error in cleanup {
             result =
-                crate::metadata::historical_write::finish_historical(result, Err(error.into()));
+                crate::metadata::owned_write::finish_owned(result, Err(error.into()));
         }
     }
     drop(stage);
@@ -283,7 +283,7 @@ pub(super) fn persist_capture(
     let checks = std::cell::RefCell::new(supplemental);
     crate::metadata::evidence_catalog::put_capture(
         home,
-        crate::metadata::EvidenceDomain::Historical,
+        crate::metadata::EvidenceDomain::General,
         key,
         raw,
         &[],

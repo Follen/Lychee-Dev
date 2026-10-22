@@ -2,7 +2,8 @@
 //! A main replacement can be durable while slot migration remains pending; resume never picks a new release.
 use crate::{deploy, installation, release, slots};
 use lycheedev_core::{
-    Result, ToolkitError, control::OperationControl, coordination::InstallationGuard, storage,
+    Result, ToolkitError, control::OperationControl, coordination::InstallationMaintenanceLease,
+    storage,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -180,7 +181,11 @@ fn other_pending(target: &Path, selected: Option<&Path>, control: &OperationCont
     }
     Ok(())
 }
-pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> Result<Value> {
+pub fn apply(
+    target: &Path,
+    request: Request<'_>,
+    guard: &InstallationMaintenanceLease,
+) -> Result<Value> {
     let lease = deploy::InstallationLease::acquire(target, request.control)?;
     let result = apply_locked(target, request, guard, &lease);
     lease.finish(result)
@@ -188,7 +193,7 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
 pub(crate) fn apply_locked(
     target: &Path,
     request: Request<'_>,
-    guard: &InstallationGuard,
+    guard: &InstallationMaintenanceLease,
     lease: &deploy::InstallationLease,
 ) -> Result<Value> {
     apply_locked_observed(target, request, guard, lease, &mut |_, _| {})
@@ -196,11 +201,10 @@ pub(crate) fn apply_locked(
 fn apply_locked_observed(
     target: &Path,
     request: Request<'_>,
-    guard: &InstallationGuard,
+    guard: &InstallationMaintenanceLease,
     lease: &deploy::InstallationLease,
     observe: &mut impl FnMut(Step, &Path),
 ) -> Result<Value> {
-    guard.require_idle()?;
     request.control.check()?;
     let target = deploy::destination(target)?;
     if identity(&guard.target) != identity(&target) || identity(lease.target()) != identity(&target)
@@ -466,8 +470,7 @@ fn apply_locked_observed(
             slots::COUNT,
             request.control,
         )?;
-        let installed =
-            installation::inspect_main_controlled(&target, "addon", request.control)?;
+        let installed = installation::inspect_main_controlled(&target, "addon", request.control)?;
         if installed["state"] != "managed"
             || !installation::same_receipt_value(&installed["receipt"], &wanted)?
         {

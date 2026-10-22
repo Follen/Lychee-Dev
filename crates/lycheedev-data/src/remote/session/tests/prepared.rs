@@ -18,7 +18,7 @@ fn same_session_reuses_prepared_root_index_pages_and_reports_root_only_once() {
     let mut readings = Vec::new();
     session
         .read_batches(&[7], &mut |files| {
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             readings.push(files[0].reading.clone());
             Ok(vec![])
         })
@@ -34,7 +34,7 @@ fn same_session_reuses_prepared_root_index_pages_and_reports_root_only_once() {
     std::fs::remove_file(root_path).unwrap();
     session
         .read_batches(&[7], &mut |files| {
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             readings.push(files[0].reading.clone());
             Ok(vec![])
         })
@@ -238,7 +238,7 @@ fn missing_prepared_root_is_exactly_rebuilt_without_replacing_owner_or_attributi
     assert_eq!(entries[0].content_key, hash(&f.payload));
     session
         .read_batches(&[7], &mut |files| {
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             assert_eq!(files[0].reading["root"]["sha256"], reference.sha256);
             assert_eq!(files[0].reading["decodedCache"]["contentDecodeCalls"], 0);
             assert_eq!(files[0].reading["decodedCache"]["blobReads"], 0);

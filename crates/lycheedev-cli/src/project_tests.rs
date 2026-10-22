@@ -20,7 +20,7 @@ impl Fixture {
     }
     fn inv(&self, args: &[&str]) -> Invocation {
         let mut args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        // Go 3.2.3 command_contract.go: only project lock admits --home.
+        // Fixed command contract: only project lock admits --home.
         // Init/status use the project path and must not touch a workspace.
         if args.get(1).is_some_and(|verb| verb == "lock") {
             args.extend([
@@ -38,7 +38,7 @@ impl Fixture {
     }
 }
 #[test]
-fn project_actual_argv_init_status_lock_publish_go_shapes_and_snapshot_context() {
+fn project_actual_argv_init_status_lock_publish_reference_shapes_and_snapshot_context() {
     let f = Fixture::new();
     let inv = f.inv(&["project", "init", "--product", "retail"]);
     let out = dispatch(&inv).unwrap();

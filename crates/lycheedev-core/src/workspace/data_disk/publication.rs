@@ -290,7 +290,11 @@ impl<'a> DerivedObjectWriter<'a> {
                 bytes: self.bytes,
             };
             let path = self.owner.paths.object(&object.sha256)?;
-            let parent = prepare_root(path.parent().expect("content shard"), &self.owner.control)?;
+            let parent = prepare_root(
+                path.parent().expect("content shard"),
+                &self.owner.directories,
+                &self.owner.control,
+            )?;
             let result = self.publish_object(&parent, &object);
             join(result, close_directory(parent), &self.owner.control)
         })();

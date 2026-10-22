@@ -1,6 +1,6 @@
 use super::*;
 #[test]
-fn go_byte_grammar_accepts_raw_non_utf8_and_surrogate_escapes() {
+fn wire_byte_grammar_accepts_raw_non_utf8_and_surrogate_escapes() {
     for byte in 0x20..=0xff {
         if matches!(byte, b'"' | b'\\') {
             continue;
@@ -21,7 +21,7 @@ fn go_byte_grammar_accepts_raw_non_utf8_and_surrogate_escapes() {
     }
 }
 #[test]
-fn go_byte_grammar_rejects_controls_bad_structure_escapes_and_numbers() {
+fn wire_byte_grammar_rejects_controls_bad_structure_escapes_and_numbers() {
     for byte in 0..0x20 {
         assert!(!is_valid(&[b'"', byte, b'"']));
     }
@@ -70,7 +70,7 @@ fn go_byte_grammar_rejects_controls_bad_structure_escapes_and_numbers() {
     }
 }
 #[test]
-fn go_byte_grammar_depth_is_iterative_and_exactly_10000() {
+fn wire_byte_grammar_depth_is_iterative_and_exactly_10000() {
     let deep = [vec![b'['; MAX_DEPTH], b"0".to_vec(), vec![b']'; MAX_DEPTH]].concat();
     assert!(is_valid(&deep));
     assert!(validate_at(&deep, 1).is_err());

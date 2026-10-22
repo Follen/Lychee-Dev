@@ -20,6 +20,12 @@ pub struct OwnedValue {
 }
 #[derive(Clone, Debug)]
 enum ValueEvidence {
+    Nominal {
+        token: SessionToken,
+        context: String,
+        catalog: String,
+        name: String,
+    },
     Object {
         binding: ObjectBinding,
         fields: BTreeMap<LuaMemberKey, OwnedValue>,
@@ -64,6 +70,20 @@ impl PartialEq for OwnedValue {
         // second time. In particular old object equality rejects foreign tokens
         // before walking fields. Constructors keep these representations paired.
         match (self.evidence.as_deref(), other.evidence.as_deref()) {
+            (
+                Some(ValueEvidence::Nominal {
+                    token: a,
+                    context: ac,
+                    catalog: ad,
+                    name: an,
+                }),
+                Some(ValueEvidence::Nominal {
+                    token: b,
+                    context: bc,
+                    catalog: bd,
+                    name: bn,
+                }),
+            ) => a == b && ac == bc && ad == bd && an == bn,
             (None, None) => self.ty == other.ty,
             (
                 Some(ValueEvidence::Object {
@@ -165,6 +185,18 @@ impl Eq for OwnedValue {}
 impl Hash for OwnedValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.evidence.as_deref() {
+            Some(ValueEvidence::Nominal {
+                token,
+                context,
+                catalog,
+                name,
+            }) => {
+                7u8.hash(state);
+                state.write_usize(Arc::as_ptr(&token.0) as usize);
+                context.hash(state);
+                catalog.hash(state);
+                name.hash(state);
+            }
             None => {
                 0u8.hash(state);
                 self.ty.hash(state);
@@ -351,6 +383,29 @@ pub struct OwnedObjectInfo<'a> {
 }
 
 impl OwnedValue {
+    // This is type identity, not an enumerable object shape. Runtime member
+    // selection and mutations remain with the selected Source value provider.
+    pub(crate) fn nominal(session: &super::OwnedBindingSession, catalog: &str, name: &str) -> Self {
+        Self {
+            ty: LuaType::Ref(emmylua_code_analysis::LuaTypeDeclId::global(name)),
+            evidence: Some(Arc::new(ValueEvidence::Nominal {
+                token: session.token.clone(),
+                context: session.identity().into(),
+                catalog: catalog.into(),
+                name: name.into(),
+            })),
+        }
+    }
+    pub(crate) fn nominal_identity(&self) -> Option<(&str, &str)> {
+        match self.evidence.as_deref()? {
+            ValueEvidence::Nominal { catalog, name, .. } => Some((catalog, name)),
+            _ => None,
+        }
+    }
+    pub(crate) fn nominal_belongs_to(&self, session: &super::OwnedBindingSession) -> bool {
+        matches!(self.evidence.as_deref(), Some(ValueEvidence::Nominal { token, context, .. })
+            if *token == session.token && context == session.identity())
+    }
     pub fn plain(ty: LuaType) -> Self {
         Self { ty, evidence: None }
     }

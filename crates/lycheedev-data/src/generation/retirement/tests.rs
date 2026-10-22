@@ -1,4 +1,5 @@
 use super::*;
+use lycheedev_core::ToolkitError;
 use lycheedev_core::{storage, workspace::data_disk::DataCachePaths};
 use std::fs;
 #[allow(dead_code)]
@@ -14,15 +15,13 @@ fn sample() -> Fixture {
     )])
 }
 fn prepare(f: &Fixture) -> lycheedev_core::Outcome {
-    let mut inv = f.invocation("data cache prepare", &[]);
-    inv.positional = Some("Sample".into());
-    crate::migration_oracle::dispatch(&inv).unwrap()
+    crate::prepare_cache(&f.context(), &request()).unwrap()
 }
-fn command(f: &Fixture) -> Invocation {
-    let mut inv = f.invocation("cache prune", &[]);
-    inv.flags.clear();
-    inv.flags.insert("--data-derived".into(), "true".into());
-    inv
+fn request() -> crate::request::CachePrepareRequest {
+    crate::request::CachePrepareRequest {
+        table: "Sample".into(),
+        timeout: std::time::Duration::from_secs(300),
+    }
 }
 fn path(f: &Fixture, result: &lycheedev_core::Outcome) -> std::path::PathBuf {
     DataCachePaths::new(&f.home).generations.join(format!(
@@ -40,7 +39,7 @@ fn public_data_scope_retires_real_prepared_generation_then_prepare_rebuilds_exac
         .unwrap();
     let raw = fs::read(&object).unwrap();
     let manifest = fs::read(path(&f, &first)).unwrap();
-    let result = crate::prune_derived_cache(&command(&f)).unwrap();
+    let result = crate::prune_derived_cache(&f.context(), Default::default()).unwrap();
     assert!(result.complete);
     assert_eq!(result.data["removedObjects"], 1);
     assert_eq!(result.data["removedGenerations"], 1);
@@ -79,7 +78,7 @@ fn partial_generation_retirement_accepts_real_missing_key_metadata_without_promo
     )
     .unwrap();
     assert_eq!(object.sha256, result.data["object"]["sha256"]);
-    assert!(crate::prune_derived_cache(&command(&f)).unwrap().complete);
+    assert!(crate::prune_derived_cache(&f.context(), Default::default()).unwrap().complete);
     let rebuilt = prepare(&f);
     assert!(!rebuilt.complete);
     assert_eq!(rebuilt.data["generation"], result.data["generation"]);
@@ -114,7 +113,7 @@ fn malformed_unknown_duplicate_or_inconsistent_typed_manifest_blocks_all_deletio
     for changed in replacements {
         assert_ne!(changed, raw);
         fs::write(&manifest_path, &changed).unwrap();
-        let error = crate::prune_derived_cache(&command(&f)).unwrap_err();
+        let error = crate::prune_derived_cache(&f.context(), Default::default()).unwrap_err();
         assert_eq!(error.code, "records.generation_invalid");
         assert_eq!(error.details["result"]["removedObjects"], 0);
         assert_eq!(error.details["result"]["removedGenerations"], 0);
@@ -253,28 +252,25 @@ fn retirement_source_blobrefs_keep_strict_shape_length_and_optional_contract() {
     }
 }
 #[test]
-fn typed_dry_run_preserves_exact_files_and_incompatible_staging_flag_is_rejected() {
+fn typed_dry_run_preserves_exact_files() {
     let f = sample();
     let result = prepare(&f);
     let path = path(&f, &result);
     let bytes = fs::read(&path).unwrap();
-    let mut inv = command(&f);
-    inv.flags.insert("--dry-run".into(), "true".into());
-    let planned = crate::prune_derived_cache(&inv).unwrap();
+    let planned = crate::prune_derived_cache(&f.context(), DerivedRetirementOptions {
+        dry_run: true,
+        ..Default::default()
+    }).unwrap();
     assert!(planned.complete);
     assert_eq!(planned.data["dryRun"], true);
     assert_eq!(planned.data["deletions"][0]["state"], "planned");
     assert_eq!(fs::read(&path).unwrap(), bytes);
-    inv.flags.insert("--uncommitted".into(), "true".into());
-    let error = crate::prune_derived_cache(&inv).unwrap_err();
-    assert_eq!(error.code, "command.invalid_arguments");
-    assert_eq!(fs::read(path).unwrap(), bytes);
     fs::remove_dir_all(f.root).unwrap();
 }
 
 // Force a real prepare miss with owned fixture orphans. Source/decoded cache and
 // CAP records remain intact; production source preparation still precedes quota.
-fn pressure_fixture(f: &Fixture) -> (lycheedev_core::Outcome, Invocation) {
+fn pressure_fixture(f: &Fixture) -> (lycheedev_core::Outcome, crate::request::DataContext) {
     use workspace::{
         data_disk::AdditionalPeak,
         data_resources::{self, Policy},
@@ -302,15 +298,13 @@ fn pressure_fixture(f: &Fixture) -> (lycheedev_core::Outcome, Invocation) {
     let mut config = workspace::config(&f.home).unwrap();
     config["dataCache"]["maxBytes"] = serde_json::json!(existing + peak - 1);
     storage::atomic_json(&f.home.join("config.json"), &config).unwrap();
-    let mut inv = f.invocation("data cache prepare", &[]);
-    inv.positional = Some("Sample".into());
-    (first, inv)
+    (first, f.context())
 }
 #[test]
 fn prepare_capacity_trigger_reclaims_cold_orphans_and_rebuilds_exact_generation() {
     let f = sample();
     let (first, inv) = pressure_fixture(&f);
-    let second = crate::migration_oracle::dispatch(&inv).unwrap();
+    let second = crate::prepare_cache(&inv, &request()).unwrap();
     assert_eq!(second.data["generation"], first.data["generation"]);
     assert_eq!(second.data["object"], first.data["object"]);
     assert!(
@@ -332,7 +326,7 @@ fn prepare_capacity_trigger_reclaims_cold_orphans_and_rebuilds_exact_generation(
         second.data["diskReservation"]["coverage"]["totalDataCoverageComplete"],
         false
     );
-    let third = crate::migration_oracle::dispatch(&inv).unwrap();
+    let third = crate::prepare_cache(&inv, &request()).unwrap();
     assert!(third.data.get("automaticRetirement").is_none());
     assert_eq!(third.data["generation"], first.data["generation"]);
     fs::remove_dir_all(f.root).unwrap();
@@ -341,7 +335,7 @@ fn prepare_capacity_trigger_reclaims_cold_orphans_and_rebuilds_exact_generation(
 fn prepare_capacity_retirement_facts_survive_later_encoder_error() {
     let f = sample();
     let (_, inv) = pressure_fixture(&f);
-    let error = application::dispatch_after_encode(&inv, &mut || {
+    let error = application::dispatch_after_encode(&inv, &request(), &mut || {
         Err(ToolkitError::new(
             "test.after_auto_retirement",
             "injected encoder failure",
@@ -362,7 +356,7 @@ fn prepare_capacity_retirement_facts_survive_later_encoder_error() {
 fn prepare_capacity_retirement_facts_survive_final_teardown_error() {
     let f = sample();
     let (_, inv) = pressure_fixture(&f);
-    let error = application::dispatch_after_hooks(&inv, &mut || Ok(()), &mut |result| {
+    let error = application::dispatch_after_hooks(&inv, &request(), &mut || Ok(()), &mut |result| {
         result?;
         Err(ToolkitError::new(
             "test.after_auto_close",

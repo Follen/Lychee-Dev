@@ -3,14 +3,14 @@ use super::*;
 use std::{sync::atomic::{AtomicBool,Ordering},time::{Duration,Instant}};
 
 fn declaration(id:usize,file:usize,start:u32,end:u32)->IndexedDeclaration {
-    IndexedDeclaration{id:format!("{id:064x}"),name:format!("name_{id}"),
+    IndexedDeclaration{id:DeclarationId::parse(&format!("{id:064x}")).unwrap(),name:format!("name_{id}"),
         site:SyntaxSite{file,start,end},kind:match id%3{0=>"local",1=>"parameter",_=>"loop_local"},
         owner:None,implicit_self:false}
 }
 fn old_lookups(index:&SourceSyntaxIndex)->(BTreeMap<String,usize>,BTreeMap<SyntaxSite,usize>) {
     let mut by_id=BTreeMap::new();let mut by_site=BTreeMap::new();
     for (id,declaration) in index.declarations.iter().enumerate(){
-        by_id.insert(declaration.id.clone(),id);by_site.insert(declaration.site,id);
+        by_id.insert(declaration.id.public(),id);by_site.insert(declaration.site,id);
     }
     (by_id,by_site)
 }
@@ -53,9 +53,10 @@ fn independent_duplicate_id_and_site_keys_keep_the_last_original_declaration() {
 fn packed_lookups_retain_only_two_row_indexes_and_one_digest_owner() {
     let mut index=SourceSyntaxIndex::default();
     for n in 0..100_000usize{index.declarations.push(declaration(n,n/1000,n as u32,n as u32+1));}
-    let pointers=index.declarations.iter().map(|declaration|declaration.id.as_ptr()).collect::<Vec<_>>();
+    let keys=index.declarations.iter().map(|declaration|declaration.id).collect::<Vec<_>>();
     index.finish_declaration_lookups();
-    for (declaration,pointer) in index.declarations.iter().zip(pointers){assert_eq!(declaration.id.as_ptr(),pointer);}
+    for (declaration,key) in index.declarations.iter().zip(keys){assert_eq!(declaration.id,key);}
+    assert_eq!(std::mem::size_of::<DeclarationId>(),32);
     let retained=std::mem::size_of_val(index.declarations_by_id.as_ref())
         +std::mem::size_of_val(index.declarations_by_site.as_ref());
     let rows=index.declarations.len();
@@ -64,7 +65,7 @@ fn packed_lookups_retain_only_two_row_indexes_and_one_digest_owner() {
     // allocator overhead, and the declaration rows retained by BOTH versions.
     let old_initialized=rows*(std::mem::size_of::<String>()+std::mem::size_of::<usize>()
         +std::mem::size_of::<SyntaxSite>()+std::mem::size_of::<usize>())
-        +index.declarations.iter().map(|declaration|declaration.id.len()).sum::<usize>();
+        +rows*64;
     assert_eq!(old_initialized-retained,rows*(std::mem::size_of::<String>()+std::mem::size_of::<SyntaxSite>()+64));
     if usize::BITS==64{assert_eq!(old_initialized-retained,10_400_000);}
 }
@@ -94,19 +95,54 @@ fn admitted(control:&OperationControl)->Arc<SourceInputs> {
 
 #[test]
 fn lookup_freeze_preserves_public_declaration_bytes_and_static_kind_text() {
-    let control=OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(false)));
+    let control=OperationControl::uncancelable(Instant::now()+Duration::from_secs(30));
     let inputs=admitted(&control);let mut index=SourceSyntaxIndex::default();
     for id in 0..6{index.declarations.push(declaration(id,0,6,11));}
     let before=index.declarations.iter().map(|declaration|declaration.public(&inputs)).collect::<Vec<_>>();
     let expected=serde_json::to_vec(&before).unwrap();index.finish_declaration_lookups();
     let after=index.declarations.iter().map(|declaration|declaration.public(&inputs)).collect::<Vec<_>>();
     assert_eq!(serde_json::to_vec(&after).unwrap(),expected);
-    for (id,declaration) in after.iter().enumerate(){assert_eq!(declaration.kind,match id%3{0=>"local",1=>"parameter",_=>"loop_local"});}
+    for (id,declaration) in after.iter().enumerate(){
+        assert_eq!(declaration.id,format!("{id:064x}"));
+        assert_eq!(declaration.kind,match id%3{0=>"local",1=>"parameter",_=>"loop_local"});
+    }
+    // The retained binary key hashes precisely the former public tuple,
+    // including JSON escaping and the full original source range.
+    for site in [Site{file:"a.lua".into(),start:6,end:11},
+        Site{file:"路径/\"quoted\"\\name.lua".into(),start:0,end:u32::MAX}] {
+        let public=source_decl_id(&inputs,&site);
+        assert_eq!(source_decl_key(&inputs,&site).public(),public);
+        assert_eq!(DeclarationId::parse(&public),Some(source_decl_key(&inputs,&site)));
+    }
+    for invalid in ["".to_owned(),"0".repeat(63),"0".repeat(65),"A".repeat(64),"é".repeat(32)] {
+        assert_eq!(DeclarationId::parse(&invalid),None);
+    }
+}
+
+#[test]
+fn packed_declaration_target_keeps_public_reference_proof_and_context_identity() {
+    let control=OperationControl::uncancelable(Instant::now()+Duration::from_secs(30));
+    let prepared=prepare(admitted(&control),&control).unwrap();
+    let declaration=&prepared.syntax.declarations[0];
+    let public_id=source_decl_id(&prepared.inputs,&declaration.site.public(&prepared.inputs));
+    let query=prepared.source_queries(&control).unwrap();
+    let references=query.references(QueryTarget::Declaration(public_id.clone()),
+        ReferenceFilter::default(),PageRequest::default()).unwrap();
+    assert!(!references.has_more);
+    assert!(references.rows.iter().any(|row|row.roles.contains(&ReferenceRole::Read)));
+    for row in &references.rows{assert_eq!(row.lexical_declaration.as_deref(),Some(public_id.as_str()));}
+    let declared=references.rows.iter().find(|row|row.roles.contains(&ReferenceRole::Declaration)).unwrap();
+    assert_eq!(declared.id,digest(&(&public_id,"declaration_reference")));
+    assert_eq!(declared.proof,public_id);
+    let context=query.context(QueryTarget::Declaration(public_id.clone()),ContextOptions::default(),PageRequest::default()).unwrap();
+    let row=context.rows.iter().find(|row|row.kind=="lexical_declaration").unwrap();
+    assert_eq!(row.id,public_id);
+    assert_eq!(row.detail["declaration"]["id"],public_id);
 }
 
 #[test]
 fn compacted_lookup_keeps_original_query_cancellation_and_final_charge_boundary() {
-    let control=OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(false)));
+    let control=OperationControl::uncancelable(Instant::now()+Duration::from_secs(30));
     let prepared=prepare(admitted(&control),&control).unwrap();
     let counts=prepared.inputs.corpus.files.iter().map(|file|{
         let model=prepared.analysis.semantic_model(prepared.files[&file.path]);
@@ -123,8 +159,8 @@ fn compacted_lookup_keeps_original_query_cancellation_and_final_charge_boundary(
     assert!(prepared.build_syntax_index(&counts).unwrap_err().contains("shared operation step budget"));
     assert_eq!(prepared.inputs.shared_steps.load(Ordering::Relaxed),limit-rows+1);
     let query=prepared.source_queries(&control).unwrap();
-    control.cancel_handle().store(true,Ordering::Release);
-    let error=query.references(QueryTarget::Declaration(prepared.syntax.declarations[0].id.clone()),
+    control.tracked_cancel_handle().unwrap().cancel();
+    let error=query.references(QueryTarget::Declaration(prepared.syntax.declarations[0].id.public()),
         ReferenceFilter::default(),PageRequest::default()).unwrap_err();
     assert_eq!(error.code,"command.cancelled");
     assert_eq!(prepared.inputs.shared_steps.load(Ordering::Relaxed),limit-rows+1);

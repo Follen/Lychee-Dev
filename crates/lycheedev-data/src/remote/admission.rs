@@ -73,7 +73,7 @@ pub(super) struct OpenWorkspace<'a> {
     budget: Option<&'a Budget>,
 }
 impl<'a> OpenWorkspace<'a> {
-    fn open(
+    pub(super) fn open(
         home: &Path,
         control: &'a OperationControl,
         budget: Option<&'a Budget>,
@@ -172,10 +172,9 @@ impl<'a> OpenWorkspace<'a> {
         after_close: impl FnOnce() -> Result<()>,
     ) -> Result<T> {
         if let Some(metadata) = self.metadata.take() {
-            if let Err(error) = lycheedev_core::metadata::historical_write::finish_historical(
-                metadata.close(),
-                after_close(),
-            ) {
+            if let Err(error) =
+                lycheedev_core::metadata::owned_write::finish_owned(metadata.close(), after_close())
+            {
                 cleanup.push(error);
             }
         }
@@ -199,15 +198,6 @@ pub(super) struct AdmittedWorkspace<'a> {
     workspace: OpenWorkspace<'a>,
 }
 impl<'a> AdmittedWorkspace<'a> {
-    pub fn acquire(
-        home: &Path,
-        policy: Policy,
-        control: &'a OperationControl,
-        budget: Option<&'a Budget>,
-    ) -> Result<Self> {
-        // Standalone session callers retain their prior no-Metadata admission.
-        OpenWorkspace::open(home, control, budget)?.acquire(policy)
-    }
     pub fn home(&self) -> &Path {
         self.workspace.home()
     }

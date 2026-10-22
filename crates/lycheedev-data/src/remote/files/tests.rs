@@ -1,5 +1,6 @@
 use super::super::{cache::MetadataFetcher, fragments::RangeFetcher, transport::RangeReply};
 use super::*;
+use crate::blte::EncodedRead;
 use crate::{
     blte,
     resource::{Budget, Cost},
@@ -493,15 +494,6 @@ fn loose_http_uncertainty_is_not_rewritten_as_missing_by_later_indexes() {
         "records.remote_http"
     );
 }
-#[test]
-fn location_go_duplicate_null_and_signed_shape_is_retained_until_consumption() {
-    let location:Location=serde_json::from_str(r#"{"Object":"first","object":"last","OBJECT":null,"offset":-1,"Offset":2,"bytes":20,"Bytes":null,"extra":[]}"#).unwrap();
-    assert_eq!(location.object, "last");
-    assert_eq!(location.offset, 2);
-    assert_eq!(location.bytes, 20);
-    assert!(serde_json::from_str::<Location>(r#"{"bytes":1e0}"#).is_err());
-}
-
 #[test]
 fn joined_archive_workers_keep_original_cancellation_and_spent_attempts() {
     for cancel_budget_only in [false, true] {

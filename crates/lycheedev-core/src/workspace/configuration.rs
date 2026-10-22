@@ -164,9 +164,15 @@ fn scalar<'de, T: Deserialize<'de>>(raw: &'de RawValue, place: &mut T) -> Result
     Ok(())
 }
 fn integer(raw: &RawValue, place: &mut i64) -> Result<()> {
-    let mut value = evidence::GoSignedInteger(*place);
-    scalar(raw, &mut value)?;
-    *place = value.0;
+    let token = raw.get();
+    if token == "null" {
+        return Ok(());
+    }
+    let digits = token.strip_prefix('-').unwrap_or(token);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    *place = token.parse().map_err(|_| invalid())?;
     Ok(())
 }
 fn object(raw: &RawValue) -> Result<Object> {
@@ -182,12 +188,11 @@ fn decode(
     if raw.len() > MAXIMUM || std::str::from_utf8(raw).is_err() || !crate::raw_json::is_valid(raw) {
         return Err(invalid());
     }
-    // Bounded original-byte grammar pass precedes normalization; no synthetic
-    // 128-depth cap on ignored schema-peek fields. At most 3x string scratch.
+    // Bounded original-byte grammar pass precedes decoding; no synthetic
+    // 128-depth cap on ignored schema-peek fields.
     control.check()?;
     check()?;
-    let normalized = evidence::normalize_go_json_strings(raw, control)?;
-    let fields: Object = serde_json::from_slice(&normalized).map_err(|_| invalid())?;
+    let fields: Object = serde_json::from_slice(raw).map_err(|_| invalid())?;
     let mut schema = String::new();
     for (name, value) in &fields.0 {
         control.check()?;
@@ -301,7 +306,7 @@ mod tests {
         decode(raw, &OperationControl::default(), &mut || Ok(())).map(|c| c.download_workers)
     }
     #[test]
-    fn configuration_duplicate_null_case_and_nested_merge_match_go() {
+    fn configuration_duplicate_null_case_and_nested_merge_match_wire_contract() {
         assert_eq!(parse(br#"{"Schema":"lycheedev.config.v1","cache":null,"download":{"workers":2},"DOWNLOAD":null,"Download":{"Workers":3},"download":{"workers":null}}"#).unwrap(),3);
         assert_eq!(parse(br#"{"schema":"lycheedev.config.v1"}"#).unwrap(), 0);
         assert_eq!(
@@ -342,7 +347,7 @@ mod tests {
         }
     }
     #[test]
-    fn schema_peek_newer_precedes_unknown_fields_and_uses_go_depth() {
+    fn schema_peek_newer_precedes_unknown_fields_and_uses_wire_depth() {
         assert_eq!(
             parse(br#"{"unknown":1,"schema":"lycheedev.config.v2"}"#)
                 .unwrap_err()
@@ -412,7 +417,7 @@ mod data_policy_tests {
             let config =
                 decode(raw.as_bytes(), &OperationControl::default(), &mut || Ok(())).unwrap();
             assert_eq!(config.data_cache_max_bytes, 5_000_000_000);
-            assert_eq!(config.cache_max_bytes, 0); // Fixed Go present-file default.
+            assert_eq!(config.cache_max_bytes, 0); // Fixed reference present-file default.
             assert_eq!(config.download_workers, 0);
         }
     }
@@ -665,15 +670,12 @@ mod public_set_tests {
         let _remove = Remove(home.clone());
         let raw = br#"{"schema":"lycheedev.config.v1","cache":{"maxBytes":32,"custom":"keep"},"download":{"workers":0},"future":{"nested":[1,true]},"DataCache":{"MaxBytes":"5GB"}}"#;
         fs::write(home.join("config.json"), raw).unwrap();
-        let invocation = crate::Invocation {
-            command: "config set".into(),
-            positional: None,
-            flags: [("--download-workers".into(), "4".into())].into(),
+        let ctx = crate::request::RequestContext {
             cwd: home.clone(),
             home: home.clone(),
             control: OperationControl::default(),
         };
-        let result = workspace::dispatch(&invocation).unwrap();
+        let result = workspace::set_config(&ctx, &workspace::ConfigUpdate { download_workers: Some(4), ..Default::default() }).unwrap();
         assert_eq!(result.data["download"]["workers"], 4);
         assert_eq!(result.data["dataCache"]["maxBytes"], 5_000_000_000u64);
         assert_eq!(result.data["cache"]["custom"], "keep");

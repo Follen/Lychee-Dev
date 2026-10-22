@@ -6,7 +6,7 @@ export const HISTORICAL_GENERATION_PRODUCT = Object.freeze({
   commit:'7bd4216c28b45761f27239e1d74536af71b11a9b',
   sourceTreeSHA256:'cbad32ff06cac1fbcd01cbba5dd6dc5a8028a70e4a8741cf2a44a1266cdeeadd',
 });
-const baseKeys=['schema','ownerRoot','artifact','goSource','goPackage','luaLSArchive','fixturePreparation'];
+const baseKeys=['schema','ownerRoot','artifact','goReference','fixturePreparation'];
 export function generationMode(request, mode) {
   assert(['--observation','--acceptance','--profile-observation'].includes(mode),'explicit generation mode');
   const profiled=mode==='--profile-observation';

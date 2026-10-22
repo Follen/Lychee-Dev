@@ -255,31 +255,6 @@ impl ReadLimit {
         }
     }
 }
-async fn read_bounded(
-    body: impl AsyncRead + Unpin,
-    maximum: usize,
-    control: &OperationControl,
-    budget: Option<&Budget>,
-    deadline: Instant,
-) -> Result<Vec<u8>> {
-    collect(
-        body,
-        ReadLimit::Complete(maximum),
-        control,
-        budget,
-        deadline,
-    )
-    .await
-}
-async fn collect(
-    body: impl AsyncRead + Unpin,
-    limit: ReadLimit,
-    control: &OperationControl,
-    budget: Option<&Budget>,
-    deadline: Instant,
-) -> Result<Vec<u8>> {
-    collect_admitted(body, limit, control, budget, deadline, &mut |_| Ok(())).await
-}
 async fn collect_admitted(
     mut body: impl AsyncRead + Unpin,
     limit: ReadLimit,

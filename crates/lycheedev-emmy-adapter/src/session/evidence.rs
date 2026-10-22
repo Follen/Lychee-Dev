@@ -117,6 +117,8 @@ pub struct CallObservation {
     pub closure_identity: String,
     pub invocation_identity: String,
     pub returns: Vec<BindingDecision<BoundValue>>,
+    /// Returns contains only the observed prefix; further slots are unknown.
+    pub open_tail: bool,
     pub proof: String,
 }
 #[derive(Clone, Debug)]

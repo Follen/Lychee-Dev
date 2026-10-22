@@ -1,6 +1,6 @@
 //! Controlled initialization for callers that retain an ordinary Metadata.
 //! Compatibility open/read/write behavior stays in the parent module.
-use super::{historical_write::finish_historical, *};
+use super::{owned_write::finish_owned, *};
 use crate::control::OperationControl;
 use std::time::Duration;
 
@@ -72,7 +72,7 @@ impl Metadata {
         crate::workspace::open_controlled_with_check(home, control, &mut check)?;
         metadata_check(control, &mut check)?;
         let schema = if write {
-            Some(historical_write::historical_lease_observed_with_check(
+            Some(owned_write::owned_lease_observed_with_check(
                 home,
                 "metadata-schema",
                 control,
@@ -127,7 +127,7 @@ impl Metadata {
             };
             match initialized {
                 Ok(()) => Ok(metadata),
-                Err(error) => finish_historical(Err(error), metadata.close()),
+                Err(error) => finish_owned(Err(error), metadata.close()),
             }
         })();
         let released = schema.map_or(Ok(()), |lease| lease.close());
@@ -136,13 +136,13 @@ impl Metadata {
         let metadata = match (opened, released) {
             (Ok(metadata), Ok(())) => metadata,
             (Ok(metadata), Err(error)) => {
-                return finish_historical(Err(error), metadata.close());
+                return finish_owned(Err(error), metadata.close());
             }
-            (Err(error), cleanup) => return finish_historical(Err(error), cleanup),
+            (Err(error), cleanup) => return finish_owned(Err(error), cleanup),
         };
         match metadata_check(control, &mut check) {
             Ok(()) => Ok(metadata),
-            Err(error) => finish_historical(Err(error), metadata.close()),
+            Err(error) => finish_owned(Err(error), metadata.close()),
         }
     }
 
@@ -252,7 +252,7 @@ impl Metadata {
             .connection
             .busy_timeout(Duration::from_secs(5))
             .map_err(ToolkitError::from);
-        finish_historical(result, restore)
+        finish_owned(result, restore)
     }
 
     /// Consume this handle and report SQLite's close result. No statement or
@@ -270,9 +270,17 @@ mod tests;
 #[cfg(test)]
 mod consumer_tests;
 
+fn metadata_integrity() -> ToolkitError {
+    ToolkitError::new(
+        "vault.metadata",
+        "metadata schema does not own the required document tables",
+        4,
+    )
+}
+
 // The request-owned capture route repeats the same live schema/authentication
 // checks as opening a writer, but borrows the existing SQLite connection.
-fn initialize_connection(
+pub(super) fn initialize_connection(
     connection: &Connection,
     write: bool,
     control: &OperationControl,
@@ -286,8 +294,6 @@ fn initialize_connection(
         connection.pragma_query_value(None, "user_version", |row| row.get(0))
     })?;
     metadata_check(control, check)?;
-    // Deliberately retain open's existing schema/version diagnostics.
-    // Historical Go migration has its separate, stricter boundary.
     if version > 1 {
         return Err(ToolkitError::new(
             "vault.schema_newer",
@@ -303,6 +309,8 @@ fn initialize_connection(
                 4,
             ));
         }
+        let tables:i64=checked_sql_with_check(control,until,check,on_busy,||connection.query_row("SELECT count(*) FROM sqlite_schema WHERE type='table'",[],|row|row.get(0)))?;
+        if tables!=0{return Err(ToolkitError::new("vault.schema_invalid","Metadata schema is not initialized by the current toolkit",4));}
         checked_sql_with_check(control, until, check, on_busy, || {
             connection.pragma_update(None, "synchronous", "FULL")
         })?;
@@ -316,6 +324,22 @@ fn initialize_connection(
             checked_sql_with_check(control, until, check, on_busy, || {
                 transaction.execute_batch("CREATE TABLE IF NOT EXISTS documents (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>0), value BLOB NOT NULL CHECK(length(value)<=1048576)) WITHOUT ROWID")
             })?;
+            checked_sql_with_check(control, until, check, on_busy, || {
+                transaction.execute_batch(super::DELETED_GENERATIONS_SCHEMA)
+            })?;
+            // CREATE TABLE IF NOT EXISTS silently tolerates a same-named VIEW or
+            // other object. Bootstrap owns both document tables or it fails; the
+            // transaction rolls back so a later clean open can still initialize.
+            let owned: i64 = checked_sql_with_check(control, until, check, on_busy, || {
+                transaction.query_row(
+                    "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('documents','deleted_generations')",
+                    [],
+                    |row| row.get(0),
+                )
+            })?;
+            if owned != 2 {
+                return Err(metadata_integrity());
+            }
             checked_sql_with_check(control, until, check, on_busy, || {
                 transaction.pragma_update(None, "user_version", 1)
             })?;
@@ -336,14 +360,32 @@ fn initialize_connection(
         };
         // Do not silently retry a failed rollback through Drop.
         transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-        finish_historical(created, rollback)?;
+        finish_owned(created, rollback)?;
     }
     if write {
         checked_sql_with_check(control, until, check, on_busy, || {
             connection.pragma_update(None, "synchronous", "FULL")
         })?;
+        // Tombstones are a current typed mechanism: ensure the side table exists
+        // for newly created workspaces and for writers that opened an older
+        // documents-only database. Read-only opens never create it.
         checked_sql_with_check(control, until, check, on_busy, || {
-            connection.execute_batch(DELETED_GENERATIONS_SCHEMA)
+            connection.execute_batch(super::DELETED_GENERATIONS_SCHEMA)
+        })?;
+        // A version-1 database must still own the ordinary documents table; a
+        // same-named view is not writable metadata and fails closed here.
+        let documents: i64 = checked_sql_with_check(control, until, check, on_busy, || {
+            connection.query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='documents'",
+                [],
+                |row| row.get(0),
+            )
+        })?;
+        if documents != 1 {
+            return Err(metadata_integrity());
+        }
+        checked_sql_with_check(control, until, check, on_busy, || {
+            connection.query_row("SELECT count(*) FROM deleted_generations",[],|row|row.get::<_,i64>(0)).map(|_|())
         })?;
     }
     metadata_check(control, check)
@@ -374,7 +416,7 @@ impl Metadata {
         metadata_check(control, &mut check)?;
         self.check_capture_binding(home)?;
         crate::workspace::open_controlled_with_check(home, control, &mut check)?;
-        let schema = historical_write::historical_lease_observed_with_check(
+        let schema = owned_write::owned_lease_observed_with_check(
             home,
             "metadata-schema",
             control,
@@ -385,7 +427,7 @@ impl Metadata {
         // transaction is kept alive between source, codec, artifact and manifest.
         let checked =
             initialize_connection(&self.connection, true, control, &mut check, &mut || {});
-        let checked = finish_historical(checked, schema.close());
+        let checked = finish_owned(checked, schema.close());
         let checked = crate::selection::selection_finish(checked, control.check());
         crate::selection::selection_finish(checked, check())
     }

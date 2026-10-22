@@ -1,7 +1,7 @@
 //! Executed-boundary observations: successful Directory constructions and actual
 //! checked closes, not estimates of native handle/syscall counts or elapsed time.
 use super::*;
-use crate::{evidence, workspace};
+use crate::{control::TrackedCancellation, evidence, workspace};
 use std::{
     collections::BTreeMap,
     io::{self, Cursor, Read},
@@ -25,8 +25,8 @@ struct Events {
 struct Observation {
     events: Events,
     fail_closes: Vec<PathBuf>,
-    stop_after_open: Option<(PathBuf, Arc<AtomicBool>)>,
-    stop_after_borrow: Option<(PathBuf, Arc<AtomicBool>)>,
+    stop_after_open: Option<(PathBuf, TrackedCancellation)>,
+    stop_after_borrow: Option<(PathBuf, TrackedCancellation)>,
 }
 thread_local! {
     static OBSERVATION: RefCell<Option<Rc<RefCell<Observation>>>> = const { RefCell::new(None) };
@@ -43,7 +43,7 @@ pub(super) fn directory_opened(path: &Path) {
         state.events.opened.push(path.to_owned());
         if let Some((target, stop)) = &state.stop_after_open {
             if path == target {
-                stop.store(true, Ordering::Release);
+                stop.cancel();
             }
         }
     });
@@ -53,7 +53,7 @@ pub(super) fn directory_borrowed(path: &Path) {
         state.events.borrowed.push(path.to_owned());
         if let Some((target, stop)) = &state.stop_after_borrow {
             if path == target {
-                stop.store(true, Ordering::Release);
+                stop.cancel();
             }
         }
     });
@@ -171,6 +171,149 @@ fn same_failure(owner: &DerivedReservation<'_>, code: &str) {
 }
 
 #[test]
+fn prepare_root_existing_and_missing_preserve_identity_and_release_checked_owners() {
+    let f = Fixture::new(1000);
+    let control = OperationControl::default();
+    let checks = Checks {
+        control: &control,
+        supplemental: None,
+    };
+    let parent = f.0.join("cache");
+    for existing in [false, true] {
+        for mode in 0..3 {
+            let root = parent.join(format!("prepared-{existing}-{mode}"));
+            if existing {
+                fs::create_dir(&root).unwrap();
+            }
+            let held = if mode == 1 {
+                vec![Directory::open_controlled(&parent, &mut Controlled(&checks)).unwrap()]
+            } else {
+                Vec::new()
+            };
+            let directory = if mode == 2 {
+                let home =
+                    Directory::open_shared_controlled(&f.0, &mut Controlled(&checks)).unwrap();
+                let directory = prepare_root_from_home(&root, &home, &held, &checks).unwrap();
+                assert!(close_directory(home).is_empty());
+                // A child's duplicated ancestry keeps the identity after both
+                // temporary shared owners close, without denying parent writes.
+                use std::os::windows::fs::OpenOptionsExt;
+                for path in [&f.0, &parent] {
+                    let writer = fs::OpenOptions::new()
+                        .access_mode(0x100) // FILE_WRITE_ATTRIBUTES
+                        .share_mode(7)
+                        .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
+                        .open(path)
+                        .unwrap();
+                    storage::close_file(writer).unwrap();
+                }
+                directory
+            } else {
+                prepare_root(&root, &held, &checks).unwrap()
+            };
+            directory.verify().unwrap();
+            fs::write(root.join("body"), b"preserved").unwrap();
+            let moved = root.with_extension("moved");
+            assert!(fs::rename(&root, &moved).is_err());
+            assert!(close_directory(directory).is_empty());
+            for parent in held {
+                parent.verify().unwrap();
+                assert!(close_directory(parent).is_empty());
+            }
+            fs::rename(&root, &moved).unwrap();
+            assert_eq!(fs::read(moved.join("body")).unwrap(), b"preserved");
+        }
+    }
+}
+
+#[test]
+fn prepare_root_rejects_existing_files_and_preserves_cancellation_without_creation() {
+    let f = Fixture::new(1000);
+    for mode in 0..3 {
+        let control = OperationControl::default();
+        let checks = Checks {
+            control: &control,
+            supplemental: None,
+        };
+        let parent = f.0.join("cache");
+        let root = parent.join(format!("foreign-{mode}"));
+        fs::write(&root, b"foreign").unwrap();
+        let held = if mode == 1 {
+            vec![Directory::open_controlled(&parent, &mut Controlled(&checks)).unwrap()]
+        } else {
+            Vec::new()
+        };
+        let home = (mode == 2)
+            .then(|| Directory::open_shared_controlled(&f.0, &mut Controlled(&checks)).unwrap());
+        let prepare = |path: &Path| match &home {
+            Some(home) => prepare_root_from_home(path, home, &held, &checks),
+            None => prepare_root(path, &held, &checks),
+        };
+        assert!(prepare(&root).is_err());
+        assert_eq!(fs::read(&root).unwrap(), b"foreign");
+        control.tracked_cancel_handle().unwrap().cancel();
+        let missing = parent.join(format!("missing-{mode}"));
+        for path in [&root, &missing] {
+            let error = prepare(path).err().expect("cancelled preparation");
+            assert_eq!(error.code, "command.cancelled");
+        }
+        assert!(!missing.exists());
+        if let Some(home) = home {
+            home.verify().unwrap();
+            assert!(close_directory(home).is_empty());
+        }
+        for parent in held {
+            parent.verify().unwrap();
+            assert!(close_directory(parent).is_empty());
+        }
+        fs::remove_file(&root).unwrap();
+    }
+}
+
+#[test]
+fn initialization_shared_ancestor_close_failures_keep_both_causes_and_release_quota() {
+    let f = Fixture::new(1000);
+    let paths = DataCachePaths::new(&f.0);
+    for root in paths.roots() {
+        fs::create_dir_all(root).unwrap();
+    }
+    let control = OperationControl::default();
+    let monitor = Monitor::new();
+    monitor.0.borrow_mut().fail_closes = vec![f.0.join("cache"), f.0.clone()];
+    let error = DerivedReservation::acquire_inner(
+        None,
+        &f.0,
+        1000,
+        AdditionalPeak::default(),
+        &control,
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.code, "test.close");
+    let causes = error.details["causes"].as_array().unwrap();
+    assert_eq!(causes.len(), 2);
+    assert!(causes.iter().all(|cause| cause["code"] == "test.close"));
+    assert_eq!(
+        monitor.events().closed,
+        [
+            f.0.join("cache"),
+            paths.roots()[0].to_owned(),
+            f.0.clone(),
+            f.0.join("locks"),
+        ]
+    );
+    assert_eq!(monitor.events().quotas, 1);
+    drop(monitor);
+    ExclusiveLock::resource(&f.0.join("locks"), QUOTA_RESOURCE)
+        .unwrap()
+        .close()
+        .unwrap();
+    f.reserve(&control, 0).finish(Ok(())).unwrap();
+}
+
+#[test]
 fn full_inventory_reuses_managed_owners_and_keeps_identical_file_work() {
     let f = Fixture::new(10000);
     let body = f.publish(b"shared-body");
@@ -203,20 +346,20 @@ fn full_inventory_reuses_managed_owners_and_keeps_identical_file_work() {
     assert_eq!(reused_events.inventories, 1);
     assert_eq!(fallback_events.file_closes, 9);
     assert_eq!(reused_events.file_closes, fallback_events.file_closes);
-    // Eleven managed directories plus two extra shared-record walks: durable
-    // spool declarations and semantic shared-body attribution.
-    assert_eq!(fallback_events.opened.len(), 15); // 13 managed traversals + 2 unknown.
-    assert_eq!(reused_events.opened.len(), 2);
-    assert_eq!(fallback_events.closed.len(), 17);
+    // Eleven managed directories plus durable spool declarations, external
+    // export allowances, and semantic shared-body attribution.
+    assert_eq!(fallback_events.opened.len(), 17); // 14 managed traversals + 2 unknown + blobs.
+    assert_eq!(reused_events.opened.len(), 3);
+    assert_eq!(fallback_events.closed.len(), 18);
     assert_eq!(
         fallback_events.closed.len() - reused_events.closed.len(),
-        13
+        14
     );
     assert!(fallback_events.borrowed.is_empty());
     let mut expected_managed = frequencies(managed.clone());
     *expected_managed
         .get_mut(&owner.paths.shared_blobs())
-        .unwrap() += 2;
+        .unwrap() += 3;
     assert_eq!(
         frequencies(reused_events.borrowed.clone()),
         expected_managed
@@ -255,6 +398,103 @@ fn full_inventory_reuses_managed_owners_and_keeps_identical_file_work() {
 }
 
 #[test]
+fn shared_body_inventory_reuses_one_root_and_preserves_both_completed_charges() {
+    let f = Fixture::new(10000);
+    let first = f.publish(b"first shared body");
+    let second = f.publish(b"second shared body");
+    let control = OperationControl::default();
+    let owner = f.reserve(&control, 0);
+    let blobs = f.0.join("blobs");
+    let monitor = Monitor::new();
+    let usage = run_inventory(&owner, true).unwrap();
+    assert_eq!(usage.shared_blob_bytes, first.bytes + second.bytes);
+    assert_eq!(usage.retained_shared_peak_bytes, 0);
+    assert_eq!(usage.total().unwrap(), first.bytes + second.bytes + 160);
+    let events = monitor.events();
+    assert_eq!(
+        events.opened.iter().filter(|path| **path == blobs).count(),
+        1
+    );
+    assert_eq!(
+        events.closed.iter().filter(|path| **path == blobs).count(),
+        1
+    );
+    for (reference, body) in [
+        (&first, b"first shared body".as_slice()),
+        (&second, b"second shared body".as_slice()),
+    ] {
+        assert_eq!(
+            fs::read(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap(),
+            body
+        );
+    }
+    drop(monitor);
+    owner.finish(Ok(())).unwrap();
+    let moved = f.0.join("blobs-moved");
+    fs::rename(&blobs, &moved).unwrap();
+    fs::rename(&moved, &blobs).unwrap();
+    assert_eq!(f.publish(b"first shared body").sha256, first.sha256);
+}
+
+#[test]
+fn shared_body_inventory_closes_reused_root_after_cancel_and_preserves_close_error() {
+    let f = Fixture::new(10000);
+    let body = b"shared cancellation body";
+    let reference = f.publish(body);
+    let control = OperationControl::default();
+    let owner = f.reserve(&control, 0);
+    let blobs = f.0.join("blobs");
+    let monitor = Monitor::new();
+    monitor.0.borrow_mut().fail_closes = vec![blobs.clone()];
+    monitor.0.borrow_mut().stop_after_open =
+        Some((blobs.clone(), control.tracked_cancel_handle().unwrap()));
+    let check = || {
+        if control.check().is_err() {
+            Err(ToolkitError::new(
+                "test.budget",
+                "original independent budget",
+                3,
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    let checks = Checks {
+        control: &control,
+        supplemental: Some(&check),
+    };
+    let error =
+        shared_blobs::inventory_recovering(&f.0, &owner.paths, &checks, None, &owner.directories)
+            .unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    let detail = serde_json::to_string(&error).unwrap();
+    assert!(detail.contains("\"code\":\"test.close\""));
+    assert!(detail.contains("\"code\":\"test.budget\""));
+    let events = monitor.events();
+    assert_eq!(
+        events.opened.iter().filter(|path| **path == blobs).count(),
+        1
+    );
+    assert_eq!(
+        events.closed.iter().filter(|path| **path == blobs).count(),
+        1
+    );
+    assert_eq!(
+        fs::read(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap(),
+        body
+    );
+    drop(monitor);
+    assert_eq!(
+        owner.finish::<()>(Err(error)).unwrap_err().code,
+        "command.cancelled"
+    );
+    let moved = f.0.join("blobs-moved");
+    fs::rename(&blobs, &moved).unwrap();
+    fs::rename(&moved, &blobs).unwrap();
+    assert_eq!(f.publish(body).sha256, reference.sha256);
+}
+
+#[test]
 fn borrowed_scans_never_close_original_owners_and_finish_consumes_each_once() {
     let f = Fixture::new(1000);
     let control = OperationControl::default();
@@ -271,7 +511,7 @@ fn borrowed_scans_never_close_original_owners_and_finish_consumes_each_once() {
     assert!(monitor.events().opened.is_empty());
     assert!(monitor.events().closed.is_empty());
     let mut expected_walk = frequencies(paths[1..].iter().cloned());
-    *expected_walk.get_mut(&owner.paths.shared_blobs()).unwrap() += 2;
+    *expected_walk.get_mut(&owner.paths.shared_blobs()).unwrap() += 3;
     assert_eq!(
         frequencies(monitor.events().borrowed),
         expected_walk
@@ -481,7 +721,8 @@ fn cancellation_after_real_unknown_open_checks_close_and_original_owner_cleanup(
     let unknown = owner.paths.objects.join("unknown");
     fs::create_dir(&unknown).unwrap();
     let monitor = Monitor::new();
-    monitor.0.borrow_mut().stop_after_open = Some((unknown.clone(), control.cancel_handle()));
+    monitor.0.borrow_mut().stop_after_open =
+        Some((unknown.clone(), control.tracked_cancel_handle().unwrap()));
     let error = owner.finish(Ok(())).unwrap_err();
     assert_eq!(error.code, "command.cancelled");
     let events = monitor.events();
@@ -530,7 +771,7 @@ fn fallback_close_failures_preserve_both_equal_events_primary_cancel_and_indepen
     monitor.0.borrow_mut().fail_closes = vec![outer.clone(), inner.clone()];
     let error = with_inventory_directory(&outer, &owner.directories, &checks, |_| {
         with_inventory_directory(&inner, &owner.directories, &checks, |_| {
-            control.cancel_handle().store(true, Ordering::Release);
+            control.tracked_cancel_handle().unwrap().cancel();
             budget.store(true, Ordering::Release);
             Err::<(), _>(ToolkitError::new("test.primary", "original failure", 4))
         })
@@ -563,9 +804,9 @@ fn borrowed_entry_observes_original_supplemental_stop_without_closing_the_owner(
     let f = Fixture::new(1000);
     let control = OperationControl::default();
     let owner = f.reserve(&control, 0);
-    let stop = Arc::new(AtomicBool::new(false));
+    let stop = TrackedCancellation::new();
     let check = || {
-        if stop.load(Ordering::Acquire) {
+        if stop.is_cancelled() {
             Err(ToolkitError::new("test.budget", "original budget", 3))
         } else {
             Ok(())
@@ -672,8 +913,9 @@ fn ordinary_new_body_stream_keeps_two_quota_acquisitions_and_four_full_inventori
     let events = monitor.events();
     assert_eq!(events.quotas, 2);
     assert_eq!(events.inventories, 4);
-    assert_eq!(events.borrowed.len(), 52); // 13 managed traversals per inventory.
-    assert!(events.opened.is_empty());
+    assert_eq!(events.borrowed.len(), 56); // 14 managed traversals per inventory.
+    // Only the final inventory has an attributed body and opens its shared root.
+    assert_eq!(events.opened, [f.0.join("blobs")]);
     let paths = DataCachePaths::new(&std::path::absolute(&f.0).unwrap());
     assert_eq!(
         events
@@ -681,7 +923,7 @@ fn ordinary_new_body_stream_keeps_two_quota_acquisitions_and_four_full_inventori
             .iter()
             .filter(|path| **path == paths.shared_blobs())
             .count(),
-        12 // File inventory, durable spool declarations, semantic attribution.
+        16 // File inventory, spool declarations, external allowances, shared attribution.
     );
     drop(monitor);
     let control = OperationControl::default();
@@ -754,6 +996,46 @@ fn later_quota_inventory_sees_nested_producer_publication_and_refuses_stale_admi
 }
 
 #[test]
+fn metadata_finish_verifies_once_on_success_and_failure_and_releases_quota() {
+    let f = Fixture::new(1000);
+    let control = OperationControl::default();
+    for evidence in [false, true] {
+        for failed in [false, true] {
+            let monitor = Monitor::new();
+            let result = if failed {
+                Err(ToolkitError::new(
+                    "test.primary",
+                    "metadata write failed",
+                    5,
+                ))
+            } else {
+                Ok(())
+            };
+            let result = if evidence {
+                EvidenceQuota::acquire(&f.0, &control, &|| Ok(()))
+                    .unwrap()
+                    .finish(result)
+            } else {
+                MetadataQuota::acquire(&f.0, &control, &|| Ok(()))
+                    .unwrap()
+                    .finish(result)
+            };
+            assert_eq!(monitor.events().inventories, 2); // Admission and final usage.
+            if failed {
+                assert_eq!(result.unwrap_err().code, "test.primary");
+            } else {
+                result.unwrap();
+            }
+            drop(monitor);
+            ExclusiveLock::resource(&f.0.join("locks"), QUOTA_RESOURCE)
+                .unwrap()
+                .close()
+                .unwrap();
+        }
+    }
+}
+
+#[test]
 fn metadata_only_inventory_keeps_its_original_fallback_scope() {
     let f = Fixture::new(1000);
     let control = OperationControl::default();
@@ -761,7 +1043,7 @@ fn metadata_only_inventory_keeps_its_original_fallback_scope() {
     fs::write(owner.paths.metadata.join("private"), b"meta").unwrap();
     fs::write(owner.paths.objects.join("not-metadata"), b"object").unwrap();
     let monitor = Monitor::new();
-    let usage = metadata_inventory(&owner.paths, &owner.control).unwrap();
+    let usage = metadata_inventory(&owner.paths, &owner.control, &[]).unwrap();
     assert_eq!(usage.private_metadata_namespace_bytes, 4);
     assert_eq!(usage.total().unwrap(), 4);
     assert_eq!(monitor.events().opened, [owner.paths.metadata.clone()]);
@@ -769,4 +1051,62 @@ fn metadata_only_inventory_keeps_its_original_fallback_scope() {
     assert!(monitor.events().borrowed.is_empty());
     drop(monitor);
     owner.finish(Ok(())).unwrap();
+}
+
+#[test]
+fn metadata_read_owners_reuse_only_private_metadata_and_release_quota() {
+    for evidence in [false, true] {
+        let f = Fixture::new(1);
+        let paths = DataCachePaths::new(&std::path::absolute(&f.0).unwrap());
+        fs::create_dir_all(&paths.metadata).unwrap();
+        let name = if evidence {
+            "evidence-v2.sqlite"
+        } else {
+            "cache-v1.sqlite"
+        };
+        fs::write(paths.metadata.join(name), b"meta").unwrap();
+        // Unrelated derived data may be unavailable. A metadata-only read must
+        // neither open that namespace nor recreate other payload directories.
+        fs::write(paths.roots()[0], b"unavailable payload namespace").unwrap();
+        let control = OperationControl::default();
+        let monitor = Monitor::new();
+        if evidence {
+            let mut owner = EvidenceQuota::acquire_read(&f.0, &control, &|| Ok(())).unwrap();
+            assert_eq!(owner.pin_existing_main().unwrap(), Some(4));
+            let report = owner.snapshot().unwrap();
+            assert_eq!(report.existing.private_metadata_namespace_bytes, 4);
+            assert_eq!(report.existing.total().unwrap(), 4);
+            owner.finish(Ok(())).unwrap();
+        } else {
+            let owner = MetadataReadQuota::acquire(&f.0, &control, &|| Ok(())).unwrap();
+            assert_eq!(owner.length(name).unwrap(), Some(4));
+            owner.verify_recovery().unwrap();
+            owner.finish(Ok(())).unwrap();
+        }
+        let events = monitor.events();
+        assert!(events.opened.is_empty());
+        assert!(!events.borrowed.is_empty());
+        assert!(events.borrowed.iter().all(|path| *path == paths.metadata));
+        // Initialization closes its shared state parent and home. The retained
+        // metadata/locks owners keep independent shared ancestry until finish.
+        assert_eq!(
+            events.closed,
+            [
+                f.0.join("state"),
+                f.0.clone(),
+                paths.metadata.clone(),
+                f.0.join("locks"),
+            ]
+        );
+        let moved = paths.metadata.with_extension("closed");
+        fs::rename(&paths.metadata, &moved).unwrap();
+        assert_eq!(fs::read(moved.join(name)).unwrap(), b"meta");
+        assert!(!paths.roots()[1].exists());
+        assert!(!paths.roots()[2].exists());
+        drop(monitor);
+        ExclusiveLock::resource(&f.0.join("locks"), QUOTA_RESOURCE)
+            .unwrap()
+            .close()
+            .unwrap();
+    }
 }

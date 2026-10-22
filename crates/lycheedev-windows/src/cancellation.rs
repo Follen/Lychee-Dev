@@ -3,10 +3,7 @@
 use crate::Result;
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
-    sync::{
-        Arc, Mutex, Weak,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex, Weak},
 };
 use windows::{
     Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler},
@@ -150,22 +147,8 @@ impl Drop for ConsoleCancellationRegistration {
     }
 }
 
-pub struct ConsoleCancellation {
-    token: Arc<AtomicBool>,
-    _registration: ConsoleCancellationRegistration,
-}
+pub struct ConsoleCancellation;
 impl ConsoleCancellation {
-    /// Legacy raw-token interface. Timestamp-aware callers use install_callback
-    /// and record cancellation directly in their own tracked state.
-    pub fn install() -> Result<Self> {
-        let token = Arc::new(AtomicBool::new(false));
-        let signal = token.clone();
-        let registration = Self::install_callback(move || signal.store(true, Ordering::Release))?;
-        Ok(Self {
-            token,
-            _registration: registration,
-        })
-    }
     /// Invoke `cancel` synchronously for Ctrl+C/Break, without a worker thread
     /// or polling delay. The callback must be short, bounded and avoid I/O or
     /// waiting for another handler. Concurrent signals may invoke it together.
@@ -179,18 +162,12 @@ impl ConsoleCancellation {
             callback: Some(callback),
         })
     }
-    pub fn cancelled(&self) -> &AtomicBool {
-        &self.token
-    }
-    pub fn token(&self) -> Arc<AtomicBool> {
-        self.token.clone()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[test]
     fn signal_during_registration_runs_outside_lock_and_busy_is_explicit() {
@@ -336,12 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn real_registration_preserves_legacy_token_and_callback_ownership() {
-        let legacy = ConsoleCancellation::install().unwrap();
-        assert!(!legacy.cancelled().load(Ordering::Acquire));
-        assert!(dispatch(&ACTIVE, CTRL_C_EVENT));
-        assert!(legacy.token().load(Ordering::Acquire));
-        drop(legacy);
+    fn real_registration_preserves_callback_ownership() {
         let observed = Arc::new(AtomicUsize::new(0));
         let target = observed.clone();
         let registration = ConsoleCancellation::install_callback(move || {

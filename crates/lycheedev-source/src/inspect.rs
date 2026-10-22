@@ -216,7 +216,14 @@ fn inspect_path(
 mod tests {
     use super::*;
     #[test]
-    fn inspect_six_lines_match_go_empty_crlf_terminal_and_long_files() {
+    fn inspect_excerpt_uses_fffd_for_invalid_utf8_like_query_and_context() {
+        let raw = b"function Before() end\n-- Night Web\x92s Hollow\r\nfunction After() end\n";
+        let text = excerpt(raw);
+        assert!(text.contains("2: -- Night Web\u{fffd}s Hollow"), "{text}");
+        assert!(text.contains("3: function After() end"), "{text}");
+    }
+    #[test]
+    fn inspect_six_lines_match_reference_empty_crlf_terminal_and_long_files() {
         for (raw, expected) in [
             ("", "1: "),
             ("a\n", "1: a\n2: "),

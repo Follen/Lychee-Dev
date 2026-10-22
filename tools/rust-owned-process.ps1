@@ -46,8 +46,8 @@ $jobIdentity=$expectedStem+'.job.json'
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ToolkitBootCounter{[DllImport("kernel32.dll",SetLastError=true)]public static extern bool QueryUnbiasedInterruptTime(out ulong time);}'
 [UInt64]$bootCounter=0
 if(-not [ToolkitBootCounter]::QueryUnbiasedInterruptTime([ref]$bootCounter)){throw 'owned.boot_counter'}
-$identity=@{schema='lycheedev.owned-start.v1';runId=$requestData.runId;identitySource=$identitySource;requestPath=$requestPath;bootClock='QueryUnbiasedInterruptTime';coordinatorPid=$requestData.coordinatorPid;wrapperPid=$PID;wrapperSessionId=$wrapperProcess.SessionId;wrapperCreationFileTime=$wrapperProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture);bootUptime100ns=$bootCounter.ToString([Globalization.CultureInfo]::InvariantCulture);requestSHA256=$requestSHA256;wrapperObservedSHA256=$wrapperObservedSHA256;rootIdentity=[string]$requestData.rootIdentity;jobName=$jobName;jobIdentity=$jobIdentity;state='wrapper-started';rootAssignment='PROC_THREAD_ATTRIBUTE_JOB_LIST';historicalReapProof=$false}
-$identityBytes=[Text.Encoding]::UTF8.GetBytes(($identity|ConvertTo-Json -Depth 4))
+$wrapperIdentity=@{schema='lycheedev.owned-start.v1';runId=$requestData.runId;identitySource=$identitySource;requestPath=$requestPath;bootClock='QueryUnbiasedInterruptTime';coordinatorPid=$requestData.coordinatorPid;wrapperPid=$PID;wrapperSessionId=$wrapperProcess.SessionId;wrapperCreationFileTime=$wrapperProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture);bootUptime100ns=$bootCounter.ToString([Globalization.CultureInfo]::InvariantCulture);requestSHA256=$requestSHA256;wrapperObservedSHA256=$wrapperObservedSHA256;rootIdentity=[string]$requestData.rootIdentity;jobName=$jobName;jobIdentity=$jobIdentity;state='wrapper-started';rootAssignment='PROC_THREAD_ATTRIBUTE_JOB_LIST';historicalReapProof=$false}
+$identityBytes=[Text.Encoding]::UTF8.GetBytes(($wrapperIdentity|ConvertTo-Json -Depth 4))
 $identityTemporary=[string]$requestData.identity+'.writing'
 $identityFile=New-Object IO.FileStream $identityTemporary,([IO.FileMode]::CreateNew),([IO.FileAccess]::Write),([IO.FileShare]::Read),4096,([IO.FileOptions]::WriteThrough)
 try{$identityFile.Write($identityBytes,0,$identityBytes.Length);$identityFile.Flush($true)}finally{$identityFile.Dispose()}
@@ -151,13 +151,13 @@ if($requestData.msvcCompile -eq $true){
    # This never admits another path: every present variant still requires all
    # pinned bytes, version, signature and held-file identity checks below.
    if(-not [IO.File]::Exists($helperPath)){continue}
-   $identity=Open-IdentityFile $helperPath
-   if($identity.bytes -ne $helper.bytes -or $identity.sha256 -ne $helper.sha256){throw 'owned.unreviewed_helper_identity'}
+   $helperIdentity=Open-IdentityFile $helperPath
+   if($helperIdentity.bytes -ne $helper.bytes -or $helperIdentity.sha256 -ne $helper.sha256){throw 'owned.unreviewed_helper_identity'}
    $version=[Diagnostics.FileVersionInfo]::GetVersionInfo($helperPath).FileVersion
    $signature=[ToolkitSignature]::Verify($helperPath)
    if($version -ne $helper.fileVersion -or $signature.Subject -ne $helper.signerSubject -or $signature.Thumbprint -ne $helper.signerThumbprint){throw 'owned.helper_signature_identity'}
-   $identity.kind=$helper.kind;$identity.fileVersion=$version;$identity.signatureStatus='WinVerifyTrust:0';$identity.signerSubject=$signature.Subject;$identity.signerThumbprint=$signature.Thumbprint
-   $helperAdmission.helpers+=@($identity);$admittedHelperPaths+=@($identity.path)
+   $helperIdentity.kind=$helper.kind;$helperIdentity.fileVersion=$version;$helperIdentity.signatureStatus='WinVerifyTrust:0';$helperIdentity.signerSubject=$signature.Subject;$helperIdentity.signerThumbprint=$signature.Thumbprint
+   $helperAdmission.helpers+=@($helperIdentity);$admittedHelperPaths+=@($helperIdentity.path)
   }
   if($admittedHelperPaths.Count -eq 0){throw 'owned.no_reviewed_helper_present'}
  }catch{$admittedHelperPaths=@();$helperAdmission=@{state='disabled';reason=$_.Exception.Message;helpers=@()}}
@@ -474,7 +474,7 @@ namespace ToolkitMemory {
 }
 
 '@
-try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths,[string]$requestData.memoryPrefix,[string]$requestData.memoryMarker,[string]$requestData.rootIdentity,[string]$requestData.runId,($requestData.startupDiagnostics -eq $true),$jobName,$jobIdentity,$requestSHA256,[int]$identity.wrapperPid,[string]$identity.wrapperCreationFileTime)}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
+try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths,[string]$requestData.memoryPrefix,[string]$requestData.memoryMarker,[string]$requestData.rootIdentity,[string]$requestData.runId,($requestData.startupDiagnostics -eq $true),$jobName,$jobIdentity,$requestSHA256,[int]$wrapperIdentity.wrapperPid,[string]$wrapperIdentity.wrapperCreationFileTime)}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
 # FILETIME exceeds the JSON/JavaScript exact integer range. Preserve the native
 # Int64 comparisons above, and emit decimal strings at every evidence boundary.
 function Convert-ObservedProcesses($rows) {

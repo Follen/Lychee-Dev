@@ -1,10 +1,7 @@
 //! Frozen Go 3766f9c internal/vault/cache.go:477–631. Execution NOT_RUN.
 use super::*;
-use crate::control::OperationControl;
-use std::{
-    sync::{Arc, atomic::AtomicBool},
-    time::{Duration, Instant},
-};
+use crate::control::{OperationControl, TrackedCancellation};
+use std::time::{Duration, Instant};
 
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -27,18 +24,15 @@ impl Fixture {
         workspace::initialize(&home).unwrap();
         Self { base, home }
     }
-    fn invocation(&self, flags: &[(&str, &str)]) -> Invocation {
-        Invocation {
-            command: "cache prune".into(),
-            positional: None,
-            flags: flags
-                .iter()
-                .map(|(key, value)| ((*key).into(), (*value).into()))
-                .collect(),
+    fn context(&self) -> crate::request::RequestContext {
+        crate::request::RequestContext {
             home: self.home.clone(),
             cwd: self.base.clone(),
             control: OperationControl::default(),
         }
+    }
+    fn request(&self, target_bytes: u64, dry_run: bool, max_objects: usize, include_uncommitted: bool) -> crate::cache::CacheRequest {
+        crate::cache::CacheRequest::Prune { target_bytes, dry_run, max_objects, include_uncommitted }
     }
     fn object(&self, bytes: &[u8]) -> (String, PathBuf) {
         let digest = storage::sha256(bytes);
@@ -77,14 +71,9 @@ fn staging_only_totals_include_preserved_deleted_and_dry_run_bytes() {
     for (include, dry) in [(false, false), (true, false), (false, true), (true, true)] {
         let f = Fixture::new();
         let stage = f.stage(&"a".repeat(32), b"staging");
-        let mut inv = f.invocation(&[]);
-        if include {
-            inv.flags.insert("--uncommitted".into(), "true".into());
-        }
-        if dry {
-            inv.flags.insert("--dry-run".into(), "true".into());
-        }
-        let out = dispatch(&inv).unwrap();
+        let context = f.context();
+        let request = f.request(0, dry, 0, include);
+        let out = crate::cache::dispatch(&context, request).unwrap();
         totals(
             &out.data,
             7,
@@ -114,11 +103,8 @@ fn mixed_totals_preserve_protected_busy_and_foreign_staging_in_both_modes() {
         let staged = f.stage(&"b".repeat(32), b"staging");
         let foreign = f.home.join("cache/tmp/foreign.tmp");
         fs::write(&foreign, b"???").unwrap();
-        let mut inv = f.invocation(&[("--uncommitted", "true")]);
-        if dry {
-            inv.flags.insert("--dry-run".into(), "true".into());
-        }
-        let out = dispatch(&inv).unwrap();
+        let context = f.context();
+        let out = crate::cache::dispatch(&context, f.request(0, dry, 0, true)).unwrap();
         totals(&out.data, 25, 12, 13);
         assert_eq!(out.data["removedObjects"], 1);
         assert_eq!(out.data["removedUncommitted"], 1);
@@ -141,7 +127,7 @@ fn target_applies_to_objects_while_object_bound_still_allows_staging_reclamation
     let (_, two) = f.object(b"bb");
     let stage = f.stage(&"c".repeat(32), b"staging");
     let out =
-        dispatch(&f.invocation(&[("--max-objects", "1"), ("--uncommitted", "true")])).unwrap();
+        crate::cache::dispatch(&f.context(), f.request(0, false, 1, true)).unwrap();
     totals(&out.data, 11, 2, 9);
     assert_eq!(out.data["removedObjects"], 1);
     assert_eq!(out.data["removedUncommitted"], 1);
@@ -151,7 +137,7 @@ fn target_applies_to_objects_while_object_bound_still_allows_staging_reclamation
     assert!(!stage.exists());
 
     let stage = f.stage(&"d".repeat(32), b"staging");
-    let out = dispatch(&f.invocation(&[("--target-bytes", "2")])).unwrap();
+    let out = crate::cache::dispatch(&f.context(), f.request(2, false, 0, false)).unwrap();
     totals(&out.data, 9, 9, 0);
     assert!(out.complete && stage.exists());
 }
@@ -164,16 +150,21 @@ fn original_cancelled_or_expired_control_never_starts_pruning() {
         (true, false, "command.cancelled"),
         (false, true, "command.deadline"),
     ] {
-        let mut inv = f.invocation(&[("--uncommitted", "true")]);
-        inv.control = OperationControl::new(
+        let mut context = f.context();
+        let request = f.request(0, false, 0, true);
+        let token = TrackedCancellation::new();
+        if cancelled {
+            token.cancel();
+        }
+        context.control = OperationControl::tracked(
             if deadline {
                 Instant::now() - Duration::from_secs(1)
             } else {
                 Instant::now() + Duration::from_secs(60)
             },
-            Arc::new(AtomicBool::new(cancelled)),
+            token,
         );
-        let error = dispatch(&inv).unwrap_err();
+        let error = crate::cache::dispatch(&context, request).unwrap_err();
         assert_eq!(error.code, expected);
         assert_eq!(error.details["result"]["removedObjects"], 0);
         assert_eq!(error.details["result"]["removedUncommitted"], 0);
@@ -209,14 +200,14 @@ fn cancellation_at_real_scan_lease_and_unlink_boundaries_preserves_committed_cou
         let stage = f.stage(&stage_id, b"staging");
         let parent = OperationControl::default();
         let signal = parent.tracked_cancel_handle().unwrap();
-        let mut inv = f.invocation(&[("--uncommitted", "true")]);
-        inv.control = parent.ordered_child(parent.deadline()).unwrap();
+        let mut context = f.context();
+        context.control = parent.ordered_child(parent.deadline()).unwrap();
         let mut seen = 0;
         let scanning = matches!(
             phase,
             Phase::ScanObjects | Phase::ScanStaging | Phase::ScanMarkers
         );
-        let error = prune_observed(&inv, |at| {
+        let error = prune_observed(&context, 0, false, 0, true, |at| {
             if at == phase {
                 seen += 1;
                 // Stop inside traversal, not merely before the scanner starts.
@@ -267,9 +258,9 @@ fn dry_run_cancellation_reports_projections_without_removing_any_file() {
     let f = Fixture::new();
     let (_, object) = f.object(b"object");
     let stage = f.stage(&"a".repeat(32), b"staging");
-    let inv = f.invocation(&[("--uncommitted", "true"), ("--dry-run", "true")]);
-    let signal = inv.control.tracked_cancel_handle().unwrap();
-    let error = prune_observed(&inv, |phase| {
+    let context = f.context();
+    let signal = context.control.tracked_cancel_handle().unwrap();
+    let error = prune_observed(&context, 0, true, 0, true, |phase| {
         if phase == Phase::StageRemoved {
             signal.cancel();
         }
@@ -287,8 +278,8 @@ fn unlink_failure_retains_prior_object_deletion_and_original_error() {
     let (_, object) = f.object(b"object");
     let stage = f.stage(&"b".repeat(32), b"staging");
     let preserved = stage.with_extension("preserved");
-    let inv = f.invocation(&[("--uncommitted", "true")]);
-    let error = prune_observed(&inv, |phase| {
+    let context = f.context();
+    let error = prune_observed(&context, 0, false, 0, true, |phase| {
         if phase == Phase::StageUnlink {
             fs::rename(&stage, &preserved).unwrap();
             fs::create_dir(&stage).unwrap();
@@ -314,7 +305,7 @@ fn busy_staging_remains_accounted_while_unrelated_evidence_is_never_pruned() {
     fs::write(&evidence, b"retained evidence").unwrap();
     let lease =
         ExclusiveLock::resource(&f.home.join("locks"), &format!("cache:stage:{id}")).unwrap();
-    let out = dispatch(&f.invocation(&[("--uncommitted", "true")])).unwrap();
+    let out = crate::cache::dispatch(&f.context(), f.request(0, false, 0, true)).unwrap();
     totals(&out.data, 12, 7, 5);
     assert_eq!(out.data["removedUncommitted"], 1);
     assert_eq!(out.data["skippedInUse"], 1);
@@ -330,11 +321,11 @@ fn compound_busy_and_checked_close_errors_are_not_swallowed_as_skipped_leases() 
         let f = Fixture::new();
         let (_, object) = f.object(b"object");
         let stage = f.stage(&"e".repeat(32), b"staging");
-        let inv = f.invocation(&[("--uncommitted", "true")]);
+        let context = f.context();
         // Model the exact acquisition error composition, not a successful
         // handle or a claimed operating-system close failure. The checked
         // lock owner has independent one-close tests in storage.
-        let acquisition_error = crate::metadata::historical_write::finish_historical::<()>(
+        let acquisition_error = crate::metadata::owned_write::finish_owned::<()>(
             Err(ToolkitError::new("workspace.busy", "lock contended", 6)),
             Err(ToolkitError::io(std::io::Error::other(
                 "injected close failure",
@@ -342,7 +333,8 @@ fn compound_busy_and_checked_close_errors_are_not_swallowed_as_skipped_leases() 
         )
         .unwrap_err();
         let error = prune_with_leases(
-            &inv,
+            &context,
+            0, false, 0, true,
             |_| {},
             |resource| {
                 if resource.starts_with(if fail_staging {
@@ -355,7 +347,7 @@ fn compound_busy_and_checked_close_errors_are_not_swallowed_as_skipped_leases() 
                     ExclusiveLock::resource_controlled(
                         &f.home.join("locks"),
                         resource,
-                        &inv.control,
+                        &context.control,
                     )
                 }
             },
@@ -435,7 +427,7 @@ fn retention_exact_limit_is_admitted_for_protected_and_unprotected_prune() {
         let marker = marker_path(&f, &digest);
         let raw = padded_marker(&digest, protected, MAX_RETAIN_BYTES);
         fs::write(&marker, &raw).unwrap();
-        let out = dispatch(&f.invocation(&[])).unwrap();
+        let out = crate::cache::dispatch(&f.context(), f.request(0, false, 0, false)).unwrap();
         totals(&out.data, 6, if protected { 6 } else { 0 }, if protected { 0 } else { 6 });
         assert_eq!(out.data["removedObjects"], usize::from(!protected));
         assert_eq!(out.data["skippedProtected"], usize::from(protected));
@@ -457,7 +449,7 @@ fn retention_limit_plus_one_and_malformed_markers_abort_before_deletion() {
             b"{not JSON}".to_vec()
         };
         fs::write(&marker, &raw).unwrap();
-        let error = dispatch(&f.invocation(&[("--uncommitted", "true")])).unwrap_err();
+        let error = crate::cache::dispatch(&f.context(), f.request(0, false, 0, true)).unwrap_err();
         untouched_prune(&error, "vault.cache_protection");
         assert_eq!(fs::read(object).unwrap(), b"object");
         assert_eq!(fs::read(stage).unwrap(), b"staging");
@@ -483,7 +475,7 @@ fn retention_growth_after_stat_and_between_reads_is_bounded_on_real_prune() {
                 fs::write(&hook_path, &hook_grown).unwrap();
             }
         });
-        let error = dispatch(&f.invocation(&[("--uncommitted", "true")])).unwrap_err();
+        let error = crate::cache::dispatch(&f.context(), f.request(0, false, 0, true)).unwrap_err();
         assert!(seen.get());
         untouched_prune(&error, "vault.cache_protection");
         assert_eq!(fs::read(object).unwrap(), b"object");
@@ -502,8 +494,9 @@ fn retention_original_control_cancellation_during_read_preserves_all_bytes() {
         fs::write(&marker, &raw).unwrap();
         let parent = OperationControl::default();
         let signal = parent.tracked_cancel_handle().unwrap();
-        let mut inv = f.invocation(&[("--uncommitted", "true")]);
-        inv.control = parent.ordered_child(parent.deadline()).unwrap();
+        let mut context = f.context();
+        let request = f.request(0, false, 0, true);
+        context.control = parent.ordered_child(parent.deadline()).unwrap();
         let seen = std::rc::Rc::new(std::cell::Cell::new(false));
         let hook_seen = seen.clone();
         let _hook = RetainReadHook::install(move |read| {
@@ -512,7 +505,7 @@ fn retention_original_control_cancellation_during_read_preserves_all_bytes() {
                 signal.cancel();
             }
         });
-        let error = dispatch(&inv).unwrap_err();
+        let error = crate::cache::dispatch(&context, request).unwrap_err();
         assert!(seen.get());
         untouched_prune(&error, "command.cancelled");
         assert_eq!(fs::read(object).unwrap(), b"object");
@@ -537,10 +530,10 @@ fn retention_read_error_after_prior_removal_preserves_partial_prune_facts() {
         let grown = padded_marker(&second.digest, false, MAX_RETAIN_BYTES + 1);
         let armed = std::rc::Rc::new(std::cell::Cell::new(false));
         let seen = std::rc::Rc::new(std::cell::Cell::new(false));
-        let mut inv = f.invocation(&[("--uncommitted", "true")]);
+        let mut context = f.context();
         let parent = OperationControl::default();
         let signal = parent.tracked_cancel_handle().unwrap();
-        inv.control = parent.ordered_child(parent.deadline()).unwrap();
+        context.control = parent.ordered_child(parent.deadline()).unwrap();
         let hook_armed = armed.clone();
         let hook_seen = seen.clone();
         let hook_path = marker.clone();
@@ -554,7 +547,7 @@ fn retention_read_error_after_prior_removal_preserves_partial_prune_facts() {
                 }
             }
         });
-        let error = prune_observed(&inv, |phase| {
+        let error = prune_observed(&context, 0, false, 0, true, |phase| {
             if phase == Phase::ObjectRemoved {
                 armed.set(true);
             }
@@ -595,7 +588,7 @@ fn retention_read_uses_original_handle_when_marker_path_is_replaced() {
             fs::write(&hook_path, b"{not JSON}").unwrap();
         }
     });
-    let error = dispatch(&f.invocation(&[])).unwrap_err();
+    let error = crate::cache::dispatch(&f.context(), f.request(0, false, 0, false)).unwrap_err();
     assert!(seen.get());
     assert_eq!(error.code, "vault.cache_protection");
     // Initial scan consumed the original handle successfully. The object-lock

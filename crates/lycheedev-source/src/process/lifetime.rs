@@ -32,14 +32,14 @@ impl ProcessState {
                 self.outputs[index] = Some(bytes);
                 if let Err(error) = result {
                     return Err(ToolkitError::new(
-                        "luals.check_failed",
+                        "source.process_check_failed",
                         format!("Process output reader failed: {error}"),
                         5,
                     ));
                 }
                 if overflow {
                     return Err(ToolkitError::new(
-                        "luals.input_budget",
+                        "source.process_input_budget",
                         "External process output cap exceeded",
                         3,
                     ));
@@ -74,7 +74,7 @@ impl WorkerSet {
                 })
                 .map_err(|error| {
                     ToolkitError::new(
-                        "luals.unavailable",
+                        "source.process_unavailable",
                         format!("Process pipe worker could not start: {error}"),
                         3,
                     )
@@ -93,7 +93,7 @@ impl WorkerSet {
                 let result = match slot.take().expect("finished worker").join() {
                     Ok(event) => state.observe_event(event),
                     Err(_) => Err(ToolkitError::new(
-                        "luals.check_failed",
+                        "source.process_check_failed",
                         "Process pipe worker panicked",
                         5,
                     )),
@@ -251,12 +251,12 @@ fn observe(
         if let Some((control, _)) = *completion {
             // This is the old RUN completion boundary: select a final control
             // stop or successful-root stdin failure before later Job cleanup.
-            let result = control.check_complete().and_then(|()| {
+            let result = control.check().and_then(|()| {
                 if state.status == Some(0)
                     && let Some(error) = state.input_error.take()
                 {
                     return Err(ToolkitError::new(
-                        "luals.check_failed",
+                        "source.process_check_failed",
                         format!("Process stdin failed: {error}"),
                         5,
                     ));
@@ -373,6 +373,7 @@ fn retire_inner(
 #[cfg(test)]
 mod completion_tests {
     use super::*;
+    use lycheedev_core::control::OperationControl;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct Exited;
@@ -399,9 +400,10 @@ mod completion_tests {
         }
     }
     #[test]
-    fn legacy_pending_completion_checks_stop_before_join_but_cleanup_finishes() {
+    fn pending_completion_checks_stop_before_join_but_cleanup_finishes() {
         for cancel in [false, true] {
-            let raw = AtomicBool::new(cancel);
+            let control = OperationControl::default();
+            if cancel { control.tracked_cancel_handle().unwrap().cancel(); }
             let (wake, rx) = mpsc::channel();
             let mut workers = WorkerSet::default();
             workers
@@ -423,7 +425,7 @@ mod completion_tests {
                 &mut state,
                 &rx,
                 Instant::now() + Duration::from_secs(5),
-                ProcessControl::Legacy(Some(&raw)),
+                ProcessControl(&control),
                 deadline,
             );
             assert!(cleanup.complete());
@@ -432,7 +434,7 @@ mod completion_tests {
                 if cancel {
                     "process.cancelled"
                 } else {
-                    "luals.check_failed"
+                    "source.process_check_failed"
                 }
             );
             assert_eq!(state.outputs[0].as_deref(), Some(b"tail".as_slice()));
@@ -469,7 +471,7 @@ mod completion_tests {
             let mut state = ProcessState::default();
             state.status = Some(0);
             let mut cleanup = Retirement::default();
-            let mut completion = Some((ProcessControl::Complete(&control), control.deadline()));
+            let mut completion = Some((ProcessControl(&control), control.deadline()));
             observe(
                 &mut Exited,
                 &mut workers,
@@ -492,7 +494,7 @@ mod completion_tests {
             cleanup.job_empty = Some(true);
             let error = super::super::finish_retired_result(
                 Ok(()),
-                ProcessControl::Complete(&control),
+                ProcessControl(&control),
                 &mut state,
                 &cleanup,
             )
@@ -500,46 +502,12 @@ mod completion_tests {
             assert_eq!(
                 error.code,
                 if overflow {
-                    "luals.input_budget"
+                    "source.process_input_budget"
                 } else {
-                    "luals.check_failed"
+                    "source.process_check_failed"
                 }
             );
             assert_eq!(state.outputs[1].as_deref(), Some(b"second-tail".as_slice()));
         }
-    }
-    #[test]
-    fn joined_legacy_interval_does_not_start_a_new_cancellation_boundary() {
-        let raw = AtomicBool::new(false);
-        let (wake, _rx) = mpsc::channel();
-        let mut workers = WorkerSet::default();
-        workers
-            .spawn(1, wake, || Event::Output(0, vec![], Ok(()), false))
-            .unwrap();
-        wait_finished(&workers, 1);
-        let mut state = ProcessState::default();
-        state.status = Some(0);
-        let mut cleanup = Retirement::default();
-        let mut completion = Some((
-            ProcessControl::Legacy(Some(&raw)),
-            Instant::now() + Duration::from_secs(10),
-        ));
-        observe(
-            &mut Exited,
-            &mut workers,
-            &mut state,
-            &mut cleanup,
-            &mut completion,
-        );
-        assert!(completion.is_none());
-        raw.store(true, Ordering::Release);
-        observe(
-            &mut Exited,
-            &mut workers,
-            &mut state,
-            &mut cleanup,
-            &mut completion,
-        );
-        assert!(cleanup.completion_error.is_none());
     }
 }

@@ -76,7 +76,7 @@ impl Metadata {
                 )),
             }
         })();
-        let result = historical_write::finish_historical(
+        let result = owned_write::finish_owned(
             result,
             self.connection
                 .busy_timeout(Duration::from_secs(5))

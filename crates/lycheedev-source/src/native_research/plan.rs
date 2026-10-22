@@ -394,7 +394,7 @@ mod tests {
             assert!(!answer["result"]["coverage"].as_array().unwrap().is_empty());
             let missing=verified.semantic_type(&target,&[],&control,||Ok(())).unwrap();assert_eq!(missing["executed"],false);
             let mut foreign=target.clone();foreign.site.start+=1;assert!(verified.semantic_type(&foreign,host.bindings(),&control,||Ok(())).is_err());
-            control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);assert_eq!(verified.semantic_type(&target,host.bindings(),&control,||Ok(())).unwrap_err().code,"command.cancelled");
+            control.tracked_cancel_handle().unwrap().cancel();assert_eq!(verified.semantic_type(&target,host.bindings(),&control,||Ok(())).unwrap_err().code,"command.cancelled");
         }
     }
 
@@ -407,7 +407,7 @@ mod tests {
         assert!(facts.diagnostics.iter().any(|note|note.message=="source_ast_depth_limit"));
         assert!(plan.unavailable.contains(&"structural_scanner_incomplete"));
         assert!(!plan.scanner_diagnostics.is_empty());
-        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(plan.scan_facts(&text,"deep.lua",&control).err().unwrap().code,"command.cancelled");
     }
 

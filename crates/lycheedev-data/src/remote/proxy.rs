@@ -110,7 +110,7 @@ impl Policy {
         if host == "localhost" || ip.is_some_and(|ip| normalized_ip(ip).is_loopback()) {
             return Ok(None);
         }
-        let host = go_lower(go_trim(&host));
+        let host = simple_fold_lower(wire_trim(&host));
         if self.bypass.iter().any(|rule| rule.matches(&host, port, ip)) {
             return Ok(None);
         }
@@ -173,7 +173,7 @@ enum Rule {
 
 impl Rule {
     fn parse(value: &str) -> Option<Self> {
-        let value = go_lower(go_trim(value));
+        let value = simple_fold_lower(wire_trim(value));
         if value.is_empty() {
             return None;
         }
@@ -276,14 +276,14 @@ fn split_rule_host_port(value: &str) -> Option<(&str, &str)> {
     Some((host, port))
 }
 
-fn go_lower(value: &str) -> String {
+fn simple_fold_lower(value: &str) -> String {
     value
         .chars()
         .map(|c| crate::unicode_simple::map(c, false))
         .collect()
 }
 
-fn go_trim(value: &str) -> &str {
+fn wire_trim(value: &str) -> &str {
     value.trim_matches(|c| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{0085}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}'))
 }
 

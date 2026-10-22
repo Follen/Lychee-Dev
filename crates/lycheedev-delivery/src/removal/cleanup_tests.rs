@@ -1,5 +1,5 @@
 use super::*;
-use lycheedev_core::coordination::{Claim, InstallationMaintenanceLease};
+use lycheedev_core::coordination::InstallationMaintenanceLease;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -82,69 +82,6 @@ fn close_error(which: &str) -> ToolkitError {
         5,
     )
     .with_details(json!({"consumed":true}))
-}
-
-#[test]
-fn pending_claim_failure_closes_maintenance_without_acquiring_installation() {
-    let fixture = Fixture::new(false);
-    let mut guard = InstallationGuard::acquire(&fixture.target).unwrap();
-    guard
-        .claim(Claim {
-            owner: "fixture-owner".into(),
-            kind: "native-live".into(),
-            resource: "fixture-resource".into(),
-            process_id: 123,
-            created_at: "fixture".into(),
-            lifecycle_ref: "fixture-lifecycle".into(),
-            pending: true,
-        })
-        .unwrap();
-    guard.close().unwrap();
-    let before = fs::read(
-        fixture
-            .target
-            .parent()
-            .unwrap()
-            .join(".lycheedev-claims.json"),
-    )
-    .unwrap();
-    let mut closes = 0;
-    let error = addon_with_cleanup(
-        &fixture.target,
-        &fixture.archive,
-        &OperationControl::default(),
-        |_, _| panic!("pending ownership must not move"),
-        |_| panic!("installation lock must not be acquired"),
-        |_| panic!("no installation lock was acquired"),
-        |guard| {
-            closes += 1;
-            guard.close()?;
-            Err(close_error("maintenance"))
-        },
-    )
-    .unwrap_err();
-    assert_eq!(closes, 1);
-    assert_eq!(error.code, "delivery.installation_in_use");
-    assert_eq!(error.exit_code, 6);
-    assert_eq!(error.details["primary"]["code"], error.code);
-    assert_eq!(
-        error.details["cleanup"]["code"],
-        "fixture.maintenance_close"
-    );
-    assert!(fixture.target.exists());
-    assert!(!fixture.archive.exists());
-    assert_eq!(
-        fs::read(
-            fixture
-                .target
-                .parent()
-                .unwrap()
-                .join(".lycheedev-claims.json")
-        )
-        .unwrap(),
-        before
-    );
-    fixture.assert_released();
 }
 
 #[test]

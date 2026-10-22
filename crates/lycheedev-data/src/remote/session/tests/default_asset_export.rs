@@ -2,11 +2,12 @@
 //! the fixture backend; command dispatch receives no alternate transport.
 use super::*;
 use lycheedev_core::{
-    Invocation, Outcome, evidence,
+    Outcome, evidence,
     metadata::Metadata,
     selection::{self, SelectionSpec},
 };
 use serde_json::{Value, json};
+use crate::{assets::{self, request::{DemuxInput, DemuxRequest, Encoding, ExportRequest}}, request::{DataContext, SourceOptions}};
 struct AssetFixture {
     source: Fixture,
     snapshot: String,
@@ -42,7 +43,7 @@ impl AssetFixture {
         session
             .read_batches(&[7], &mut |files| {
                 assert_eq!(files.len(), 1);
-                assert_eq!(files[0].bytes(), source.payload);
+                assert_eq!(files[0].materialized.content.bytes.as_slice(), source.payload);
                 Ok(Vec::new())
             })
             .unwrap();
@@ -55,24 +56,12 @@ impl AssetFixture {
             output,
         }
     }
-    fn invocation(&self, name: &str) -> Invocation {
-        Invocation {
-            command: "asset export".into(),
-            positional: None,
-            flags: BTreeMap::from([
-                ("--cdn".into(), "true".into()),
-                ("--offline".into(), "true".into()),
-                ("--snapshot".into(), self.snapshot.clone()),
-                ("--file-id".into(), "7".into()),
-                (
-                    "--output".into(),
-                    self.output.join(name).to_str().unwrap().into(),
-                ),
-            ]),
-            home: self.source.home.clone(),
-            cwd: self.source.home.clone(),
-            control: OperationControl::default(),
-        }
+    fn context(&self) -> DataContext {
+        DataContext { home: self.source.home.clone(), cwd: self.source.home.clone(), control: OperationControl::default(),
+            source: SourceOptions { snapshot: Some(self.snapshot.clone()), cdn: true, offline: true, ..Default::default() } }
+    }
+    fn export_request(&self, name: &str) -> ExportRequest {
+        ExportRequest::raw(7, self.output.join(name))
     }
     fn captures(&self) -> Vec<Value> {
         let metadata = Metadata::open(&self.source.home, false).unwrap();
@@ -130,7 +119,7 @@ fn default_cdn_raw_export_cold_then_warm_streams_authenticated_cache_and_depende
         evidence::blob_path(&f.source.home, &storage::sha256(&f.source.payload)).unwrap(),
     )
     .unwrap();
-    let cold = crate::migration_oracle::dispatch(&f.invocation("cold.bin")).unwrap();
+    let cold = assets::export::run(&f.context(), &f.export_request("cold.bin")).unwrap();
     f.verify(&cold, "cold.bin");
     assert_eq!(
         std::fs::read(f.output.join("cold.bin")).unwrap(),
@@ -142,7 +131,7 @@ fn default_cdn_raw_export_cold_then_warm_streams_authenticated_cache_and_depende
         json!([cold.provenance[0]["id"]])
     );
     assert_eq!(cold.data["source"]["decodedCache"]["contentDecodeCalls"], 1);
-    let warm = crate::migration_oracle::dispatch(&f.invocation("warm.bin")).unwrap();
+    let warm = assets::export::run(&f.context(), &f.export_request("warm.bin")).unwrap();
     f.verify(&warm, "warm.bin");
     assert_eq!(warm.data["source"]["decodedCache"]["contentDecodeCalls"], 0);
     assert_eq!(warm.data["source"]["decodedCache"]["hits"], 2);
@@ -156,9 +145,9 @@ fn default_cdn_raw_export_cold_then_warm_streams_authenticated_cache_and_depende
 fn default_cdn_png_and_webp_export_keep_ordered_source_artifact_manifest_dependencies() {
     let f = AssetFixture::new(blp());
     for encoding in ["png", "webp"] {
-        let mut inv = f.invocation(encoding);
-        inv.flags.insert("--encoding".into(), encoding.into());
-        let result = crate::migration_oracle::dispatch(&inv).unwrap();
+        let ctx = f.context();
+        let request = ExportRequest { encoding: if encoding == "png" { Encoding::Png } else { Encoding::Webp }, ..f.export_request(encoding) };
+        let result = assets::export::run(&ctx, &request).unwrap();
         f.verify(&result, encoding);
         assert_eq!(result.provenance.len(), 3);
         let source = &result.provenance[0];
@@ -205,17 +194,17 @@ fn default_cdn_export_conflict_precedes_snapshot_lookup_and_overwrite_preserves_
     let output = f.output.join("body");
     std::fs::write(&output, b"old bytes").unwrap();
     std::fs::hard_link(&output, f.output.join("old-hardlink")).unwrap();
-    let mut inv = f.invocation("body");
-    inv.flags
-        .insert("--snapshot".into(), "invalid-snapshot".into());
+    let mut ctx = f.context();
+    let mut request = f.export_request("body");
+    ctx.source.snapshot = Some("invalid-snapshot".into());
     assert_eq!(
-        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
+        assets::export::run(&ctx, &request).unwrap_err().code,
         "records.export_conflict"
     );
     assert!(f.captures().is_empty());
-    inv.flags.insert("--snapshot".into(), f.snapshot.clone());
-    inv.flags.insert("--overwrite".into(), "true".into());
-    let result = crate::migration_oracle::dispatch(&inv).unwrap();
+    ctx.source.snapshot = Some(f.snapshot.clone());
+    request.overwrite = true;
+    let result = assets::export::run(&ctx, &request).unwrap();
     f.verify(&result, "body");
     assert_eq!(std::fs::read(output).unwrap(), f.source.payload);
     assert_eq!(
@@ -229,7 +218,7 @@ fn default_cdn_export_corrupt_selected_cache_never_publishes_output_or_capture()
     let f = AssetFixture::new(b"authenticated cache bytes".to_vec());
     let path = evidence::blob_path(&f.source.home, &storage::sha256(&f.source.payload)).unwrap();
     std::fs::write(path, b"corrupt cache bytes").unwrap();
-    let error = crate::migration_oracle::dispatch(&f.invocation("body")).unwrap_err();
+    let error = assets::export::run(&f.context(), &f.export_request("body")).unwrap_err();
     assert_eq!(error.code, "vault.blob_integrity");
     assert!(!f.output.join("body").exists());
     assert!(f.captures().is_empty());
@@ -238,9 +227,9 @@ fn default_cdn_export_corrupt_selected_cache_never_publishes_output_or_capture()
 #[test]
 fn default_cdn_export_image_failure_keeps_one_committed_source_identity_without_output() {
     let f = AssetFixture::new(b"not a BLP image".to_vec());
-    let mut inv = f.invocation("image");
-    inv.flags.insert("--encoding".into(), "png".into());
-    let error = crate::migration_oracle::dispatch(&inv).unwrap_err();
+    let ctx = f.context();
+    let request = ExportRequest { encoding: Encoding::Png, ..f.export_request("image") };
+    let error = assets::export::run(&ctx, &request).unwrap_err();
     assert_eq!(error.code, "texture.unsupported_format");
     let captures = f.captures();
     assert_eq!(captures.len(), 1);
@@ -254,10 +243,11 @@ fn default_cdn_export_image_failure_keeps_one_committed_source_identity_without_
 #[test]
 fn default_cdn_export_original_cancel_before_source_has_no_capture_or_output() {
     let f = AssetFixture::new(b"cancelled body".to_vec());
-    let inv = f.invocation("body");
-    inv.control.tracked_cancel_handle().unwrap().cancel();
-    let expected = inv.control.check().unwrap_err();
-    let actual = crate::migration_oracle::dispatch(&inv).unwrap_err();
+    let ctx = f.context();
+    let request = f.export_request("body");
+    ctx.control.tracked_cancel_handle().unwrap().cancel();
+    let expected = ctx.control.check().unwrap_err();
+    let actual = assets::export::run(&ctx, &request).unwrap_err();
     assert_eq!(actual.code, expected.code);
     assert_eq!(actual.exit_code, expected.exit_code);
     assert!(f.captures().is_empty());
@@ -268,15 +258,15 @@ fn default_cdn_export_original_cancel_before_source_has_no_capture_or_output() {
 #[test]
 fn actual_remote_captured_consumer_cancel_is_terminal_and_releases_admission() {
     let f = AssetFixture::new(b"cancel after committed capture".to_vec());
-    let inv = f.invocation("unused");
+    let ctx = f.context();
     let mut calls = 0;
     let mut id = String::new();
-    let error = crate::assets::input::with_casc_verified(&inv, 7, &mut |source| {
+    let error = crate::assets::input::with_casc_verified(&ctx, 7, &mut |source| {
         calls += 1;
         id = source.capture["id"].as_str().unwrap().to_owned();
         let mut bytes = [0; 2];
         assert_eq!(source.blob.read_checked(&mut bytes)?, 2);
-        inv.control.tracked_cancel_handle().unwrap().cancel();
+        ctx.control.tracked_cancel_handle().unwrap().cancel();
         let read = source.blob.read_checked(&mut bytes).unwrap_err();
         assert_eq!(read.code, "command.cancelled");
         Err::<(), _>(read)
@@ -285,7 +275,7 @@ fn actual_remote_captured_consumer_cancel_is_terminal_and_releases_admission() {
     assert_eq!(calls, 1);
     assert_eq!(error.code, "command.cancelled");
     assert_eq!(
-        inv.control.stop_cause().unwrap(),
+        ctx.control.stop_cause().unwrap(),
         Some(lycheedev_core::control::StopCause::Cancelled)
     );
     let captures = f.captures();
@@ -295,8 +285,10 @@ fn actual_remote_captured_consumer_cancel_is_terminal_and_releases_admission() {
     // A fresh bounded scope can acquire all measurement slots only after the
     // stopped consumer's ordinary owner has really released its resources.
     let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(10));
-    let probe =
-        AdmittedWorkspace::acquire(&f.source.home, Policy::Measurement, &control, None).unwrap();
+    let probe = OpenWorkspace::open(&f.source.home, &control, None)
+        .unwrap()
+        .acquire(Policy::Measurement)
+        .unwrap();
     probe.finish(Ok(())).unwrap();
     f.close();
 }

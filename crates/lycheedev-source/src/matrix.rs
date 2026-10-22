@@ -1,9 +1,12 @@
 //! Strict multi-target validation: every target resolves independently to a
 //! fixed SourcePin and keeps its own syntax/catalog/semantic evidence.
-use crate::{SourceTools, git, validate};
+use crate::{
+    SourceTools, git,
+    request::{MatrixValidationRequest, SourceContext},
+    validate,
+};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError, control::OperationControl, evidence,
-    selection::SourcePin,
+    Outcome, Result, ToolkitError, control::OperationControl, evidence, selection::SourcePin,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -251,10 +254,14 @@ pub fn merge(path: &Path, targets: &[Value]) -> Value {
     }
     json!({"path":path,"valid":targets.iter().all(|t|t["valid"]==true),"targets":targets,"summary":{"apis":facts(targets,&["api"]),"events":facts(targets,&["event"]),"xml":facts(targets,&["template","mixin","frame-type"]),"interfaces":interfaces,"sharedFiles":shared_files,"targetOnlyFiles":only_files,"sharedDiagnostics":shared_diagnostics,"targetOnlyDiagnostics":only_diagnostics,"unresolved":unresolved}})
 }
-pub fn dispatch(inv: &Invocation, tools: SourceTools<'_>) -> Result<Outcome> {
-    validate_with_resolver(inv, tools, &mut |target| {
+pub fn dispatch(
+    ctx: &SourceContext,
+    request: &MatrixValidationRequest,
+    tools: SourceTools<'_>,
+) -> Result<Outcome> {
+    validate_with_resolver(ctx, request, tools, &mut |target| {
         git::resolve_source_with_control(
-            &inv.home,
+            &ctx.home,
             if target.source.is_empty() {
                 "wow-ui-source"
             } else {
@@ -262,33 +269,20 @@ pub fn dispatch(inv: &Invocation, tools: SourceTools<'_>) -> Result<Outcome> {
             },
             &target.product,
             &target.reference,
-            &inv.control,
+            &ctx.control,
         )
     })
 }
 pub fn validate_with_resolver(
-    inv: &Invocation,
+    ctx: &SourceContext,
+    request: &MatrixValidationRequest,
     tools: SourceTools<'_>,
     resolve: &mut dyn FnMut(&Target) -> Result<SourcePin>,
 ) -> Result<Outcome> {
-    for key in ["--snapshot", "--path", "--toc", "--environment"] {
-        if inv.flag(key).is_some() {
-            return Err(ToolkitError::arguments(
-                "source validate requires either --matrix or --snapshot/--path/--toc; matrix targets require their own client source",
-            ));
-        }
-    }
-    let configured = Path::new(inv.required("--matrix")?);
-    let matrix = if configured.is_absolute() {
-        configured.to_path_buf()
-    } else {
-        inv.cwd.join(configured)
-    };
-    let (config, root) = read_config(&matrix, &inv.control)?;
-    let mut targets = Vec::with_capacity(config.targets.len());
+    let mut targets = Vec::with_capacity(request.targets.len());
     let mut output_budget = OutputBudget(16 << 20);
-    for target in &config.targets {
-        inv.control.check()?;
+    for target in &request.targets {
+        ctx.control.check()?;
         let pin = resolve(target)?;
         git::validate_pin(&pin)?;
         if pin.product != target.product
@@ -306,14 +300,14 @@ pub fn validate_with_resolver(
             ));
         }
         let mut value = validate::toc_with_control(
-            &inv.home,
+            &ctx.home,
             &pin,
             "",
-            &root,
+            &request.root,
             &target.toc,
             &tools,
-            inv.flag_bool("--semantic"),
-            &inv.control,
+            request.semantic,
+            &ctx.control,
         )?;
         value["id"] = json!(target.id);
         value["ref"] = json!(target.reference);
@@ -327,21 +321,21 @@ pub fn validate_with_resolver(
         })?;
         targets.push(value);
     }
-    let mut out = Outcome::new(merge(&root, &targets));
+    let mut out = Outcome::new(merge(&request.root, &targets));
     let valid = out.data["valid"] == true;
     out.complete = capture_complete(valid, &targets);
     out.coverage = json!({"targets":targets.len(),"complete":targets.iter().all(|t|t["complete"]==true),"scope":"independently validated target closures; target semantic and unresolved coverage remain explicit"});
     out.provenance.push(evidence::commit_capture_bounded(
-        &inv.home,
+        &ctx.home,
         lycheedev_core::evidence::CaptureInput {
             bytes: &serde_json::to_vec(&out.data)?,
             maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
             media_type: "application/json",
-            provenance: json!({"kind":"addon-matrix-validate","locator":matrix}),
+            provenance: json!({"kind":"addon-matrix-validate","locator":request.configuration}),
             complete: out.complete,
             truncated: false,
         },
-        &inv.control,
+        &ctx.control,
     )?);
     if !valid {
         return Err(ToolkitError::new("codebase.addon_static_check_failed","Addon validation found invalid source",4).with_details(json!({"result":out.data,"captures":out.provenance,"context":{"coverage":out.coverage}})));
@@ -349,13 +343,13 @@ pub fn validate_with_resolver(
     Ok(out)
 }
 fn capture_complete(valid: bool, targets: &[Value]) -> bool {
-    // Fixed Go's matrix capture means valid static compatibility coverage.
+    // Matrix capture completeness means valid static compatibility coverage.
     // Native semantic.complete/coverage are independent evidence dimensions;
     // a passed checker can still report partial or unavailable semantic facts.
-    valid && targets.iter().all(|target| {
-        target["coverage"]["unresolved"] == 0
-            && target["sourceCoverage"]["complete"] == true
-    })
+    valid
+        && targets.iter().all(|target| {
+            target["coverage"]["unresolved"] == 0 && target["sourceCoverage"]["complete"] == true
+        })
 }
 
 #[cfg(test)]
@@ -363,16 +357,21 @@ mod capture_tests {
     use super::*;
     #[test]
     fn valid_matrix_with_unresolved_or_source_gap_is_not_complete() {
-        let complete=json!({"coverage":{"unresolved":0},"sourceCoverage":{"complete":true},"complete":true});
-        assert!(capture_complete(true,&[complete.clone()]));
-        assert!(!capture_complete(false,&[complete.clone()]));
-        let mut unresolved=complete.clone();unresolved["coverage"]["unresolved"]=json!(1);
-        assert!(!capture_complete(true,&[complete.clone(),unresolved]));
-        let mut gap=complete.clone();gap["sourceCoverage"]["complete"]=json!(false);
-        assert!(!capture_complete(true,&[complete.clone(),gap]));
-        let mut semantic=complete;semantic["complete"]=json!(false);
-        semantic["semantic"]=json!({"passed":true,"complete":false,"coverage":[{"state":"unavailable"}]});
-        assert!(capture_complete(true,&[semantic]));
+        let complete =
+            json!({"coverage":{"unresolved":0},"sourceCoverage":{"complete":true},"complete":true});
+        assert!(capture_complete(true, &[complete.clone()]));
+        assert!(!capture_complete(false, &[complete.clone()]));
+        let mut unresolved = complete.clone();
+        unresolved["coverage"]["unresolved"] = json!(1);
+        assert!(!capture_complete(true, &[complete.clone(), unresolved]));
+        let mut gap = complete.clone();
+        gap["sourceCoverage"]["complete"] = json!(false);
+        assert!(!capture_complete(true, &[complete.clone(), gap]));
+        let mut semantic = complete;
+        semantic["complete"] = json!(false);
+        semantic["semantic"] =
+            json!({"passed":true,"complete":false,"coverage":[{"state":"unavailable"}]});
+        assert!(capture_complete(true, &[semantic]));
     }
 }
 struct OutputBudget(usize);

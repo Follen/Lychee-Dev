@@ -2,6 +2,7 @@
 //! check/checker/check_return_count.rs; Copyright (c) CppCXY, MIT (LICENSE-EmmyLua).
 //! Return values and condition inference use the same owned query/session.
 use super::CheckContext;
+use crate::session::backend::return_pack::{ReturnArity, return_arity, return_expands};
 use crate::session::backend::{OwnedQuery, QueryResult};
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
@@ -34,7 +35,19 @@ impl<E> OwnedQuery<'_, '_, E> {
             let Some(closure) = LuaClosureExpr::cast(node) else {
                 continue;
             };
-            let expected = self.return_expectation(signature, &closure)?;
+            let Some(expected) = self.return_expectation(signature, &closure)? else {
+                continue;
+            };
+            if !expected.available {
+                self.record_check(
+                    closure.get_syntax_id(),
+                    "return_count_check",
+                    "unavailable",
+                    String::new(),
+                    Some("native_return_expectation_unavailable".into()),
+                )?;
+                continue;
+            }
             self.return_stats(context, &closure, &expected)?;
             self.return_missing(context, &closure, &expected)?;
         }
@@ -44,7 +57,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         &mut self,
         signature: &Signature,
         closure: &LuaClosureExpr,
-    ) -> QueryResult<ReturnExpectation, E> {
+    ) -> QueryResult<Option<ReturnExpectation>, E> {
         let mut syntaxes = Vec::new();
         if let Some(docs) = &signature.docs {
             syntaxes.extend(
@@ -65,11 +78,9 @@ impl<E> OwnedQuery<'_, '_, E> {
                 .into_iter()
                 .map(|(_, syntax)| project_return_annotation(&self.model, syntax))
                 .collect::<Vec<_>>();
-            return Ok(expectation_from_types(&types));
+            return Ok(Some(expectation_from_types(&types, &self.model)));
         }
-        Ok(self
-            .return_contextual_expectation(closure)?
-            .unwrap_or_else(ReturnExpectation::none))
+        self.return_contextual_expectation(closure)
     }
     fn return_contextual_expectation(
         &mut self,
@@ -122,7 +133,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                     project_return_annotation_in(&self.model, field_ref.file_id, ty.get_syntax_id())
                 })
                 .collect::<Vec<_>>();
-            Some(expectation_from_types(&types))
+            Some(expectation_from_types(&types, &self.model))
         })();
         Ok(result)
     }
@@ -132,21 +143,45 @@ impl<E> OwnedQuery<'_, '_, E> {
         closure: &LuaClosureExpr,
         expected: &ReturnExpectation,
     ) -> QueryResult<(), E> {
-        if expected.max.is_none() && expected.min == 0 {
-            return Ok(());
-        }
         for stat in own_return_stats(closure) {
-            let Some((total, redundant)) = self.return_values(&stat, expected.max)? else {
+            let Some((actual, redundant)) = self.return_values(&stat, expected.max)? else {
+                self.record_check(
+                    stat.get_syntax_id(),
+                    "return_count_check",
+                    "unavailable",
+                    String::new(),
+                    Some("native_return_tail_arity_unavailable".into()),
+                )?;
                 continue;
             };
-            if total < expected.min {
-                context.add_diagnostic(DiagnosticCode::MissingReturnValue, stat.get_range(), t!("Annotations specify that at least %{min} return value(s) are required, found %{rmin} returned here instead.", min = expected.min, rmin = total));
+            let complete = actual.max == Some(actual.min);
+            if let Some(maximum) = actual.max.filter(|maximum| *maximum < expected.min) {
+                if complete {
+                    context.add_diagnostic(DiagnosticCode::MissingReturnValue, stat.get_range(), t!("Annotations specify that at least %{min} return value(s) are required, found %{rmin} returned here instead.", min = expected.min, rmin = maximum));
+                } else {
+                    context.add_diagnostic(DiagnosticCode::MissingReturnValue, stat.get_range(), t!("Annotations specify that at least %{min} return value(s) are required, found at most %{rmin} returned here instead.", min = expected.min, rmin = maximum));
+                }
             }
             if let Some(max) = expected.max {
                 for range in redundant {
-                    context.add_diagnostic(DiagnosticCode::RedundantReturnValue, range, t!("Annotations specify that at most %{max} return value(s) are required, found %{rmax} returned here instead.", max = max, rmax = total));
+                    if complete {
+                        context.add_diagnostic(DiagnosticCode::RedundantReturnValue, range, t!("Annotations specify that at most %{max} return value(s) are required, found %{rmax} returned here instead.", max = max, rmax = actual.min));
+                    } else {
+                        context.add_diagnostic(DiagnosticCode::RedundantReturnValue, range, t!("Annotations specify that at most %{max} return value(s) are required, found at least %{rmax} returned here instead.", max = max, rmax = actual.min));
+                    }
                 }
             }
+            self.record_check(
+                stat.get_syntax_id(),
+                "return_count_check",
+                if complete {
+                    "native_checked"
+                } else {
+                    "unavailable"
+                },
+                String::new(),
+                (!complete).then(|| "native_return_tail_arity_unavailable".into()),
+            )?;
         }
         Ok(())
     }
@@ -154,32 +189,39 @@ impl<E> OwnedQuery<'_, '_, E> {
         &mut self,
         stat: &LuaReturnStat,
         expected_max: Option<usize>,
-    ) -> QueryResult<Option<(usize, Vec<rowan::TextRange>)>, E> {
+    ) -> QueryResult<Option<(ReturnArity, Vec<rowan::TextRange>)>, E> {
         let exprs = stat.get_expr_list().collect::<Vec<_>>();
-        let mut total = 0;
+        let mut total = ReturnArity::fixed(0);
         let mut redundant = Vec::new();
-        let mut tail_nil = false;
         for (index, expr) in exprs.iter().enumerate() {
             let ty = self.return_full_type(expr)?;
-            match ty.structural_type() {
-                LuaType::Variadic(variadic) => {
-                    let Some(len) = variadic.get_max_len() else {
-                        return Ok(None);
-                    };
-                    total += len;
+            let expands = return_expands(expr, index + 1 == exprs.len());
+            let arity = if matches!(ty.structural_type(), LuaType::Never) {
+                None
+            } else if expands {
+                if let LuaExpr::CallExpr(call) = expr {
+                    self.binding_call_return_arity(call)?
+                        .or_else(|| return_arity(ty.structural_type()))
+                } else {
+                    return_arity(ty.structural_type())
                 }
-                LuaType::Nil => {
-                    if index == exprs.len() - 1 {
-                        tail_nil = true;
-                    }
-                    total += 1;
-                }
-                _ => total += 1,
-            }
+            } else {
+                Some(ReturnArity::fixed(1))
+            };
+            let Some(arity) = arity else {
+                return Ok(None);
+            };
+            total.min += arity.min;
+            total.max = total
+                .max
+                .zip(arity.max)
+                .map(|(prefix, values)| prefix + values);
+            let tail_nil = index + 1 == exprs.len() && matches!(ty.structural_type(), LuaType::Nil);
             if let Some(max) = expected_max
-                && total > max
+                && arity.min > 0
+                && total.min > max
             {
-                if tail_nil && total - 1 == max {
+                if tail_nil && total.min - 1 == max {
                     continue;
                 }
                 redundant.push(expr.get_range());
@@ -190,7 +232,7 @@ impl<E> OwnedQuery<'_, '_, E> {
     fn return_full_type(&mut self, expr: &LuaExpr) -> QueryResult<OwnedValue, E> {
         if let Some(ty) = self.binding_type_of_expr(expr.get_syntax_id())? {
             return Ok(
-                if matches!(ty.structural_type(), LuaType::Unknown)
+                if matches!(ty.structural_type(), LuaType::Unknown | LuaType::Any)
                     && matches!(expr, LuaExpr::CallExpr(_))
                 {
                     OwnedValue::plain(LuaType::Variadic(Arc::new(VariadicType::Base(
@@ -208,13 +250,24 @@ impl<E> OwnedQuery<'_, '_, E> {
             };
             if !managed && let Some(types) = self.return_call_annotations(call)? {
                 return Ok(match types.len() {
-                    0 => OwnedValue::plain(LuaType::Nil),
+                    0 => OwnedValue::pack(Vec::new()),
                     1 => types.into_iter().next().expect("len checked"),
                     _ => OwnedValue::pack(types),
                 });
             }
         }
-        self.type_of_expr_at(expr.get_syntax_id(), expr.get_range().start().into())
+        let value = self.type_of_expr_at(expr.get_syntax_id(), expr.get_range().start().into())?;
+        Ok(
+            if matches!(expr, LuaExpr::CallExpr(_))
+                && matches!(value.structural_type(), LuaType::Unknown | LuaType::Any)
+            {
+                OwnedValue::plain(LuaType::Variadic(Arc::new(VariadicType::Base(
+                    LuaType::Unknown,
+                ))))
+            } else {
+                value
+            },
+        )
     }
     fn return_call_annotations(
         &mut self,
@@ -285,7 +338,8 @@ impl<E> OwnedQuery<'_, '_, E> {
             )
             .collect::<Vec<_>>();
         if syntaxes.is_empty() {
-            return Ok(Some(Vec::new()));
+            // Parameter-only docs do not declare a zero-return contract.
+            return Ok(None);
         }
         syntaxes.sort_by_key(|(start, _)| *start);
         Ok(Some(
@@ -303,14 +357,18 @@ impl<E> OwnedQuery<'_, '_, E> {
         closure: &LuaClosureExpr,
         expected: &ReturnExpectation,
     ) -> QueryResult<(), E> {
-        if expected.min == 0 {
-            return Ok(());
-        }
         let flow = match closure_body_block(closure) {
             Some(block) => self.return_block_flow(&block)?,
             None => ReturnFlow::fallthrough(),
         };
-        if !flow.can_fall_through && !flow.can_break {
+        self.record_check(
+            closure.get_syntax_id(),
+            "return_flow_check",
+            "native_checked",
+            String::new(),
+            None,
+        )?;
+        if expected.min == 0 || !flow.can_fall_through && !flow.can_break {
             return Ok(());
         }
         let range = closure_body_block(closure)
@@ -511,17 +569,23 @@ impl<E> OwnedQuery<'_, '_, E> {
 struct ReturnExpectation {
     min: usize,
     max: Option<usize>,
+    available: bool,
 }
 
 impl ReturnExpectation {
     fn none() -> Self {
-        Self { min: 0, max: None }
+        Self {
+            min: 0,
+            max: None,
+            available: false,
+        }
     }
 
     fn fixed(count: usize) -> Self {
         Self {
             min: count,
             max: Some(count),
+            available: true,
         }
     }
 }
@@ -566,7 +630,14 @@ enum StaticValue {
     String(String),
 }
 
-fn expectation_from_types(types: &[LuaType]) -> ReturnExpectation {
+fn expectation_from_types(types: &[LuaType], model: &SemanticModel<'_>) -> ReturnExpectation {
+    if types.iter().any(|ty| match ty {
+        LuaType::Unknown => true,
+        LuaType::Ref(id) | LuaType::Def(id) => model.type_def_of(id).is_none(),
+        _ => false,
+    }) {
+        return ReturnExpectation::none();
+    }
     if types.is_empty() {
         return ReturnExpectation::fixed(0);
     }
@@ -579,61 +650,45 @@ fn expectation_from_types(types: &[LuaType]) -> ReturnExpectation {
             return ReturnExpectation {
                 min: 0,
                 max: Some(1),
+                available: true,
             };
         }
         if matches!(ty, LuaType::Nil) {
             return ReturnExpectation {
                 min: 0,
                 max: Some(0),
+                available: true,
             };
         }
         let min = usize::from(!ty.is_optional());
-        return ReturnExpectation { min, max: Some(1) };
+        return ReturnExpectation {
+            min,
+            max: Some(1),
+            available: true,
+        };
     }
 
-    let mut min = types.len();
-    // Trailing consecutive optionals are not required to be returned.
-    for ty in types.iter().rev() {
-        if ty.is_optional() {
+    expectation_from_variadic(&VariadicType::Multi(types.to_vec()))
+}
+
+fn expectation_from_variadic(variadic: &VariadicType) -> ReturnExpectation {
+    let Some(arity) = return_arity(&LuaType::Variadic(Arc::new(variadic.clone()))) else {
+        return ReturnExpectation::none();
+    };
+    let mut min = arity.min;
+    // Only trailing optional slots may be omitted; an open tail contributes no
+    // required value but must not erase the known prefix or its flow check.
+    for idx in (0..min).rev() {
+        if variadic.get_type(idx).is_some_and(LuaType::is_optional) {
             min -= 1;
         } else {
             break;
         }
     }
-    let mut max = Some(0usize);
-    for ty in types {
-        match ty {
-            LuaType::Variadic(variadic) => {
-                let Some(len) = variadic.get_max_len() else {
-                    return ReturnExpectation { min, max: None };
-                };
-                *max.as_mut().expect("max is Some") += len;
-            }
-            _ => *max.as_mut().expect("max is Some") += 1,
-        }
-    }
-    ReturnExpectation { min, max }
-}
-
-fn expectation_from_variadic(variadic: &VariadicType) -> ReturnExpectation {
-    let Some(min_len) = variadic.get_min_len() else {
-        return ReturnExpectation::none();
-    };
-    let mut min = min_len;
-    if min_len > 0 {
-        for idx in (0..min_len).rev() {
-            if let Some(ty) = variadic.get_type(idx)
-                && ty.is_optional()
-            {
-                min -= 1;
-            } else {
-                break;
-            }
-        }
-    }
     ReturnExpectation {
         min,
-        max: variadic.get_max_len(),
+        max: arity.max,
+        available: true,
     }
 }
 

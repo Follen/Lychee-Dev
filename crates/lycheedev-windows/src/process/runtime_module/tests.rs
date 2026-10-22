@@ -1,12 +1,29 @@
 use super::*;
-use std::time::Duration;
+use std::{
+    sync::{Arc, atomic::AtomicBool},
+    time::Duration,
+};
 
+struct FixtureClearControl;
+impl crate::process::RuntimeControl for FixtureClearControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
+struct FixtureFlagControl(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl crate::process::RuntimeControl for FixtureFlagControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        if self.0.load(std::sync::atomic::Ordering::Acquire) {
+            Err("memory.runtime_cancelled".into())
+        } else {
+            Ok(())
+        }
+    }
+}
 fn budget(limits: RuntimeLimits) -> RuntimeBudget {
-    RuntimeBudget::new(
-        limits,
-        Instant::now() + Duration::from_secs(10),
-        Arc::new(AtomicBool::new(false)),
-    )
+    RuntimeBudget::with_control_factory(limits, Instant::now() + Duration::from_secs(10), 0, || {
+        FixtureClearControl
+    })
     .unwrap()
 }
 fn region(start: u64, end: u64) -> Region {
@@ -94,9 +111,16 @@ fn all_budget_dimensions_reject_without_charging_other_dimensions() {
 }
 #[test]
 fn cancellation_and_deadline_do_no_work_but_cannot_replace_an_os_failure() {
-    let cancelled = Arc::new(AtomicBool::new(true));
-    let mut b =
-        RuntimeBudget::new(RuntimeLimits::defaults(), Instant::now(), cancelled.clone()).unwrap();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let mut b = RuntimeBudget::with_control_factory(
+        RuntimeLimits::defaults(),
+        Instant::now() + Duration::from_secs(1),
+        0,
+        || FixtureFlagControl(cancelled.clone()),
+    )
+    .unwrap();
+    b.deadline = Instant::now();
+    cancelled.store(true, Ordering::Release);
     assert_eq!(
         b.charge(RuntimeCost::os()).unwrap_err(),
         "memory.runtime_cancelled"
@@ -114,7 +138,13 @@ fn cancellation_and_deadline_do_no_work_but_cannot_replace_an_os_failure() {
         b.finish::<()>(Err("test.os_denied:5".into())).unwrap_err(),
         "test.os_denied:5"
     );
-    assert_eq!(b.usage(), RuntimeUsage::default());
+    assert_eq!(
+        b.usage(),
+        RuntimeUsage {
+            allocation_bytes: std::mem::size_of::<FixtureFlagControl>() as u64,
+            ..RuntimeUsage::default()
+        }
+    );
 }
 #[test]
 fn current_mapping_splits_preserve_allocation_identity_and_intersections() {
@@ -606,10 +636,12 @@ fn runtime_formal_work_absolute_cap_is_finite_and_defaults_are_unchanged() {
     let mut limits = RuntimeLimits::defaults();
     assert_eq!(limits.work_units, 1 << 30);
     limits.work_units = 32 << 30;
-    assert!(RuntimeBudget::new(limits, deadline, Arc::new(AtomicBool::new(false))).is_ok());
+    assert!(
+        RuntimeBudget::with_control_factory(limits, deadline, 0, || FixtureClearControl).is_ok()
+    );
     limits.work_units += 1;
     assert_eq!(
-        RuntimeBudget::new(limits, deadline, Arc::new(AtomicBool::new(false)))
+        RuntimeBudget::with_control_factory(limits, deadline, 0, || FixtureClearControl)
             .err()
             .unwrap(),
         "memory.runtime_budget_options"
@@ -684,7 +716,7 @@ fn runtime_close_join_keeps_primary_close_and_control_causes() {
 }
 
 #[test]
-fn module_identity_uses_fixed_go_path_fold_with_bounded_original_control() {
+fn module_identity_uses_path_fold_with_bounded_original_control() {
     let mut b = budget(RuntimeLimits::defaults());
     for (a, z, expected) in [
         ("C:\\K\\Wow.exe", "c:\\K\\WOW.EXE", true),
@@ -705,16 +737,24 @@ fn module_identity_uses_fixed_go_path_fold_with_bounded_original_control() {
         );
     }
     assert!(equal_fold_image_path(&[0xd800], &[0xfffd], &mut b).unwrap());
-    let cancelled = Arc::new(AtomicBool::new(true));
-    let mut stopped = RuntimeBudget::new(
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let mut stopped = RuntimeBudget::with_control_factory(
         RuntimeLimits::defaults(),
         Instant::now() + Duration::from_secs(5),
-        cancelled,
+        0,
+        || FixtureFlagControl(cancelled.clone()),
     )
     .unwrap();
+    cancelled.store(true, Ordering::Release);
     assert_eq!(
         equal_fold_image_path(&[b'a' as u16], &[b'A' as u16], &mut stopped).unwrap_err(),
         "memory.runtime_cancelled"
     );
-    assert_eq!(stopped.usage(), RuntimeCost::default());
+    assert_eq!(
+        stopped.usage(),
+        RuntimeCost {
+            allocation_bytes: std::mem::size_of::<FixtureFlagControl>() as u64,
+            ..RuntimeCost::default()
+        }
+    );
 }

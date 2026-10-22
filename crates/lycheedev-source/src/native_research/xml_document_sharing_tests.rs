@@ -104,6 +104,6 @@ fn shared_document_identity_preserves_original_cancelled_control(){
     let control=OperationControl::default();
     let xml=XmlResearch::prepare(&mut BTreeMap::new(),BTreeMap::from([("Frame.xml".into(),"<Ui><Script>Target()</Script></Ui>".into())]),&[],&json!({}),&control).unwrap();
     assert!(matches!(xml.documents["Frame.xml"],ResearchDocument::Shared(_)));
-    control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(xml.identity(&control).unwrap_err().code,"command.cancelled");
 }

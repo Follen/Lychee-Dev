@@ -1,12 +1,12 @@
-#[path = "original_lines.rs"]
-mod original_lines;
+#[cfg(test)]
+#[path = "expression_identity_tests.rs"]
+mod expression_identity_tests;
 #[path = "expression_index.rs"]
 mod expression_index;
 #[path = "managed_sites.rs"]
 mod managed_sites;
-#[cfg(test)]
-#[path = "expression_identity_tests.rs"]
-mod expression_identity_tests;
+#[path = "original_lines.rs"]
+mod original_lines;
 #[cfg(test)]
 #[path = "retained_site_identity_tests.rs"]
 mod retained_site_identity_tests;
@@ -26,7 +26,7 @@ use lycheedev_emmy_adapter::session::{
 use lycheedev_emmy_adapter::session::{ExternalSourceSpan, FieldWriteOrigin, ObjectOrigin};
 use std::collections::{HashMap, HashSet};
 
-pub const NATIVE_RULES: &str = "wow-native-binding-context-v10-reachable-object-versions";
+pub const NATIVE_RULES: &str = "wow-native-binding-context-v14-argument-comparison-coverage";
 pub const NATIVE_PROFILE: &str = "typed-call-v1";
 
 // A source template and a concrete invocation are distinct query contracts.
@@ -47,7 +47,7 @@ pub struct FrozenContext {
     identity: String,
     decisions: HashMap<BindingSite, BindingDecision<BoundValue>>,
     calls: HashMap<BindingSite, BindingDecision<CallPermit>>,
-    call_observations: HashMap<BindingSite, CallObservation>,
+    call_observations: HashMap<BindingSite, BindingDecision<CallObservation>>,
     managed_sites: Arc<managed_sites::ManagedSites>,
     refs: HashMap<String, Vec<BindingReference>>,
     shapes: HashMap<NativeObjectViewKey, ObjectShape>,
@@ -118,7 +118,6 @@ impl BindingContext for FrozenContext {
         self.call_observations
             .get(&site)
             .cloned()
-            .map(BindingDecision::Bound)
             .unwrap_or(BindingDecision::NotManaged)
     }
     fn references(&self, identity: &str) -> BindingDecision<Vec<BindingReference>> {
@@ -342,31 +341,29 @@ impl PreparedSnapshot {
         phase: &str,
         ordered: &[&str],
         scope: Option<&str>,
-        native_profile: bool,
     ) -> Result<Graph> {
         self.control.check().map_err(|e| e.to_string())?;
         let owned = self
             .inputs
             .execution(phase, ordered, &self.control)
             .map_err(|e| e.to_string())?;
-        self.graph_owned(name, scope, native_profile, owned)
+        self.graph_owned(name, scope, owned)
     }
     fn graph_owned(
         &self,
         name: &str,
         scope: Option<&str>,
-        native_profile: bool,
         owned: Arc<SourceInputs>,
     ) -> Result<Graph> {
         let ordered = &owned.ordered;
         let phase = &owned.phase;
         let mut inputs = json!({"admissionSHA256":owned.identity_sha256(),"adapter":fixed_graph_limits(),
             "orderedScriptLoadOccurrences":ordered.iter().enumerate().map(|(index,file)|json!({"index":index,"file":file})).collect::<Vec<_>>(),
-            "executionPhase":phase,"evaluator":if native_profile{"native-invocations"}else{"legacy-v7"}});
+            "executionPhase":phase,"evaluator":"native-invocations"});
         if owned.load_plan.is_some() {
             inputs["adapter"]["explicitExecution"] = json!({"rulesVersion":ENTRY_RULES,"views":["entry"],"loadPlan":"known_occurrences_or_unknown_file_set","unknownOrder":"knowledge_boundary_no_execution","entryArguments":"unspecified_unknown_or_exact_list_nil_padding"});
         }
-        if native_profile && !owned.host.data.bindings.is_empty() {
+        if !owned.host.data.bindings.is_empty() {
             inputs["adapter"]["hostRuntime"] =
                 host_runtime_profile_for(owned.entry.is_some(), owned.corpus.limits.research);
         }
@@ -381,7 +378,7 @@ impl PreparedSnapshot {
             common: owned.graph_common.clone(),
             execution: evidence_fields(inputs),
         };
-        build_graph(self, name, inputs, native_profile, owned)
+        build_graph(self, name, inputs, owned)
     }
     fn freeze_inner(
         &self,
@@ -630,22 +627,47 @@ impl PreparedSnapshot {
                 .iter()
                 .find(|frame| frame.call == Some(call.id))
                 .is_some_and(|frame| frame.return_paths.len() > 1);
-            let uncertain_slots = graph
+            let return_slots = graph
                 .host_runtime
                 .as_ref()
-                .and_then(|host| host.calls.iter().find(|slots| slots.call == call.id))
-                .is_some_and(|slots| {
-                    slots.argument_open_tail.is_some()
-                        || slots.return_open_tail.is_some()
-                        || slots
-                            .argument_arities
-                            .as_ref()
-                            .is_some_and(|arities| arities.len() > 1)
-                        || slots
-                            .return_arities
-                            .as_ref()
-                            .is_some_and(|arities| arities.len() > 1)
-                });
+                .and_then(|host| host.calls.iter().find(|slots| slots.call == call.id));
+            let open_prefix = return_slots
+                .and_then(|slots| slots.return_open_tail.as_ref())
+                .map(|tail| tail.first_unknown_slot.saturating_sub(1));
+            let uncertain_returns = return_slots.is_some_and(|slots| {
+                slots
+                    .return_arities
+                    .as_ref()
+                    .is_some_and(|arities| arities.len() > 1)
+            });
+            let return_observation_reason = if uncertain_returns {
+                Some("host_sequence_requires_cardinality_projection")
+            } else if multiple_return_paths {
+                Some("conditional_return_path_candidates_require_path_projection")
+            } else {
+                None
+            };
+            let selected_value_check = if call.conditional_branch.is_none()
+                && let Decision::Bound(id) = callee.decision
+            {
+                let known_shape = match &graph.values[id].kind {
+                    ValueKind::Primitive(_) => true,
+                    ValueKind::Object(_) => callee
+                        .object_view
+                        .and_then(|view| graph.object_views.get(view))
+                        .is_some_and(|view| {
+                            matches!(view.enumeration, ObjectEnumeration::Complete)
+                        }),
+                    _ => false,
+                };
+                known_shape
+                    && matches!(
+                        provider.decisions.get(&self.binding_site(&callee.site)?),
+                        Some(BindingDecision::Bound(_))
+                    )
+            } else {
+                false
+            };
             let decision = if host_descriptor.is_some() && call.conditional_branch.is_none() {
                 // A declaration permits signature checks independently of heap
                 // effects and return cardinality. Neither grants future lookup.
@@ -654,16 +676,14 @@ impl PreparedSnapshot {
                     proof: result.proof_id.clone(),
                     capability_profile: "authenticated_environment_signature_v1".into(),
                 })
-            } else if uncertain_slots {
-                BindingDecision::Unavailable {
-                    proof: result.proof_id.clone(),
-                    reason: "host_sequence_requires_cardinality_projection".into(),
-                }
-            } else if multiple_return_paths {
-                BindingDecision::Unavailable {
-                    proof: result.proof_id.clone(),
-                    reason: "conditional_return_path_candidates_require_path_projection".into(),
-                }
+            } else if selected_value_check {
+                // The selected value can be checked for callability without
+                // inventing a function invocation or any return observation.
+                BindingDecision::Bound(CallPermit {
+                    callee: self.binding_site(&callee.site)?,
+                    proof: callee.proof_id.clone(),
+                    capability_profile: NATIVE_PROFILE.into(),
+                })
             } else if call.conditional_branch.is_some() {
                 BindingDecision::Unavailable {
                     proof: result.proof_id.clone(),
@@ -679,17 +699,15 @@ impl PreparedSnapshot {
                         proof: result.proof_id.clone(),
                         capability_profile: "fixture_intrinsic_value".into(),
                     })
-                } else if !matches!(call.invocation_coverage, CallCoverage::Unavailable) {
+                } else {
+                    // The exact selected function identity admits static
+                    // callable/parameter checks even in a deferred body. An
+                    // execution frame and its returns are separate evidence.
                     BindingDecision::Bound(CallPermit {
                         callee: self.binding_site(&callee.site)?,
                         proof: result.proof_id.clone(),
                         capability_profile: NATIVE_PROFILE.into(),
                     })
-                } else {
-                    BindingDecision::Unavailable {
-                        proof: result.proof_id.clone(),
-                        reason: "native_call_effect_or_binding_unavailable".into(),
-                    }
                 }
             } else {
                 match &callee.decision {
@@ -735,7 +753,7 @@ impl PreparedSnapshot {
                 if frame.return_facts.len() > INVOCATION_RETURN_LIMIT {
                     return Err("call observation return slot budget exceeded".into());
                 }
-                let returns = frame
+                let mut returns = frame
                     .return_facts
                     .iter()
                     .map(|id| {
@@ -745,12 +763,16 @@ impl PreparedSnapshot {
                         )
                     })
                     .collect::<Result<Vec<_>>>()?;
+                if let Some(prefix) = open_prefix {
+                    returns.truncate(prefix);
+                }
                 let observation = CallObservation {
                     callee: ObservedCallee::Source(function),
                     selected_callee_identity,
                     closure_identity: format!("{}:closure:{}", graph.snapshot_key, closure.id),
                     invocation_identity: format!("{}:frame:{}", graph.snapshot_key, frame.id),
                     returns,
+                    open_tail: open_prefix.is_some(),
                     proof: digest(&(
                         graph.snapshot_key.as_str(),
                         call.id,
@@ -761,7 +783,16 @@ impl PreparedSnapshot {
                 };
                 if provider
                     .call_observations
-                    .insert(site, observation)
+                    .insert(
+                        site,
+                        match return_observation_reason {
+                            Some(reason) => BindingDecision::Unavailable {
+                                proof: result.proof_id.clone(),
+                                reason: reason.into(),
+                            },
+                            None => BindingDecision::Bound(observation),
+                        },
+                    )
                     .is_some()
                 {
                     return Err("ambiguous call return observation".into());
@@ -778,11 +809,14 @@ impl PreparedSnapshot {
                     .as_ref()
                     .and_then(|host| host.calls.iter().find(|slots| slots.call == call.id))
                     .ok_or("host call slot observation missing")?;
-                let returns = slots
+                let mut returns = slots
                     .returns
                     .iter()
                     .map(|slot| self.native_decision(graph, &graph.uses[slot.use_fact]))
                     .collect::<Result<Vec<_>>>()?;
+                if let Some(prefix) = open_prefix {
+                    returns.truncate(prefix);
+                }
                 let observation = CallObservation {
                     callee: ObservedCallee::Environment(descriptor),
                     selected_callee_identity: format!(
@@ -792,15 +826,41 @@ impl PreparedSnapshot {
                     closure_identity: String::new(),
                     invocation_identity: format!("{}:call:{}", graph.snapshot_key, call.id),
                     returns,
+                    open_tail: open_prefix.is_some(),
                     proof: slots.proof_id.clone(),
                 };
                 if provider
                     .call_observations
-                    .insert(site, observation)
+                    .insert(
+                        site,
+                        match return_observation_reason {
+                            Some(reason) => BindingDecision::Unavailable {
+                                proof: slots.proof_id.clone(),
+                                reason: reason.into(),
+                            },
+                            None => BindingDecision::Bound(observation),
+                        },
+                    )
                     .is_some()
                 {
                     return Err("ambiguous host call observation".into());
                 }
+            }
+            if function.is_some()
+                && matches!(&decision, BindingDecision::Bound(permit)
+                    if permit.capability_profile != "fixture_intrinsic_value")
+                && !provider.call_observations.contains_key(&site)
+            {
+                // A selected source function can be checked in a deferred body
+                // without executing it. Absence here is an observed-knowledge
+                // boundary, not an unmanaged provider with a fixed signature.
+                provider.call_observations.insert(
+                    site,
+                    BindingDecision::Unavailable {
+                        proof: result.proof_id.clone(),
+                        reason: "native_call_return_observation_missing".into(),
+                    },
+                );
             }
             if provider.calls.insert(site, decision).is_some() {
                 return Err("ambiguous call execution occurrence".into());
@@ -828,8 +888,10 @@ impl PreparedSnapshot {
                 rebase(decision);
             }
             for observation in provider.call_observations.values_mut() {
-                for value in &mut observation.returns {
-                    rebase(value);
+                if let BindingDecision::Bound(observation) = observation {
+                    for value in &mut observation.returns {
+                        rebase(value);
+                    }
                 }
             }
             let mut shapes = HashMap::new();
@@ -1146,5 +1208,132 @@ fn owned_byte_range(range: TextRange) -> lycheedev_emmy_adapter::ByteRange {
     lycheedev_emmy_adapter::ByteRange {
         start: range.start().into(),
         end: range.end().into(),
+    }
+}
+
+#[cfg(test)]
+mod call_return_evidence_tests {
+    use super::*;
+    use lycheedev_emmy_adapter::session::{DiagnosticRun, OwnedQuery, SelectedProjectionBackend};
+
+    #[test]
+    fn deferred_selected_calls_keep_declared_types_without_claiming_observed_arity() {
+        for declaration in ["", "---@return number\n"] {
+            let text = format!(
+                "---@param n number\n{declaration}local function f(n) mystery(); return 1 end\nlocal function one(value) end\nlocal function caller() return one(f(1)) end\nlocal function badcaller() return f('bad',2) end\n"
+            );
+            let control = OperationControl::default();
+            let host = TrustedHostEnvironment::from_host_material(
+                "deferred-call-return".into(),
+                false,
+                vec![],
+                vec![],
+                &control,
+            )
+            .unwrap();
+            let config = crate::engine_config::addon_diagnostics();
+            let inputs = SourceInputs::admit(SourceInputSpec {
+                files: vec![SourceFileInput {
+                    path: "main.lua".into(), content_sha256: hash(text.as_bytes()),
+                    analysis_utf8: text.clone().into(), original_utf8: text.clone(), map: SourceMap::Identity,
+                }],
+                workspace_root: std::env::current_dir().unwrap().join("deferred-call-return"),
+                source_identity: json!({"test":"deferred-call-return","declaration":declaration}),
+                phase: "after_load".into(), ordered_occurrences: vec!["main.lua".into()],
+                config: config.clone(), host,
+                luac: LuacIdentity { version:"5.1.5".into(), platform:"windows-amd64".into(),
+                    executable_sha256:"a".repeat(64), executable_bytes:1 },
+                limits: SourceLimits::research(),
+            }, &control).unwrap();
+            let prepared = prepare(inputs, &control).unwrap();
+            let graph = prepared
+                .build("deferred-call-return", None, &control)
+                .unwrap();
+            let call = graph
+                .calls
+                .iter()
+                .find(|call| call.site.text(prepared.inputs()).unwrap() == "f(1)")
+                .unwrap();
+            assert!(matches!(
+                call.invocation_coverage,
+                CallCoverage::Unavailable
+            ));
+            assert!(
+                !graph
+                    .native_invocations
+                    .as_ref()
+                    .unwrap()
+                    .frames
+                    .iter()
+                    .any(|frame| frame.call == Some(call.id))
+            );
+            let provider = prepared
+                .freeze(&graph, NativeViewSelection::SourceTemplates, &control)
+                .unwrap();
+            let site = prepared.binding_site(&call.site).unwrap();
+            assert!(matches!(provider.call(site), BindingDecision::Bound(_)));
+            assert!(
+                matches!(provider.call_observation(site), BindingDecision::Unavailable { ref reason, .. }
+                if reason == "native_call_return_observation_missing")
+            );
+            let session = BindingSession::new_checked(provider, || Ok::<_, ()>(())).unwrap();
+            let mut check = || Ok::<_, ()>(());
+            let mut query = OwnedQuery::new_with_contribution_order(
+                &prepared.analysis,
+                &session,
+                site.file_id,
+                &mut check,
+                prepared.contribution_order.clone(),
+            );
+            let value = query.type_of_expr(site.syntax).unwrap();
+            assert_eq!(
+                value.structural_type(),
+                if declaration.is_empty() {
+                    &emmylua_code_analysis::LuaType::Unknown
+                } else {
+                    &emmylua_code_analysis::LuaType::Number
+                }
+            );
+            let mut run = DiagnosticRun::default();
+            query
+                .diagnose_into(
+                    Arc::new(emmylua_code_analysis::CheckConfig::new(&config)),
+                    &mut run,
+                )
+                .unwrap();
+            let outer = graph
+                .calls
+                .iter()
+                .find(|call| call.site.text(prepared.inputs()).unwrap() == "one(f(1))")
+                .unwrap();
+            let outer = prepared.binding_site(&outer.site).unwrap();
+            let bad_call = graph
+                .calls
+                .iter()
+                .find(|call| call.site.text(prepared.inputs()).unwrap() == "f('bad',2)")
+                .unwrap();
+            let bad_site = prepared.binding_site(&bad_call.site).unwrap();
+            let rows = session.coverage_checked(|| Ok::<_, ()>(())).unwrap();
+            assert!(rows.iter().any(|row| row.site == site
+                && row.operation == "argument_count_check"
+                && row.state == "native_checked"));
+            assert!(rows.iter().any(|row| row.site == outer
+                && row.operation == "argument_count_check"
+                && row.state == "unavailable"));
+            assert!(!rows.iter().any(|row| row.site == outer
+                && row.operation == "argument_count_check"
+                && row.state == "native_checked"));
+            for operation in ["callable_check", "argument_count_check", "argument_check"] {
+                assert!(rows.iter().any(|row| row.site == bad_site
+                    && row.operation == operation
+                    && row.state == "native_checked"));
+            }
+            for code in [
+                emmylua_code_analysis::DiagnosticCode::ParamTypeMismatch,
+                emmylua_code_analysis::DiagnosticCode::RedundantParameter,
+            ] {
+                assert!(run.diagnostics.iter().any(|row| row.code == code));
+            }
+        }
     }
 }

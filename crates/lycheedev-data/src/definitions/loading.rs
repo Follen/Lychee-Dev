@@ -9,10 +9,6 @@ use crate::{
     resource::{Budget, Cost},
 };
 use lycheedev_core::ToolkitError;
-use serde::{
-    Deserializer,
-    de::{DeserializeSeed, IgnoredAny, MapAccess},
-};
 
 const MAXIMUM: usize = 4 << 20;
 
@@ -84,31 +80,10 @@ fn identity() -> ToolkitError {
         "Cached definition identity differs",
     )
 }
-#[derive(Default)]
+#[derive(Deserialize)]
 struct CachedObject {
     url: String,
-    blob: wire::CachedBlob,
-}
-impl wire::Object for CachedObject {
-    fn fields<'de, A: MapAccess<'de>>(&mut self, mut map: A) -> std::result::Result<(), A::Error> {
-        while let Some(key) = map.next_key::<String>()? {
-            match wire::folded(&key).as_str() {
-                "url" => wire::scalar(&mut map, &mut self.url)?,
-                "blob" => map.next_value_seed(wire::ObjectSeed(&mut self.blob))?,
-                _ => {
-                    map.next_value::<IgnoredAny>()?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-impl<'de> Deserialize<'de> for CachedObject {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let mut value = Self::default();
-        wire::ObjectSeed(&mut value).deserialize(d)?;
-        Ok(value)
-    }
+    blob: wire::BlobRef,
 }
 fn decode_cached_object(
     raw: &[u8],
@@ -116,22 +91,13 @@ fn decode_cached_object(
     budget: Option<&Budget>,
     mut check: impl FnMut() -> Result<()>,
 ) -> Result<CachedObject> {
-    // This <=1 MiB metadata decode has the same Go scalar/merge grammar as
-    // remote cache reads. Temporary normalization is a refundable owner;
-    // definition work/metadata charges below remain cumulative.
+    // Keep the bounded parse allocation owned until current typed decoding completes.
     let _reserved = budget
         .map(|b| b.reserve_retained(raw.len() * 3))
         .transpose()?;
-    let valid = lycheedev_core::raw_json::is_valid(raw);
-    if !valid {
-        return Err(identity());
-    }
+    control.check()?;
     check()?;
-    let normalized = evidence::normalize_go_json_strings(raw, control)?;
-    check()?;
-    // Preserve a completed parse failure. The load's finish observes any
-    // concurrent stop and retains it as a distinct typed secondary cause.
-    let object = serde_json::from_slice(&normalized).map_err(|_| identity())?;
+    let object = serde_json::from_slice(raw).map_err(|_| identity())?;
     check()?;
     Ok(object)
 }
@@ -152,14 +118,14 @@ fn read_cached_definition(
     if object.url != url {
         return Err(identity());
     }
-    if !(0..=MAXIMUM as i64).contains(&object.blob.bytes) {
+    if object.blob.bytes > MAXIMUM as u64 {
         return Err(fault(
             "records.metadata_limit",
             3,
             "Definition byte budget exceeded",
         ));
     }
-    let bytes = object.blob.bytes as u64;
+    let bytes = object.blob.bytes;
     if let Some(budget) = budget {
         budget.charge_split(
             definition_cost(bytes),

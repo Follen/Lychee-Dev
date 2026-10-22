@@ -65,7 +65,7 @@ export function parseToc(text) {
 /**
  * Collect the exact release payload from the addon source tree.
  * @param {string} repoRoot repository root containing `addon/` and `release/`
- * @returns {{entries: Map<string, Buffer>, tocs: {name: string, parse: ReturnType<typeof parseToc>}[], report: {path: string, selected: 'toc'|'load'|'media'}[]}} entries keyed `Lychee Dev/...`, the four TOCs in client order, and one report row per entry
+ * @returns {{entries: Map<string, Buffer>, tocs: {name: string, parse: ReturnType<typeof parseToc>}[], report: {path: string, selected: 'toc'|'load'|'media'}[]}} entries keyed `Lychee Dev/...`, the single client-matrix TOC, and one report row per entry
  * @throws {Error} `addon-package.missing_load` / `addon-package.missing_media` when a referenced load file or `addon/Media/` is missing on disk
  */
 export function collectAddonZipEntries(repoRoot) {

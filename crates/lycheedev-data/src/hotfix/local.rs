@@ -1,12 +1,13 @@
 //! Fixed Go records.InspectHotfix's local named-table path. Scan checkpoints and
 //! remote providers stay separate and explicitly unavailable in this batch.
-use super::{CacheFilter, decode_page, inspect_budgeted};
+use super::{LocalInput, LocalRequest, decode_page, inspect_budgeted};
+use crate::request::DataContext;
 use crate::{
     capture, definitions, fault,
     resource::{Budget, Cost, RetainedReservation},
     schema,
 };
-use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, evidence, selection, storage};
+use lycheedev_core::{Outcome, Result, ToolkitError, evidence, selection, storage};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
@@ -179,7 +180,7 @@ fn read_file_scoped(
             }
             Ok(raw)
         })();
-        lycheedev_core::metadata::historical_write::finish_historical(
+        lycheedev_core::metadata::owned_write::finish_owned(
             result,
             storage::close_file(file).map_err(Into::into),
         )
@@ -187,10 +188,7 @@ fn read_file_scoped(
     let mut result = result;
     if let Err(errors) = parent.close() {
         for error in errors {
-            result = lycheedev_core::metadata::historical_write::finish_historical(
-                result,
-                Err(error.into()),
-            );
+            result = lycheedev_core::metadata::owned_write::finish_owned(result, Err(error.into()));
         }
     }
     if let Some(control) = control {
@@ -205,7 +203,7 @@ fn read_file_scoped(
     {
         return result;
     }
-    lycheedev_core::metadata::historical_write::finish_historical(result, stopped)
+    lycheedev_core::metadata::owned_write::finish_owned(result, stopped)
 }
 
 fn digest(raw: &[u8], budget: &Budget) -> Result<String> {
@@ -216,69 +214,6 @@ fn digest(raw: &[u8], budget: &Budget) -> Result<String> {
     }
     budget.charge(Cost::retained(64))?;
     Ok(crate::casc::hex(&hash.finalize()))
-}
-fn number(inv: &Invocation, flag: &str) -> Result<Option<u32>> {
-    inv.flag(flag)
-        .map(|value| {
-            if let Some(hex) = value.strip_prefix("0x") {
-                u32::from_str_radix(hex, 16)
-            } else {
-                value.parse()
-            }
-        })
-        .transpose()
-        .map_err(|_| fault("records.hotfix_query", 2, format!("Invalid {flag}")))
-}
-fn request_limit(inv: &Invocation, flag: &str, default: usize, maximum: usize) -> Result<usize> {
-    let value = inv
-        .flag(flag)
-        .map(str::parse::<usize>)
-        .transpose()
-        .map_err(|_| ToolkitError::arguments(format!("Invalid {flag}")))?
-        .unwrap_or(default);
-    if value == 0 || value > maximum {
-        return Err(fault(
-            "records.hotfix_limit",
-            2,
-            "Hotfix request exceeds input/page limits",
-        ));
-    }
-    Ok(value)
-}
-fn validate_source_flags(inv: &Invocation) -> Result<()> {
-    for flag in [
-        "--raidbots",
-        "--product",
-        "--build",
-        "--region",
-        "--locale",
-        "--search",
-        "--to",
-        "--cursor",
-    ] {
-        if inv.flag(flag).is_some_and(|value| !value.is_empty())
-            && !(flag == "--cursor" && inv.flag_bool("--scan"))
-        {
-            return Err(ToolkitError::arguments(format!(
-                "{flag} is not supported by the dbcache hotfix source"
-            )));
-        }
-    }
-    for flag in ["--page", "--max-pages", "--max-requests"] {
-        if number(inv, flag)?.is_some_and(|value| value != 0)
-            && !(flag == "--max-pages" && inv.flag_bool("--scan"))
-        {
-            return Err(ToolkitError::arguments(format!(
-                "{flag} is not supported by the dbcache hotfix source"
-            )));
-        }
-    }
-    if inv.flag("--encoding") == Some("csv") {
-        return Err(ToolkitError::arguments(
-            "--encoding csv is not supported by the dbcache hotfix source",
-        ));
-    }
-    Ok(())
 }
 fn validate_data(data: &selection::DataPin) -> Result<()> {
     let profile = lycheedev_core::client::product(&data.product).ok_or_else(|| {
@@ -317,19 +252,20 @@ fn validate_data(data: &selection::DataPin) -> Result<()> {
     Ok(())
 }
 fn named_definition(
-    inv: &Invocation,
+    ctx: &DataContext,
     data: &selection::DataPin,
     name: &str,
     budget: &Budget,
+    offline: bool,
 ) -> Result<(definitions::Bundle, schema::Definition)> {
     let (bundle, raw) = definitions::prepare_controlled(
-        &inv.home,
+        &ctx.home,
         &data.definition_commit,
         name,
-        inv.flag_bool("--offline"),
+        offline,
         budget.deadline,
         Some(budget),
-        &inv.control,
+        &ctx.control,
     )?;
     budget.check()?;
     let bytes = bundle.manifest["bytes"]
@@ -339,10 +275,10 @@ fn named_definition(
     budget.charge(Cost::metadata(bytes))?;
     let _manifest_parser = budget.reserve_retained(bytes * 32 + 4096)?;
     let manifest = evidence::read_blob_bounded_with_check(
-        &inv.home,
+        &ctx.home,
         &bundle.manifest,
         4 << 20,
-        &inv.control,
+        &ctx.control,
         || budget.check(),
     )?;
     let entries: Vec<Value> = serde_json::from_slice(&manifest)?;
@@ -374,7 +310,7 @@ fn named_definition(
     }
     let _definition_parser = budget.reserve_retained(raw.len() * 32 + 4096)?;
     let definition = schema::Document::parse_with_check(&raw, || {
-        inv.control.check()?;
+        ctx.control.check()?;
         budget.check()
     })?
     .select(&data.full_build, "")?;
@@ -537,83 +473,15 @@ fn public_number_layout(
     ))
 }
 
-pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    inv.control.check()?;
-    let snapshot = inv.required("--snapshot")?;
-    if inv
-        .flag("--dbcache")
-        .filter(|value| !value.is_empty())
-        .is_some()
-        == inv
-            .flag("--from")
-            .filter(|value| !value.is_empty())
-            .is_some()
-    {
-        return Err(ToolkitError::arguments(
-            "data hotfix --source dbcache requires exactly one of --dbcache or --from",
-        ));
-    }
-    validate_source_flags(inv)?;
-    if inv.flag("--table").is_some_and(|value| !value.is_empty())
-        && inv.flag("--table-hash").is_some()
-    {
-        return Err(fault(
-            "records.hotfix_identity",
-            2,
-            "Select --table or --table-hash, not both",
-        ));
-    }
-    if inv.flag("--after-index").is_some()
-        && inv
-            .flag("--from")
-            .filter(|value| !value.is_empty())
-            .is_none()
-    {
-        return Err(fault(
-            "records.hotfix_identity",
-            2,
-            "Pagination requires an archived --from",
-        ));
-    }
-    if inv.flag_bool("--scan") {
-        return Err(fault(
-            "command.unsupported",
-            3,
-            "Resumable hotfix scans have not completed Rust parity",
-        ));
-    }
-    let maximum = request_limit(inv, "--max-bytes", 128 << 20, 512 << 20)?;
-    let budget = Budget::controlled(
-        hotfix_limits(maximum),
-        inv.control.deadline(),
-        inv.control.clone(),
-    );
+pub(crate) fn dispatch(ctx: &DataContext, request: &LocalRequest) -> Result<Outcome> {
+    ctx.control.check()?;
+    let snapshot = &request.snapshot;
+    let maximum = request.max_bytes;
+    let budget = Budget::controlled(hotfix_limits(maximum), ctx.control.deadline(), ctx.control.clone());
     budget.check()?;
-    let mut filter = CacheFilter {
-        build: 0,
-        table_hash: inv
-            .flag("--table-hash")
-            .map(super::parse_table_hash)
-            .transpose()?,
-        record_id: number(inv, "--record")?,
-        push: inv
-            .flag("--push")
-            .map(str::parse)
-            .transpose()
-            .map_err(|_| fault("records.hotfix_query", 2, "Invalid signed push"))?,
-        region: number(inv, "--region-id")?,
-        status: number(inv, "--status")?
-            .map(|value| {
-                u8::try_from(value)
-                    .map_err(|_| fault("records.hotfix_query", 2, "Status outside 0..255"))
-            })
-            .transpose()?,
-        latest: inv.flag_bool("--latest"),
-        after_index: number(inv, "--after-index")?,
-        limit: request_limit(inv, "--limit", 20, 200)?,
-    };
+    let mut filter = request.filter.clone();
     let mut pin =
-        selection::load_pinned_controlled_with_check(&inv.home, snapshot, &inv.control, || {
+        selection::load_pinned_controlled_with_check(&ctx.home, snapshot, &ctx.control, || {
             budget.check()
         })?;
     budget.check()?;
@@ -623,9 +491,9 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         .ok_or_else(|| identity("Hotfix requires pinned data"))?;
     validate_data(&data)?;
     filter.build = schema::version(&data.full_build)?[3];
-    let (mut source, raw) = if let Some(id) = inv.flag("--from").filter(|value| !value.is_empty()) {
+    let (mut source, raw) = if let LocalInput::Capture(id) = &request.input {
         let source =
-            evidence::read_capture_controlled_with_check(&inv.home, id, &inv.control, || {
+            evidence::read_capture_controlled_with_check(&ctx.home, id, &ctx.control, || {
                 budget.check()
             })?;
         budget.check()?;
@@ -640,9 +508,9 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
             ));
         }
         let origin = selection::load_pinned_controlled_with_check(
-            &inv.home,
+            &ctx.home,
             source["provenance"]["snapshot"].as_str().unwrap_or(""),
-            &inv.control,
+            &ctx.control,
             || budget.check(),
         )?;
         budget.check()?;
@@ -655,23 +523,21 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
             .ok_or_else(limit)? as usize;
         budget.charge(Cost::metadata(bytes))?;
         let raw = evidence::read_blob_bounded_with_check(
-            &inv.home,
+            &ctx.home,
             &source["blob"],
             maximum,
-            &inv.control,
+            &ctx.control,
             || budget.check(),
         )?;
         (Some(source), raw)
     } else {
         (
             None,
-            read_file(Path::new(inv.required("--dbcache")?), maximum, &budget)?,
+            read_file(match &request.input { LocalInput::File(path) => path, LocalInput::Capture(_) => unreachable!("archived input handled above") }, maximum, &budget)?,
         )
     };
-    let named = inv
-        .flag("--table")
-        .filter(|name| !name.is_empty())
-        .map(|name| named_definition(inv, &data, name, &budget))
+    let named = request.table.as_deref()
+        .map(|name| named_definition(ctx, &data, name, &budget, request.offline))
         .transpose()?;
     if let Some((bundle, _)) = &named {
         filter.table_hash = Some(bundle.identity.hash);
@@ -701,7 +567,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     // definitions and every selected typed payload have all validated.
     if source.is_none() {
         source = Some(evidence::commit_capture_budgeted(
-            &inv.home,
+            &ctx.home,
             evidence::CaptureInput {
                 bytes: &raw,
                 maximum_bytes: maximum,
@@ -710,7 +576,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
                 complete: true,
                 truncated: false,
             },
-            &inv.control,
+            &ctx.control,
             &budget,
         )?);
     }
@@ -718,7 +584,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     if pin.changes.is_none() {
         budget.check()?;
         pin = selection::pin_selection_controlled_with_check(
-            &inv.home,
+            &ctx.home,
             selection::SelectionSpec {
                 parent: pin.id.clone(),
                 changes: Some(selection::ChangePin {
@@ -735,7 +601,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
                 }),
                 ..Default::default()
             },
-            &inv.control,
+            &ctx.control,
             || budget.check(),
         )?;
     }
@@ -779,7 +645,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         .as_str()
         .ok_or_else(|| identity("Source capture lacks identity"))?;
     let result_capture = evidence::commit_capture_budgeted_with_dependencies(
-        &inv.home,
+        &ctx.home,
         evidence::CaptureInput {
             bytes: &encoded,
             maximum_bytes: 32 << 20,
@@ -789,7 +655,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
             truncated,
         },
         &[source_id],
-        &inv.control,
+        &ctx.control,
         &budget,
     )?;
     let mut out = Outcome::new(result);

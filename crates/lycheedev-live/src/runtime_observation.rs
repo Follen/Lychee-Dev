@@ -2,7 +2,7 @@
 //! No returned field grants input, reconstructs a reader capability or is a saved
 //! root/heap pointer. Every subsequent operation must open its own current scope.
 use crate::{
-    mailbox::{Record, Selector},
+    mailbox::lookup::{Record, Selector},
     runtime_binding::{
         RuntimeBindingDescription, RuntimeBindingFailure, RuntimeBoundMemory, RuntimeCoverage,
         runtime_budget,
@@ -197,7 +197,7 @@ fn decode_identity(
     description: &RuntimeBindingDescription,
     budget: &mut RuntimeBudget,
 ) -> std::result::Result<RuntimeIdentityObservation, String> {
-    use crate::go_mailbox_v1::{self as protocol, IdentityPublication};
+    use crate::mailbox as protocol;
     // Named lookup has already verified wire and path. The same cumulative
     // request ledger accounts this bounded JSON decoding separately.
     budget.charge(RuntimeCost {
@@ -207,21 +207,8 @@ fn decode_identity(
         ..RuntimeCost::default()
     })?;
     let borrowed = record.contract()?;
-    let publication = protocol::decode_identity(&borrowed, &description.expected_release)
+    let value = protocol::decode_identity(&borrowed, &description.expected_release)
         .map_err(|e| e.to_string())?;
-    let (value, compatibility, activation_only, diagnostic_codes) = match publication {
-        IdentityPublication::Current(i) => (i, "current", false, Vec::new()),
-        IdentityPublication::UpgradeCapability(i) => (i, "read_only_upgrade", true, Vec::new()),
-        IdentityPublication::ManualActivationRequired(i) => (
-            i,
-            "manual_activation_required",
-            true,
-            vec![
-                "memory.mailbox_incompatible",
-                "live.channel_legacy_identity_requires_activation",
-            ],
-        ),
-    };
     if value.product != description.client.product {
         return Err("live.runtime_identity_product".into());
     }
@@ -239,9 +226,9 @@ fn decode_identity(
         release: value.release,
         inventory: value.inventory,
         slots: value.slots,
-        compatibility,
-        diagnostic_codes,
-        activation_only,
+        compatibility: "current",
+        diagnostic_codes: Vec::new(),
+        activation_only: false,
         record_sequence: record.sequence,
     })
 }

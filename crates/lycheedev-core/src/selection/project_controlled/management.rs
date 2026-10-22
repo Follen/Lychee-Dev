@@ -307,86 +307,59 @@ fn lock<C: FnMut() -> Result<()>>(
     })();
     finish_directory(directory, result, scope)
 }
-pub(in crate::selection) fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    let mut scope = Scope {
-        control: &inv.control,
-        supplemental: || Ok(()),
-    };
+pub(in crate::selection) fn execute(ctx: &RequestContext, request: &ProjectRequest) -> Result<Outcome> {
+    let mut scope = Scope { control: &ctx.control, supplemental: || Ok(()) };
     let mut publication = Publication::default();
     let result = (|| {
-        let value = match inv.command.as_str() {
-            "project init" => {
-                let product = inv
-                    .flag("--product")
-                    .filter(|v| !v.is_empty())
-                    .ok_or_else(|| ToolkitError::arguments("project init requires --product"))?;
-                initialize(
-                    &inv.cwd.join(inv.flag("--path").unwrap_or(".")),
-                    product,
-                    &mut scope,
-                    &mut publication,
-                )?
-            }
-            "project status" | "project lock" => {
-                let snapshot = if inv.command == "project lock" {
-                    Some(
-                        inv.flag("--snapshot")
-                            .filter(|v| !v.is_empty())
-                            .ok_or_else(|| {
-                                ToolkitError::arguments("project lock requires --snapshot")
-                            })?,
-                    )
-                } else {
-                    None
+        let value = match request {
+            ProjectRequest::Init { path, product } => initialize(
+                &ctx.cwd.join(path), product, &mut scope, &mut publication,
+            )?,
+            ProjectRequest::Status { path } | ProjectRequest::Lock { path, .. } => {
+                // Find the nearest declaration before authenticating the pin;
+                // an explicitly selected directory is not stat'ed yet.
+                let path = match path {
+                    Some(path) => ctx.cwd.join(path),
+                    None => find(&ctx.cwd, &mut scope)?,
                 };
-                // The command wrapper finds the nearest declaration before
-                // invoking LockProject; an explicit path is not stat'ed yet.
-                let path = match inv.flag("--path").filter(|v| !v.is_empty()) {
-                    Some(path) => inv.cwd.join(path),
-                    None => find(&inv.cwd, &mut scope)?,
-                };
-                match snapshot {
-                    Some(id) => lock(&inv.home, &path, id, &mut scope, &mut publication)?,
-                    None => inspect(&path, &mut scope)?,
+                match request {
+                    ProjectRequest::Lock { snapshot, .. } => lock(&ctx.home, &path, snapshot, &mut scope, &mut publication)?,
+                    _ => inspect(&path, &mut scope)?,
                 }
             }
-            _ => return Err(ToolkitError::arguments("unknown project verb")),
         };
         let mut out = Outcome::new(serde_json::to_value(&value)?);
-        if inv.command == "project lock" {
-            out.selection =
-                json!({"snapshot":value.lock.as_ref().expect("successful lock").selection.id});
+        if matches!(request, ProjectRequest::Lock { .. }) {
+            out.selection = json!({"snapshot":value.lock.as_ref().expect("successful lock").selection.id});
         }
         Ok(out)
     })();
     publication.finish(scope.finish(result, []))
 }
-pub(in crate::selection) fn optional(inv: &Invocation) -> Result<Option<(PathBuf, PinnedSet)>> {
-    let mut scope = Scope {
-        control: &inv.control,
-        supplemental: || Ok(()),
-    };
+
+pub(in crate::selection) fn optional(request: PinSelectionRequest<'_>, control: &OperationControl) -> Result<Option<(PathBuf, PinnedSet)>> {
+    let mut scope = Scope { control, supplemental: || Ok(()) };
     let result = (|| {
         scope.check()?;
-        if inv.flag("--snapshot").is_some_and(|id| !id.is_empty()) {
+        if request.snapshot.is_some_and(|id| !id.is_empty()) {
             return Ok(None);
         }
-        let path = match inv.flag("--project").filter(|p| !p.is_empty()) {
-            Some(path) => absolute(&inv.cwd.join(path))?,
-            None => match find(&inv.cwd, &mut scope) {
+        let path = match request.project.filter(|p| !p.is_empty()) {
+            Some(path) => absolute(&request.cwd.join(path))?,
+            None => match find(request.cwd, &mut scope) {
                 Ok(path) => path,
                 Err(e) if pure(&e, "selection.project_missing") => return Ok(None),
                 Err(e) => return Err(e),
             },
         };
-        let mut selected = inv.clone();
-        selected
-            .flags
-            .insert("--project".into(), path.to_string_lossy().into());
-        let pin = resolve_pinned_controlled_with_check(&selected, || Ok(()))?;
+        let project = path.to_string_lossy();
+        let pin = resolve_pin_request_controlled_with_check(
+            PinSelectionRequest { project: Some(&project), ..request }, control, || Ok(()),
+        )?;
         Ok(Some((path, pin)))
     })();
     scope.finish(result, [])
 }
+
 #[cfg(test)]
 mod tests;

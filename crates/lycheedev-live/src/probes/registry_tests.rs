@@ -1,6 +1,5 @@
 use super::*;
 use std::{
-    collections::BTreeMap,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -25,29 +24,17 @@ impl Fixture {
         fs::write(root.join("code.lua"), b"return 42").unwrap();
         Self { root }
     }
-    fn inv(&self, command: &str) -> Invocation {
-        Invocation {
-            command: command.into(),
-            positional: None,
-            flags: BTreeMap::new(),
-            home: self.root.join("home"),
-            cwd: self.root.clone(),
-            control: Default::default(),
-        }
+    fn context(&self) -> LiveContext {
+        LiveContext { home: self.root.join("home"), control: Default::default() }
+    }
+    fn put_request(&self, name: &str) -> ProbeRequest {
+        ProbeRequest::Put { name: name.into(), file: self.root.join("code.lua") }
     }
     fn put(&self, name: &str) -> Outcome {
-        let mut inv = self.inv("live probe put");
-        inv.flags.insert("--name".into(), name.into());
-        inv.flags.insert(
-            "--file".into(),
-            self.root.join("code.lua").to_string_lossy().into_owned(),
-        );
-        dispatch(&inv).unwrap()
+        dispatch(&self.context(), &self.put_request(name)).unwrap()
     }
     fn remove(&self, name: &str) {
-        let mut inv = self.inv("live probe remove");
-        inv.positional = Some(name.into());
-        dispatch(&inv).unwrap();
+        dispatch(&self.context(), &ProbeRequest::Remove { name: name.into() }).unwrap();
     }
     fn corrupt_name(&self, key: &str, name: &str) {
         let mut meta = Metadata::open(&self.root.join("home"), true).unwrap();
@@ -72,16 +59,15 @@ fn active_limit_pages_past_removed_names_and_include_removed_keeps_order() {
     }
     f.remove("a");
     f.remove("b");
-    let mut inv = f.inv("live probe list");
-    inv.flags.insert("--limit".into(), "1".into());
-    let result = dispatch(&inv).unwrap();
+    let ctx = f.context();
+    let request = ProbeRequest::List { limit: 1, include_removed: false };
+    let result = dispatch(&ctx, &request).unwrap();
     assert_eq!(result.data["items"].as_array().unwrap().len(), 1);
     assert_eq!(result.data["items"][0]["name"], "z");
-    inv.flags.insert("--include-removed".into(), "true".into());
-    assert_eq!(dispatch(&inv).unwrap().data["items"][0]["name"], "a");
-    inv.flags.remove("--include-removed");
+    let including_removed = ProbeRequest::List { limit: 1, include_removed: true };
+    assert_eq!(dispatch(&ctx, &including_removed).unwrap().data["items"][0]["name"], "a");
     f.remove("z");
-    assert_eq!(dispatch(&inv).unwrap().data["items"], json!([]));
+    assert_eq!(dispatch(&ctx, &request).unwrap().data["items"], json!([]));
 }
 #[test]
 fn corrupt_selector_rejects_put_before_new_revision_is_committed() {
@@ -90,14 +76,10 @@ fn corrupt_selector_rejects_put_before_new_revision_is_committed() {
     f.corrupt_name("a", "wrong");
     let bytes = b"return 43";
     fs::write(f.root.join("code.lua"), bytes).unwrap();
-    let mut inv = f.inv("live probe put");
-    inv.flags.insert("--name".into(), "a".into());
-    inv.flags.insert(
-        "--file".into(),
-        f.root.join("code.lua").to_string_lossy().into_owned(),
-    );
-    assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_name_corrupt");
-    let meta = Metadata::open(&inv.home, false).unwrap();
+    let ctx = f.context();
+    let request = f.put_request("a");
+    assert_eq!(dispatch(&ctx, &request).unwrap_err().code, "live.probe_name_corrupt");
+    let meta = Metadata::open(&ctx.home, false).unwrap();
     assert_eq!(
         meta.read::<Revision>(&format!("probe/revision/PRB-{}", storage::sha256(bytes)))
             .unwrap_err()
@@ -113,12 +95,12 @@ fn list_and_remove_validate_key_identity_including_removed_names() {
     f.remove("a");
     f.corrupt_name("a", "wrong");
     assert_eq!(
-        dispatch(&f.inv("live probe list")).unwrap_err().code,
+        dispatch(&f.context(), &ProbeRequest::List { limit: 100, include_removed: false }).unwrap_err().code,
         "live.probe_name_corrupt"
     );
-    let mut inv = f.inv("live probe remove");
-    inv.positional = Some("a".into());
-    assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_name_corrupt");
+    let ctx = f.context();
+    let request = ProbeRequest::Remove { name: "a".into() };
+    assert_eq!(dispatch(&ctx, &request).unwrap_err().code, "live.probe_name_corrupt");
 }
 #[test]
 fn same_revision_is_idempotent_and_removed_revision_remains_readable() {
@@ -128,42 +110,33 @@ fn same_revision_is_idempotent_and_removed_revision_remains_readable() {
     assert_eq!(f.put("a").data["changed"], false);
     let id = first.data["revision"]["id"].as_str().unwrap();
     f.remove("a");
-    assert_eq!(code(&f.inv("live probe show"), id).unwrap(), b"return 42");
+    assert_eq!(code(&f.context(), id).unwrap(), b"return 42");
     assert_eq!(f.put("a").data["changed"], true);
 }
 #[test]
 fn bounded_input_rechecks_actual_growth_and_empty_after_same_handle_stat() {
     let f = Fixture::new();
     let path = f.root.join("code.lua");
-    let mut inv = f.inv("live probe put");
-    inv.flags
-        .insert("--file".into(), path.to_string_lossy().into_owned());
-    let error = source_bytes_observed(&inv, || fs::write(&path, vec![b'x'; MAX_CODE + 1]).unwrap())
+    let ctx = f.context();
+    let error = source_bytes_observed(&ctx, &path, || fs::write(&path, vec![b'x'; MAX_CODE + 1]).unwrap())
         .unwrap_err();
     assert_eq!(error.exit_code, 2);
     fs::write(&path, b"x").unwrap();
-    let error = source_bytes_observed(&inv, || fs::write(&path, []).unwrap()).unwrap_err();
+    let error = source_bytes_observed(&ctx, &path, || fs::write(&path, []).unwrap()).unwrap_err();
     assert_eq!(error.exit_code, 2);
 }
 #[test]
 fn cancelled_registry_commands_publish_nothing() {
-    use std::{
-        sync::{Arc, atomic::AtomicBool},
-        time::{Duration, Instant},
-    };
+    use lycheedev_core::control::{OperationControl, TrackedCancellation};
+    use std::time::{Duration, Instant};
     let f = Fixture::new();
-    let mut inv = f.inv("live probe put");
-    inv.flags.insert("--name".into(), "a".into());
-    inv.flags.insert(
-        "--file".into(),
-        f.root.join("code.lua").to_string_lossy().into_owned(),
-    );
-    inv.control = lycheedev_core::control::OperationControl::new(
-        Instant::now() + Duration::from_secs(10),
-        Arc::new(AtomicBool::new(true)),
-    );
-    assert_eq!(dispatch(&inv).unwrap_err().exit_code, 7);
-    let meta = Metadata::open(&inv.home, false).unwrap();
+    let mut ctx = f.context();
+    let request = f.put_request("a");
+    let token = TrackedCancellation::new();
+    token.cancel();
+    ctx.control = OperationControl::tracked(Instant::now() + Duration::from_secs(10), token);
+    assert_eq!(dispatch(&ctx, &request).unwrap_err().exit_code, 7);
+    let meta = Metadata::open(&ctx.home, false).unwrap();
     assert_eq!(
         meta.read::<Name>("probe/name/a").unwrap_err().code,
         "vault.record_missing"
@@ -176,14 +149,10 @@ fn failed_selector_cas_rolls_back_new_revision_in_same_transaction() {
     f.put("a");
     let bytes = b"return 999";
     fs::write(f.root.join("code.lua"), bytes).unwrap();
-    let mut inv = f.inv("live probe put");
-    inv.flags.insert("--name".into(), "a".into());
-    inv.flags.insert(
-        "--file".into(),
-        f.root.join("code.lua").to_string_lossy().into_owned(),
-    );
-    let error = dispatch_observed(&inv, || {
-        let mut meta = Metadata::open(&inv.home, true)?;
+    let ctx = f.context();
+    let request = f.put_request("a");
+    let error = dispatch_observed(&ctx, &request, || {
+        let mut meta = Metadata::open(&ctx.home, true)?;
         let key = "probe/name/a";
         let n: Name = meta.read(key)?;
         let generation = meta.generation(key)?;
@@ -192,7 +161,7 @@ fn failed_selector_cas_rolls_back_new_revision_in_same_transaction() {
     })
     .unwrap_err();
     assert_eq!(error.code, "vault.generation_conflict");
-    let meta = Metadata::open(&inv.home, false).unwrap();
+    let meta = Metadata::open(&ctx.home, false).unwrap();
     assert_eq!(
         meta.read::<Revision>(&format!("probe/revision/PRB-{}", storage::sha256(bytes)))
             .unwrap_err()
@@ -203,32 +172,23 @@ fn failed_selector_cas_rolls_back_new_revision_in_same_transaction() {
 }
 #[test]
 fn cancellation_after_validation_does_not_commit_either_document() {
-    use std::{
-        sync::{Arc, atomic::AtomicBool},
-        time::{Duration, Instant},
-    };
+    use lycheedev_core::control::{OperationControl, TrackedCancellation};
+    use std::time::{Duration, Instant};
     let f = Fixture::new();
-    let token = Arc::new(AtomicBool::new(false));
-    let mut inv = f.inv("live probe put");
-    inv.flags.insert("--name".into(), "a".into());
-    inv.flags.insert(
-        "--file".into(),
-        f.root.join("code.lua").to_string_lossy().into_owned(),
-    );
-    inv.control = lycheedev_core::control::OperationControl::new(
-        Instant::now() + Duration::from_secs(10),
-        token.clone(),
-    );
+    let token = TrackedCancellation::new();
+    let mut ctx = f.context();
+    let request = f.put_request("a");
+    ctx.control = OperationControl::tracked(Instant::now() + Duration::from_secs(10), token.clone());
     assert_eq!(
-        dispatch_observed(&inv, || {
-            token.store(true, Ordering::Release);
+        dispatch_observed(&ctx, &request, || {
+            token.cancel();
             Ok(())
         })
         .unwrap_err()
         .exit_code,
         7
     );
-    let meta = Metadata::open(&inv.home, false).unwrap();
+    let meta = Metadata::open(&ctx.home, false).unwrap();
     assert!(meta.list::<Name>("probe/name/", 100).unwrap().is_empty());
     assert!(
         meta.list::<Revision>("probe/revision/", 100)
@@ -242,10 +202,8 @@ fn cancellation_after_validation_does_not_commit_either_document() {
 fn source_read_retains_original_handle_when_path_is_replaced() {
     let f = Fixture::new();
     let path = f.root.join("code.lua");
-    let mut inv = f.inv("live probe put");
-    inv.flags
-        .insert("--file".into(), path.to_string_lossy().into_owned());
-    let bytes = source_bytes_observed(&inv, || {
+    let ctx = f.context();
+    let bytes = source_bytes_observed(&ctx, &path, || {
         fs::rename(&path, f.root.join("original.lua")).unwrap();
         fs::write(&path, b"replacement").unwrap();
     })
@@ -258,16 +216,12 @@ fn second_mutation_conflict_rolls_back_selector_update() {
     let original = f.put("a");
     let bytes = b"return 999";
     fs::write(f.root.join("code.lua"), bytes).unwrap();
-    let mut inv = f.inv("live probe put");
-    inv.flags.insert("--name".into(), "a".into());
-    inv.flags.insert(
-        "--file".into(),
-        f.root.join("code.lua").to_string_lossy().into_owned(),
-    );
+    let ctx = f.context();
+    let request = f.put_request("a");
     let digest = storage::sha256(bytes);
     let id = format!("PRB-{digest}");
-    let error = dispatch_observed(&inv, || {
-        let mut meta = Metadata::open(&inv.home, true)?;
+    let error = dispatch_observed(&ctx, &request, || {
+        let mut meta = Metadata::open(&ctx.home, true)?;
         meta.create(
             &format!("probe/revision/{id}"),
             &Revision {
@@ -283,7 +237,7 @@ fn second_mutation_conflict_rolls_back_selector_update() {
     })
     .unwrap_err();
     assert_eq!(error.code, "vault.generation_conflict");
-    let meta = Metadata::open(&inv.home, false).unwrap();
+    let meta = Metadata::open(&ctx.home, false).unwrap();
     let name: Name = meta.read("probe/name/a").unwrap();
     assert_eq!(
         name.revision,
@@ -299,14 +253,12 @@ fn exact_maximum_code_round_trips_and_one_extra_byte_is_not_published() {
     fs::write(&path, &bytes).unwrap();
     let result = f.put("max");
     let id = result.data["revision"]["id"].as_str().unwrap();
-    assert_eq!(code(&f.inv("live probe show"), id).unwrap(), bytes);
+    assert_eq!(code(&f.context(), id).unwrap(), bytes);
     fs::write(&path, vec![b'x'; MAX_CODE + 1]).unwrap();
-    let mut inv = f.inv("live probe put");
-    inv.flags.insert("--name".into(), "too_large".into());
-    inv.flags
-        .insert("--file".into(), path.to_string_lossy().into_owned());
-    assert_eq!(dispatch(&inv).unwrap_err().exit_code, 2);
-    let meta = Metadata::open(&inv.home, false).unwrap();
+    let ctx = f.context();
+    let request = f.put_request("too_large");
+    assert_eq!(dispatch(&ctx, &request).unwrap_err().exit_code, 2);
+    let meta = Metadata::open(&ctx.home, false).unwrap();
     assert_eq!(
         meta.read::<Name>("probe/name/too_large").unwrap_err().code,
         "vault.record_missing"
@@ -321,15 +273,7 @@ const ZERO_TIMESTAMPS: &[&str] = &[
     "0001-01-01T01:00:00+01:00",
     "0000-12-31T23:00:00-01:00",
 ];
-fn put_inv(f: &Fixture, name: &str) -> Invocation {
-    let mut inv = f.inv("live probe put");
-    inv.flags.insert("--name".into(), name.into());
-    inv.flags.insert(
-        "--file".into(),
-        f.root.join("code.lua").to_string_lossy().into_owned(),
-    );
-    inv
-}
+
 fn set_name_timestamp(f: &Fixture, stamp: &str) {
     let mut meta = Metadata::open(&f.root.join("home"), true).unwrap();
     let key = "probe/name/a";
@@ -349,11 +293,11 @@ fn change_revision(f: &Fixture, id: &str, change: impl FnOnce(&mut Revision)) {
     meta.close().unwrap();
 }
 fn registry_snapshot(f: &Fixture) -> Vec<(String, i64, Vec<u8>)> {
-    let inv = f.inv("live probe list");
-    let meta = Metadata::open(&inv.home, false).unwrap();
+    let ctx = f.context();
+    let meta = Metadata::open(&ctx.home, false).unwrap();
     let mut documents = Vec::new();
     let (count, _) = meta.visit_raw_page_controlled_with_check(
-        "probe/", "", 100, &inv.control, || Ok(()),
+        "probe/", "", 100, &ctx.control, || Ok(()),
         |key, generation, bytes| {
             documents.push((key.to_owned(), generation, bytes.to_vec()));
             Ok(())
@@ -376,33 +320,30 @@ fn zero_selector_timestamps_reject_all_consumers_without_registry_mutation() {
             set_name_timestamp(&f, stamp);
             let before = registry_snapshot(&f);
             for include_removed in [false, true] {
-                let mut inv = f.inv("live probe list");
-                if include_removed {
-                    inv.flags.insert("--include-removed".into(), "true".into());
-                }
-                assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_name_corrupt", "{stamp}");
+                let ctx = f.context();
+                let request = ProbeRequest::List { limit: 100, include_removed };
+                assert_eq!(dispatch(&ctx, &request).unwrap_err().code, "live.probe_name_corrupt", "{stamp}");
                 assert_eq!(registry_snapshot(&f), before);
             }
-            for command in ["live probe show", "live probe remove"] {
-                let mut inv = f.inv(command);
-                inv.positional = Some("a".into());
-                assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_name_corrupt", "{stamp}");
+            for request in [ProbeRequest::Show { selector: "a".into() }, ProbeRequest::Remove { name: "a".into() }] {
+                let ctx = f.context();
+                assert_eq!(dispatch(&ctx, &request).unwrap_err().code, "live.probe_name_corrupt", "{stamp}");
                 assert_eq!(registry_snapshot(&f), before);
             }
-            assert_eq!(code(&f.inv("live probe show"), "a").unwrap_err().code, "live.probe_name_corrupt");
+            assert_eq!(code(&f.context(), "a").unwrap_err().code, "live.probe_name_corrupt");
             // Both the otherwise-idempotent put and a fresh revision must fail
             // before either stored document or its generation is changed.
-            assert_eq!(dispatch(&put_inv(&f, "a")).unwrap_err().code, "live.probe_name_corrupt");
+            assert_eq!(dispatch(&f.context(), &f.put_request("a")).unwrap_err().code, "live.probe_name_corrupt");
             assert_eq!(registry_snapshot(&f), before);
             fs::write(f.root.join("code.lua"), b"return 43").unwrap();
-            assert_eq!(dispatch(&put_inv(&f, "a")).unwrap_err().code, "live.probe_name_corrupt");
+            assert_eq!(dispatch(&f.context(), &f.put_request("a")).unwrap_err().code, "live.probe_name_corrupt");
             assert_eq!(registry_snapshot(&f), before);
             // Explicit immutable revision lookup does not consume a stored
             // selector. Its synthetic unnamed zero timestamp remains legal.
-            let shown = show(&f.inv("live probe show"), id).unwrap();
+            let shown = show(&f.context(), id).unwrap();
             assert_eq!(shown.data["name"]["name"], "");
             assert_eq!(shown.data["name"]["updatedAt"], "0001-01-01T00:00:00Z");
-            assert_eq!(code(&f.inv("live probe show"), id).unwrap(), b"return 42");
+            assert_eq!(code(&f.context(), id).unwrap(), b"return 42");
             assert_eq!(registry_snapshot(&f), before);
         }
     }
@@ -416,25 +357,25 @@ fn zero_revision_timestamps_reject_show_code_and_put_without_partial_names() {
         change_revision(&f, id, |revision| revision.created_at = (*stamp).into());
         let before = registry_snapshot(&f);
         for selector in ["a", id] {
-            let mut inv = f.inv("live probe show");
-            inv.positional = Some(selector.into());
-            assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
-            assert_eq!(code(&inv, selector).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
+            let ctx = f.context();
+            let request = ProbeRequest::Show { selector: selector.into() };
+            assert_eq!(dispatch(&ctx, &request).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
+            assert_eq!(code(&ctx, selector).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
             assert_eq!(registry_snapshot(&f), before);
         }
         for name in ["a", "new_name"] {
-            assert_eq!(dispatch(&put_inv(&f, name)).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
+            assert_eq!(dispatch(&f.context(), &f.put_request(name)).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
             assert_eq!(registry_snapshot(&f), before);
         }
         // Go list/remove consume selectors alone; the timestamp check must not
         // grow into an unrelated revision scan or stop retiring a valid name.
-        assert_eq!(dispatch(&f.inv("live probe list")).unwrap().data["items"][0]["name"], "a");
+        assert_eq!(dispatch(&f.context(), &ProbeRequest::List { limit: 100, include_removed: false }).unwrap().data["items"][0]["name"], "a");
         assert_eq!(registry_snapshot(&f), before);
         f.remove("a");
         let after = registry_snapshot(&f);
         let key = format!("probe/revision/{id}");
         assert_eq!(before.iter().find(|doc| doc.0 == key), after.iter().find(|doc| doc.0 == key));
-        assert_eq!(dispatch(&f.inv("live probe list")).unwrap().data["items"], json!([]));
+        assert_eq!(dispatch(&f.context(), &ProbeRequest::List { limit: 100, include_removed: false }).unwrap().data["items"], json!([]));
     }
 }
 #[test]
@@ -451,21 +392,21 @@ fn nonzero_stored_times_and_unnamed_zero_fallback_keep_registry_behavior() {
         set_name_timestamp(&f, stamp);
         change_revision(&f, id, |revision| revision.created_at = stamp.into());
         let before = registry_snapshot(&f);
-        let shown = show(&f.inv("live probe show"), "a").unwrap();
+        let shown = show(&f.context(), "a").unwrap();
         assert_eq!(shown.data["name"]["updatedAt"], stamp);
         assert_eq!(shown.data["revision"]["createdAt"], stamp);
-        assert_eq!(code(&f.inv("live probe show"), "a").unwrap(), b"return 42");
+        assert_eq!(code(&f.context(), "a").unwrap(), b"return 42");
         assert_eq!(f.put("a").data["changed"], false);
         assert_eq!(registry_snapshot(&f), before);
-        assert_eq!(dispatch(&f.inv("live probe list")).unwrap().data["items"][0]["updatedAt"], stamp);
+        assert_eq!(dispatch(&f.context(), &ProbeRequest::List { limit: 100, include_removed: false }).unwrap().data["items"][0]["updatedAt"], stamp);
         f.remove("a");
-        assert_eq!(show(&f.inv("live probe show"), "a").unwrap_err().code, "live.probe_removed");
-        let shown = show(&f.inv("live probe show"), id).unwrap();
+        assert_eq!(show(&f.context(), "a").unwrap_err().code, "live.probe_removed");
+        let shown = show(&f.context(), id).unwrap();
         assert_eq!(shown.data["name"]["updatedAt"], "0001-01-01T00:00:00Z");
         assert_eq!(shown.data["revision"]["createdAt"], stamp);
-        assert_eq!(code(&f.inv("live probe show"), id).unwrap(), b"return 42");
+        assert_eq!(code(&f.context(), id).unwrap(), b"return 42");
         assert_eq!(f.put("a").data["changed"], true);
-        assert_eq!(code(&f.inv("live probe show"), "a").unwrap(), b"return 42");
+        assert_eq!(code(&f.context(), "a").unwrap(), b"return 42");
     }
 }
 #[test]
@@ -484,12 +425,12 @@ fn valid_stored_timestamps_do_not_weaken_revision_identity_or_code_integrity() {
         });
         let before = registry_snapshot(&f);
         for selector in ["a", id] {
-            let inv = f.inv("live probe show");
-            assert_eq!(show(&inv, selector).unwrap_err().code, "live.probe_revision_corrupt", "{field}");
-            assert_eq!(code(&inv, selector).unwrap_err().code, "live.probe_revision_corrupt", "{field}");
+            let ctx = f.context();
+            assert_eq!(show(&ctx, selector).unwrap_err().code, "live.probe_revision_corrupt", "{field}");
+            assert_eq!(code(&ctx, selector).unwrap_err().code, "live.probe_revision_corrupt", "{field}");
         }
-        assert!(dispatch(&put_inv(&f, "a")).is_err());
-        assert!(dispatch(&put_inv(&f, "new_name")).is_err());
+        assert!(dispatch(&f.context(), &f.put_request("a")).is_err());
+        assert!(dispatch(&f.context(), &f.put_request("new_name")).is_err());
         assert_eq!(registry_snapshot(&f), before);
     }
 }

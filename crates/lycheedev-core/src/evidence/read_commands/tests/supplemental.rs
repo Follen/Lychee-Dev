@@ -9,7 +9,7 @@ fn stopped() -> ToolkitError {
 #[test]
 fn independent_capture_read_reuses_historical_identity_and_never_creates_evidence() {
     let f = Fixture::new();
-    let (id, raw) = f.manifest(-2, "supplemental");
+    let (id, raw) = f.manifest(2, "supplemental");
     let mut checks = 0;
     let value =
         read_capture_controlled_with_check(&f.home, &id, &OperationControl::default(), || {
@@ -93,22 +93,12 @@ fn original_parse_failure_keeps_priority_when_independent_stop_is_also_observed(
     );
 }
 #[test]
-fn normalization_checks_independent_scope_during_large_input_without_exposing_raw_token() {
+fn typed_capture_reads_retain_stop_observation_without_a_normalization_pass() {
     let stop = TrackedCancellation::new();
+    stop.cancel();
     let control = OperationControl::tracked(Instant::now() + Duration::from_secs(30), stop);
-    let raw = format!("{{\"text\":\"{}\"}}", "a".repeat(200_000));
-    let mut checks = 0;
-    let error = normalize_go_json_strings_with_check(raw.as_bytes(), &control, || {
-        checks += 1;
-        if checks >= 3 { Err(stopped()) } else { Ok(()) }
-    })
-    .unwrap_err();
-    assert_eq!(error.code, "records.query_resource_budget");
-    assert!(checks >= 3);
-    assert_eq!(control.stop_cause().unwrap(), None);
-    control
-        .ordered_child(control.deadline())
-        .unwrap()
-        .check()
-        .unwrap();
+    let raw = br#"{"schema":"lycheedev.capture.v1"}"#;
+    let error = dependencies::decode_capture_ref(raw, &control).unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(control.stop_cause().unwrap(), Some(StopCause::Cancelled));
 }

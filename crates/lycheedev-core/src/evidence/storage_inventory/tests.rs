@@ -158,36 +158,23 @@ fn relative_home_inventory_keeps_managed_tmp_out_of_legacy_totals() {
 #[test]
 fn authenticated_legacy_body_forms_are_protected_not_rejected_or_verified() {
     let f = Fixture::new();
-    let base = f.capture(b"legacy", "data-query", "signed-forms");
-    for (negative, uppercase) in [(true, false), (false, true)] {
-        let mut capture: CaptureRef = serde_json::from_value(base.clone()).unwrap();
-        capture.id.clear();
-        capture.blob.bytes = 0;
-        if uppercase {
-            capture.blob.sha256 = capture.blob.sha256.to_ascii_uppercase();
-        }
-        let unsigned = String::from_utf8(storage::identity_json(&capture).unwrap()).unwrap();
-        let unsigned = if negative {
-            unsigned.replace("\"bytes\":0", "\"bytes\":-1")
-        } else {
-            unsigned
-        };
-        let id = format!("CAP-{}", storage::sha256(unsigned.as_bytes()));
-        let raw = unsigned.replace("\"id\":\"\"", &format!("\"id\":\"{id}\""));
-        let value: Value = serde_json::from_str(&raw).unwrap();
-        let mut metadata = Metadata::open(&f.0, true).unwrap();
-        metadata
-            .put(&format!("capture/{id}"), &value, None)
-            .unwrap();
-        metadata.close().unwrap();
-    }
+    let base = f.capture(b"legacy", "data-query", "historical-forms");
+    let mut capture: CaptureRef = serde_json::from_value(base.clone()).unwrap();
+    capture.id.clear();
+    capture.blob.bytes = 0;
+    capture.blob.sha256 = capture.blob.sha256.to_ascii_uppercase();
+    let unsigned = String::from_utf8(storage::identity_json(&capture).unwrap()).unwrap();
+    let id = format!("CAP-{}", storage::sha256(unsigned.as_bytes()));
+    let raw = unsigned.replace("\"id\":\"\"", &format!("\"id\":\"{id}\""));
+    let value: Value = serde_json::from_str(&raw).unwrap();
+    let mut metadata = Metadata::open(&f.0, true).unwrap();
+    metadata
+        .put(&format!("capture/{id}"), &value, None)
+        .unwrap();
+    metadata.close().unwrap();
     let result = report(&f.0, &OperationControl::default()).unwrap();
     let candidates = &result["historicalProtected"]["dataProducerCandidates"];
-    assert_eq!(candidates["captureCount"], 3);
-    assert_eq!(
-        candidates["unsupportedAuthenticatedCaptureCounts"]["negativeSignedLength"],
-        1
-    );
+    assert_eq!(candidates["captureCount"], 2);
     assert_eq!(
         candidates["unsupportedAuthenticatedCaptureCounts"]["noncanonicalDigest"],
         1

@@ -3,7 +3,7 @@ use crate::xml_load::{Action, GameMode, HandlerTarget, LoadFamily, Program, XmlO
 use std::{sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 
 fn control() -> OperationControl {
-    OperationControl::new(Instant::now() + Duration::from_secs(30), Arc::new(AtomicBool::new(false)))
+    OperationControl::uncancelable(Instant::now() + Duration::from_secs(30))
 }
 fn program(control: &OperationControl) -> Program {
     Program::from_sources("Main.toc", [
@@ -16,6 +16,8 @@ fn identity(program: Option<Arc<Program>>) -> SourceIdentityEvidence {
     SourceIdentityEvidence {
         common: Arc::new(evidence_fields(json!({"a":{"z":0,"a":1},"shared":"common","z":[]}))),
         execution: evidence_fields(json!({"executionPhase":"after_load","shared":"execution"})),
+        environment: None,
+        environment_value: std::sync::OnceLock::new(),
         xml: program,
         xml_value: std::sync::OnceLock::new(),
     }
@@ -23,6 +25,10 @@ fn identity(program: Option<Arc<Program>>) -> SourceIdentityEvidence {
 fn eager_identity(identity: &SourceIdentityEvidence) -> Value {
     let mut fields = identity.common.as_ref().clone();
     fields.extend(identity.execution.clone());
+    if let Some(environment) = &identity.environment {
+        let host=TrustedHostEnvironment{data:environment.clone(),admission_control:control()};
+        fields.insert("environment".into(),host.identity_value(&host.admission_control).unwrap());
+    }
     if let Some(program) = &identity.xml { fields.insert("xmlProgram".into(), json!(program.as_ref())); }
     Value::Object(fields)
 }
@@ -35,6 +41,118 @@ fn snapshot(identity: SourceIdentityEvidence) -> Arc<GraphSnapshotEvidence> {
 }
 fn error_json<T>(result: lycheedev_core::Result<T>) -> Value {
     match result { Ok(_) => panic!("expected failure"), Err(error) => json!(error) }
+}
+
+const HOST_SOURCE:&str="Mixin=function() end\nCreateFromMixins=function() end\nsetmetatable=function() end\n";
+fn populated_host(c:&OperationControl)->TrustedHostEnvironment {
+    let rules=json!({"calls":{"HostRules":{"name":"HostRules",
+        "arguments":{"1":{"secret":"conditional","condition":"界\nquoted\"","metadata":{"z":null,"a":[true,1.25]}}},
+        "returns":{"1":{"state":"possible"},"2":{"state":"never"}}}}});
+    let rules_bytes=serde_json::to_vec(&rules).unwrap();
+    let material=json!({"sourceExecution":false,"configExecution":false,
+        "rules":{"sha256":hash(&rules_bytes)},
+        "callables":[
+            {"name":"HostUnknown","identity":"unknown","effect":"unknown","sourceExecution":false},
+            {"name":"HostRules","identity":"rules","effect":"no_lua_heap_write","retainsArguments":false,"returnArity":2,"sourceExecution":false,
+                "descriptor":{"kind":"function","name":"HostRules","raw":{"z":{"z":null,"a":[u64::MAX,i64::MIN,-1.25,0.0]},"a":"\"\\\n\t界"}}}],
+        "methods":[{"name":"FrameOwner.Show","identity":"method","effect":"unknown","sourceExecution":false,"returnArity":0,
+            "descriptor":{"kind":"function","name":"Show","owner":{"kind":"script-object","name":"FrameOwner","source":null},"raw":{}}}],
+        "nominalObjects":{"Frame":{"owner":"FrameOwner"}},
+        "predicates":[{"name":"issecretvalue","identity":"predicate","effect":"no_lua_heap_write","retainsArguments":false,"returnArity":1,"argument":1}],
+        "initialObjects":[{"name":"HostObject","identity":"object","fields":[]}]});
+    let api_bytes=serde_json::to_vec(&material).unwrap();
+    let intrinsics=["Mixin","CreateFromMixins","setmetatable"].into_iter().map(|name|{
+        let start=HOST_SOURCE.find(name).unwrap()as u32;
+        IntrinsicDeclaration{file:"a.lua".into(),source_sha256:hash(HOST_SOURCE.as_bytes()),start,end:start+name.len()as u32,
+            name:name.into(),rule:PROFILE.into(),host_material:"api".into()}
+    }).collect();
+    let reference=|material:&str,pointer:&str|HostMaterialRef{material:material.into(),pointer:pointer.into()};
+    TrustedHostEnvironment::from_host_material("canonical-host-界".into(),true,vec![
+        HostMaterialInput{name:"api".into(),expected_sha256:hash(&api_bytes),bytes:api_bytes},
+        HostMaterialInput{name:"rules".into(),expected_sha256:hash(&rules_bytes),bytes:rules_bytes},
+    ],intrinsics,c).unwrap().with_bindings(vec![
+        HostBindingInput::Callable{declaration:reference("api","/callables/0"),rules:None},
+        HostBindingInput::Callable{declaration:reference("api","/callables/1"),rules:Some(reference("rules","/calls/HostRules"))},
+        HostBindingInput::Method{declaration:reference("api","/methods/0")},
+        HostBindingInput::Predicate{declaration:reference("api","/predicates/0")},
+        HostBindingInput::EmptyObject{declaration:reference("api","/initialObjects/0")},
+    ],c).unwrap()
+}
+
+#[test]
+fn canonical_host_environment_matches_eager_bytes_hash_and_all_binding_shapes() {
+    let c=control();
+    let populated=populated_host(&c);
+    let eager=populated.identity_value(&c).unwrap();
+    assert_eq!(eager["bindings"].as_array().unwrap().len(),5);
+    assert_eq!(eager["intrinsics"].as_array().unwrap().len(),3);
+    assert_eq!(eager["bindings"][0]["return_arity"],Value::Null);
+    assert_eq!(eager["bindings"][0]["rules"],Value::Null);
+    assert!(eager["bindings"][0].get("descriptor").is_none());
+    assert!(eager["bindings"][0].get("receiver_type").is_none());
+    assert_eq!(eager["bindings"][1]["descriptor"]["raw"]["z"]["a"][0],u64::MAX);
+    assert_eq!(eager["bindings"][2]["receiver_type"],"Frame");
+    assert_eq!(eager["bindings"][3]["kind"],"predicate");
+    assert_eq!(eager["bindings"][4]["kind"],"empty_object");
+    let material_only=TrustedHostEnvironment::from_host_material("material-only".into(),false,
+        vec![HostMaterialInput{name:"raw".into(),bytes:vec![0,255],expected_sha256:hash(&[0,255])}],vec![],&c).unwrap();
+    for host in [populated,material_only,
+        TrustedHostEnvironment::from_host_material("empty".into(),false,vec![],vec![],&c).unwrap(),
+        TrustedHostEnvironment::from_host_material("closed".into(),true,vec![],vec![],&c).unwrap()] {
+        let old=host.identity_value(&c).unwrap();
+        let expected=serialize_json(&old,&c,32<<20).unwrap();
+        let canonical=CanonicalHostEnvironment(&host.data);
+        assert_eq!(serialize_json(&canonical,&c,32<<20).unwrap(),expected);
+        assert_eq!(serialize_json_hash(&canonical,&c,32<<20).unwrap(),(hash(&expected),expected.len()));
+        if host.bindings().is_empty(){assert!(old.get("bindings").is_none());}
+    }
+}
+
+#[test]
+fn host_identity_is_lazy_shared_and_uses_current_request_control_after_renewal() {
+    let c=control();
+    let host=populated_host(&c);
+    let host_data=host.data.clone();
+    let old_environment=host.identity_value(&c).unwrap();
+    let input=SourceInputs::admit(SourceInputSpec{
+        files:vec![SourceFileInput{path:"a.lua".into(),original_utf8:HOST_SOURCE.into(),analysis_utf8:HOST_SOURCE.into(),
+            content_sha256:hash(HOST_SOURCE.as_bytes()),map:SourceMap::Identity}],
+        workspace_root:std::env::current_dir().unwrap().join("host-identity-fixture"),source_identity:json!({"pin":"host-identity"}),
+        phase:"after_load".into(),ordered_occurrences:vec!["a.lua".into()],config:crate::engine_config::research(),host,
+        luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+        limits:SourceLimits::research()},&c).unwrap();
+    assert!(Arc::ptr_eq(input.identity.environment.as_ref().unwrap(),&host_data));
+    assert!(input.identity.common.get("environment").is_none());
+    assert!(input.identity.environment_value.get().is_none());
+    let expected=eager_identity(input.identity());
+    let expected_bytes=serde_json::to_vec(&expected).unwrap();
+    assert_eq!(serde_json::to_vec(input.identity()).unwrap(),expected_bytes);
+    assert_eq!(input.identity_sha256(),hash(&expected_bytes));
+    assert!(input.identity.environment_value.get().is_none());
+    assert_eq!(input.identity()["environment"],old_environment);
+    assert!(std::ptr::eq(&input.identity()["environment"],&input.identity()["environment"]));
+    let cloned=input.identity().clone();
+    assert!(Arc::ptr_eq(cloned.environment.as_ref().unwrap(),&host_data));
+    assert!(cloned.environment_value.get().is_none());
+    assert_eq!(serde_json::to_vec(&cloned).unwrap(),expected_bytes);
+    let refreshed=input.execution("after_load",&["a.lua","a.lua"],&c).unwrap();
+    assert!(Arc::ptr_eq(refreshed.identity.environment.as_ref().unwrap(),&host_data));
+    assert!(refreshed.identity.environment_value.get().is_none());
+    assert_eq!(refreshed.identity_sha256(),hash(&serde_json::to_vec(&eager_identity(refreshed.identity())).unwrap()));
+
+    let mut prepared=prepare(input.clone(),&c).unwrap();
+    c.tracked_cancel_handle().unwrap().cancel();
+    let current=control();
+    prepared.begin_research_request(&current).unwrap();
+    let renewed=prepared.inputs.execution("after_load",&["a.lua"],&current).unwrap();
+    assert!(Arc::ptr_eq(renewed.identity.environment.as_ref().unwrap(),&host_data));
+    assert!(renewed.identity.environment_value.get().is_none());
+    assert_eq!(serialize_json_hash(renewed.identity(),&current,32<<20).unwrap(),(hash(&expected_bytes),expected_bytes.len()));
+    assert_eq!(renewed.identity_sha256(),input.identity_sha256());
+    assert_eq!(renewed.identity()["environment"],old_environment);
+    assert_eq!(error_json(serialize_json_hash(renewed.identity(),&c,32<<20))["code"],"command.cancelled");
+    current.tracked_cancel_handle().unwrap().cancel();
+    assert_eq!(error_json(serialize_json_hash(renewed.identity(),&current,32<<20))["code"],"command.cancelled");
 }
 
 #[test]
@@ -213,7 +331,7 @@ impl Serialize for CancelDuringSerialization<'_> {
         use serde::ser::SerializeSeq;
         let mut seq = serializer.serialize_seq(Some(2))?;
         seq.serialize_element(&"prefix")?;
-        self.0.cancel_handle().store(true, Ordering::Release);
+        self.0.tracked_cancel_handle().unwrap().cancel();
         if self.1 { return Err(serde::ser::Error::custom("failure after cancellation")); }
         seq.serialize_element(&"next")?;
         seq.end()
@@ -222,7 +340,7 @@ impl Serialize for CancelDuringSerialization<'_> {
 #[test]
 fn streamed_json_hash_preserves_cancellation_deadline_and_post_error_precedence() {
     for deadline in [false, true] {
-        let stopped = OperationControl::new(if deadline { Instant::now()-Duration::from_secs(1) } else { Instant::now()+Duration::from_secs(30) }, Arc::new(AtomicBool::new(!deadline)));
+        let stopped = stopped_control(deadline, Instant::now()+Duration::from_secs(30));
         for limit in [0, 1, 32<<20, (32<<20)+1] {
             assert_eq!(error_json(serialize_json_hash(&json!({}), &stopped, limit)), error_json(serialize_json(&json!({}), &stopped, limit)));
         }
@@ -244,7 +362,7 @@ fn snapshot_hash_validates_before_lazy_construction_and_preserves_original_failu
         assert_eq!(error_json(SnapshotInputsJson::new(Arc::clone(&evidence), &c, limit)), error_json(serialize_json(evidence.as_ref(), &c, limit)));
     }
     let (lazy, _) = SnapshotInputsJson::new(Arc::clone(&evidence), &c, expected.len()).unwrap();
-    c.cancel_handle().store(true, Ordering::Release);
+    c.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(error_json(SnapshotInputsJson::new(Arc::clone(&evidence), &c, expected.len())), error_json(serialize_json(evidence.as_ref(), &c, expected.len())));
     // As before, the already admitted immutable public text remains readable
     // after the request ends; laziness cannot turn that access into a new task.

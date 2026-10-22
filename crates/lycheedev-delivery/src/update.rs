@@ -1,9 +1,9 @@
 //! Managed resource update decisions and recovery live here, not in the npm launcher.
 use crate::{deploy, installation, release, slots};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError, VERSION,
+    Outcome, Result, ToolkitError, VERSION, request::RequestContext,
     control::OperationControl,
-    coordination::InstallationGuard,
+    coordination::InstallationMaintenanceLease,
     storage::{self, ExclusiveLock},
 };
 use serde::{Deserialize, Serialize};
@@ -41,11 +41,6 @@ fn read_targets(state: &Path, control: &OperationControl) -> Result<Vec<UpdateTa
         return Err(ToolkitError::invalid("update supports at most 64 targets"));
     }
     Ok(values)
-}
-fn paths_are_implicit(inv: &Invocation) -> bool {
-    inv.flag("--file").is_none()
-        && inv.flag_values("--path").is_empty()
-        && inv.flag_values("--installation").is_empty()
 }
 fn path_identity(path: &Path) -> String {
     path.to_string_lossy()
@@ -187,127 +182,76 @@ enum UpdateStep {
     BeforeTarget(usize),
     LockedTarget(usize),
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    inv.control.check()?;
-    let state = state_path(&inv.home);
-    let paths = inv.flag_values("--path");
-    let installations = inv.flag_values("--installation");
-    let mut targets =
-        if let Some(file) = inv.flag("--file") {
-            if !paths.is_empty() || !installations.is_empty() {
-                return Err(ToolkitError::arguments(
-                    "update --file cannot be combined with target selectors",
-                ));
-            }
-            if fs::metadata(file)?.len() > 64 << 10 {
-                return Err(ToolkitError::arguments("update target file exceeds 64 KiB"));
-            }
-            let values: Vec<UpdateTarget> = serde_json::from_slice(
-                &slots::read_bounded_controlled(Path::new(file), 64 << 10, &inv.control)?,
-            )?;
-            values
-        } else {
-            vec![]
-        };
-    targets.extend(paths.into_iter().map(|path| UpdateTarget {
-        component: "skill".into(),
-        path: path.into(),
-    }));
-    targets.extend(installations.into_iter().map(|path| UpdateTarget {
-        component: "addon".into(),
-        path: path.into(),
-    }));
-    if targets.is_empty() && inv.flag("--file").is_none() {
-        targets = read_targets(&state, &inv.control)?;
-        let user = std::env::var_os("USERPROFILE").map(PathBuf::from);
-        if let Some(user) = user {
-            let codex = std::env::var_os("CODEX_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| user.join(".codex"));
-            for path in [
-                user.join(".agents/skills/lycheedev"),
-                codex.join("skills/lycheedev"),
-            ] {
-                if path.exists() {
-                    targets.push(UpdateTarget {
-                        component: "skill".into(),
-                        path,
-                    });
-                }
-            }
-        }
-        if inv.home.join("state/toolkit.sqlite").exists() {
-            let configs: Vec<Value> = lycheedev_core::metadata::Metadata::open(&inv.home, false)?
-                .list("target/", 10001)?;
-            for config in configs {
-                if config["source"] == "installation"
-                    && let Some(path) = config["installation"].as_str()
-                {
-                    targets.push(UpdateTarget {
-                        component: "addon".into(),
-                        path: path.into(),
-                    });
-                }
-            }
-        }
-    }
-    if paths_are_implicit(inv) {
-        targets = discover_targets(targets, &inv.control)?;
-    }
-    let root = inv
-        .flag("--release")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent()?.parent()?.parent().map(Path::to_path_buf))
-        })
-        .ok_or_else(|| {
-            ToolkitError::new(
-                "delivery.invalid_release",
-                "unable to locate installed release",
-                3,
-            )
-        })?;
-    if inv.flag("--release").is_none() && !inv.flag_bool("--plan") {
-        if let (Some(node), Some(nonce)) = (
-            std::env::var_os("LYCHEEDEV_NODE_EXE"),
-            std::env::var_os("LYCHEEDEV_NPM_NONCE"),
-        ) {
-            let plan = managed_with_control(&root, VERSION, &state, &targets, true, &inv.control)?;
-            let frozen: Vec<UpdateTarget> = plan.data["targets"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|target| {
-                    serde_json::from_value(
-                        json!({"component":target["component"],"path":target["path"]}),
-                    )
-                })
-                .collect::<std::result::Result<_, _>>()?;
-            return crate::npm_update::prepare(
-                inv,
-                &root,
-                &PathBuf::from(node),
-                &nonce.to_string_lossy(),
-                frozen,
-            );
-        }
-        return Err(ToolkitError::new(
-            "update.self_update_handoff_required",
-            "native archives require --release; npm process self-update handoff is not yet connected",
-            3,
-        ));
-    }
-    managed_with_control(
-        &root,
-        VERSION,
-        &state,
-        &targets,
-        inv.flag_bool("--plan"),
-        &inv.control,
-    )
+#[derive(Clone, Debug)]
+pub enum TargetSelection {
+    Explicit(Vec<UpdateTarget>),
+    Discover { skill_candidates: Vec<PathBuf> },
 }
+#[derive(Clone, Debug)]
+pub struct Launcher {
+    pub node: PathBuf,
+    pub nonce: String,
+    pub npm_search_paths: Vec<PathBuf>,
+}
+#[derive(Clone, Debug)]
+pub enum Action {
+    Managed { release: PathBuf, plan: bool },
+    SelfUpdate { installed: PathBuf, launcher: Option<Launcher>, presentation: String },
+}
+#[derive(Clone, Debug)]
+pub struct Request {
+    pub selection: TargetSelection,
+    pub action: Action,
+}
+/// The update inventory file format; selectors belong to the CLI adapter.
+pub fn read_target_file(path: &Path, control: &OperationControl) -> Result<Vec<UpdateTarget>> {
+    control.check()?;
+    if fs::metadata(path)?.len() > 64 << 10 {
+        return Err(ToolkitError::arguments("update target file exceeds 64 KiB"));
+    }
+    Ok(serde_json::from_slice(&slots::read_bounded_controlled(path, 64 << 10, control)?)?)
+}
+pub fn dispatch(ctx: &RequestContext, request: &Request) -> Result<Outcome> {
+    ctx.control.check()?;
+    let state = state_path(&ctx.home);
+    let mut targets = match &request.selection {
+        TargetSelection::Explicit(targets) => targets.clone(),
+        TargetSelection::Discover { skill_candidates } => {
+            let mut targets = read_targets(&state, &ctx.control)?;
+            for path in skill_candidates {
+                if path.exists() {
+                    targets.push(UpdateTarget { component: "skill".into(), path: path.clone() });
+                }
+            }
+            if ctx.home.join("state/toolkit.sqlite").exists() {
+                let configs: Vec<Value> = lycheedev_core::metadata::Metadata::open(&ctx.home, false)?.list("target/", 10001)?;
+                for config in configs {
+                    if config["source"] == "installation" && let Some(path) = config["installation"].as_str() {
+                        targets.push(UpdateTarget { component: "addon".into(), path: path.into() });
+                    }
+                }
+            }
+            discover_targets(targets, &ctx.control)?
+        }
+    };
+    match &request.action {
+        Action::Managed { release, plan } => managed_with_control(release, VERSION, &state, &targets, *plan, &ctx.control),
+        Action::SelfUpdate { installed, launcher, presentation } => {
+            if let Some(launcher) = launcher {
+                let plan = managed_with_control(installed, VERSION, &state, &targets, true, &ctx.control)?;
+                // Freeze the exact admitted/current target identities before npm
+                // preparation, retaining original preflight and recovery order.
+                targets = plan.data["targets"].as_array().unwrap().iter().map(|target| {
+                    serde_json::from_value(json!({"component":target["component"],"path":target["path"]}))
+                }).collect::<std::result::Result<_, _>>()?;
+                crate::npm_update::prepare(ctx, presentation, installed, &launcher.node, &launcher.nonce, &launcher.npm_search_paths, targets)
+            } else {
+                Err(ToolkitError::new("update.self_update_handoff_required", "native archives require --release; npm process self-update handoff is not yet connected", 3))
+            }
+        }
+    }
+}
+
 pub fn managed(
     root: &Path,
     version: &str,
@@ -382,10 +326,8 @@ fn managed_with_close(
                 crate::acquisition_control_tests::AcquirePoint::UpdatePreflight,
                 control,
             );
-            let guard = InstallationGuard::acquire_controlled(&path, control)?;
-            let checked = guard.require_idle().and_then(|()| {
-                slots::preflight_controlled(path.parent().unwrap(), version, control)
-            });
+            let guard = InstallationMaintenanceLease::acquire_controlled(&path, control)?;
+            let checked = slots::preflight_controlled(path.parent().unwrap(), version, control);
             deploy::finish_close(checked, guard.close())?;
             (Some(client), path)
         } else {
@@ -512,14 +454,13 @@ fn managed_with_close(
                         crate::acquisition_control_tests::AcquirePoint::UpdateMutation,
                         control,
                     );
-                    Some(InstallationGuard::acquire_controlled(path, control)?)
+                    Some(InstallationMaintenanceLease::acquire_controlled(
+                        path, control,
+                    )?)
                 } else {
                     None
                 };
                 let changed = (|| {
-                    if let Some(guard) = &maintenance {
-                        guard.require_idle()?;
-                    }
                     let lease = deploy::InstallationLease::acquire(path, control)?;
                     let applied = (|| -> Result<()> {
                         let wanted = serde_json::to_value(release::receipt(&release, component))?;

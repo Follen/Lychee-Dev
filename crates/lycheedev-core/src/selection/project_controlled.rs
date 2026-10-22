@@ -5,7 +5,7 @@ use crate::control::OperationControl;
 use std::{ffi::OsStr, io::Read};
 mod management;
 mod wire;
-pub(super) use management::{dispatch, inspect_value, optional};
+pub(super) use management::{execute, inspect_value, optional};
 
 fn error(code: &str) -> ToolkitError {
     ToolkitError::new(
@@ -42,7 +42,7 @@ impl<C: FnMut() -> Result<()>> Scope<'_, C> {
         cleanup: impl IntoIterator<Item = ToolkitError>,
     ) -> Result<T> {
         let result = cleanup.into_iter().fold(result, |result, error| {
-            crate::metadata::historical_write::finish_historical(result, Err(error))
+            crate::metadata::owned_write::finish_owned(result, Err(error))
         });
         let result = selection_finish(result, self.control.check());
         selection_finish(result, (self.supplemental)())
@@ -157,7 +157,6 @@ fn read_file<T, C: FnMut() -> Result<()>>(
         if raw.len() > 65536 || std::str::from_utf8(&raw).is_err() {
             return Err(format());
         }
-        wire::validate(&raw, scope)?;
         decode(&raw, scope).map(Some)
     })();
     let cleanup = storage::close_file(file).err().map(ToolkitError::from);
@@ -168,24 +167,6 @@ fn inspect<C: FnMut() -> Result<()>>(path: &Path, scope: &mut Scope<'_, C>) -> R
         .lock
         .map(|lock| lock.selection)
         .ok_or_else(|| error("selection.project_unlocked"))
-}
-
-/// Compatibility entry for command consumers. The resolver itself only borrows
-/// selection inputs and does not interpret an invocation or own its control.
-pub fn resolve_pinned_controlled_with_check(
-    inv: &Invocation,
-    supplemental: impl FnMut() -> Result<()>,
-) -> Result<PinnedSet> {
-    resolve_pin_request_controlled_with_check(
-        PinSelectionRequest {
-            home: &inv.home,
-            cwd: &inv.cwd,
-            snapshot: inv.flag("--snapshot"),
-            project: inv.flag("--project"),
-        },
-        &inv.control,
-        supplemental,
-    )
 }
 
 /// Resolve and authenticate the persisted immutable winner without requiring a

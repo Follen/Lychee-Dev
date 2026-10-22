@@ -1,6 +1,6 @@
 //! Only cache/objects and explicitly selected staging are reclaimable. Evidence blobs are separate.
 use crate::{
-    Invocation, Outcome, Result, ToolkitError,
+    Outcome, Result, ToolkitError,
     selection::valid_digest,
     storage::{self, ExclusiveLock},
     workspace,
@@ -372,20 +372,31 @@ pub fn read_object(
     })();
     storage::finish_file(file, result, control)
 }
-pub fn commands() -> &'static [&'static str] {
-    &["cache status", "cache verify", "cache prune"]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CacheRequest {
+    Status,
+    DataStatus,
+    Verify,
+    Prune {
+        target_bytes: u64,
+        dry_run: bool,
+        max_objects: usize,
+        include_uncommitted: bool,
+    },
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    if inv.command == "cache status" && inv.flags.contains_key("--data") {
-        return crate::evidence::data_storage_report(&inv.home, &inv.control).map(Outcome::new);
+pub fn dispatch(
+    context: &crate::request::RequestContext,
+    request: CacheRequest,
+) -> Result<Outcome> {
+    if request == CacheRequest::DataStatus {
+        return crate::evidence::data_storage_report(&context.home, &context.control).map(Outcome::new);
     }
-
-    if inv.command == "cache prune" {
-        return pruning::prune(inv);
+    if let CacheRequest::Prune { target_bytes, dry_run, max_objects, include_uncommitted } = &request {
+        return pruning::prune(context, *target_bytes, *dry_run, *max_objects, *include_uncommitted);
     }
-    if inv.command == "cache verify" {
-        workspace::open_controlled(&inv.home, &inv.control)?;
-        let report = verify(&inv.home, &inv.control)?;
+    if request == CacheRequest::Verify {
+        workspace::open_controlled(&context.home, &context.control)?;
+        let report = verify(&context.home, &context.control)?;
         let value = serde_json::to_value(&report)?;
         if !report.ok {
             return Err(ToolkitError::new("vault.cache_integrity", "vault.cache_integrity", 4)
@@ -393,18 +404,18 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
         }
         return Ok(Outcome::new(value));
     }
-    workspace::open(&inv.home)?;
-    let (objs, foreign) = objects(&inv.home)?;
+    workspace::open(&context.home)?;
+    let (objs, foreign) = objects(&context.home)?;
     let (staging, staging_bytes) = {
-        let entries = stages(&inv.home)?;
+        let entries = stages(&context.home)?;
         let bytes = entries.iter().map(|(_, bytes, _)| *bytes).sum::<u64>();
         (entries, bytes)
     };
-    let (protective, missing, marker_foreign) = markers(&inv.home)?;
+    let (protective, missing, marker_foreign) = markers(&context.home)?;
     let bytes = objs.iter().map(|o| o.bytes).sum::<u64>();
-    match inv.command.as_str() {
-        "cache status" => {
-            let limit = workspace::config(&inv.home)?["cache"]["maxBytes"]
+    match request {
+        CacheRequest::Status => {
+            let limit = workspace::config(&context.home)?["cache"]["maxBytes"]
                 .as_u64()
                 .unwrap();
             let mut protected = vec![];
@@ -421,6 +432,6 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
                 json!({"objectBytes":bytes,"objectCount":objs.len(),"uncommittedBytes":staging_bytes,"uncommittedCount":staging.len(),"protectedCount":protected.len(),"protectedByKind":kinds,"protected":protected,"orphanMarkers":missing.len(),"foreignCount":foreign+marker_foreign,"limitBytes":limit,"withinLimit":bytes<=limit}),
             ))
         }
-        _ => Err(ToolkitError::arguments("unknown cache verb")),
+        _ => unreachable!("cache request routed by CLI parser"),
     }
 }

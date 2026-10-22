@@ -2,7 +2,7 @@
 //! meta.Table. Applicability conditions stay visible and never filter DB2 rows.
 use super::*;
 use crate::{
-    relational::{Scalar, Source},
+    query_value::{Scalar, Source},
     resource::{Budget, Cost},
 };
 

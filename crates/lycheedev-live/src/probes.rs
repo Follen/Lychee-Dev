@@ -1,12 +1,13 @@
-//! Immutable probe revisions and mutable selectors; public Go wire shapes are preserved.
+//! Immutable probe revisions and mutable selectors for reusable Lua probes.
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError,
-    metadata::{HistoricalMutation, Metadata},
+    Outcome, Result, ToolkitError,
+    metadata::{Metadata, OwnedMutation},
     storage, workspace,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fs;
+use std::{fs, path::Path};
+use crate::request::{LiveContext, ProbeRequest};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Revision {
@@ -68,17 +69,16 @@ fn validate_name(n: &Name) -> Result<()> {
 fn stored_timestamp_valid(value: &str) -> bool {
     // Go's zero is year 1 UTC, including fractional and offset spellings of
     // that same instant. Keep the existing RFC3339 admission otherwise.
-    chrono::DateTime::parse_from_rfc3339(value).is_ok_and(|time| {
-        (time.timestamp(), time.timestamp_subsec_nanos()) != (-62_135_596_800, 0)
-    })
+    chrono::DateTime::parse_from_rfc3339(value)
+        .is_ok_and(|time| (time.timestamp(), time.timestamp_subsec_nanos()) != (-62_135_596_800, 0))
 }
-pub fn code(inv: &Invocation, selector: &str) -> Result<Vec<u8>> {
-    let shown = show(inv, selector)?;
+pub fn code(ctx: &LiveContext, selector: &str) -> Result<Vec<u8>> {
+    let shown = show(ctx, selector)?;
     let r: Revision = serde_json::from_value(shown.data["revision"].clone())?;
     revision_valid(&r)
 }
-pub fn show(inv: &Invocation, selector: &str) -> Result<Outcome> {
-    let meta = Metadata::open_controlled(&inv.home, false, &inv.control)?;
+pub fn show(ctx: &LiveContext, selector: &str) -> Result<Outcome> {
+    let meta = Metadata::open_controlled(&ctx.home, false, &ctx.control)?;
     let result = (|| {
         let mut named = None;
         let id = if let Some(stripped) = selector.strip_prefix("PRB-") {
@@ -90,7 +90,7 @@ pub fn show(inv: &Invocation, selector: &str) -> Result<Outcome> {
             if !name_valid(selector) {
                 return Err(ToolkitError::arguments("invalid probe name"));
             }
-            let n: Name = meta.read_controlled(&format!("probe/name/{selector}"), &inv.control)?;
+            let n: Name = meta.read_controlled(&format!("probe/name/{selector}"), &ctx.control)?;
             validate_name(&n)?;
             if n.name != selector {
                 return Err(ToolkitError::invalid("probe name identity differs"));
@@ -106,7 +106,7 @@ pub fn show(inv: &Invocation, selector: &str) -> Result<Outcome> {
             named = Some(n);
             id
         };
-        let r: Revision = meta.read_controlled(&format!("probe/revision/{id}"), &inv.control)?;
+        let r: Revision = meta.read_controlled(&format!("probe/revision/{id}"), &ctx.control)?;
         revision_valid(&r)?;
         if r.id != id {
             return Err(ToolkitError::invalid("probe revision identity differs"));
@@ -116,7 +116,7 @@ pub fn show(inv: &Invocation, selector: &str) -> Result<Outcome> {
             json!({"name":named,"revision":r,"changed":false}),
         ))
     })();
-    finish_registry(finish_registry(result, meta.close()), inv.control.check())
+    finish_registry(finish_registry(result, meta.close()), ctx.control.check())
 }
 fn selector_identity(n: &Name, name: &str) -> Result<()> {
     validate_name(n)?;
@@ -130,12 +130,12 @@ fn selector_identity(n: &Name, name: &str) -> Result<()> {
     Ok(())
 }
 const MAX_CODE: usize = 262144;
-fn source_bytes(inv: &Invocation) -> Result<Vec<u8>> {
-    source_bytes_observed(inv, || {})
+fn source_bytes(ctx: &LiveContext, path: &Path) -> Result<Vec<u8>> {
+    source_bytes_observed(ctx, path, || {})
 }
-fn source_bytes_observed(inv: &Invocation, after_stat: impl FnOnce()) -> Result<Vec<u8>> {
-    inv.control.check()?;
-    let mut file = fs::File::open(inv.required("--file")?)?;
+fn source_bytes_observed(ctx: &LiveContext, path: &Path, after_stat: impl FnOnce()) -> Result<Vec<u8>> {
+    ctx.control.check()?;
+    let mut file = fs::File::open(path)?;
     let result = (|| {
         use std::io::Read;
         let stat = file.metadata()?;
@@ -148,7 +148,7 @@ fn source_bytes_observed(inv: &Invocation, after_stat: impl FnOnce()) -> Result<
         let mut bytes = Vec::with_capacity(stat.len() as usize);
         let mut chunk = [0; 8192];
         loop {
-            inv.control.check()?;
+            ctx.control.check()?;
             let allowed = chunk.len().min(MAX_CODE + 1 - bytes.len());
             let n = file.read(&mut chunk[..allowed])?;
             if n == 0 {
@@ -168,7 +168,7 @@ fn source_bytes_observed(inv: &Invocation, after_stat: impl FnOnce()) -> Result<
         }
         Ok(bytes)
     })();
-    storage::finish_file(file, result, &inv.control)
+    storage::finish_file(file, result, &ctx.control)
 }
 // Keep the first typed cause and avoid reporting the same stop twice.
 // The Core selection helper is private to that crate; registry consumers use
@@ -182,38 +182,35 @@ fn finish_registry<T>(result: Result<T>, stopped: Result<()>) -> Result<T> {
     {
         return result;
     }
-    lycheedev_core::metadata::historical_write::finish_historical(result, stopped)
+    lycheedev_core::metadata::owned_write::finish_owned(result, stopped)
 }
 fn write_registry<T>(
-    inv: &Invocation,
-    run: impl FnOnce(&lycheedev_core::metadata::HistoricalWriter<'_>) -> Result<T>,
+    ctx: &LiveContext,
+    run: impl FnOnce(&lycheedev_core::metadata::OwnedWriter<'_>) -> Result<T>,
 ) -> Result<T> {
-    use lycheedev_core::metadata::historical_write::{finish_historical, historical_lease};
-    let lease = historical_lease(&inv.home, "probe-registry", &inv.control)?;
-    let result = Metadata::with_historical_write(&inv.home, &inv.control, run);
-    finish_registry(
-        finish_historical(result, lease.close()),
-        inv.control.check(),
-    )
+    use lycheedev_core::metadata::owned_write::{finish_owned, owned_lease};
+    let lease = owned_lease(&ctx.home, "probe-registry", &ctx.control)?;
+    let result = Metadata::with_owned_write(&ctx.home, &ctx.control, run);
+    finish_registry(finish_owned(result, lease.close()), ctx.control.check())
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    dispatch_observed(inv, || Ok(()))
+pub fn dispatch(ctx: &LiveContext, request: &ProbeRequest) -> Result<Outcome> {
+    dispatch_observed(ctx, request, || Ok(()))
 }
 fn dispatch_observed(
-    inv: &Invocation,
+    ctx: &LiveContext,
+    request: &ProbeRequest,
     before_commit: impl FnOnce() -> Result<()>,
 ) -> Result<Outcome> {
-    workspace::open_controlled(&inv.home, &inv.control)?;
-    match inv.command.as_str() {
-        "live probe put" => {
-            let name = inv.required("--name")?;
+    workspace::open_controlled(&ctx.home, &ctx.control)?;
+    match request {
+        ProbeRequest::Put { name, file } => {
             if !name_valid(name) {
                 return Err(ToolkitError::arguments("invalid probe name"));
             }
-            let bytes = source_bytes(inv)?;
+            let bytes = source_bytes(ctx, file)?;
             let digest = storage::sha256(&bytes);
             let id = format!("PRB-{digest}");
-            write_registry(inv, |writer| {
+            write_registry(ctx, |writer| {
                 let key = format!("probe/revision/{id}");
                 let (r, fresh) = match writer.document(&key) {
                     Ok(doc) => {
@@ -253,7 +250,7 @@ fn dispatch_observed(
                 };
                 let n = Name {
                     schema: "lycheedev.probe-name.v1".into(),
-                    name: name.into(),
+                    name: name.clone(),
                     revision: r.id.clone(),
                     active: true,
                     updated_at: now(),
@@ -261,13 +258,13 @@ fn dispatch_observed(
                 let revision_bytes = serde_json::to_vec(&r)?;
                 let name_bytes = serde_json::to_vec(&n)?;
                 let mut changes = Vec::with_capacity(2);
-                changes.push(HistoricalMutation {
+                changes.push(OwnedMutation {
                     key: &nk,
                     expected_generation: generation,
                     bytes: &name_bytes,
                 });
                 if fresh {
-                    changes.push(HistoricalMutation {
+                    changes.push(OwnedMutation {
                         key: &key,
                         expected_generation: 0,
                         bytes: &revision_bytes,
@@ -278,13 +275,13 @@ fn dispatch_observed(
                 Ok(Outcome::new(json!({"name":n,"revision":r,"changed":true})))
             })
         }
-        "live probe list" => {
-            let limit = inv.usize_flag("--limit", 100, 1, 1000)?;
-            if !inv.home.join("state/toolkit.sqlite").exists() {
-                inv.control.check()?;
+        ProbeRequest::List { limit, include_removed } => {
+            let limit = *limit;
+            if !ctx.home.join("state/toolkit.sqlite").exists() {
+                ctx.control.check()?;
                 return Ok(Outcome::new(json!({"items":[]})));
             }
-            let meta = Metadata::open_controlled(&inv.home, false, &inv.control)?;
+            let meta = Metadata::open_controlled(&ctx.home, false, &ctx.control)?;
             let result = (|| {
                 let mut items = Vec::new();
                 let mut after = String::new();
@@ -294,12 +291,12 @@ fn dispatch_observed(
                         "probe/name/",
                         &after,
                         page_size,
-                        &inv.control,
+                        &ctx.control,
                         || Ok(()),
                         |key, _, bytes| {
                             let n: Name = serde_json::from_slice(bytes)?;
                             selector_identity(&n, key.strip_prefix("probe/name/").unwrap_or(""))?;
-                            if n.active || inv.flag_bool("--include-removed") {
+                            if n.active || *include_removed {
                                 items.push(n);
                             }
                             Ok(())
@@ -312,15 +309,14 @@ fn dispatch_observed(
                 }
                 Ok(Outcome::new(json!({"items":items})))
             })();
-            finish_registry(finish_registry(result, meta.close()), inv.control.check())
+            finish_registry(finish_registry(result, meta.close()), ctx.control.check())
         }
-        "live probe show" => show(inv, inv.argument()?),
-        "live probe remove" => {
-            let name = inv.argument()?;
+        ProbeRequest::Show { selector } => show(ctx, selector),
+        ProbeRequest::Remove { name } => {
             if !name_valid(name) {
                 return Err(ToolkitError::arguments("invalid probe name"));
             }
-            write_registry(inv, |writer| {
+            write_registry(ctx, |writer| {
                 let key = format!("probe/name/{name}");
                 let doc = writer.document(&key)?;
                 let mut n: Name = serde_json::from_slice(&doc.bytes)?;
@@ -329,7 +325,7 @@ fn dispatch_observed(
                     n.active = false;
                     n.updated_at = now();
                     let bytes = serde_json::to_vec(&n)?;
-                    writer.commit(&[HistoricalMutation {
+                    writer.commit(&[OwnedMutation {
                         key: &key,
                         expected_generation: doc.generation,
                         bytes: &bytes,
@@ -338,7 +334,6 @@ fn dispatch_observed(
                 Ok(Outcome::new(serde_json::to_value(n)?))
             })
         }
-        _ => Err(ToolkitError::arguments("unknown probe registry command")),
     }
 }
 fn now() -> String {

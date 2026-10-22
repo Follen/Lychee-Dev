@@ -6,7 +6,8 @@ use std::{
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub(super) struct Fixture {
-    pub inv: Invocation,
+    pub ctx: DataContext,
+    pub request: Request,
     pub root: PathBuf,
 }
 impl Fixture {
@@ -21,23 +22,10 @@ impl Fixture {
         let home = root.join("home");
         lycheedev_core::workspace::initialize(&home).unwrap();
         Self {
-            inv: Invocation {
-                command: "data hotfix".into(),
-                positional: None,
-                home,
-                cwd: root.clone(),
-                control: OperationControl::default(),
-                flags: [
-                    ("--source", source),
-                    ("--product", "retail"),
-                    ("--build", "12.0.7.68974"),
-                    ("--region", "us"),
-                    ("--locale", "enUS"),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-            },
+            ctx: DataContext { home, cwd: root.clone(), control:OperationControl::default(), source:Default::default() },
+            request: Request { provider:if source=="wago" { Provider::Wago } else { Provider::Raidbots(root.join("cache.bin")) },
+                query: Query {product:"retail".into(),full_build:"12.0.7.68974".into(),region:"us".into(),locale:"enUS".into(),limit:50,..Default::default()},
+                max_pages:2048,fetch:FetchBudget::default(),csv:None},
             root,
         }
     }
@@ -55,9 +43,7 @@ impl Fixture {
         raw.resize(44, 0);
         let path = self.root.join("cache.bin");
         std::fs::write(&path, &raw).unwrap();
-        self.inv
-            .flags
-            .insert("--raidbots".into(), path.to_string_lossy().into());
+        self.request.provider = Provider::Raidbots(path);
         raw
     }
 }
@@ -75,16 +61,16 @@ fn raidbots_default_chain_keeps_original_scope_and_publishes_exact_change_pin() 
     let mut f = Fixture::new("raidbots");
     let raw = f.cache();
     let budget = f.budget();
-    let result = run(&f.inv, &budget).unwrap();
+    let result = run(&f.ctx, &f.request, &budget).unwrap();
     assert!(result.capture.is_none());
     assert_eq!(result.change.sha256, storage::sha256(&raw));
     let pin =
-        selection::load_pinned_controlled(&f.inv.home, &result.snapshot, &f.inv.control).unwrap();
+        selection::load_pinned_controlled(&f.ctx.home, &result.snapshot, &f.ctx.control).unwrap();
     assert_eq!(pin.changes.as_ref(), Some(&result.change));
-    assert!(f.inv.control.stop_cause().unwrap().is_none());
-    f.inv
+    assert!(f.ctx.control.stop_cause().unwrap().is_none());
+    f.ctx
         .control
-        .ordered_child(f.inv.control.deadline())
+        .ordered_child(f.ctx.control.deadline())
         .unwrap()
         .check()
         .unwrap();
@@ -98,13 +84,13 @@ fn raidbots_independent_budget_stops_before_file_and_pin() {
         Instant::now() - Duration::from_secs(1),
         None,
     );
-    let error = run(&f.inv, &budget).err().unwrap();
+    let error = run(&f.ctx, &f.request, &budget).err().unwrap();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("records.query_resource_budget", 3)
     );
-    f.inv.control.check().unwrap();
-    match lycheedev_core::metadata::Metadata::open(&f.inv.home, false) {
+    f.ctx.control.check().unwrap();
+    match lycheedev_core::metadata::Metadata::open(&f.ctx.home, false) {
         Ok(owner) => {
             assert!(owner.list::<Value>("pin/", 1).unwrap().is_empty());
             owner.close().unwrap();
@@ -117,13 +103,13 @@ fn raidbots_file_validator_stop_closes_before_return_and_original_wins() {
     let mut f = Fixture::new("raidbots");
     f.cache();
     let budget = f.budget();
-    let path = PathBuf::from(f.inv.flag("--raidbots").unwrap());
-    let cancel = f.inv.control.tracked_cancel_handle().unwrap();
+    let path = match &f.request.provider { Provider::Raidbots(path) => path.clone(), _ => unreachable!() };
+    let cancel = f.ctx.control.tracked_cancel_handle().unwrap();
     let error = super::super::local::read_source_file_controlled(
         &path,
         512 << 20,
         &budget,
-        &f.inv.control,
+        &f.ctx.control,
         |_| {
             cancel.cancel();
             Ok(())
@@ -148,12 +134,12 @@ fn parent_pin_observes_independent_budget_without_a_child_deadline() {
         fetched_at: "2026-10-16T00:00:00Z".into(),
         ..Default::default()
     };
-    let error = pin(&f.inv, change, &budget).unwrap_err();
+    let error = pin(&f.ctx, change, &budget).unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("records.query_resource_budget", 3)
     );
-    f.inv.control.check().unwrap();
+    f.ctx.control.check().unwrap();
 }
 #[test]
 fn snapshot_scanner_observes_original_callback_inside_version_eight_probes() {
@@ -167,7 +153,7 @@ fn snapshot_scanner_observes_original_callback_inside_version_eight_probes() {
     row[24] = 1;
     raw.extend(row);
     let budget = f.budget();
-    let cancel = f.inv.control.tracked_cancel_handle().unwrap();
+    let cancel = f.ctx.control.tracked_cancel_handle().unwrap();
     let mut checks = 0;
     let result = super::super::inspect_budgeted_with_check(
         &raw,
@@ -182,7 +168,7 @@ fn snapshot_scanner_observes_original_callback_inside_version_eight_probes() {
             if checks == 3 {
                 cancel.cancel();
             }
-            f.inv.control.check()
+            f.ctx.control.check()
         },
     );
     assert_eq!(result.unwrap_err().code, "command.cancelled");
@@ -190,11 +176,11 @@ fn snapshot_scanner_observes_original_callback_inside_version_eight_probes() {
     budget.check().unwrap();
 }
 #[test]
-fn output_failure_retains_committed_capture_and_original_typed_cause() {
+fn presentation_failure_retains_committed_capture_and_original_typed_cause() {
     let f = Fixture::new("wago");
     let budget = f.budget();
     let committed = evidence::commit_capture_budgeted(
-        &f.inv.home,
+        &f.ctx.home,
         evidence::CaptureInput {
             bytes: b"{}",
             maximum_bytes: 2,
@@ -203,11 +189,11 @@ fn output_failure_retains_committed_capture_and_original_typed_cause() {
             complete: true,
             truncated: false,
         },
-        &f.inv.control,
+        &f.ctx.control,
         &budget,
     )
     .unwrap();
-    let query = Query::from_invocation(&f.inv).unwrap();
+    let query = f.request.query.clone();
     let mut reading = RemoteResult::new(
         "wago",
         query.clone(),
@@ -220,10 +206,10 @@ fn output_failure_retains_committed_capture_and_original_typed_cause() {
     let original = ToolkitError::new("records.query_resource_budget", "stopped during output", 3)
         .with_details(json!({"reason":"fixture"}));
     let error =
-        committed_result::<()>(Err(output_failure(original.clone())), &reading).unwrap_err();
+        committed_result::<()>(Err(original.clone()), &reading).unwrap_err();
     assert_eq!(error.details["completedCaptures"], json!([committed["id"]]));
     assert_eq!(
-        error.details["primary"]["details"]["originalCause"],
+        error.details["primary"],
         serde_json::to_value(original).unwrap()
     );
 }

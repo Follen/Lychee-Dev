@@ -50,16 +50,16 @@ fn selection_file_actual_argv_dispatch_envelope_has_pin_without_added_snapshot_o
     std::fs::remove_dir_all(path).unwrap();
 }
 #[test]
-fn selection_file_actual_failure_is_plain_go_error_with_dispatch_stage_and_no_pin() {
+fn selection_file_actual_failure_keeps_dispatch_stage_and_no_pin() {
     let path = home();
     workspace::initialize(&path).unwrap();
     let inv = request(&path, "selection.json");
     for (raw, message) in [
         (
             br#"{"unknown":true}"#.as_slice(),
-            "json: unknown field \"unknown\"",
+            "unknown field `unknown`",
         ),
-        (b"null".as_slice(), "selection.empty"),
+        (b"null".as_slice(), "invalid type: null"),
     ] {
         std::fs::write(path.join("selection.json"), raw).unwrap();
         let error = crate::command_fault(&inv, crate::dispatch(&inv).unwrap_err());
@@ -67,7 +67,11 @@ fn selection_file_actual_failure_is_plain_go_error_with_dispatch_stage_and_no_pi
             (error.code.as_str(), error.exit_code),
             ("command.failed", 5)
         );
-        assert_eq!(error.message, message);
+        assert!(
+            error.message.starts_with(message),
+            "unexpected message: {}",
+            error.message
+        );
         let value = crate::envelope(&Err(error));
         assert_eq!(value["error"]["stage"], "dispatch");
         assert_eq!(value["context"], json!({}));

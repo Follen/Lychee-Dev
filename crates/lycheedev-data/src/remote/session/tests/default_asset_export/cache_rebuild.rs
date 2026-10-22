@@ -9,14 +9,11 @@ mod tables;
 #[test]
 fn default_export_rebuild_preserves_existing_capture_keep_and_alias_documents() {
     let f = AssetFixture::new(b"retained original source body".to_vec());
-    let first = crate::migration_oracle::dispatch(&f.invocation("first.bin")).unwrap();
+    let first = assets::export::run(&f.context(), &f.export_request("first.bin")).unwrap();
     f.verify(&first, "first.bin");
     let capture = &first.provenance[0];
-    let mut keep = f.invocation("unused");
-    keep.command = "evidence keep".into();
-    keep.positional = Some(capture["id"].as_str().unwrap().to_owned());
-    keep.flags.clear();
-    evidence::dispatch(&keep).unwrap();
+    let context = lycheedev_core::request::RequestContext { home: f.source.home.clone(), cwd: f.source.home.clone(), control: Default::default() };
+    evidence::dispatch(&context, evidence::EvidenceRequest::Keep { id: capture["id"].as_str().unwrap().into() }).unwrap();
     let source_keys = keys::Context::prepare_scoped(
         &f.source.home,
         None,
@@ -65,7 +62,7 @@ fn default_export_rebuild_preserves_existing_capture_keep_and_alias_documents() 
         std::fs::read(&complete_path).unwrap(),
     );
     std::fs::remove_file(evidence::blob_path(&f.source.home, &digest).unwrap()).unwrap();
-    let rebuilt = crate::migration_oracle::dispatch(&f.invocation("rebuilt.bin")).unwrap();
+    let rebuilt = assets::export::run(&f.context(), &f.export_request("rebuilt.bin")).unwrap();
     f.verify(&rebuilt, "rebuilt.bin");
     assert_eq!(
         rebuilt.data["source"]["decodedCache"]["contentDecodeCalls"],
@@ -158,12 +155,9 @@ fn default_cache_prepare_rebuilds_missing_decoded_source_and_preserves_exact_row
     let digest = storage::sha256(&f.source.payload);
     let body = evidence::blob_path(&f.source.home, &digest).unwrap();
     std::fs::remove_file(&body).unwrap();
-    let mut inv = f.invocation("unused");
-    inv.command = "data cache prepare".into();
-    inv.positional = Some("Sample".into());
-    inv.flags.remove("--file-id");
-    inv.flags.remove("--output");
-    let first = crate::migration_oracle::dispatch(&inv).unwrap();
+    let ctx = f.context();
+    let request = crate::request::CachePrepareRequest { table: "Sample".into(), timeout: Duration::from_secs(30) };
+    let first = crate::prepare_cache(&ctx, &request).unwrap();
     assert!(first.complete);
     assert_eq!(first.data["availableRows"], 1);
     assert_eq!(std::fs::read(&body).unwrap(), table.raw);
@@ -191,7 +185,7 @@ fn default_cache_prepare_rebuilds_missing_decoded_source_and_preserves_exact_row
     );
     assert!(reader.next().is_none());
     drop(reader);
-    let second = crate::migration_oracle::dispatch(&inv).unwrap();
+    let second = crate::prepare_cache(&ctx, &request).unwrap();
     assert_eq!(first.data["generation"], second.data["generation"]);
     assert_eq!(first.data["object"], second.data["object"]);
     assert_eq!(std::fs::read_dir(&paths.staging).unwrap().count(), 0);

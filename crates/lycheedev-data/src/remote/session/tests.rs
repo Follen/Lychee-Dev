@@ -1,4 +1,5 @@
 use super::*;
+use crate::remote::admission::OpenWorkspace;
 use crate::remote::{
     catalog,
     transport::{RangeReply, RangeRequest},
@@ -252,13 +253,10 @@ impl Fixture {
         }
     }
     fn admission(&self) -> AdmittedWorkspace<'_> {
-        AdmittedWorkspace::acquire(
-            &self.home,
-            Policy::Ordinary,
-            &self.control,
-            Some(&self.budget),
-        )
-        .unwrap()
+        OpenWorkspace::open(&self.home, &self.control, Some(&self.budget))
+            .unwrap()
+            .acquire(Policy::Ordinary)
+            .unwrap()
     }
 }
 #[test]
@@ -281,7 +279,11 @@ fn borrowed_session_is_lazy_and_never_releases_the_external_admission() {
     let moved = f.home.with_extension("moved");
     assert!(std::fs::rename(&f.home, &moved).is_err());
     let deadline = OperationControl::uncancelable(Instant::now() + Duration::from_millis(50));
-    assert!(AdmittedWorkspace::acquire(&f.home, Policy::Measurement, &deadline, None).is_err());
+    assert!(
+        OpenWorkspace::open(&f.home, &deadline, None)
+            .and_then(|workspace| workspace.acquire(Policy::Measurement))
+            .is_err()
+    );
     admission.finish(Ok(())).unwrap();
     std::fs::rename(&f.home, &moved).unwrap();
     std::fs::remove_dir_all(moved).unwrap();
@@ -304,14 +306,14 @@ fn actual_admitted_cdn_encoding_root_selected_chain_keeps_one_scoped_batch() {
         .read_batches(&[7, 7], &mut |files| {
             batches += 1;
             for file in files {
-                assert_eq!(file.bytes(), f.payload);
+                assert_eq!(file.materialized.content.bytes.as_slice(), f.payload);
                 assert_eq!(file.entry.file_data_id, 7);
                 assert_eq!(file.reading["source"], "cdn");
                 assert_eq!(
                     file.reading["verification"]["contentWholeDecodedCKey"],
                     true
                 );
-                assert_eq!(file.reference().sha256, storage::sha256(&f.payload));
+                assert_eq!(file.materialized.blob.sha256, storage::sha256(&f.payload));
             }
             Ok(if batches == 1 { vec![7] } else { Vec::new() })
         })
@@ -599,7 +601,7 @@ fn multi_locale_root_match_limit_is_per_id_not_per_batch() {
             );
             for file in files {
                 assert_eq!(file.entry.locale_mask, 0x40);
-                assert_eq!(file.bytes(), f.payload);
+                assert_eq!(file.materialized.content.bytes.as_slice(), f.payload);
             }
             Ok(Vec::new())
         })
@@ -635,10 +637,6 @@ mod decoded_alias;
 
 mod body_owner;
 
-mod default_sql;
-
-mod default_navigation;
-
 #[test]
 fn real_remote_metadata_reads_preserve_ordered_original_scope_through_batches() {
     let f = Fixture::new();
@@ -656,7 +654,7 @@ fn real_remote_metadata_reads_preserve_ordered_original_scope_through_batches() 
     session
         .read_batches(&[7], &mut |files| {
             calls += 1;
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             assert_eq!(f.control.stop_cause().unwrap(), None);
             let child = f.control.ordered_child(f.control.deadline()).unwrap();
             child.check().unwrap();
@@ -696,7 +694,7 @@ fn real_remote_metadata_reads_keep_independent_budget_cancellation_ordered() {
     session
         .read_batches(&[7], &mut |files| {
             calls += 1;
-            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].materialized.content.bytes.as_slice(), f.payload);
             assert_eq!(budget_control.stop_cause().unwrap(), None);
             budget_control
                 .ordered_child(budget_control.deadline())
@@ -737,5 +735,3 @@ mod verified;
 mod default_asset_export;
 
 mod prepared;
-
-mod partial_tables;

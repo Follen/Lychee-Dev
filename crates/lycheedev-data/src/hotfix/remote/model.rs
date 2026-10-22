@@ -1,23 +1,14 @@
-//! Fixed Go 3.2.0 physical-record contract, independent of local scan state.
+//! Retained wire physical-record contract, independent of local scan state.
 use super::*;
-use base64::{
-    Engine as _,
-    alphabet::URL_SAFE,
-    engine::{
-        DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig, general_purpose::URL_SAFE_NO_PAD,
-    },
-};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike, Utc};
-use serde::{
-    Deserialize, Deserializer, Serialize,
-    de::{DeserializeSeed, MapAccess},
-};
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 pub(super) const CURSOR_SCHEMA: &str = "lycheedev.hotfix-cursor.v1";
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub(super) struct Query {
+pub struct Query {
     pub product: String,
     pub full_build: String,
     pub region: String,
@@ -58,111 +49,19 @@ fn is_zero(n: &i64) -> bool {
 fn is_zero_u64(n: &u64) -> bool {
     *n == 0
 }
-fn arg_number<T: std::str::FromStr>(inv: &Invocation, flag: &str) -> Result<Option<T>> {
-    inv.flag(flag)
-        .map(|v| {
-            v.parse()
-                .map_err(|_| error("query", 2, format!("invalid {flag}")))
-        })
-        .transpose()
-}
-fn uint(inv: &Invocation, flag: &str) -> Result<Option<u32>> {
-    inv.flag(flag)
-        .map(|v| {
-            validate_option(flag, v)?;
-            if flag == "--table-hash" {
-                u32::from_str_radix(v, 16)
-            } else {
-                v.parse()
-            }
-            .map_err(|_| ToolkitError::arguments(format!("invalid {flag}")))
-        })
-        .transpose()
-}
-/// Go entry.go validates each admitted option before provider/workspace I/O.
-/// The CLI calls this in argv order; direct provider users validate the same bounds.
-pub(super) fn validate_option(key: &str, value: &str) -> Result<()> {
-    let signed = || value.parse::<i64>().ok();
-    let unsigned = || {
-        !value.is_empty()
-            && value.bytes().all(|b| b.is_ascii_digit())
-            && value.parse::<u32>().is_ok()
-    };
-    let message = match key {
-        "--source" if !["wago", "dbcache", "raidbots"].contains(&value) => {
-            Some("--source must be wago, dbcache, or raidbots".into())
-        }
-        "--encoding" if !["csv", "raw", "png", "webp"].contains(&value) => {
-            Some("--encoding must be raw, png, or webp".into())
-        }
-        "--table-hash" if value.len() != 8 => {
-            Some("--table-hash requires eight hexadecimal digits".into())
-        }
-        "--table-hash" if !value.bytes().all(|b| b.is_ascii_hexdigit()) => {
-            Some("invalid --table-hash".into())
-        }
-        "--record" | "--region-id" | "--after-index" if !unsigned() => {
-            Some(format!("invalid {key}"))
-        }
-        "--push" if value.parse::<i32>().is_err() => Some("invalid --push".into()),
-        "--status" if signed().is_none_or(|n| !(0..=255).contains(&n)) => {
-            Some("--status must be between 0 and 255".into())
-        }
-        "--page" if signed().is_none_or(|n| n < 0) => Some("invalid --page".into()),
-        "--limit" if signed().is_none_or(|n| !(1..=200).contains(&n)) => {
-            Some("invalid --limit".into())
-        }
-        "--max-pages" if signed().is_none_or(|n| !(1..=2048).contains(&n)) => {
-            Some("--max-pages must be between 1 and 2048".into())
-        }
-        "--max-requests" if signed().is_none_or(|n| n < 1) => {
-            Some("--max-requests must be at least 1".into())
-        }
-        "--max-bytes" if signed().is_none_or(|n| !(1..=536870912).contains(&n)) => {
-            Some("--max-bytes must be between 1 and 536870912".into())
-        }
-        "--timeout-seconds" if signed().is_none_or(|n| !(1..=3600).contains(&n)) => {
-            Some("--timeout-seconds must be between 1 and 3600".into())
-        }
-        _ => None,
-    };
-    message.map_or(Ok(()), |m| Err(ToolkitError::arguments(m)))
-}
-fn parsed_time(value: &str) -> Result<evidence::GoTimestamp> {
-    if let Some(time) = evidence::parse_go_timestamp(value) {
+fn parsed_time(value: &str) -> Result<DateTime<FixedOffset>> {
+    if let Ok(time) = DateTime::parse_from_rfc3339(value) {
         return Ok(time);
     }
-    // The only fallback is Go's source-native layout. It has no zone. Reuse
-    // the same exact date/hour/fraction parser instead of chrono's wider grammar.
-    if value.as_bytes().get(10) == Some(&b' ') {
-        let rfc = format!("{}T{}Z", &value[..10], value[10..].trim_start_matches(' '));
-        if let Some(time) = evidence::parse_go_timestamp(&rfc) {
-            return Ok(time);
-        }
-    }
-    Err(error(
-        "query",
-        2,
-        "time must be RFC3339 or 2006-01-02 15:04:05",
-    ))
+    chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f")
+        .map(|time| time.and_utc().fixed_offset())
+        .map_err(|_| error("query", 2, "time must be RFC3339 or 2006-01-02 15:04:05"))
 }
-fn time_wire(value: &str) -> Result<String> {
-    let parsed = parsed_time(value)?;
-    Ok(parsed.canonical().unwrap_or(value).to_owned())
+pub(super) fn time_wire(value: &str) -> Result<String> {
+    Ok(parsed_time(value)?.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))
 }
 pub(super) fn parse_time(value: &str) -> Result<DateTime<FixedOffset>> {
-    let parsed = parsed_time(value)?;
-    if let Some(canonical) = parsed.canonical() {
-        return DateTime::parse_from_rfc3339(canonical)
-            .map_err(|_| fault("records.internal", 8, "Go time canonical conversion failed"));
-    }
-    let (seconds, nanos) = parsed.instant();
-    // A >=24h zone cannot be represented by chrono::FixedOffset, but its exact
-    // UTC instant can. Callers use this result only for comparisons/UTC scope;
-    // time_wire retains the original zone for the later JSON marshal boundary.
-    DateTime::<Utc>::from_timestamp(seconds, nanos)
-        .map(|time| time.fixed_offset())
-        .ok_or_else(|| fault("records.internal", 8, "Go time instant conversion failed"))
+    parsed_time(value)
 }
 fn utc_scope_time(value: &str) -> Result<String> {
     let time = parse_time(value)?.with_timezone(&Utc);
@@ -189,99 +88,21 @@ fn utc_scope_time(value: &str) -> Result<String> {
     out.push('Z');
     Ok(out)
 }
-fn time_marshal_failure() -> ToolkitError {
-    fault(
-        "command.failed",
-        5,
-        "json: error calling MarshalJSON for type time.Time: Time.MarshalJSON: timezone hour outside of range [0,23]",
-    )
-}
 fn serialize_optional_time<S: serde::Serializer>(
     value: &Option<String>,
     serializer: S,
 ) -> std::result::Result<S::Ok, S::Error> {
     match value {
         None => serializer.serialize_none(),
-        Some(raw) => {
-            let parsed = parsed_time(raw).map_err(serde::ser::Error::custom)?;
-            let canonical = parsed
-                .canonical()
-                .ok_or_else(|| serde::ser::Error::custom(time_marshal_failure().message))?;
-            serializer.serialize_some(canonical)
-        }
+        Some(raw) => serializer.serialize_some(&time_wire(raw).map_err(serde::ser::Error::custom)?),
     }
 }
-
 impl Query {
     pub(super) fn check_time_marshal(&self) -> Result<()> {
         for raw in [&self.from, &self.to].into_iter().flatten() {
-            if parsed_time(raw)?.canonical().is_none() {
-                return Err(time_marshal_failure());
-            }
+            parsed_time(raw)?;
         }
         Ok(())
-    }
-    pub fn from_invocation(inv: &Invocation) -> Result<Self> {
-        for (key, value) in &inv.flags {
-            validate_option(key, value)?;
-        }
-        let source = inv.required("--source")?;
-        if source == "raidbots" && inv.flag("--raidbots").unwrap_or_default().is_empty() {
-            return Err(ToolkitError::arguments(
-                "data hotfix --source raidbots requires --raidbots",
-            ));
-        }
-        if source == "wago" && inv.flag("--raidbots").is_some_and(|v| !v.is_empty()) {
-            return Err(ToolkitError::arguments(
-                "--raidbots is not supported by the wago hotfix source",
-            ));
-        }
-        if inv.flag("--dbcache").is_some_and(|v| !v.is_empty()) {
-            return Err(ToolkitError::arguments(format!(
-                "--dbcache is not supported by the {source} hotfix source"
-            )));
-        }
-        if ["--product", "--build", "--region", "--locale"]
-            .iter()
-            .any(|f| inv.flag(f).unwrap_or_default().is_empty())
-        {
-            return Err(ToolkitError::arguments(format!(
-                "data hotfix --source {source} requires --product, --build, --region, and --locale"
-            )));
-        }
-        if inv.flag("--after-index").is_some() {
-            return Err(ToolkitError::arguments(format!(
-                "data hotfix --source {source} pages with --cursor, not --after-index"
-            )));
-        }
-        let time = |flag| {
-            inv.flag(flag)
-                .filter(|s| !s.is_empty())
-                .map(time_wire)
-                .transpose()
-        };
-        let query = Self {
-            product: inv.required("--product")?.into(),
-            full_build: inv.required("--build")?.into(),
-            region: inv.required("--region")?.into(),
-            locale: inv.required("--locale")?.into(),
-            table: inv.flag("--table").unwrap_or_default().into(),
-            table_hash: uint(inv, "--table-hash")?,
-            record_id: uint(inv, "--record")?,
-            push_id: arg_number(inv, "--push")?,
-            region_id: uint(inv, "--region-id")?,
-            status: arg_number(inv, "--status")?,
-            from: time("--from")?,
-            to: time("--to")?,
-            search: inv.flag("--search").unwrap_or_default().into(),
-            latest: inv.flag_bool("--latest"),
-            page: arg_number(inv, "--page")?.unwrap_or(0),
-            limit: arg_number(inv, "--limit")?.unwrap_or(50),
-            cursor: inv.flag("--cursor").unwrap_or_default().into(),
-            definition: None,
-        };
-        query.validate()?;
-        Ok(query)
     }
     pub fn validate(&self) -> Result<()> {
         if lycheedev_core::client::product(&self.product).is_none() {
@@ -470,7 +291,7 @@ pub(crate) fn equal_fold(a: &str, b: &str) -> bool {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub(super) struct Record {
+pub struct Record {
     pub provider: String,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub id: u64,
@@ -522,7 +343,7 @@ impl Record {
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub(super) struct FetchBudget {
+pub struct FetchBudget {
     pub max_requests: i64,
     pub max_bytes: i64,
     pub requests: i64,
@@ -530,7 +351,7 @@ pub(super) struct FetchBudget {
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub(super) struct Coverage {
+pub struct Coverage {
     pub provider: String,
     pub product: String,
     pub full_build: String,
@@ -576,7 +397,7 @@ impl Coverage {
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct RemoteResult {
+pub struct RemoteResult {
     pub schema: &'static str,
     pub query: Query,
     pub records: Vec<Record>,
@@ -625,7 +446,7 @@ impl RemoteResult {
         })
     }
 }
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct CursorPage {
     pub page: i64,
@@ -634,10 +455,10 @@ pub(super) struct CursorPage {
     pub sha256: String,
     pub total: i64,
     pub last_page: i64,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub next_page_url: String,
 }
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Cursor {
     pub schema: String,
@@ -646,7 +467,7 @@ pub(super) struct Cursor {
     pub reference: String,
     pub scope: String,
     pub resume_page: i64,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub after: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous: Option<CursorPage>,
@@ -655,76 +476,17 @@ pub(super) struct Cursor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after_index: Option<u32>,
 }
-impl parse::Object for CursorPage {
-    fn field<'de, A: MapAccess<'de>>(
-        &mut self,
-        k: &str,
-        m: &mut A,
-    ) -> std::result::Result<(), A::Error> {
-        match k {
-            "page" => parse::scalar(m, &mut self.page),
-            "key" => parse::scalar(m, &mut self.key),
-            "sha256" => parse::scalar(m, &mut self.sha256),
-            "total" => parse::scalar(m, &mut self.total),
-            "lastpage" => parse::scalar(m, &mut self.last_page),
-            "nextpageurl" => parse::scalar(m, &mut self.next_page_url),
-            _ => parse::ignored(m),
-        }
-    }
-}
-impl parse::Object for Cursor {
-    fn field<'de, A: MapAccess<'de>>(
-        &mut self,
-        k: &str,
-        m: &mut A,
-    ) -> std::result::Result<(), A::Error> {
-        match k {
-            "schema" => parse::scalar(m, &mut self.schema),
-            "source" => parse::scalar(m, &mut self.source),
-            "ref" => parse::scalar(m, &mut self.reference),
-            "scope" => parse::scalar(m, &mut self.scope),
-            "resumepage" => parse::scalar(m, &mut self.resume_page),
-            "after" => parse::scalar(m, &mut self.after),
-            "previous" => parse::pointer(m, &mut self.previous),
-            "self" => parse::pointer(m, &mut self.current),
-            "afterindex" => {
-                self.after_index = m.next_value()?;
-                Ok(())
-            }
-            _ => parse::ignored(m),
-        }
-    }
-}
-impl<'de> Deserialize<'de> for Cursor {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let mut c = Self::default();
-        parse::Seed(&mut c).deserialize(d)?;
-        Ok(c)
-    }
-}
 impl Cursor {
     pub fn encode(mut self, budget: &Budget) -> Result<String> {
         self.schema = CURSOR_SCHEMA.into();
-        Ok(URL_SAFE_NO_PAD.encode(go_bytes(&self, budget, 1 << 20)?))
+        Ok(URL_SAFE_NO_PAD.encode(wire_bytes(&self, budget, 1 << 20)?))
     }
     pub fn decode(encoded: &str, q: &Query, source: &str) -> Result<Self> {
-        let decoder = GeneralPurpose::new(
-            &URL_SAFE,
-            GeneralPurposeConfig::new()
-                .with_encode_padding(false)
-                .with_decode_padding_mode(DecodePaddingMode::RequireNone)
-                .with_decode_allow_trailing_bits(true),
-        );
-        let bytes = decoder
-            .decode(encoded.replace(['\r', '\n'], ""))
+        let bytes = URL_SAFE_NO_PAD
+            .decode(encoded)
             .map_err(|e| error("cursor", 2, e.to_string()))?;
-        if !lycheedev_core::raw_json::is_valid(&bytes) {
-            return Err(error("cursor", 2, "invalid cursor JSON"));
-        }
-        let mut decoder = serde_json::Deserializer::from_slice(&bytes);
-        decoder.disable_recursion_limit();
-        let cursor =
-            Self::deserialize(&mut decoder).map_err(|e| error("cursor", 2, e.to_string()))?;
+        let cursor: Self =
+            serde_json::from_slice(&bytes).map_err(|e| error("cursor", 2, e.to_string()))?;
         if cursor.schema != CURSOR_SCHEMA
             || cursor.source.is_empty()
             || cursor.reference.len() != 64

@@ -87,7 +87,7 @@ pub(crate) fn record(
 mod tests {
     use super::*;
     #[test]
-    fn asset_normalization_matches_go_simple_unicode_and_both_slashes() {
+    fn asset_normalization_matches_reference_simple_unicode_and_both_slashes() {
         for (input, expected) in [
             ("Assets/ÜBER.BLP", "assets\\über.blp"),
             ("ASSETS\\ASCII.PNG", "assets\\ascii.png"),
@@ -99,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_metadata_preserves_fixed_go_headers_fallbacks_and_metadata_only_rows() {
+    fn asset_metadata_preserves_fixed_reference_headers_fallbacks_and_metadata_only_rows() {
         let mut png = vec![0; 24];
         png[..8].copy_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
         png[16..20].copy_from_slice(&123u32.to_be_bytes());

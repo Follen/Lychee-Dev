@@ -95,7 +95,7 @@ fn real_configuration_download_obeys_quota_and_closes_publisher_before_private_a
     );
     assert!(
         f.store()
-            .read::<CachedBlob>(&format!("remote-config/{digest}"))
+            .read::<BlobRef>(&format!("remote-config/{digest}"))
             .unwrap()
             .is_none()
     );

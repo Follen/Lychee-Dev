@@ -152,11 +152,11 @@ fn capture_completion_preserves_all_cleanup_events_and_never_claims_unknown_comm
     let primary = ToolkitError::new("records.metadata_limit", "budget", 3)
         .with_details(serde_json::json!({"used":17}));
     let close = ToolkitError::new("vault.close", "same close failure", 5);
-    let result = crate::metadata::historical_write::finish_historical::<()>(
+    let result = crate::metadata::owned_write::finish_owned::<()>(
         Err(primary.clone()),
         Err(close.clone()),
     );
-    let result = crate::metadata::historical_write::finish_historical(result, Err(close));
+    let result = crate::metadata::owned_write::finish_owned(result, Err(close));
     let error = capture_result(result, value.clone(), CaptureWriteState::Committed).unwrap_err();
     assert_eq!(
         error.details["primary"]["details"]["primary"]["details"]["primary"],

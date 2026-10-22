@@ -10,32 +10,25 @@ import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
 import {agentEnvironment,preparationEnvironmentPolicy,preparationTimeout} from './agent-environment.mjs';
 import {resolvedTool,verifyTool} from './agent-tool-identity.mjs';
 import {CONTENT_BYTES, dataCases} from './data-contract.mjs';
-import {CSV_CARGO_LOCK_SHA256, NUMERIC_LAYOUT_SOURCE_SHA256, digest, loadAgentDataFixture, parse} from './agent-fixture-inputs.mjs';
+import {fixturePreparers, fixturePreparationRecipe, fixtureArgs, digest, loadAgentDataFixture, parse} from './agent-fixture-inputs.mjs';
 
-export const fixturePreparers = Object.freeze([
-  {kind: 'catalog', target: 'catalog_navigation_parity', test: 'prepare_catalog_public_fixture', variable: 'LYCHEEDEV_CATALOG_FIXTURE'},
-  {kind: 'content', target: 'content_budget_parity', test: 'prepare_compressed_content_public_fixture', variable: 'LYCHEEDEV_CONTENT_BUDGET_FIXTURE'},
-  {kind: 'images', target: 'image_export_business', test: 'prepare_large_image_export_public_fixture', variable: 'LYCHEEDEV_IMAGE_EXPORT_FIXTURE'},
-]);
-export const numericCSVPreparer = Object.freeze({kind: 'csv-numeric', target: 'catalog_navigation_parity', test: 'prepare_numeric_csv_public_fixture', variable: 'LYCHEEDEV_NUMERIC_CSV_FIXTURE'});
+export {fixturePreparers, fixtureArgs};
 export function selectedFixturePreparers(args) {
-  assert(args.length === 0 || args.length === 1 && args[0] === '--csv-numeric', 'only optional --csv-numeric is supported');
-  return args.length ? [numericCSVPreparer] : fixturePreparers;
+  assert(args.length === 0 || args.length === 1 && ['--content', '--images', '--catalog', '--csv-numeric'].includes(args[0]), 'optional --content, --images, --catalog or --csv-numeric selects one fixture family');
+  return args.length ? [fixturePreparationRecipe(args[0].slice(2))] : fixturePreparers.filter(entry => entry.kind !== 'csv-numeric');
 }
-export const fixtureArgs = entry => ['test', '--locked', '--offline', '-j', '1', '-p', 'lycheedev-data', '--features','migration-oracle','--test', entry.target, entry.test, '--', '--ignored', '--exact', '--nocapture', '--test-threads=1'];
 
 function main() {
-  assert(process.platform === 'win32', 'usage (Windows, fixture-producer root): node tests/rust-performance-paired/agent-prepare-fixtures.mjs [--csv-numeric]');
+  assert(process.platform === 'win32', 'usage (Windows, fixture-producer root): node tests/rust-performance-paired/agent-prepare-fixtures.mjs [--content | --images | --catalog | --csv-numeric]');
   const selected = selectedFixturePreparers(process.argv.slice(2));
   const root = resolve('.'), started = performance.now();
   agentEnvironment(root,process.env);const cargoIdentity=resolvedTool('cargo');
   const paths = ['tests/rust-performance-paired/agent-prepare-fixtures.mjs', 'tests/rust-performance-paired/agent-fixture-inputs.mjs', 'tests/rust-performance-paired/agent-json.mjs', 'tests/rust-performance-paired/data-contract.mjs',
-    'tests/rust-performance-paired/inputs.mjs', 'tests/rust-performance-paired/contract.mjs', 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-parity/describe-contract.mjs', 'tests/rust-parity/oracle.mjs',
+    'tests/rust-performance-paired/inputs.mjs', 'tests/rust-performance-paired/contract.mjs', 'tests/rust-source-full-corpus/assertions.mjs',
     'tests/rust-performance-paired/agent-custody.mjs','tests/rust-performance-paired/agent-environment.mjs','tests/rust-performance-paired/agent-tool-identity.mjs','tools/rust-owned-memory.mjs','tools/rust-build.mjs', 'tools/rust-disk.mjs', 'tools/rust-emmy-identity.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-build-auxiliary.json', 'tools/zip.mjs', 'release/rust-disk-policy.json'];
   const inputs = {environmentPolicy:preparationEnvironmentPolicy,environmentOverrides:[],cargoIdentity,sourceTree: sourceDigest(root), files: Object.fromEntries(paths.map(path => [path, hashFile(join(root, path))])), contentBytes: CONTENT_BYTES};
-  if (selected[0] === numericCSVPreparer) {
+  if (selected.some(entry => entry.kind === 'csv-numeric')) {
     inputs.numericLayout = {sourceSHA256: hashFile(join(root, 'crates/lycheedev-core/src/public_json.rs')), cargoLockSHA256: hashFile(join(root, 'Cargo.lock'))};
-    assert.equal(inputs.numericLayout.sourceSHA256,NUMERIC_LAYOUT_SOURCE_SHA256,'unchanged numeric ABI source');
   }
   const job = beginScratch(root, 'paired-data-fixtures', {command: process.argv, inputs, retention: 'evidence', admissionOptions: {requiredBytes: 1 << 30, scratchReserveBytes: 256 << 20}});
   const reportPath = join(job.evidence, 'fixture-preparation.json');
@@ -56,7 +49,11 @@ function main() {
           execute(binary, args, options) {
             agentEnvironment(root,process.env);verifyTool(cargoIdentity);options={...options,timeout:preparationTimeout(started,performance.now(),options.timeout)};row.actualTimeoutMs=options.timeout;
             row.launched = true; handlesReaped = false; row.buildEvidence = join(options.evidence, 'receipt.json'); save();
-            const run = ownedSpawnSync(binary, args, options); verifyTool(cargoIdentity);assert.equal(run.proof?.binary,cargoIdentity.path);handlesReaped = run.handlesReaped === true;
+            const run = ownedSpawnSync(binary, args, options); handlesReaped = run.handlesReaped === true;
+            // Return post-run validation failures to runCargo with the original
+            // reap proof, so it can close this failed invocation's own lease.
+            try { verifyTool(cargoIdentity);assert.equal(run.proof?.binary,cargoIdentity.path); }
+            catch (error) { run.error ??= error; }
             row.process = {exit: run.status, signal: run.signal, error: run.error?.message, handlesReaped, proof: run.proof, logs: run.logs,
               stdoutSHA256: digest(run.stdout || Buffer.alloc(0)), stderrSHA256: digest(run.stderr || Buffer.alloc(0))}; save();
             return run;

@@ -1,15 +1,12 @@
 //! OS-issued main-module reads for runtime instruction recipes. Opening this
 //! capability performs no disk read. The explicit verify_image_layout issuer
 //! additionally locks/hashes its EXE under the same request ledger. Both remain
-//! separate from historical ModulePlan and private-heap discovery.
+//! scoped to its current process/window and cumulative request budget.
 use super::{Handle, Process, ProcessIdentity, WindowIdentity, readable};
 use crate::Result;
 use std::{
     mem::size_of,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::Instant,
 };
 use windows::Win32::{
@@ -110,14 +107,10 @@ pub struct RuntimeBudget {
     limits: RuntimeLimits,
     used: RuntimeUsage,
     deadline: Instant,
-    cancel: Option<Arc<AtomicBool>>,
     control: Option<Box<dyn RuntimeControl>>,
     scoped_controls: Vec<Box<dyn RuntimeControl>>,
 }
 impl RuntimeBudget {
-    pub fn new(limits: RuntimeLimits, deadline: Instant, cancel: Arc<AtomicBool>) -> Result<Self> {
-        Self::initialize(limits, deadline, Some(cancel))
-    }
     pub fn with_control<C: RuntimeControl + 'static>(
         limits: RuntimeLimits,
         deadline: Instant,
@@ -134,7 +127,7 @@ impl RuntimeBudget {
         retained_bytes: usize,
         create: impl FnOnce() -> C,
     ) -> Result<Self> {
-        let mut budget = Self::initialize(limits, deadline, None)?;
+        let mut budget = Self::initialize(limits, deadline)?;
         let allocation = size_of::<C>()
             .checked_add(retained_bytes)
             .ok_or("memory.runtime_control_allocation")?;
@@ -144,11 +137,7 @@ impl RuntimeBudget {
         budget.control = Some(Box::new(control));
         Ok(budget)
     }
-    fn initialize(
-        limits: RuntimeLimits,
-        deadline: Instant,
-        cancel: Option<Arc<AtomicBool>>,
-    ) -> Result<Self> {
+    fn initialize(limits: RuntimeLimits, deadline: Instant) -> Result<Self> {
         if limits.os_call_units > 8_000_000
             || limits.query_calls > 1_000_000
             || limits.read_calls > 1_000_000
@@ -163,7 +152,6 @@ impl RuntimeBudget {
             limits,
             used: RuntimeUsage::default(),
             deadline,
-            cancel,
             control: None,
             scoped_controls: Vec::new(),
         })
@@ -183,13 +171,6 @@ impl RuntimeBudget {
         }
         for control in &self.scoped_controls {
             control.check()?;
-        }
-        if self
-            .cancel
-            .as_ref()
-            .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-        {
-            return Err("memory.runtime_cancelled".into());
         }
         if Instant::now() >= self.deadline {
             return Err("memory.runtime_deadline".into());

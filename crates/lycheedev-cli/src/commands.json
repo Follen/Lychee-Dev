@@ -12,6 +12,12 @@
       "--path <skill-directory> (repeatable)",
       "--installation <client-directory> (repeatable)",
       "--plan"
+    ],
+    "examples": [
+      "lycheedev update --home EXAMPLE_HOME --release RELEASE_ROOT --path SKILL_DIR --plan --format json"
+    ],
+    "constraints": [
+      "RELEASE_ROOT is the distribution to synchronize and SKILL_DIR is an existing managed Skill directory. --plan reports the proposed update actions."
     ]
   },
   {
@@ -23,6 +29,12 @@
       "--format text|json|jsonl",
       "--product <track>",
       "--path <directory>"
+    ],
+    "examples": [
+      "lycheedev project init --path PROJECT_DIR --product retail --format json"
+    ],
+    "constraints": [
+      "PROJECT_DIR is the directory where lycheedev.json will be created for the selected product."
     ]
   },
   {
@@ -40,7 +52,7 @@
       "--raidbots <DBCache.bin>",
       "--from <cache-capture-or-time>",
       "--to <time>",
-      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)",
+      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary>",
       "--build <full-build>",
       "--region <us|eu|cn|kr|tw>",
       "--locale <locale>",
@@ -63,6 +75,13 @@
       "--max-bytes <n>",
       "--encoding csv",
       "--output <file>"
+    ],
+    "constraints": [
+      "Remote source flags are validated by the Hotfix provider; see data hotfix --help.",
+      "DATA_PIN and DBCACHE_FILE must identify the same product/build. Replace record 2 and table hash 0000002A with the record and hexadecimal table hash to inspect."
+    ],
+    "examples": [
+      "lycheedev data hotfix --home EXAMPLE_HOME --source dbcache --snapshot DATA_PIN --dbcache DBCACHE_FILE --table-hash 0000002A --record 2 --format json"
     ]
   },
   {
@@ -75,6 +94,12 @@
       "--format text|json|jsonl",
       "--snapshot <pin>",
       "--path <directory>"
+    ],
+    "examples": [
+      "lycheedev project lock --home EXAMPLE_HOME --path PROJECT_DIR --snapshot SOURCE_PIN --format json"
+    ],
+    "constraints": [
+      "PROJECT_DIR contains lycheedev.json; SOURCE_PIN is an existing fixed selection to write into its lock file."
     ]
   },
   {
@@ -85,6 +110,12 @@
     "flags": [
       "--format text|json|jsonl",
       "--path <directory>"
+    ],
+    "examples": [
+      "lycheedev project status --path PROJECT_DIR --format json"
+    ],
+    "constraints": [
+      "PROJECT_DIR contains the project configuration and any current lock file."
     ]
   },
   {
@@ -97,6 +128,12 @@
       "--format text|json|jsonl",
       "--name <name>",
       "--file <probe.lua>"
+    ],
+    "examples": [
+      "lycheedev live probe put --home EXAMPLE_HOME --name example_read --file PROBE_FILE --format json"
+    ],
+    "constraints": [
+      "PROBE_FILE contains Lua source bytes to store under the name example_read."
     ]
   },
   {
@@ -114,9 +151,22 @@
       "--budget-seconds <1-120>",
       "--project <directory>",
       "--wait-seconds <1-600> (default 120)",
-      "--no-cache",
       "--policy <opaque|observation> (default opaque)"
-    ]
+    ],
+    "defaults": {
+      "--wait-seconds": "120",
+      "--policy": "opaque"
+    },
+    "examples": [
+      "lycheedev live execute --home EXAMPLE_HOME --project PROJECT_DIR --session CON_ID --probe example_read --request example-read-001 --budget-seconds 5 --policy observation --format json"
+    ],
+    "constraints": [
+      "CON_ID is the retained CON- connection in PROJECT_DIR; example_read is a stored probe. A ready connection and fresh compatible INPUT are required. The command sends the observation request identified by --request; retain that identity and deadline for recovery."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true
+    }
   },
   {
     "path": "live probe list",
@@ -128,6 +178,12 @@
       "--format text|json|jsonl",
       "--include-removed",
       "--limit <1-1000>"
+    ],
+    "examples": [
+      "lycheedev live probe list --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Lists the probe names stored in EXAMPLE_HOME."
     ]
   },
   {
@@ -140,6 +196,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev live probe show example_read --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "example_read is a stored probe name; a returned PRB revision can also be used."
     ]
   },
   {
@@ -152,6 +214,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev live probe remove example_read --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "example_read is the stored probe name to remove."
     ]
   },
   {
@@ -165,6 +233,22 @@
       "--path <target>",
       "--output <archive>",
       "--resume"
+    ],
+    "required": [
+      "--path"
+    ],
+    "oneOfRequired": [
+      [
+        "--release",
+        "--resume"
+      ]
+    ],
+    "constraints": [
+      "--release is required unless --resume is used; --resume requires --output and forbids --release.",
+      "RELEASE_ROOT is a valid distribution and SKILL_DIR is the destination directory ending in lycheedev, such as the Agent's user Skill directory."
+    ],
+    "examples": [
+      "lycheedev skill install --release RELEASE_ROOT --path SKILL_DIR --format json"
     ]
   },
   {
@@ -175,6 +259,15 @@
     "flags": [
       "--format text|json|jsonl",
       "--path <installed-directory>"
+    ],
+    "required": [
+      "--path"
+    ],
+    "examples": [
+      "lycheedev skill status --path SKILL_DIR --format json"
+    ],
+    "constraints": [
+      "SKILL_DIR is the installed Skill directory whose managed files and version will be inspected."
     ]
   },
   {
@@ -186,6 +279,16 @@
       "--format text|json|jsonl",
       "--path <parent/lycheedev>",
       "--output <recovery-directory>"
+    ],
+    "required": [
+      "--path",
+      "--output"
+    ],
+    "examples": [
+      "lycheedev skill remove --path SKILL_DIR --output SKILL_RECOVERY_DIR --format json"
+    ],
+    "constraints": [
+      "SKILL_DIR is the managed Skill to remove; SKILL_RECOVERY_DIR is a new directory for its recovery data."
     ]
   },
   {
@@ -197,6 +300,18 @@
       "--format text|json|jsonl",
       "--path <addon-directory>",
       "--installation <client-directory>"
+    ],
+    "oneOfRequired": [
+      [
+        "--installation",
+        "--path"
+      ]
+    ],
+    "examples": [
+      "lycheedev addon status --installation CLIENT_DIR --format json"
+    ],
+    "constraints": [
+      "CLIENT_DIR selects the installation whose managed addon and slots will be inspected."
     ]
   },
   {
@@ -210,6 +325,22 @@
       "--installation <client-directory>",
       "--output <archive>",
       "--resume"
+    ],
+    "required": [
+      "--installation"
+    ],
+    "oneOfRequired": [
+      [
+        "--release",
+        "--resume"
+      ]
+    ],
+    "constraints": [
+      "--release is required unless --resume is used; --resume requires --output and forbids --release.",
+      "RELEASE_ROOT is a valid distribution and CLIENT_DIR is the destination client installation. Installation writes the managed addon and its 500 load-on-demand slots."
+    ],
+    "examples": [
+      "lycheedev addon install --release RELEASE_ROOT --installation CLIENT_DIR --format json"
     ]
   },
   {
@@ -221,6 +352,16 @@
       "--format text|json|jsonl",
       "--installation <client-directory>",
       "--output <recovery-directory>"
+    ],
+    "required": [
+      "--installation",
+      "--output"
+    ],
+    "examples": [
+      "lycheedev addon remove --installation CLIENT_DIR --output ADDON_RECOVERY_DIR --format json"
+    ],
+    "constraints": [
+      "CLIENT_DIR selects the managed addon and slots to remove; ADDON_RECOVERY_DIR is a new directory for recovery data."
     ]
   },
   {
@@ -231,6 +372,9 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev data agent schema --format json"
     ]
   },
   {
@@ -251,6 +395,22 @@
       "--max-objects <1-1024> (default 32; retained result handles)",
       "--max-bytes <n> (default 536870912; shared session memory admission)",
       "--result-ttl-seconds <1-3600> (default 300; result handle lifetime)"
+    ],
+    "defaults": {
+      "--timeout-seconds": "300",
+      "--max-objects": "32",
+      "--max-bytes": "536870912",
+      "--result-ttl-seconds": "300"
+    },
+    "required": [
+      "--format"
+    ],
+    "constraints": [
+      "--format must be jsonl for the supervised Data Agent worker.",
+      "Send stdin as separate JSONL lines: {\"protocol\":\"lycheedev.data-agent.v1\",\"id\":1,\"task\":\"query\",\"query\":{\"kind\":\"plan\",\"plan\":{\"op\":\"scan\",\"table\":{\"name\":\"Map\",\"mode\":\"static\"}}}}. Wait for the matching query response, then send {\"protocol\":\"lycheedev.data-agent.v1\",\"id\":2,\"task\":\"close\"}. If you insert page, capture or other handle operations, assign increasing IDs to every subsequent request, including close."
+    ],
+    "examples": [
+      "lycheedev data agent serve --home EXAMPLE_HOME --snapshot DATA_PIN --installation CLIENT_DIR --format jsonl"
     ]
   },
   {
@@ -271,6 +431,15 @@
       "--max-bytes <n>",
       "--key-file <WoW.txt|keys.json>",
       "--timeout-seconds <1-3600> (default 300; entire query)"
+    ],
+    "defaults": {
+      "--timeout-seconds": "300"
+    },
+    "examples": [
+      "lycheedev data cache prepare Map --home EXAMPLE_HOME --snapshot DATA_PIN --installation CLIENT_DIR --format json"
+    ],
+    "constraints": [
+      "DATA_PIN fixes the product/build/locale selection; CLIENT_DIR supplies matching installation data. Map is the table to prepare. Preparation loads its required definitions and data into the cache; --offline requires all needed inputs already cached."
     ]
   },
   {
@@ -290,6 +459,12 @@
       "--file-id <id>",
       "--max-bytes <n>",
       "--offline"
+    ],
+    "examples": [
+      "lycheedev asset inspect --home EXAMPLE_HOME --snapshot DATA_PIN --installation CLIENT_DIR --file-id 134400 --format json"
+    ],
+    "constraints": [
+      "DATA_PIN fixes the product/build/locale selection; CLIENT_DIR supplies matching installation data. Replace 134400 with the FileDataID to inspect."
     ]
   },
   {
@@ -310,6 +485,13 @@
       "--limit <1-200>",
       "--max-bytes <n>",
       "--offline"
+    ],
+    "constraints": [
+      "Exactly one listfile source mode is required.",
+      "--listfile community-csv selects that public listfile source. --offline requires its authenticated cache already prepared in EXAMPLE_HOME; BLP is the search term."
+    ],
+    "examples": [
+      "lycheedev asset search --home EXAMPLE_HOME --snapshot DATA_PIN --listfile community-csv --query BLP --limit 1 --offline --format json"
     ]
   },
   {
@@ -335,6 +517,12 @@
       "--overwrite",
       "--max-bytes <n>",
       "--offline"
+    ],
+    "examples": [
+      "lycheedev asset export --home EXAMPLE_HOME --snapshot DATA_PIN --installation CLIENT_DIR --file-id 134400 --encoding raw --output RAW_OUTPUT_FILE --format json"
+    ],
+    "constraints": [
+      "DATA_PIN fixes the product/build/locale selection; CLIENT_DIR supplies matching installation data for file 134400. RAW_OUTPUT_FILE is a new output file under an existing parent directory; --encoding raw exports the original bytes."
     ]
   },
   {
@@ -358,6 +546,12 @@
       "--allow-partial",
       "--overwrite",
       "--offline"
+    ],
+    "examples": [
+      "lycheedev asset demux --home EXAMPLE_HOME --path AVI_FILE --output FRAMES_DIR --format json"
+    ],
+    "constraints": [
+      "AVI_FILE is a complete supported local AVI input; FRAMES_DIR is an existing output directory. The command writes extracted frames and their manifest there."
     ]
   },
   {
@@ -368,6 +562,9 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev version --format json"
     ]
   },
   {
@@ -378,6 +575,9 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev describe --format json"
     ]
   },
   {
@@ -391,6 +591,20 @@
       "--plan",
       "--fresh",
       "--resume"
+    ],
+    "mutuallyExclusive": [
+      [
+        "--plan",
+        "--fresh",
+        "--resume"
+      ]
+    ],
+    "constraints": [
+      "At most one of --plan, --fresh or --resume.",
+      "EXAMPLE_HOME is the workspace directory to initialize."
+    ],
+    "examples": [
+      "lycheedev init --home EXAMPLE_HOME --format json"
     ]
   },
   {
@@ -406,7 +620,17 @@
       "--session <CON-id>",
       "--project <directory>",
       "--offline"
-    ]
+    ],
+    "examples": [
+      "lycheedev doctor --home EXAMPLE_HOME --offline --format json"
+    ],
+    "constraints": [
+      "Inspects the workspace and installed local providers/runtimes, reporting their availability and any required corrections."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": false
+    }
   },
   {
     "path": "live doctor",
@@ -423,9 +647,24 @@
       "--release <distribution-root>",
       "--output <upgrade-archive>",
       "--request <idempotency-key>",
-      "--wait-seconds <1-600> (default 30)",
-      "--no-cache"
-    ]
+      "--wait-seconds <1-600> (default 30)"
+    ],
+    "defaults": {
+      "--wait-seconds": "30"
+    },
+    "examples": [
+      "lycheedev live doctor --project PROJECT_DIR --session CON_ID --format json"
+    ],
+    "constraints": [
+      "CON_ID is the retained connection in PROJECT_DIR whose installation, runtime and recovery state will be diagnosed."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true,
+      "gameInputWhen": {
+        "--fix": true
+      }
+    }
   },
   {
     "path": "config show",
@@ -435,6 +674,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev config show --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Reads the configuration of EXAMPLE_HOME."
     ]
   },
   {
@@ -447,6 +692,12 @@
       "--format text|json|jsonl",
       "--cache-max-bytes <n>",
       "--download-workers <n>"
+    ],
+    "examples": [
+      "lycheedev config set --home EXAMPLE_HOME --download-workers 1 --format json"
+    ],
+    "constraints": [
+      "Sets the workspace download-worker count to 1."
     ]
   },
   {
@@ -458,6 +709,12 @@
       "--data",
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev cache status --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Reports cache usage in EXAMPLE_HOME; --data selects the Data usage view."
     ]
   },
   {
@@ -468,6 +725,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev cache verify --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Checks the cache entries and content hashes in EXAMPLE_HOME."
     ]
   },
   {
@@ -483,6 +746,12 @@
       "--uncommitted",
       "--dry-run",
       "--data-derived"
+    ],
+    "examples": [
+      "lycheedev cache prune --home EXAMPLE_HOME --target-bytes 0 --dry-run --format json"
+    ],
+    "constraints": [
+      "--dry-run reports which cache objects are eligible for removal toward --target-bytes in EXAMPLE_HOME."
     ]
   },
   {
@@ -493,9 +762,18 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl",
-      "--installation <client-or-game-root>",
-      "--passive"
-    ]
+      "--installation <client-or-game-root>"
+    ],
+    "examples": [
+      "lycheedev live instances --home EXAMPLE_HOME --installation CLIENT_DIR --format json"
+    ],
+    "constraints": [
+      "CLIENT_DIR filters passive process discovery to the selected installation."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": false
+    }
   },
   {
     "path": "live connect",
@@ -512,9 +790,21 @@
       "--installation <client>",
       "--session <session-id>",
       "--project <directory>",
-      "--wait-seconds <1-600> (default 120)",
-      "--no-cache"
-    ]
+      "--wait-seconds <1-600> (default 120)"
+    ],
+    "defaults": {
+      "--wait-seconds": "120"
+    },
+    "examples": [
+      "lycheedev live connect --home EXAMPLE_HOME --project PROJECT_DIR --installation CLIENT_DIR --pid 12345 --format json"
+    ],
+    "constraints": [
+      "Replace 12345 with the selected process PID from live instances and use its matching CLIENT_DIR. Retain the returned CON connection ID in PROJECT_DIR."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true
+    }
   },
   {
     "path": "live reload",
@@ -527,9 +817,21 @@
       "--session <session-id>",
       "--request <idempotency-key>",
       "--project <directory>",
-      "--wait-seconds <1-600> (default 120)",
-      "--no-cache"
-    ]
+      "--wait-seconds <1-600> (default 120)"
+    ],
+    "defaults": {
+      "--wait-seconds": "120"
+    },
+    "examples": [
+      "lycheedev live reload --home EXAMPLE_HOME --project PROJECT_DIR --session CON_ID --request example-reload-001 --format json"
+    ],
+    "constraints": [
+      "CON_ID is the ready connection in PROJECT_DIR. This sends a reload request to its client; keep the original request identity and deadline for recovery."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true
+    }
   },
   {
     "path": "live reload fallback",
@@ -543,9 +845,21 @@
       "--pid <pid>",
       "--request <idempotency-key>",
       "--project <directory>",
-      "--wait-seconds <1-600> (default 120)",
-      "--no-cache"
-    ]
+      "--wait-seconds <1-600> (default 120)"
+    ],
+    "defaults": {
+      "--wait-seconds": "120"
+    },
+    "examples": [
+      "lycheedev live reload fallback --home EXAMPLE_HOME --project PROJECT_DIR --installation CLIENT_DIR --pid 12345 --request example-activate-001 --format json"
+    ],
+    "constraints": [
+      "CLIENT_DIR and the selected PID identify the client to activate through its fresh compatible INPUT and effective binding. Retain any returned CON connection for recovery."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true
+    }
   },
   {
     "path": "live bugs",
@@ -559,9 +873,21 @@
       "--request <idempotency-key>",
       "--count <1-100>",
       "--project <directory>",
-      "--wait-seconds <1-600> (default 120)",
-      "--no-cache"
-    ]
+      "--wait-seconds <1-600> (default 120)"
+    ],
+    "defaults": {
+      "--wait-seconds": "120"
+    },
+    "examples": [
+      "lycheedev live bugs --home EXAMPLE_HOME --project PROJECT_DIR --session CON_ID --request example-bugs-001 --count 1 --format json"
+    ],
+    "constraints": [
+      "CON_ID is the ready connection in PROJECT_DIR. Sends a diagnostic observation request for up to 1 recent error entry."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true
+    }
   },
   {
     "path": "target resolve",
@@ -574,13 +900,19 @@
       "--file <selection.json>",
       "--target <name>",
       "--installation <game-root-or-client>",
-      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)",
+      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary>",
       "--build <full-build>",
       "--definitions <commit-or-full-ref>",
       "--region <us|eu|cn|kr|tw>",
       "--locale <locale>",
       "--from <parent-pin>",
       "--offline"
+    ],
+    "examples": [
+      "lycheedev target resolve --home EXAMPLE_HOME --installation CLIENT_DIR --product retail --build 12.1.5.70448 --definitions DBD_COMMIT --region us --locale enUS --offline --format json"
+    ],
+    "constraints": [
+      "CLIENT_DIR must match retail/build 12.1.5.70448; DBD_COMMIT is the fixed definitions commit for that build. --offline requires needed inputs already recorded or present. Retain the returned DATA_PIN."
     ]
   },
   {
@@ -593,6 +925,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev target show DATA_PIN --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "DATA_PIN is an existing PIN- selection ID; a stored target name is also accepted."
     ]
   },
   {
@@ -603,6 +941,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev target list --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Lists the target names configured in EXAMPLE_HOME."
     ]
   },
   {
@@ -615,7 +959,7 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl",
-      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)",
+      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary>",
       "--region <us|eu|cn|kr|tw>",
       "--locale <locale>",
       "--build <full-build>",
@@ -623,6 +967,19 @@
       "--definitions <commit-or-full-ref>",
       "--remote",
       "--replace"
+    ],
+    "oneOfRequired": [
+      [
+        "--installation",
+        "--remote"
+      ]
+    ],
+    "constraints": [
+      "Exactly one of --installation or --remote is required.",
+      "example-retail is the target name to create for CLIENT_DIR, product retail, region us and locale enUS."
+    ],
+    "examples": [
+      "lycheedev target add example-retail --home EXAMPLE_HOME --installation CLIENT_DIR --product retail --region us --locale enUS --format json"
     ]
   },
   {
@@ -635,6 +992,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev target remove example-retail --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "example-retail is the target name to remove. Existing project or operation references must be released first."
     ]
   },
   {
@@ -646,19 +1009,31 @@
       "--format text|json|jsonl",
       "--region <us|eu|cn|kr|tw>",
       "--offline"
+    ],
+    "examples": [
+      "lycheedev target available --region us --format json"
+    ],
+    "constraints": [
+      "Retrieves current online product manifests for region us; network access is required."
     ]
   },
   {
     "path": "live status",
-    "summary": "Read persisted work or a BTP bootstrap attempt without sending input: live status <operation-id>",
+    "summary": "Read the persisted CON connection, request and cleanup state without opening the game or sending input: live status <CON-id>",
     "mutates": false,
     "arguments": [
-      "<operation-id>"
+      "<CON-id>"
     ],
     "flags": [
       "--home <root>",
       "--format text|json|jsonl",
       "--project <directory>"
+    ],
+    "examples": [
+      "lycheedev live status CON_ID --home EXAMPLE_HOME --project PROJECT_DIR --format json"
+    ],
+    "constraints": [
+      "Use the retained CON- connection ID from the original PROJECT_DIR."
     ]
   },
   {
@@ -672,33 +1047,21 @@
       "--home <root>",
       "--format text|json|jsonl",
       "--project <directory>",
-      "--wait-seconds <1-600> (default 120)",
-      "--no-cache"
-    ]
-  },
-  {
-    "path": "live cancel",
-    "summary": "Cancel a prepared historical OP record without game input; use live abandon to terminate later historical recovery",
-    "mutates": true,
-    "arguments": [
-      "<operation-id>"
+      "--wait-seconds <1-600> (default 120)"
     ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl"
-    ]
-  },
-  {
-    "path": "live abandon",
-    "summary": "Explicitly stop unresolved probe, bugs, fixed reload, or bootstrap recovery; preserve evidence and unknown results, release host ownership without game input or claiming business completion",
-    "mutates": true,
-    "arguments": [
-      "<operation-or-bootstrap-id>"
+    "defaults": {
+      "--wait-seconds": "120"
+    },
+    "examples": [
+      "lycheedev live resume CON_ID --home EXAMPLE_HOME --project PROJECT_DIR --format json"
     ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl"
-    ]
+    "constraints": [
+      "CON_ID and PROJECT_DIR identify the original connection, request and deadline to recover. Submitted or uncertain input retains its original recovery state."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true
+    }
   },
   {
     "path": "live session",
@@ -711,6 +1074,12 @@
       "--home <root>",
       "--format text|json|jsonl",
       "--project <directory>"
+    ],
+    "examples": [
+      "lycheedev live session CON_ID --home EXAMPLE_HOME --project PROJECT_DIR --format json"
+    ],
+    "constraints": [
+      "Inspects the retained CON- connection in PROJECT_DIR."
     ]
   },
   {
@@ -723,9 +1092,21 @@
     "flags": [
       "--format text|json|jsonl",
       "--project <directory>",
-      "--wait-seconds <1-600> (default 120)",
-      "--no-cache"
-    ]
+      "--wait-seconds <1-600> (default 120)"
+    ],
+    "defaults": {
+      "--wait-seconds": "120"
+    },
+    "examples": [
+      "lycheedev live disconnect CON_ID --project PROJECT_DIR --format json"
+    ],
+    "constraints": [
+      "CON_ID selects the connection to disconnect in its original PROJECT_DIR. The result reports connection cleanup state."
+    ],
+    "effects": {
+      "gameProcess": true,
+      "gameInput": true
+    }
   },
   {
     "path": "evidence show",
@@ -737,6 +1118,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev evidence show CAP_ID --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "CAP_ID is an existing CAP- capture ID in EXAMPLE_HOME."
     ]
   },
   {
@@ -749,6 +1136,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev evidence verify CAP_ID --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "CAP_ID selects a capture whose manifest, content-addressed blob and dependencies will be checked."
     ]
   },
   {
@@ -760,6 +1153,12 @@
       "--home <root>",
       "--format text|json|jsonl",
       "--limit <n>"
+    ],
+    "examples": [
+      "lycheedev evidence list --home EXAMPLE_HOME --limit 1 --format json"
+    ],
+    "constraints": [
+      "Lists up to 1 capture from EXAMPLE_HOME."
     ]
   },
   {
@@ -772,6 +1171,12 @@
       "--format text|json|jsonl",
       "--ids <capture-id,...>",
       "--output <new-file>"
+    ],
+    "examples": [
+      "lycheedev evidence bundle --ids CAP_ID --output BUNDLE_OUTPUT_FILE --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "CAP_ID selects a capture and its dependency closure; BUNDLE_OUTPUT_FILE is a new output file for the bundle."
     ]
   },
   {
@@ -784,6 +1189,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev evidence keep CAP_ID --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Marks CAP_ID as retained so cache pruning preserves its capture dependencies."
     ]
   },
   {
@@ -796,6 +1207,12 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev evidence remove CAP_ID --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "CAP_ID is the CAP- capture ID to remove. It must be unkept and free of active references."
     ]
   },
   {
@@ -808,6 +1225,12 @@
       "--format text|json|jsonl",
       "--project <directory>",
       "--snapshot <pin>"
+    ],
+    "examples": [
+      "lycheedev source list --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Lists the configured source catalog and readiness of prepared snapshots."
     ]
   },
   {
@@ -826,6 +1249,12 @@
       "--session-reuse",
       "--static-only",
       "--release <release-root>"
+    ],
+    "examples": [
+      "lycheedev source batch --home EXAMPLE_HOME --snapshot SOURCE_PIN --file BATCH_FILE --format json"
+    ],
+    "constraints": [
+      "BATCH_FILE contains a JSON request object, for example {\"requests\":[{\"id\":\"query-1\",\"query\":{\"text\":\"GetActionButtonForID\",\"topic\":\"lua\",\"mode\":\"precise\",\"limit\":1}}]}. SOURCE_PIN selects the fixed snapshot for every item."
     ]
   },
   {
@@ -839,6 +1268,12 @@
       "--source <key>",
       "--product <track>",
       "--ref <full-ref-or-commit>"
+    ],
+    "examples": [
+      "lycheedev source sync --home EXAMPLE_HOME --source wow-ui-source --product retail --ref 31c7f7b9cc79e56c986b365c06a6afbcf3c9177b --format json"
+    ],
+    "constraints": [
+      "The full commit identifies the Retail source revision to prepare. An absent revision is fetched from the configured source remote. Retain the returned SOURCE_PIN."
     ]
   },
   {
@@ -856,6 +1291,12 @@
       "--target-path <path>",
       "--line <n>",
       "--count <n>"
+    ],
+    "examples": [
+      "lycheedev source inspect --home EXAMPLE_HOME --snapshot SOURCE_PIN --path Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua --line 97 --count 1 --format json"
+    ],
+    "constraints": [
+      "SOURCE_PIN is the Retail snapshot from source sync at the shown commit; the path and line identify the source range to read."
     ]
   },
   {
@@ -868,6 +1309,12 @@
       "--format text|json|jsonl",
       "--project <directory>",
       "--snapshot <pin-id>"
+    ],
+    "examples": [
+      "lycheedev source index --home EXAMPLE_HOME --snapshot SOURCE_PIN --format json"
+    ],
+    "constraints": [
+      "SOURCE_PIN is the fixed Source PIN from source sync in EXAMPLE_HOME, with its source mirror prepared."
     ]
   },
   {
@@ -886,6 +1333,12 @@
       "--topic <api|lua|xml|toc|asset>",
       "--limit <1-200>",
       "--cursor <token>"
+    ],
+    "examples": [
+      "lycheedev source query GetActionButtonForID --home EXAMPLE_HOME --snapshot SOURCE_PIN --topic lua --mode precise --limit 1 --format json"
+    ],
+    "constraints": [
+      "SOURCE_PIN selects the fixed Retail snapshot. GetActionButtonForID is the positional query term."
     ]
   },
   {
@@ -907,6 +1360,12 @@
       "--session-reuse",
       "--static-only",
       "--release <release-root>"
+    ],
+    "examples": [
+      "lycheedev source refs --home EXAMPLE_HOME --snapshot SOURCE_PIN --symbol GetActionButtonForID --direction incoming --limit 1 --release RELEASE_ROOT --format json"
+    ],
+    "constraints": [
+      "SOURCE_PIN selects the fixed source snapshot; RELEASE_ROOT supplies the native runtime. A matching --environment client PIN supplies client API facts, and the result reports the available coverage."
     ]
   },
   {
@@ -931,6 +1390,12 @@
       "--session-reuse",
       "--static-only",
       "--release <release-root>"
+    ],
+    "examples": [
+      "lycheedev source context --home EXAMPLE_HOME --snapshot SOURCE_PIN --symbol GetActionButtonForID --depth 0 --limit 1 --release RELEASE_ROOT --format json"
+    ],
+    "constraints": [
+      "SOURCE_PIN selects the fixed source snapshot; RELEASE_ROOT supplies the native runtime. A matching --environment client PIN supplies client API facts for the reported context."
     ]
   },
   {
@@ -942,6 +1407,12 @@
       "--home <root>",
       "--format text|json|jsonl",
       "--release <release-root>"
+    ],
+    "examples": [
+      "lycheedev source session status --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Reports the retained native session in EXAMPLE_HOME. refs/context --session-reuse creates or reuses that session."
     ]
   },
   {
@@ -953,6 +1424,12 @@
       "--home <root>",
       "--format text|json|jsonl",
       "--release <release-root>"
+    ],
+    "examples": [
+      "lycheedev source session close --home EXAMPLE_HOME --format json"
+    ],
+    "constraints": [
+      "Closes the retained native Source session in EXAMPLE_HOME."
     ]
   },
   {
@@ -966,6 +1443,12 @@
       "--from <pin-id>",
       "--to <pin-id>",
       "--limit <n>"
+    ],
+    "examples": [
+      "lycheedev source diff --home EXAMPLE_HOME --from SOURCE_PIN --to SOURCE_PIN --format json"
+    ],
+    "constraints": [
+      "SOURCE_PIN is an existing fixed selection. Using the same pin for --from and --to produces an empty comparison; use two fixed pins to inspect revision changes."
     ]
   },
   {
@@ -977,6 +1460,12 @@
       "--home <root>",
       "--format text|json|jsonl",
       "--target-bytes <n>"
+    ],
+    "examples": [
+      "lycheedev source prune --home EXAMPLE_HOME --target-bytes 0 --format json"
+    ],
+    "constraints": [
+      "Removes eligible derived source cache from EXAMPLE_HOME toward --target-bytes, accounting for fixed-pin, project, capture and active-session references."
     ]
   },
   {
@@ -995,6 +1484,12 @@
       "--toc <relative-manifest>",
       "--snapshot <pin-id>",
       "--matrix <config.json>"
+    ],
+    "examples": [
+      "lycheedev source validate --home EXAMPLE_HOME --snapshot SOURCE_PIN --path ADDON_DIR --toc Main.toc --release RELEASE_ROOT --format json"
+    ],
+    "constraints": [
+      "ADDON_DIR is the addon to validate and Main.toc is its relative manifest listing Lua/XML loads. RELEASE_ROOT supplies the managed Lua 5.1 compiler for closure and syntax checks."
     ]
   },
   {
@@ -1006,6 +1501,9 @@
     ],
     "flags": [
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev cli search \"spell\""
     ]
   },
   {
@@ -1017,6 +1515,9 @@
     ],
     "flags": [
       "--format text|json|jsonl"
+    ],
+    "examples": [
+      "lycheedev schema data agent serve --format json"
     ]
   }
 ]

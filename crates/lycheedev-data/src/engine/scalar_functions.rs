@@ -5,7 +5,7 @@ use super::{
     api::{CastKind, ScalarFunction},
     external, unsupported, values,
 };
-use crate::relational::{Scalar, engine_compat};
+use crate::query_value::{self as scalar, Scalar};
 use arrow_array::Array;
 use arrow_schema::DataType;
 use datafusion::{
@@ -24,10 +24,10 @@ enum Function {
     ValidateBits,
 }
 fn type_error() -> datafusion::common::DataFusionError {
-    external(engine_compat::type_error())
+    external(scalar::type_error())
 }
 fn numeric_error() -> datafusion::common::DataFusionError {
-    external(engine_compat::numeric_error())
+    external(scalar::numeric_error())
 }
 fn at(value: &ColumnarValue, row: usize) -> Result<ScalarValue> {
     match value {
@@ -222,18 +222,12 @@ fn build(
                     Function::Like(negated) => like_value(&input[0], &input[1], negated, &owner)?,
                     Function::Between(negated) => {
                         // All three argument expressions have completed before comparisons.
-                        let low = engine_compat::evaluate(
-                            &input[0],
-                            engine_compat::Binary::GreaterEqual,
-                            &input[1],
-                        )
-                        .map_err(external)?;
-                        let high = engine_compat::evaluate(
-                            &input[0],
-                            engine_compat::Binary::LessEqual,
-                            &input[2],
-                        )
-                        .map_err(external)?;
+                        let low =
+                            scalar::evaluate(&input[0], scalar::Binary::GreaterEqual, &input[1])
+                                .map_err(external)?;
+                        let high =
+                            scalar::evaluate(&input[0], scalar::Binary::LessEqual, &input[2])
+                                .map_err(external)?;
                         if low == Scalar::Bool(false) || high == Scalar::Bool(false) {
                             Scalar::Bool(negated)
                         } else if low == Scalar::Bool(true) && high == Scalar::Bool(true) {
@@ -276,7 +270,7 @@ fn cast_value(value: Scalar, target: CastKind) -> Result<Scalar> {
         return match value {
             Scalar::String(_) => Ok(value),
             _ => Ok(Scalar::String(
-                engine_compat::text(&value).map_err(external)?.into_owned(),
+                scalar::text(&value).map_err(external)?.into_owned(),
             )),
         };
     }
@@ -289,7 +283,7 @@ fn cast_value(value: Scalar, target: CastKind) -> Result<Scalar> {
                 _ => Err(type_error()),
             },
             _ => {
-                let number = engine_compat::exact(&value).map_err(external)?;
+                let number = scalar::exact(&value).map_err(external)?;
                 if number.is_zero() {
                     Ok(Scalar::Bool(false))
                 } else if number == num_rational::BigRational::from_integer(1.into()) {
@@ -301,10 +295,10 @@ fn cast_value(value: Scalar, target: CastKind) -> Result<Scalar> {
         };
     }
     let value = match value {
-        Scalar::String(s) => crate::relational::literal(&s).map_err(external)?,
+        Scalar::String(s) => crate::query_value::literal(&s).map_err(external)?,
         v => v,
     };
-    let exact = engine_compat::exact(&value).map_err(external)?;
+    let exact = scalar::exact(&value).map_err(external)?;
     if matches!(target, CastKind::Integer) {
         return exact
             .to_integer()

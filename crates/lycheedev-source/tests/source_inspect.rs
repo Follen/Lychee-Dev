@@ -1,13 +1,16 @@
-//! Public Source inspection/query consumers, pinned to the Go 3.2.3 contract.
+//! Typed Source inspection/query consumers over fixed local Git inputs.
 use lycheedev_core::{
-    Invocation, Outcome,
+    Outcome,
     control::OperationControl,
     evidence,
     metadata::Metadata,
     selection::{self, SelectionSpec, SourcePin},
     storage, workspace,
 };
-use lycheedev_source::{dispatch, git, index};
+use lycheedev_source::{
+    dispatch, git, index,
+    request::{InspectTarget, QueryRequest, SelectedSource, SourceContext, SourceRequest},
+};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -15,7 +18,6 @@ use std::{
     io::Write,
     path::PathBuf,
     process::{Command, Stdio},
-    sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 
@@ -23,6 +25,7 @@ struct Fixture {
     home: PathBuf,
     source: SourcePin,
     snapshot: String,
+    selection: SelectedSource,
 }
 impl Fixture {
     fn new(files: BTreeMap<String, Vec<u8>>) -> Self {
@@ -117,26 +120,25 @@ impl Fixture {
         Self {
             home,
             source,
-            snapshot: pin.id,
+            snapshot: pin.id.clone(),
+            selection: SelectedSource::new(pin).unwrap(),
         }
     }
-    fn invoke(&self, command: &str, flags: &[(&str, &str)]) -> Invocation {
-        let mut flags = flags
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect::<BTreeMap<_, _>>();
-        flags.insert("--snapshot".into(), self.snapshot.clone());
-        Invocation {
+    fn context(&self) -> SourceContext {
+        SourceContext {
             home: self.home.clone(),
             cwd: self.home.clone(),
-            command: command.into(),
-            positional: None,
-            flags,
             control: Default::default(),
         }
     }
-    fn inspect(&self, flag: &str, target: &str) -> Outcome {
-        let outcome = dispatch(&self.invoke("source inspect", &[(flag, target)])).unwrap();
+    fn inspect_request(&self, target: InspectTarget) -> SourceRequest {
+        SourceRequest::Inspect {
+            selection: self.selection.clone(),
+            target,
+        }
+    }
+    fn inspect(&self, target: InspectTarget) -> Outcome {
+        let outcome = dispatch(&self.context(), &self.inspect_request(target)).unwrap();
         assert_eq!(
             outcome.provenance[0]["provenance"]["kind"],
             "source-inspect"
@@ -144,9 +146,17 @@ impl Fixture {
         outcome
     }
     fn query(&self, target: &str) -> Outcome {
-        let mut inv = self.invoke("source query", &[("--topic", "asset")]);
-        inv.positional = Some(target.into());
-        let outcome = dispatch(&inv).unwrap();
+        let request = SourceRequest::Query {
+            selection: self.selection.clone(),
+            request: QueryRequest {
+                query: target.into(),
+                mode: String::new(),
+                topic: "asset".into(),
+                limit: 50,
+                cursor: String::new(),
+            },
+        };
+        let outcome = dispatch(&self.context(), &request).unwrap();
         assert_eq!(outcome.provenance[0]["provenance"]["kind"], "source-query");
         outcome
     }
@@ -215,8 +225,8 @@ fn blp() -> Vec<u8> {
 fn inspect_exact_document_symbol_routes_to_six_line_path_inspection_cold_and_warm() {
     let raw = b"-- first\r\nfunction Main() end\n-- 3\n-- 4\n-- 5\n-- 6\n-- 7\n";
     let f = Fixture::new(files(&[("Main.lua", raw)]));
-    let symbol = f.inspect("--symbol", "Main.lua");
-    let path = f.inspect("--target-path", "Main.lua");
+    let symbol = f.inspect(InspectTarget::Symbol("Main.lua".into()));
+    let path = f.inspect(InspectTarget::TargetPath("Main.lua".into()));
     assert_eq!(symbol.data["results"], path.data["results"]);
     assert_eq!(symbol.data["results"][0]["kind"], "file");
     assert_eq!(
@@ -262,8 +272,11 @@ fn inspect_exact_png_and_blp_symbols_return_verified_metadata_and_local_original
         ("Assets/ÜBER.blp", &b, "blp", "image/x-blp", 64, 32),
         ("Assets/quo\"te ÜBER.blp", &b, "blp", "image/x-blp", 64, 32),
     ] {
-        for flag in ["--symbol", "--target-path"] {
-            let result = f.inspect(flag, name);
+        for target in [
+            InspectTarget::Symbol(name.into()),
+            InspectTarget::TargetPath(name.into()),
+        ] {
+            let result = f.inspect(target);
             let hash = storage::sha256(raw);
             let local = evidence::blob_path(&f.home, &hash).unwrap();
             assert_eq!(
@@ -285,7 +298,7 @@ fn inspect_fuzzy_documents_and_assets_share_one_twenty_five_row_limit() {
         rows.insert(format!("Needle{n:02}.png"), png());
     }
     let f = Fixture::new(rows);
-    let result = f.inspect("--target-path", "Needle");
+    let result = f.inspect(InspectTarget::TargetPath("Needle".into()));
     let rows = result.data["results"].as_array().unwrap();
     assert_eq!(rows.len(), 25);
     assert!(rows[..20].iter().all(|row| row["kind"] == "file"));
@@ -298,7 +311,7 @@ fn inspect_fuzzy_documents_and_assets_share_one_twenty_five_row_limit() {
 fn inspect_asset_exact_path_sorts_before_lexically_earlier_substring_match() {
     let raw = png();
     let f = Fixture::new(files(&[("A/Image.png", &raw), ("Image.png", &raw)]));
-    let result = f.inspect("--target-path", "Image.png");
+    let result = f.inspect(InspectTarget::TargetPath("Image.png".into()));
     assert_eq!(result.data["results"][0]["path"], "Image.png");
     assert_eq!(result.data["results"][1]["path"], "A/Image.png");
     f.assert_capture(&result, "Image.png");
@@ -306,7 +319,7 @@ fn inspect_asset_exact_path_sorts_before_lexically_earlier_substring_match() {
 #[test]
 fn inspect_non_path_symbol_uses_existing_precise_query_and_no_match_suggests_assets() {
     let f = Fixture::new(files(&[("Main.lua", b"function Main() end\n")]));
-    let result = f.inspect("--symbol", "Main");
+    let result = f.inspect(InspectTarget::Symbol("Main".into()));
     let full = index::build(&f.home, &f.source)
         .unwrap()
         .search(&f.source, &f.snapshot, "Main", "precise", "", 25, "")
@@ -314,7 +327,7 @@ fn inspect_non_path_symbol_uses_existing_precise_query_and_no_match_suggests_ass
     assert_eq!(result.data["results"], full["results"]);
     assert!(!result.data["results"].as_array().unwrap().is_empty());
     f.assert_capture(&result, "Main");
-    let missing = f.inspect("--target-path", "missing.asset");
+    let missing = f.inspect(InspectTarget::TargetPath("missing.asset".into()));
     assert_eq!(missing.data["results"], json!([]));
     assert_eq!(
         missing.data["suggestions"],
@@ -328,7 +341,7 @@ fn inspect_partial_index_coverage_and_capture_remain_incomplete_without_truncati
         ("Main.lua", b"-- good\n"),
         ("Broken.lua", b"function broken(\n"),
     ]));
-    let result = f.inspect("--symbol", "Main.lua");
+    let result = f.inspect(InspectTarget::Symbol("Main.lua".into()));
     assert!(!result.complete);
     assert_eq!(result.data["complete"], false);
     assert_eq!(result.data["truncated"], false);
@@ -339,18 +352,18 @@ fn inspect_partial_index_coverage_and_capture_remain_incomplete_without_truncati
 fn inspect_warm_document_authenticates_and_recovers_corrupt_or_missing_original_cache() {
     let raw = b"-- authentic\nfunction Main() end\n";
     let f = Fixture::new(files(&[("Main.lua", raw)]));
-    let first = f.inspect("--symbol", "Main.lua");
+    let first = f.inspect(InspectTarget::Symbol("Main.lua".into()));
     let original = f
         .home
         .join("cache/source-originals-rust")
         .join(storage::sha256(raw));
     assert_eq!(fs::read(&original).unwrap(), raw);
     fs::write(&original, vec![b'x'; raw.len()]).unwrap();
-    let recovered = f.inspect("--symbol", "Main.lua");
+    let recovered = f.inspect(InspectTarget::Symbol("Main.lua".into()));
     assert_eq!(recovered.data["results"], first.data["results"]);
     assert_eq!(fs::read(&original).unwrap(), raw);
     fs::remove_file(&original).unwrap();
-    let recovered = f.inspect("--target-path", "Main.lua");
+    let recovered = f.inspect(InspectTarget::TargetPath("Main.lua".into()));
     assert_eq!(recovered.data["results"], first.data["results"]);
     assert_eq!(fs::read(original).unwrap(), raw);
 }
@@ -359,10 +372,10 @@ fn inspect_asset_missing_original_recovers_fixed_git_but_corruption_is_an_error(
     let raw = png();
     for name in ["Image.png", "Assets/quo\"te ÜBER.png"] {
         let f = Fixture::new(files(&[(name, &raw)]));
-        let first = f.inspect("--symbol", name);
+        let first = f.inspect(InspectTarget::Symbol(name.into()));
         let original = evidence::blob_path(&f.home, &storage::sha256(&raw)).unwrap();
         fs::remove_file(&original).unwrap();
-        let recovered = f.inspect("--target-path", name);
+        let recovered = f.inspect(InspectTarget::TargetPath(name.into()));
         assert_eq!(recovered.data["results"], first.data["results"]);
         assert_eq!(fs::read(&original).unwrap(), raw);
         f.assert_capture(&first, name);
@@ -370,75 +383,34 @@ fn inspect_asset_missing_original_recovers_fixed_git_but_corruption_is_an_error(
         let corrupt = vec![1; raw.len()];
         fs::write(&original, &corrupt).unwrap();
         assert_eq!(
-            dispatch(&f.invoke("source inspect", &[("--symbol", name)]))
-                .unwrap_err()
-                .code,
+            dispatch(
+                &f.context(),
+                &f.inspect_request(InspectTarget::Symbol(name.into()))
+            )
+            .unwrap_err()
+            .code,
             "vault.blob_integrity"
         );
         assert_eq!(fs::read(&original).unwrap(), corrupt);
     }
 }
 #[test]
-fn inspect_raw_selector_admission_precedes_pin_and_index_access() {
-    let f = Fixture::new(files(&[("Main.lua", b"-- main\n")]));
-    fs::remove_dir_all(git::mirror(&f.home, "elvui")).unwrap();
-    for flags in [
-        vec![],
-        vec![("--symbol", "")],
-        vec![("--symbol", "Main"), ("--target-path", "Main")],
-        vec![("--symbol", " "), ("--target-path", "Main.lua")],
-        vec![("--path", "Main.lua"), ("--symbol", "Main")],
-    ] {
-        let mut inv = f.invoke("source inspect", &flags);
-        inv.flags.insert("--snapshot".into(), "missing".into());
-        let error = dispatch(&inv).unwrap_err();
-        assert_eq!(error.code, "command.invalid_arguments");
-        assert_eq!(error.exit_code, 2);
-        assert_eq!(
-            error.message,
-            "source sync requires --source/--product; source inspect requires --snapshot and exactly one of --path, --symbol, --target-path"
-        );
-    }
-}
-#[test]
-fn inspect_injected_empty_selectors_preserve_target_and_excerpt_routes() {
-    let f = Fixture::new(files(&[("Main.lua", b"-- main\n")]));
-    // Actual argv rejects empty values; this tests the internal Invocation seam.
-    for flags in [
-        vec![("--symbol", ""), ("--target-path", "Main.lua")],
-        vec![("--path", ""), ("--target-path", "Main.lua")],
-        vec![("--path", ""), ("--symbol", "Main.lua")],
-    ] {
-        let out = dispatch(&f.invoke("source inspect", &flags)).unwrap();
-        assert_eq!(out.data["results"][0]["path"], "Main.lua");
-        assert_eq!(out.provenance[0]["provenance"]["kind"], "source-inspect");
-        assert_eq!(out.provenance[0]["provenance"]["locator"], "Main.lua");
-    }
-    let out = dispatch(&f.invoke(
-        "source inspect",
-        &[
-            ("--path", "Main.lua"),
-            ("--symbol", ""),
-            ("--target-path", ""),
-            ("--line", "1"),
-            ("--count", "1"),
-        ],
-    ))
-    .unwrap();
-    assert_eq!(out.data["text"], "-- main\n");
-    assert_eq!(out.provenance[0]["provenance"]["kind"], "source-excerpt");
-}
-#[test]
-fn inspect_trimmed_target_errors_keep_go_plain_failure_after_ready_index() {
+fn inspect_trimmed_target_errors_keep_reference_plain_failure_after_ready_index() {
     let f = Fixture::new(files(&[("Main.lua", b"-- main\n")]));
     index::build(&f.home, &f.source).unwrap();
     let too_long = "x".repeat(4097);
-    for (flag, target, message) in [
-        ("--target-path", too_long.as_str(), "codebase.invalid_span"),
-        ("--symbol", " ", "codebase.inspect_target_required"),
-        ("--target-path", " \t", "codebase.inspect_target_required"),
+    for (target, message) in [
+        (InspectTarget::TargetPath(too_long), "codebase.invalid_span"),
+        (
+            InspectTarget::Symbol(" ".into()),
+            "codebase.inspect_target_required",
+        ),
+        (
+            InspectTarget::TargetPath(" \t".into()),
+            "codebase.inspect_target_required",
+        ),
     ] {
-        let error = dispatch(&f.invoke("source inspect", &[(flag, target)])).unwrap_err();
+        let error = dispatch(&f.context(), &f.inspect_request(target)).unwrap_err();
         assert_eq!(error.code, "command.failed");
         assert_eq!(error.exit_code, 5);
         assert_eq!(error.message, message);
@@ -462,11 +434,18 @@ fn inspect_index_failure_precedes_target_validation_and_keeps_original_stop_cont
         b"corrupt",
     )
     .unwrap();
-    let baseline = dispatch(&f.invoke("source inspect", &[("--symbol", "Main.lua")])).unwrap_err();
+    let baseline = dispatch(
+        &f.context(),
+        &f.inspect_request(InspectTarget::Symbol("Main.lua".into())),
+    )
+    .unwrap_err();
     assert_eq!(baseline.code, "codebase.source_integrity");
     let too_long = "x".repeat(4097);
-    for (flag, target) in [("--symbol", " "), ("--target-path", too_long.as_str())] {
-        let error = dispatch(&f.invoke("source inspect", &[(flag, target)])).unwrap_err();
+    for target in [
+        InspectTarget::Symbol(" ".into()),
+        InspectTarget::TargetPath(too_long),
+    ] {
+        let error = dispatch(&f.context(), &f.inspect_request(target)).unwrap_err();
         assert_eq!(
             serde_json::to_value(error).unwrap(),
             serde_json::to_value(&baseline).unwrap()
@@ -474,10 +453,11 @@ fn inspect_index_failure_precedes_target_validation_and_keeps_original_stop_cont
     }
     for (control, code) in [
         (
-            OperationControl::new(
-                Instant::now() + Duration::from_secs(60),
-                Arc::new(AtomicBool::new(true)),
-            ),
+            {
+                let signal = lycheedev_core::control::TrackedCancellation::new();
+                signal.cancel();
+                OperationControl::tracked(Instant::now() + Duration::from_secs(60), signal)
+            },
             "command.cancelled",
         ),
         (
@@ -485,9 +465,17 @@ fn inspect_index_failure_precedes_target_validation_and_keeps_original_stop_cont
             "command.deadline",
         ),
     ] {
-        let mut inv = f.invoke("source inspect", &[("--symbol", "Main.lua")]);
-        inv.control = control;
-        assert_eq!(dispatch(&inv).unwrap_err().code, code);
+        let mut context = f.context();
+        context.control = control;
+        assert_eq!(
+            dispatch(
+                &context,
+                &f.inspect_request(InspectTarget::Symbol("Main.lua".into()))
+            )
+            .unwrap_err()
+            .code,
+            code
+        );
     }
 }
 #[test]
@@ -511,7 +499,14 @@ fn unicode_asset_queries_match_full_index_cold_warm_and_rebuilt_file_projection(
             first.data["results"][0]["contentHash"],
             storage::sha256(&raw)
         );
-        assert_eq!(first.coverage["io"]["cachedIndex"], phase == "warm");
+        if phase == "warm" {
+            assert_eq!(first.coverage["io"]["cachedIndex"], true);
+            assert_eq!(first.coverage["io"]["projection"], "file-posting");
+        } else {
+            assert_eq!(first.coverage["io"].get("cachedIndex"), None);
+            assert_eq!(first.coverage["io"]["gitTreeProcesses"], 1);
+            assert_eq!(first.coverage["io"]["projection"], "full-index");
+        }
         if let Some(expected) = &expected {
             assert_eq!(&first.data["results"], expected);
         } else {
@@ -536,50 +531,90 @@ fn unicode_asset_queries_match_full_index_cold_warm_and_rebuilt_file_projection(
     }
 }
 #[test]
-fn inspect_rebuilds_v14_asset_metadata_without_rewriting_the_historical_record() {
-    let raw = png();
-    let f = Fixture::new(files(&[("Image.png", &raw)]));
-    let source = &f.source;
-    let old_identity=storage::sha256(format!("rust-index-v14\0facts-pack-v2-path-radix512\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",source.repository,source.product,source.exact_commit,source.parser_revision).as_bytes());
-    let legacy = json!({"documents":[],"symbols":[],"assets":[{"path":"Image.png","contentHash":storage::sha256(&raw),"bytes":raw.len(),"extension":".png","mime":"application/octet-stream","format":"png","width":0,"height":0}],"summary":{"repository":source.repository,"product":source.product,"commit":source.exact_commit,"parser":source.parser_revision,"complete":true,"skippedDocuments":0,"diagnostics":0},"compatibilityGaps":[]});
-    let blob = lycheedev_core::cache::publish_derived_controlled(
-        &f.home,
-        &serde_json::to_vec(&legacy).unwrap(),
-        1 << 20,
-        &OperationControl::default(),
-    )
-    .unwrap();
-    let key = format!("source/rust-index/{old_identity}");
-    let manifest =
-        json!({"schema":"lycheedev.source-index.rust.v6","identity":old_identity,"blob":blob});
-    let mut metadata = Metadata::open(&f.home, true).unwrap();
-    metadata.put(&key, &manifest, None).unwrap();
-    metadata.close().unwrap();
-    let result = f.inspect("--symbol", "Image.png");
-    assert!(
-        result.data["results"][0]["excerpt"]
-            .as_str()
-            .unwrap()
-            .contains("mime=image/png bytes=24 width=123 height=456")
-    );
-    let metadata = Metadata::open(&f.home, false).unwrap();
-    assert_eq!(metadata.read::<Value>(&key).unwrap(), manifest);
-    assert_eq!(
-        metadata
-            .list::<Value>("source/rust-index/", 10)
-            .unwrap()
-            .len(),
-        2
-    );
-    metadata.close().unwrap();
-    f.assert_capture(&result, "Image.png");
-}
-#[test]
 fn inspect_selector_trimming_preserves_raw_capture_locator() {
     let f = Fixture::new(files(&[("Main.lua", b"-- main\n")]));
-    for flag in ["--symbol", "--target-path"] {
-        let result = f.inspect(flag, "  Main.lua  ");
+    for target in [
+        InspectTarget::Symbol("  Main.lua  ".into()),
+        InspectTarget::TargetPath("  Main.lua  ".into()),
+    ] {
+        let result = f.inspect(target);
         assert_eq!(result.data["results"][0]["path"], "Main.lua");
         f.assert_capture(&result, "  Main.lua  ");
+    }
+}
+// N11: source inspect and source query share one U+FFFD display while the
+// archived blob, its hash and the byte coordinates keep the original bytes.
+#[test]
+fn non_utf8_lua_comment_inspect_and_query_display_fffd_without_rewriting_bytes() {
+    let path = "Interface/AddOns/Blizzard_NewPlayerExperience/Camelot/Blizzard_TutorialData.lua";
+    let mut raw = b"function Before() end\n".to_vec();
+    raw.extend_from_slice(b"-- Night Web\x92s Hollow\r\n");
+    raw.extend_from_slice(b"function After() end\n");
+    let offset = raw.iter().position(|byte| *byte == 0x92).unwrap();
+    let f = Fixture::new(BTreeMap::from([
+        (path.to_owned(), raw.clone()),
+        ("Other.lua".to_owned(), b"function Other() end\n".to_vec()),
+    ]));
+    let inspected = dispatch(
+        &f.context(),
+        &f.inspect_request(InspectTarget::Excerpt {
+            path: path.into(),
+            first_line: 1,
+            line_count: 80,
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        inspected.provenance[0]["provenance"]["kind"],
+        "source-excerpt"
+    );
+    let expected = "function Before() end\n-- Night Web\u{fffd}s Hollow\r\nfunction After() end\n";
+    assert_eq!(inspected.data["text"], expected);
+    assert_eq!(inspected.data["firstLine"], 1);
+    assert_eq!(inspected.data["lastLine"], 3);
+    assert_eq!(inspected.data["totalLines"], 3);
+    assert_eq!(inspected.data["warnings"][0]["path"], path);
+    assert_eq!(inspected.data["warnings"][0]["line"], 2);
+    assert_eq!(inspected.data["warnings"][0]["byteOffset"], offset);
+    assert_eq!(inspected.data["blob"]["sha256"], storage::sha256(&raw));
+    assert_eq!(inspected.data["blob"]["bytes"], raw.len());
+
+    let queried = dispatch(
+        &f.context(),
+        &SourceRequest::Query {
+            selection: f.selection.clone(),
+            request: QueryRequest {
+                query: "Night Web".into(),
+                mode: String::new(),
+                topic: String::new(),
+                limit: 50,
+                cursor: String::new(),
+            },
+        },
+    )
+    .unwrap();
+    let row = &queried.data["results"][0];
+    assert_eq!(row["path"], path);
+    assert_eq!(row["contentHash"], storage::sha256(&raw));
+    let excerpt = row["excerpt"].as_str().unwrap();
+    assert!(
+        excerpt.contains("2: -- Night Web\u{fffd}s Hollow"),
+        "query display must match inspect: {excerpt}"
+    );
+    assert_eq!(queried.coverage["warnings"], 1);
+    assert_eq!(queried.coverage["warningSample"][0]["byteOffset"], offset);
+    // The indexed store keeps the original bytes and hash, cold and warm.
+    for _ in 0..2 {
+        let index = index::build(&f.home, &f.source).unwrap();
+        let document = index
+            .documents
+            .iter()
+            .find(|document| document.path == path)
+            .unwrap();
+        assert_eq!(document.sha256, storage::sha256(&raw));
+        assert_eq!(
+            index.excerpt(path, 1, 3).unwrap(),
+            "1: function Before() end\n2: -- Night Web\u{fffd}s Hollow\n3: function After() end"
+        );
     }
 }

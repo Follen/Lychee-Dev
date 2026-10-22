@@ -25,11 +25,10 @@ and syntax. `crates/lycheedev-binding-contracts` supplies shared evidence record
 Emmy no longer imports or re-exports either owned crate. The recipe continues to
 authenticate the small owned-contract inventory used by the surrounding build.
 
-Fixed historical patched-engine bytes are retained only in
-`tests/rust-source-engine/fixed-emmy-oracle/historical-engine` for independent
-reference tests. They are not production dependency bytes. The reference phase
-executes the old checks; the clean phase compares their captured full values,
-producer-ordered coverage and query sequences. Missing reference evidence fails.
+There is no retained historical patched-engine copy in the repository: the old
+frozen oracle trees are retired. The current source engine is exactly the
+authenticated public tree below `.tmp/emmy-reconstruction-v1/upstream`; Source
+regressions run against the current adapter and the shipped release instead.
 
 Implementation, unrun validation and remaining acceptance work are recorded in
 `handover.md`. Clean dependency custody is separate from semantic equivalence,

@@ -24,7 +24,10 @@ fn home() -> PathBuf {
 fn admitted_workspace_holds_root_and_real_slots_without_preparing_metadata_or_cdn() {
     let home = home();
     let control = OperationControl::default();
-    let owner = AdmittedWorkspace::acquire(&home, Policy::Ordinary, &control, None).unwrap();
+    let owner = OpenWorkspace::open(&home, &control, None)
+        .unwrap()
+        .acquire(Policy::Ordinary)
+        .unwrap();
     assert_eq!(owner.home(), std::path::absolute(&home).unwrap());
     assert_eq!(owner.download_workers(), 8);
     assert!(!home.join("state/toolkit.sqlite").exists());
@@ -34,7 +37,9 @@ fn admitted_workspace_holds_root_and_real_slots_without_preparing_metadata_or_cd
     owner.finish(Ok(())).unwrap();
     fs::rename(&home, &moved).unwrap();
     fs::rename(&moved, &home).unwrap();
-    AdmittedWorkspace::acquire(&home, Policy::Measurement, &control, None)
+    OpenWorkspace::open(&home, &control, None)
+        .unwrap()
+        .acquire(Policy::Measurement)
         .unwrap()
         .finish(Ok(()))
         .unwrap();
@@ -48,20 +53,28 @@ fn failed_admission_and_independent_budget_stop_release_root_and_slots() {
     let independent =
         OperationControl::tracked(Instant::now() + Duration::from_secs(5), token.clone());
     let budget = Budget::controlled(Cost::defaults(), independent.deadline(), independent);
-    let owner =
-        AdmittedWorkspace::acquire(&home, Policy::Ordinary, &control, Some(&budget)).unwrap();
+    let owner = OpenWorkspace::open(&home, &control, Some(&budget))
+        .unwrap()
+        .acquire(Policy::Ordinary)
+        .unwrap();
     token.cancel();
     assert_eq!(owner.check().unwrap_err().code, "command.cancelled");
     assert_eq!(owner.finish(Ok(())).unwrap_err().code, "command.cancelled");
     let moved = home.with_extension("moved");
     fs::rename(&home, &moved).unwrap();
     fs::rename(&moved, &home).unwrap();
-    AdmittedWorkspace::acquire(&home, Policy::Measurement, &control, None)
+    OpenWorkspace::open(&home, &control, None)
+        .unwrap()
+        .acquire(Policy::Measurement)
         .unwrap()
         .finish(Ok(()))
         .unwrap();
     fs::write(home.join("config.json"), b"invalid json").unwrap();
-    assert!(AdmittedWorkspace::acquire(&home, Policy::Ordinary, &control, None).is_err());
+    assert!(
+        OpenWorkspace::open(&home, &control, None)
+            .and_then(|workspace| workspace.acquire(Policy::Ordinary))
+            .is_err()
+    );
     fs::rename(&home, &moved).unwrap();
     fs::rename(&moved, &home).unwrap();
     fs::remove_dir_all(home).unwrap();
@@ -200,7 +213,7 @@ fn stop_after_metadata_open_closes_database_and_directory_before_failed_acquire_
     let held = data_resources::acquire(&home, Policy::Measurement, &control).unwrap();
     let short = OperationControl::default();
     let opened = OpenWorkspace::open_metadata(&home, &short, None).unwrap();
-    short.cancel_handle().store(true, Ordering::Release);
+    short.tracked_cancel_handle().unwrap().cancel();
     let error = opened
         .acquire(Policy::Ordinary)
         .err()
@@ -226,7 +239,7 @@ fn actual_admitted_cancel_with_successful_cleanup_returns_one_original_stop() {
         .unwrap()
         .acquire(Policy::Ordinary)
         .unwrap();
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     let original = control.check().unwrap_err();
     let error = owner.finish::<()>(Err(original.clone())).unwrap_err();
     assert!(same(&error, &original));
@@ -246,7 +259,7 @@ fn actual_admitted_cancel_with_successful_cleanup_returns_one_original_stop() {
 fn actual_admitted_cleanup_retains_distinct_original_and_independent_budget_stops() {
     let home = home();
     let control = OperationControl::default();
-    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cancelled = TrackedCancellation::new();
     let budget = Budget::new(
         Cost::defaults(),
         control.deadline(),
@@ -256,8 +269,8 @@ fn actual_admitted_cleanup_retains_distinct_original_and_independent_budget_stop
         .unwrap()
         .acquire(Policy::Ordinary)
         .unwrap();
-    control.cancel_handle().store(true, Ordering::Release);
-    cancelled.store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
+    cancelled.cancel();
     let original = control.check().unwrap_err();
     let independent = budget.check().unwrap_err();
     let error = owner.finish::<()>(Err(original.clone())).unwrap_err();
@@ -475,8 +488,10 @@ fn adaptive_nested_session_shares_budget_and_preserves_outer_lease() {
         control.clone(),
         Arc::new(|| Ok(4 << 30)),
     ));
-    let mut owner =
-        AdmittedWorkspace::acquire(&home, Policy::Ordinary, &control, Some(&budget)).unwrap();
+    let mut owner = OpenWorkspace::open(&home, &control, Some(&budget))
+        .unwrap()
+        .acquire(Policy::Ordinary)
+        .unwrap();
     assert_eq!(budget.memory_snapshot().unwrap().concurrent_queries, 1);
     assert!(std::ptr::eq(owner.budget().unwrap(), budget.as_ref()));
     Session::borrowed(&mut owner, &pin, options(), &budget)
@@ -501,8 +516,10 @@ fn adaptive_nested_session_shares_budget_and_preserves_outer_lease() {
         control.deadline(),
         control.clone(),
     ));
-    let mut owner =
-        AdmittedWorkspace::acquire(&home, Policy::Ordinary, &control, Some(&fixed)).unwrap();
+    let mut owner = OpenWorkspace::open(&home, &control, Some(&fixed))
+        .unwrap()
+        .acquire(Policy::Ordinary)
+        .unwrap();
     Session::borrowed(&mut owner, &pin, options(), &fixed)
         .unwrap()
         .close()

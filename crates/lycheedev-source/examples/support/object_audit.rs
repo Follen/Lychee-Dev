@@ -15,10 +15,8 @@ const AUDIT_CASES: &[(&str, &str, &[&str])] = &[
 ];
 const AUDIT_UNION_FILES: &[&str] = &["profile.lua", "audit-record-union.lua"];
 fn native_object_audit_red(out: &mut NativeOutput) -> Result<()> {
-    let patch =
-        option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256").ok_or("missing compiled patch")?;
     out.emit(
-        json!({"event":"build_identity","compiledPatchSHA256":patch,"scope":"object-audit-red"}),
+        json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256,"scope":"object-audit-red"}),
     )?;
     for name in [
         "profile.lua",
@@ -36,8 +34,7 @@ fn native_object_audit_red(out: &mut NativeOutput) -> Result<()> {
             name,
             "after_load",
             files,
-            patch,
-            Some("independent-object-audit-v1"),
+                Some("independent-object-audit-v1"),
         )?;
         let file = files[1];
         let expression = if *name == "rebind" {
@@ -67,7 +64,6 @@ fn native_object_audit_red(out: &mut NativeOutput) -> Result<()> {
         "record-union",
         "after_load",
         AUDIT_UNION_FILES,
-        patch,
         Some("independent-object-audit-v1"),
     )?;
     let provider = input.freeze(&graph)?;

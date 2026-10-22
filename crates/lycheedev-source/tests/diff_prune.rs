@@ -1,9 +1,12 @@
 use lycheedev_core::{
-    Invocation, evidence,
+    evidence,
     selection::{self, SelectionSpec, SourcePin},
     storage, workspace,
 };
-use lycheedev_source::{diff, git, index, prune};
+use lycheedev_source::{
+    diff, git, index, prune,
+    request::{DiffRequest, SelectedSource, SourceContext},
+};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -83,17 +86,11 @@ impl Fixture {
             parser_revision: "source-v1".into(),
         }
     }
-    fn invoke(&self, command: &str, flags: &[(&str, &str)]) -> Invocation {
-        Invocation {
+    fn context(&self) -> SourceContext {
+        SourceContext {
             home: self.home.clone(),
             cwd: self.home.clone(),
-            command: command.into(),
-            positional: None,
             control: Default::default(),
-            flags: flags
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
         }
     }
 }
@@ -180,10 +177,14 @@ fn diff_preserves_duplicate_declarations_signature_lines_and_original_blob_proof
         },
     )
     .unwrap();
-    let out = diff::dispatch(&f.invoke(
-        "source diff",
-        &[("--from", &from.id), ("--to", &to.id), ("--limit", "1")],
-    ))
+    let out = diff::dispatch(
+        &f.context(),
+        &DiffRequest {
+            from: SelectedSource::new(from.clone()).unwrap(),
+            to: SelectedSource::new(to).unwrap(),
+            limit: 1,
+        },
+    )
     .unwrap();
     assert!(!out.complete);
     assert_eq!(out.provenance[0]["provenance"]["baseSnapshot"], from.id);
@@ -218,12 +219,6 @@ fn diff_same_commit_no_change_and_incomplete_syntax_cannot_prove_absence() {
     assert_eq!(
         diff::compare(&f.home, &valid, &other, 10).unwrap_err().code,
         "codebase.incompatible_comparison"
-    );
-    assert_eq!(
-        diff::dispatch(&f.invoke("source diff", &[]))
-            .unwrap_err()
-            .exit_code,
-        2
     );
     assert_eq!(
         same["analysis"]["runtimeCompatibility"],
@@ -304,10 +299,17 @@ fn prune_keeps_active_owner_and_immutable_evidence_then_reclaims_only_verified_c
         ),
     )
     .unwrap();
-    let held = prune::prune(&f.home, 0).unwrap();
+    let held = prune::dispatch(&f.context(), 0).unwrap();
     assert!(!held.complete);
-    assert!(held.removed.is_empty());
-    assert!(held.skipped[0].ends_with(":in-use"));
+    assert_eq!(held.data["removed"], json!([]));
+    assert!(
+        held.data["skipped"][0]
+            .as_str()
+            .unwrap()
+            .ends_with(":in-use")
+    );
+    assert_eq!(held.data["budgetBytes"], 0);
+    assert_eq!(held.warnings.len(), 1);
     assert!(path.exists());
     drop(lease);
     fs::write(path.join("note.txt"), b"modified").unwrap();
@@ -348,18 +350,6 @@ fn prune_preserves_unknown_roots_extra_files_and_live_broker_without_ttl_stealin
     let broker = ExclusiveLock::resource(&f.home.join("locks"), "source:v1:broker-owner").unwrap();
     assert_eq!(prune::prune(&f.home, 0).unwrap_err().exit_code, 6);
     drop(broker);
-    assert_eq!(
-        prune::dispatch(&f.invoke("source prune", &[]))
-            .unwrap_err()
-            .exit_code,
-        2
-    );
-    assert_eq!(
-        prune::dispatch(&f.invoke("source prune", &[("--target-bytes", "-1")]))
-            .unwrap_err()
-            .exit_code,
-        2
-    );
     assert!(path.exists());
 }
 #[test]

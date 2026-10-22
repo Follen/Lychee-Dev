@@ -1,6 +1,7 @@
 use super::*;
 use crate::blte::EncodedRead;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use lycheedev_core::control::TrackedCancellation;
+use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 fn root() -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -46,7 +47,7 @@ fn fixture() -> (PathBuf, [u8; 16], Vec<u8>) {
     (root, key, raw)
 }
 #[test]
-fn query_index_cache_reuses_validated_bytes_and_charges_go_logical_size_once() {
+fn query_index_cache_reuses_validated_bytes_and_charges_retained_logical_size_once() {
     let (root, key, raw) = fixture();
     let control = OperationControl::default();
     let budget = budget(&control);
@@ -73,6 +74,35 @@ fn query_index_cache_reuses_validated_bytes_and_charges_go_logical_size_once() {
         "final rehash is a safety-only verification cost"
     );
     source.close_after(Ok(())).unwrap();
+}
+#[cfg(windows)]
+#[test]
+fn query_source_reads_indexes_and_archives_with_existing_shared_writers() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let (root, key, _) = fixture();
+    let data = root.join("Data/data");
+    fs::write(data.join("data.000"), b"shared archive bytes").unwrap();
+    let writers = ["0000000001.idx", "data.000"].map(|name| {
+        fs::OpenOptions::new()
+            .write(true)
+            .share_mode(1 | 2 | 4)
+            .open(data.join(name))
+            .unwrap()
+    });
+    let control = OperationControl::default();
+    let budget = budget(&control);
+    let source = QuerySource::open(&root, Limits::default(), &budget, &control).unwrap();
+    assert_eq!(source.find(0, "0000000001.idx", &key).unwrap().len(), 1);
+    let mut file = source.open_file("data.000").unwrap();
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"shared archive bytes");
+    storage::close_file(file).unwrap();
+    source.verify().unwrap();
+    source.close_after(Ok(())).unwrap();
+    drop(writers);
+    fs::remove_dir_all(root).unwrap();
 }
 #[test]
 fn query_index_final_rehash_reads_path_not_cached_bytes_or_size() {
@@ -176,7 +206,7 @@ fn query_source_prefers_real_prefix_bucket_before_unneeded_corrupt_index() {
 fn query_index_verification_keeps_independent_budget_stop_and_control_identity() {
     let (root, key, _) = fixture();
     let control = OperationControl::default();
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel = TrackedCancellation::new();
     let budget = Arc::new(Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(30),
@@ -192,7 +222,7 @@ fn query_index_verification_keeps_independent_budget_stop_and_control_identity()
             .code,
         "records.file_query"
     );
-    cancel.store(true, Ordering::Release);
+    cancel.cancel();
     let error = source.verify().unwrap_err();
     assert_eq!(error.code, "operation.cancelled");
     assert!(control.stop_cause().unwrap().is_none());

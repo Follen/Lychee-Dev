@@ -2,46 +2,24 @@
 //! the most recent authenticated body is shared only within this scoped request.
 use super::*;
 use crate::remote::{
-    cache::{
-        Store, pure_expected,
-        wire::{CachedBlob, Object, ObjectSeed, folded, scalar},
-    },
+    cache::{Store, pure_expected, wire::BlobRef},
     files::Encoded,
 };
 use md5::{Digest, Md5};
-use serde::{
-    Deserialize, Deserializer, Serialize,
-    de::{DeserializeSeed, IgnoredAny, MapAccess},
-};
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 fn integrity() -> ToolkitError {
     fault("vault.blob_integrity", 4, "Decoded cache identity differs")
 }
-#[derive(Default, Serialize)]
+#[derive(Default, Serialize, Deserialize)]
 struct Source {
     kind: String,
     state: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     commit: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     sha256: String,
-}
-impl Object for Source {
-    fn fields<'de, A: MapAccess<'de>>(&mut self, mut map: A) -> std::result::Result<(), A::Error> {
-        while let Some(key) = map.next_key::<String>()? {
-            match folded(&key).as_str() {
-                "kind" => scalar(&mut map, &mut self.kind)?,
-                "state" => scalar(&mut map, &mut self.state)?,
-                "commit" => scalar(&mut map, &mut self.commit)?,
-                "sha256" => scalar(&mut map, &mut self.sha256)?,
-                _ => {
-                    map.next_value::<IgnoredAny>()?;
-                }
-            }
-        }
-        Ok(())
-    }
 }
 impl From<&keys::KeySource> for Source {
     fn from(value: &keys::KeySource) -> Self {
@@ -53,34 +31,12 @@ impl From<&keys::KeySource> for Source {
         }
     }
 }
-#[derive(Default, Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Entry {
     content_key: String,
-    blob: CachedBlob,
+    blob: BlobRef,
     keys: Source,
-}
-impl Object for Entry {
-    fn fields<'de, A: MapAccess<'de>>(&mut self, mut map: A) -> std::result::Result<(), A::Error> {
-        while let Some(key) = map.next_key::<String>()? {
-            match folded(&key).as_str() {
-                "contentkey" => scalar(&mut map, &mut self.content_key)?,
-                "blob" => map.next_value_seed(ObjectSeed(&mut self.blob))?,
-                "keys" => map.next_value_seed(ObjectSeed(&mut self.keys))?,
-                _ => {
-                    map.next_value::<IgnoredAny>()?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-impl<'de> Deserialize<'de> for Entry {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        let mut value = Self::default();
-        ObjectSeed(&mut value).deserialize(deserializer)?;
-        Ok(value)
-    }
 }
 fn read_entry(store: &Store<'_>, key: &str) -> Result<Option<Entry>> {
     store
@@ -132,7 +88,7 @@ pub(super) fn key(
     )))
 }
 
-/// Shared Go wire/identity admission. Body modes keep their own ownership and
+/// Current source identity admission. Body modes keep their own ownership and
 /// verification; this function never materializes a cached body.
 pub(super) fn reference(
     store: &Store<'_>,
@@ -147,8 +103,7 @@ pub(super) fn reference(
         return Ok(None);
     };
     if entry.content_key != record.content_key
-        || entry.blob.bytes < 0
-        || entry.blob.bytes as u64 != record.decoded_bytes
+        || entry.blob.bytes != record.decoded_bytes
         || entry.keys.kind != keys.source.kind
         || entry.keys.sha256 != keys.source.sha256
     {
@@ -169,7 +124,7 @@ pub(super) fn reference(
     if !lycheedev_core::selection::valid_digest(&entry.blob.sha256, 64) {
         return Err(integrity());
     }
-    Ok(Some(entry.blob.into_core()?))
+    Ok(Some(entry.blob))
 }
 
 /// Returns true only for a pure concurrent-create conflict. The caller then
@@ -186,7 +141,7 @@ pub(super) fn save_entry(
     };
     let entry = Entry {
         content_key: record.content_key.clone(),
-        blob: CachedBlob::try_from(reference.clone())?,
+        blob: reference.clone(),
         keys: Source::from(&keys.source),
     };
     // Keep Go's marshal-before-existence order and no validation of old values.
@@ -230,8 +185,7 @@ pub(super) fn validate_rebuild(
     let key = key.ok_or_else(integrity)?;
     let entry = read_entry(store, key)?.ok_or_else(integrity)?;
     if entry.content_key != record.content_key
-        || entry.blob.bytes < 0
-        || entry.blob.bytes as u64 != expected.bytes
+        || entry.blob.bytes != expected.bytes
         || expected.bytes != record.decoded_bytes
         || entry.blob.sha256 != expected.sha256
         || entry.keys.kind != keys.source.kind

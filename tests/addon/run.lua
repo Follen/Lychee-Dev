@@ -1,7 +1,7 @@
 -- Standalone runner for one workbench test file under one client profile:
 --   lua run.lua <t_file.lua> [client] [addon_root]
--- Later agents drop new t_*.lua files next to this runner; the Go test globs
--- them automatically.
+-- Every t_*.lua suite next to this runner is discovered and executed by the
+-- current Go-free aggregate entry tests/addon/run-all.mjs (managed Lua 5.1).
 
 local scriptPath = arg[0] or "run.lua"
 local scriptDir = string.match(scriptPath, "^(.*)[/\\][^/\\]*$") or "."

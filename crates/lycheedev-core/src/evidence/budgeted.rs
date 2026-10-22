@@ -57,7 +57,7 @@ pub trait CaptureAccounting {
     /// Explicit producer capability. User-controlled provenance never selects a
     /// disk domain; Data adapters must preserve this method when wrapping Budget.
     fn evidence_domain(&self) -> crate::metadata::EvidenceDomain {
-        crate::metadata::EvidenceDomain::Historical
+        crate::metadata::EvidenceDomain::General
     }
     fn check(&self) -> Result<()>;
     fn admit_allocation(&self, bytes: usize) -> Result<()>;
@@ -559,7 +559,7 @@ fn commit_capture_referencing(
                         &mut || meter.check(),
                     )
                     .map(|_| ());
-                    crate::metadata::historical_write::finish_historical(published, guard.close())
+                    crate::metadata::owned_write::finish_owned(published, guard.close())
                 }
             },
             &state,
@@ -644,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn streamed_identity_matches_fixed_go_html_unicode_golden_and_legacy_identity() {
+    fn streamed_identity_matches_reference_html_unicode_golden_and_retained_identity() {
         let capture = super::super::CaptureRef {
             schema: "lycheedev.capture.v1".into(),
             id: String::new(),
@@ -695,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn dependency_identity_preserves_fixed_go_field_and_slice_order() {
+    fn dependency_identity_preserves_retained_field_and_slice_order() {
         let dependencies = vec![
             format!("CAP-{}", "b".repeat(64)),
             format!("CAP-{}", "c".repeat(64)),
@@ -718,7 +718,7 @@ mod tests {
             captured_at: "2026-10-13T00:00:00Z".into(),
             dependencies,
         };
-        // SHA256 of the explicit Go archive.go CaptureRef field order, with
+        // SHA256 of the explicit fixed-reference CaptureRef field order, with
         // dependencies last; ordered duplicates are retained, never sorted.
         let expected = "CAP-656e3ba1eecd10de6981b8a01d668b1c4f4fb361aa9a8f4b9bb8c842dc64cc5a";
         assert_eq!(super::super::capture_identity(&capture).unwrap(), expected);

@@ -3,7 +3,23 @@
 mod supervisor;
 #[cfg(windows)]
 mod worker;
-use lycheedev_core::{Invocation, Result, ToolkitError};
+#[cfg(windows)]
+mod transport;
+#[cfg(all(test, windows))]
+#[allow(dead_code)]
+#[path = "../../lycheedev-data/tests/support/catalog_fixture.rs"]
+mod fixture;
+
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+enum ReceiptEvent {
+    Ready,
+    Completed(u64),
+}
+#[cfg(windows)]
+type ReceiptObserver = std::sync::Arc<dyn Fn(ReceiptEvent) -> Result<()> + Send + Sync>;
+use crate::Invocation;
+use lycheedev_core::{Result, ToolkitError};
 
 #[cfg(windows)]
 pub fn serve(inv: Invocation) -> Result<()> {
@@ -44,7 +60,8 @@ const RECEIPT_PROTOCOL: &str = "lycheedev.data-agent-private.v1";
 struct Startup {
     home: std::path::PathBuf,
     cwd: std::path::PathBuf,
-    flags: std::collections::BTreeMap<String, String>,
+    source: lycheedev_data::request::SourceOptions,
+    session: lycheedev_data::request::SessionConfig,
     lifetime_ms: u64,
 }
 #[cfg(windows)]

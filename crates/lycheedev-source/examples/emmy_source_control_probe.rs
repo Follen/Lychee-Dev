@@ -16,43 +16,43 @@ type Result<T> = std::result::Result<T, String>;
 const FILES: &[(&str, &str)] = &[
     (
         "control-numeric.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-numeric.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-numeric.lua"),
     ),
     (
         "control-repeat.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-repeat.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-repeat.lua"),
     ),
     (
         "control-break.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-break.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-break.lua"),
     ),
     (
         "control-return.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-return.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-return.lua"),
     ),
     (
         "control-while.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-while.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-while.lua"),
     ),
     (
         "control-generic.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-generic.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-generic.lua"),
     ),
     (
         "control-budget.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-budget.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-budget.lua"),
     ),
     (
         "control-zero-step.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-zero-step.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-zero-step.lua"),
     ),
     (
         "control-function-budget.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-function-budget.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-function-budget.lua"),
     ),
     (
         "control-function-generic.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/control-function-generic.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/control-function-generic.lua"),
     ),
 ];
 fn prepare_case(file: &str, source: &str, c: &OperationControl) -> Result<PreparedSnapshot> {
@@ -106,18 +106,14 @@ impl Output {
     }
 }
 fn run(out: &mut Output) -> Result<()> {
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}))?;
     for (file, source) in FILES {
         out.emit(json!({"event":"input_identity","file":file,"bytes":source.len(),"sha256":hash(source.as_bytes())}))?;
-        let c = OperationControl::new(
-            Instant::now() + Duration::from_secs(30),
-            Arc::new(AtomicBool::new(false)),
-        );
+        let c = OperationControl::uncancelable(Instant::now() + Duration::from_secs(30));
         let prepared = prepare_case(file, source, &c)?;
         let graph = prepared
             .build(
                 file,
-                EvaluatorProfile::Native,
                 Some("common-control-fixture-v1"),
                 &c,
             )
@@ -184,7 +180,7 @@ fn run(out: &mut Output) -> Result<()> {
         }
         let freeze=prepared.freeze(&graph,NativeViewSelection::Load(0),&c).map(|_|json!({"accepted":true})).unwrap_or_else(|e|json!({"accepted":false,"code":e.code,"exit":e.exit_code,"error":e.to_string()}));
         out.emit(json!({"event":"scenario","file":file,"graph":graph,"inputIdentity":prepared.inputs().identity(),"freeze":freeze,"fullSourceAcceptance":false}))?;
-        c.cancel_handle().store(true, Ordering::Release);
+        c.tracked_cancel_handle().unwrap().cancel();
         let cancelled = prepared
             .freeze(&graph, NativeViewSelection::Load(0), &c)
             .err()

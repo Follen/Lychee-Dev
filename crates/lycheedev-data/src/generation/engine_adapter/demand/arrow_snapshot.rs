@@ -216,22 +216,6 @@ impl ArrowSnapshot {
         })
     }
 
-    pub(in crate::generation::engine_adapter) fn rows(&self) -> usize { self.rows }
-
-    pub(in crate::generation::engine_adapter) fn schema(&self) -> SchemaRef {
-        self.schema.schema.clone()
-    }
-
-    pub(in crate::generation::engine_adapter) fn batches(
-        &self,
-    ) -> impl Iterator<Item = &DemandBatch> {
-        self.batches.iter().map(|entry| &entry.batch)
-    }
-
-    pub(in crate::generation::engine_adapter) fn contains_id(&self, id: u32) -> bool {
-        self.locate(id).is_some()
-    }
-
     fn locate(&self, id: u32) -> Option<(usize, usize)> {
         let batch = self.batches.partition_point(|entry| {
             entry.index.last().is_some_and(|last| *last < id)
@@ -284,15 +268,15 @@ pub(in crate::generation::engine_adapter) struct ArrowCursor {
 
 impl ArrowCursor {
     pub(in crate::generation::engine_adapter) fn next_batch(
-        &mut self,
+        &mut self, max_rows: usize,
     ) -> Result<Option<DemandBatch>> {
         if self.done { return Ok(None); }
-        let result = self.next_inner();
+        let result = self.next_inner(max_rows);
         if result.is_err() || matches!(&result, Ok(None)) { self.done = true; }
         result
     }
 
-    fn next_inner(&mut self) -> Result<Option<DemandBatch>> {
+    fn next_inner(&mut self, max_rows: usize) -> Result<Option<DemandBatch>> {
         self.budget.check()?;
         let location = if let Some(ids) = &self.ids {
             let mut found = None;
@@ -316,23 +300,71 @@ impl ArrowCursor {
         let Some((batch, row)) = location else { return Ok(None); };
         let source = &self.snapshot.batches[batch].batch;
         if row >= source.records.num_rows() { return Err(shape()); }
-        self.budget.charge(Cost::work(add(source.records.num_columns(), 1)?))?;
-        let view_allocation = self.budget.reserve_retained(add(
-            1024, mul(source.records.num_columns(), 1024)?,
-        )?)?.into_owned(&self.budget)?;
-        // Never claim these shared buffers again: Arrow claim REPLACES its
-        // previous owner. Slices inherit the immutable original buffer hooks.
-        let records = source.records.slice(row, 1);
-        let ids = source.ids.slice(row, 1);
-        if self.ids.is_none() {
-            self.row += 1;
-            if self.row == source.records.num_rows() {
-                self.batch += 1;
-                self.row = 0;
+        let maximum = max_rows.min(BATCH_ROWS);
+        let (records, ids, view_allocation, retained_bytes) = if let Some(selected) = &self.ids {
+            let _indices = self.budget.reserve_retained(add(1024, mul(maximum, 8)?)?)?;
+            let mut positions = Vec::with_capacity(maximum);
+            positions.push(u32::try_from(row).map_err(|_| limit())?);
+            while positions.len() < maximum {
+                let Some(id) = selected.get(self.next) else { break; };
+                self.budget.charge(Cost::work(add(
+                    add(self.snapshot.batches.len().ilog2_or_zero(), self.snapshot.rows.ilog2_or_zero())?, 2,
+                )?))?;
+                let location = self.snapshot.locate(*id);
+                if location.is_some_and(|(ordinal, _)| ordinal != batch) { break; }
+                self.next += 1;
+                if let Some((_, position)) = location {
+                    positions.push(u32::try_from(position).map_err(|_| limit())?);
+                }
             }
-        }
-        Ok(Some(DemandBatch { records, ids, _view_allocation: Some(view_allocation) }))
+            let contiguous = positions.iter().enumerate()
+                .all(|(offset, position)| *position as usize == row + offset);
+            if contiguous {
+                let allocation = self.view_allocation(source.records.num_columns())?;
+                let retained = add(source.retained_bytes, allocation.bytes())?;
+                (source.records.slice(row, positions.len()), source.ids.slice(row, positions.len()), Some(allocation), retained)
+            } else {
+                // A sparse selection must not expose one whole-batch-backed
+                // slice per ID to DF Sort. Take copies native values only; its
+                // unique sorted indices cannot copy more values than the input.
+                // Admit output, list-child indices and builder peak first.
+                let input_bytes = add(source.records.get_array_memory_size(), source.ids.get_array_memory_size())?;
+                let peak = add(mul(input_bytes, 2)?, add(16384, mul(source.records.num_columns(), 4096)?)?)?;
+                let mut allocation = self.budget.reserve_retained(peak)?.into_owned(&self.budget)?;
+                self.budget.charge(Cost::work(input_bytes))?;
+                let indices = UInt32Array::from(positions);
+                let arrays = source.records.columns().iter().map(|array| {
+                    datafusion::arrow::compute::take(array.as_ref(), &indices, None).map_err(|_| shape())
+                }).collect::<Result<Vec<_>>>()?;
+                let records = RecordBatch::try_new(self.snapshot.schema.schema.clone(), arrays).map_err(|_| shape())?;
+                let ids = datafusion::arrow::compute::take(&source.ids, &indices, None).map_err(|_| shape())?;
+                let ids = ids.as_any().downcast_ref::<UInt32Array>().ok_or_else(shape)?.clone();
+                allocation.shrink_to(add(add(records.get_array_memory_size(), ids.get_array_memory_size())?, 4096)?)?;
+                let compact = keep_demand(records, ids, Admission::Effective(allocation), &self.snapshot.schema, &self.budget)?;
+                (compact.records, compact.ids, compact._view_allocation, compact.retained_bytes)
+            }
+        } else {
+            // IPC batch boundaries are already bounded by the producer. Do not
+            // split each batch into rows sharing its entire buffer capacity:
+            // native DF operators account those capacities per incoming batch.
+            let count = maximum.min(source.records.num_rows() - row);
+            let allocation = self.view_allocation(source.records.num_columns())?;
+            let records = source.records.slice(row, count);
+            let ids = source.ids.slice(row, count);
+            self.row += count;
+            if self.row == source.records.num_rows() { self.batch += 1; self.row = 0; }
+            let retained = add(source.retained_bytes, allocation.bytes())?;
+            (records, ids, Some(allocation), retained)
+        };
+        self.budget.charge(Cost::work(mul(records.num_rows(), add(records.num_columns(), 1)?)?))?;
+        // Shared views inherit the original immutable buffer hooks. Only the
+        // sparse Take result above owns a new, separately admitted allocation.
+        Ok(Some(DemandBatch { records, ids, retained_bytes, _view_allocation: view_allocation }))
     }
+    fn view_allocation(&self, columns: usize) -> Result<OwnedRetainedReservation> {
+        self.budget.reserve_retained(add(1024, mul(columns, 1024)?)?)?.into_owned(&self.budget)
+    }
+
 }
 
 // Native decoding already validates layout/alignment; this additionally checks

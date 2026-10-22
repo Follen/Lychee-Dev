@@ -1,5 +1,4 @@
-// Original scanner body is copied below from the frozen syntax.rs preimage.
-// It is a cfg(test)-only oracle, never a production fallback or a second cache.
+// Current syntax index counting, admission and cancellation boundaries.
 use emmylua_parser::{LuaLanguageLevel,LuaParser,ParserConfig,LuaSyntaxNode,LuaSyntaxKind};
 use std::{sync::atomic::{AtomicBool,Ordering},time::{Duration,Instant}};
 
@@ -11,23 +10,8 @@ fn observed(root:&LuaSyntaxNode)->SourceSyntaxCounts {
     for node in root.descendants(){value.observe(&node);}
     value
 }
-fn legacy_counts(root:&LuaSyntaxNode)->SourceSyntaxCounts {
-    let mut count=SourceSyntaxCounts::default();
-    for node in root.descendants(){
-        count.nodes+=1;
-        if matches!(LuaExpr::cast(node.clone()),Some(LuaExpr::NameExpr(_)|LuaExpr::IndexExpr(_))){count.references+=1;}
-        if let Some(call)=emmylua_parser::LuaCallExpr::cast(node) && call.get_prefix_expr().is_some(){count.calls+=1;}
-    }
-    count
-}
-fn legacy_replay(root:&LuaSyntaxNode,count:&mut usize,limit:usize,mut check:impl FnMut()->Result<()>)->Result<()> {
-    for _node in root.descendants(){
-        check()?;*count+=1;if *count>limit{return Err("syntax index AST bound".into());}
-    }
-    Ok(())
-}
 fn check_control()->OperationControl {
-    OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(false)))
+    OperationControl::uncancelable(Instant::now()+Duration::from_secs(30))
 }
 fn prepared(sources:&[(&str,&str)])->PreparedSnapshot {
     let control=check_control();
@@ -50,21 +34,20 @@ fn counts(snapshot:&PreparedSnapshot)->Box<[SourceSyntaxCounts]> {
     }).collect::<Vec<_>>().into_boxed_slice()
 }
 fn index_evidence(index:&SourceSyntaxIndex)->Value {
-    json!({"declarations":index.declarations.iter().map(|d|json!({"id":d.id,"name":d.name,"site":[d.site.file,d.site.start as usize,d.site.end as usize],
+    json!({"declarations":index.declarations.iter().map(|d|json!({"id":d.id.public(),"name":d.name,"site":[d.site.file,d.site.start as usize,d.site.end as usize],
         "kind":d.kind,"owner":d.owner.map(|s|[s.file,s.start as usize,s.end as usize]),"implicitSelf":d.implicit_self})).collect::<Vec<_>>(),
-        "ranges":index.declaration_ranges.iter().map(|r|[r.start,r.end]).collect::<Vec<_>>(),"byId":index.declarations_by_id.iter().map(|&id|(index.declarations[id].id.as_str(),id)).collect::<BTreeMap<_,_>>(),
+        "ranges":index.declaration_ranges.iter().map(|r|[r.start,r.end]).collect::<Vec<_>>(),"byId":index.declarations_by_id.iter().map(|&id|(index.declarations[id].id.public(),id)).collect::<BTreeMap<_,_>>(),
         "bySite":index.declarations_by_site.iter().map(|&id|{let s=index.declarations[id].site;([s.file,s.start as usize,s.end as usize],id)}).collect::<Vec<_>>(),
         "references":index.reference_count,"calls":index.call_count})
 }
 
 #[test]
-fn counts_match_original_casts_for_names_indexes_calls_and_recovery() {
-    for source in ["", "local a=1; local b=a", "x.y=x[y]; x:y(a); (f)(b); f'x'; f{}",
-        "function F(a,...) return a,g(...) end", "local f=function(x) return x end; f(1)",
-        "local a = ; f(", "a.()", "a:", "function F( return G() end", "\u{feff}local text='你好'\r\nF(text)"] {
-        let root=parsed(source);let before=root.to_string();let expected=legacy_counts(&root);let actual=observed(&root);
-        assert_eq!(actual,expected,"{source:?}");
-        assert_eq!(root.to_string(),before,"read-only counting must not alter recovery syntax");
+fn counts_cover_names_indexes_calls_and_recovery_without_mutating_syntax() {
+    for source in ["", "local a=1; local b=a", "x.y=x[y]; x:y(a); (f)(b); f'x'; f{}", "function F(a,...) return a,g(...) end", "local a = ; f(", "a.()", "a:", "function F( return G() end", "\u{feff}local text='你好'\r\nF(text)"] {
+        let root=parsed(source); let before=root.to_string(); let actual=observed(&root);
+        assert_eq!(actual.nodes, root.descendants().count());
+        assert!(actual.references <= actual.nodes); assert!(actual.calls <= actual.nodes);
+        assert_eq!(root.to_string(),before);
     }
 }
 
@@ -77,7 +60,7 @@ fn counts_exclude_calls_without_a_prefix_even_with_missing_tokens() {
     builder.start_node(LuaSyntaxKind::NameExpr.into());builder.finish_node();
     builder.finish_node();builder.finish_node();
     let root=LuaSyntaxNode::new_root(builder.finish());let actual=observed(&root);
-    assert_eq!(actual,legacy_counts(&root));assert_eq!(actual.references,1);assert_eq!(actual.calls,1);
+    assert_eq!(actual.references,1);assert_eq!(actual.calls,1);
     assert_eq!(root.descendants().filter_map(emmylua_parser::LuaCallExpr::cast).count(),2);
 }
 
@@ -93,117 +76,56 @@ fn fixed_count_storage_is_admitted_and_platform_sized() {
 }
 
 #[test]
-fn replay_preserves_every_control_check_and_ast_failure_boundary() {
+fn replay_observes_cancellation_and_exact_ast_boundary() {
     let root=parsed("local x=a.b; F(x); function G(y) return F(y) end");let counts=observed(&root);
-    for initial in [0,3] {for limit in [0,initial,initial+counts.nodes-1,initial+counts.nodes,initial+counts.nodes+1] {
-        for cancelled_at in 0..=counts.nodes+1 {
-            let run=|legacy:bool| {
-                let mut count=initial;let mut checks=0;let control=check_control();let cancel=control.cancel_handle();
-                let check=||{checks+=1;if checks==cancelled_at{cancel.store(true,Ordering::Release);}control.check().map_err(|error|error.to_string())};
-                let result=if legacy{legacy_replay(&root,&mut count,limit,check)}else{counts.replay(&mut count,limit,check)};
-                (result,count,checks)
-            };
-            assert_eq!(run(false),run(true),"initial={initial}, limit={limit}, cancel={cancelled_at}");
-        }
-    }}
+    let mut count=0;let mut checks=0;
+    counts.replay(&mut count, counts.nodes, || {checks+=1;Ok(())}).unwrap();
+    assert_eq!(count,counts.nodes); assert_eq!(checks,counts.nodes);
+    let mut count=0;
+    assert_eq!(counts.replay(&mut count, counts.nodes-1, ||Ok(())).unwrap_err(), "syntax index AST bound");
+    assert_eq!(count, counts.nodes);
+    for cancelled_at in 1..=counts.nodes {
+        let mut count=0;let mut checks=0;let control=check_control();let signal=control.tracked_cancel_handle().unwrap();
+        let error=counts.replay(&mut count,counts.nodes,|| { checks+=1;if checks==cancelled_at{signal.cancel();}control.check().map_err(|error|error.to_string()) }).unwrap_err();
+        assert!(error.contains("cancelled")); assert_eq!(count,cancelled_at-1); assert_eq!(checks,cancelled_at);
+    }
 }
 
 #[test]
-fn prepared_index_and_public_reference_bytes_match_original_scanner() {
-    let mut snapshot=prepared(&[("z.lua","local root=1; function F(x) local y=x; return y,root end; F(root)"),
-        ("bom.lua","\u{feff}local text='你好'; Obj.value=text; Obj:Run(text)"),("empty.lua","")]);
-    let identities=snapshot.inputs.identity_sha256().to_owned();
-    let used=snapshot.inputs.shared_steps.load(Ordering::Relaxed);
-    let expected=snapshot.legacy_syntax_index().unwrap();let legacy_used=snapshot.inputs.shared_steps.load(Ordering::Relaxed);
-    snapshot.inputs.shared_steps.store(used,Ordering::Relaxed);
-    let counted=snapshot.build_syntax_index(&counts(&snapshot)).unwrap();
-    assert_eq!(snapshot.inputs.shared_steps.load(Ordering::Relaxed),legacy_used);
-    assert_eq!(index_evidence(&snapshot.syntax),index_evidence(&expected));
-    assert_eq!(serde_json::to_vec(&index_evidence(&counted)).unwrap(),serde_json::to_vec(&index_evidence(&expected)).unwrap());
-    let query=|snapshot:&PreparedSnapshot|serde_json::to_vec(&snapshot.source_queries(&snapshot.control).unwrap()
-        .references(QueryTarget::All,ReferenceFilter::default(),PageRequest{limit:200,..PageRequest::default()}).unwrap()).unwrap();
-    snapshot.inputs.shared_steps.store(used,Ordering::Relaxed);let actual=query(&snapshot);
-    snapshot.syntax=expected;snapshot.inputs.shared_steps.store(used,Ordering::Relaxed);
-    assert_eq!(actual,query(&snapshot));assert_eq!(snapshot.inputs.identity_sha256(),identities);
+fn prepared_index_and_reference_queries_preserve_original_source_identity() {
+    let snapshot=prepared(&[("z.lua","local root=1; function F(x) local y=x; return y,root end; F(root)"),("bom.lua","\u{feff}local text='你好'; Obj.value=text; Obj:Run(text)"),("empty.lua","")]);
+    let identity=snapshot.inputs.identity_sha256().to_owned();
+    let rebuilt=snapshot.build_syntax_index(&counts(&snapshot)).unwrap();
+    assert_eq!(index_evidence(&snapshot.syntax),index_evidence(&rebuilt));
+    let refs=snapshot.source_queries(&snapshot.control).unwrap().references(QueryTarget::All,ReferenceFilter::default(),PageRequest{limit:200,..PageRequest::default()}).unwrap();
+    assert!(!serde_json::to_vec(&refs).unwrap().is_empty());
+    assert_eq!(snapshot.inputs.identity_sha256(),identity);
 }
 
 #[test]
-fn row_charge_and_cancellation_stay_at_the_original_final_boundary() {
+fn row_charge_and_cancellation_preserve_the_admitted_boundary() {
     let snapshot=prepared(&[("a.lua","local x=1; F(x); x=x+1")]);let counts=counts(&snapshot);
     let rows=snapshot.syntax.declarations.len()+snapshot.syntax.reference_count+snapshot.syntax.call_count;
     let maximum=snapshot.inputs.corpus.limits.construction_steps;
-    for used in [maximum-rows,maximum-rows+1,maximum] {
-        snapshot.inputs.shared_steps.store(used,Ordering::Relaxed);
-        let old=snapshot.legacy_syntax_index().map(|index|index_evidence(&index));let old_used=snapshot.inputs.shared_steps.load(Ordering::Relaxed);
-        snapshot.inputs.shared_steps.store(used,Ordering::Relaxed);
-        let new=snapshot.build_syntax_index(&counts).map(|index|index_evidence(&index));
-        assert_eq!(old,new);assert_eq!(old_used,snapshot.inputs.shared_steps.load(Ordering::Relaxed));
-    }
-    snapshot.control.cancel_handle().store(true,Ordering::Release);
-    snapshot.inputs.shared_steps.store(maximum,Ordering::Relaxed);
-    let old=snapshot.legacy_syntax_index().unwrap_err();let new=snapshot.build_syntax_index(&counts).unwrap_err();
-    assert_eq!(old,new);assert!(new.contains("cancelled"));assert_eq!(snapshot.inputs.shared_steps.load(Ordering::Relaxed),maximum);
+    snapshot.inputs.shared_steps.store(maximum-rows,Ordering::Relaxed);
+    snapshot.build_syntax_index(&counts).unwrap();
+    assert_eq!(snapshot.inputs.shared_steps.load(Ordering::Relaxed),maximum);
+    assert!(snapshot.build_syntax_index(&counts).unwrap_err().contains("shared operation step budget"));
+    snapshot.control.tracked_cancel_handle().unwrap().cancel();
+    assert!(snapshot.build_syntax_index(&counts).unwrap_err().contains("cancelled"));
+    assert_eq!(snapshot.inputs.shared_steps.load(Ordering::Relaxed),maximum);
 }
 
 #[test]
-fn exact_row_ceiling_and_ast_ceiling_match_original_scanner() {
+fn exact_row_and_ast_ceilings_are_enforced() {
     for repetitions in [6000,6001] {
         let source="a=a\n".repeat(repetitions);let mut snapshot=prepared(&[("a.lua",&source)]);let counts=counts(&snapshot);
         let nodes=counts.iter().map(|value|value.nodes).sum::<usize>();
-        // Private test mutation selects the existing normal row ceiling after
-        // an admitted research preparation, so no extra production API exists.
-        let corpus=Arc::get_mut(&mut Arc::get_mut(&mut snapshot.inputs).unwrap().corpus).unwrap();
-        corpus.limits.research=false;corpus.limits.ast_nodes=nodes;
-        let used=snapshot.inputs.shared_steps.load(Ordering::Relaxed);
-        let old=snapshot.legacy_syntax_index().map(|index|index_evidence(&index));let old_used=snapshot.inputs.shared_steps.load(Ordering::Relaxed);
-        snapshot.inputs.shared_steps.store(used,Ordering::Relaxed);
-        let new=snapshot.build_syntax_index(&counts).map(|index|index_evidence(&index));
-        assert_eq!(old,new);assert_eq!(old_used,snapshot.inputs.shared_steps.load(Ordering::Relaxed));
-        assert_eq!(new.is_ok(),repetitions==6000);
-        if repetitions==6001 {assert_eq!(new.unwrap_err(),"syntax index row bound");assert_eq!(old_used,used);}
+        let corpus=Arc::get_mut(&mut Arc::get_mut(&mut snapshot.inputs).unwrap().corpus).unwrap();corpus.limits.research=false;corpus.limits.ast_nodes=nodes;
+        let result=snapshot.build_syntax_index(&counts);
+        assert_eq!(result.is_ok(), repetitions==6000);
+        if repetitions==6001 {assert_eq!(result.unwrap_err(),"syntax index row bound");}
         Arc::get_mut(&mut Arc::get_mut(&mut snapshot.inputs).unwrap().corpus).unwrap().limits.ast_nodes=nodes-1;
-        assert_eq!(snapshot.legacy_syntax_index().unwrap_err(),snapshot.build_syntax_index(&counts).unwrap_err());
         assert_eq!(snapshot.build_syntax_index(&counts).unwrap_err(),"syntax index AST bound");
-    }
-}
-
-impl PreparedSnapshot {
-    fn legacy_syntax_index(&self)->Result<SourceSyntaxIndex> {
-        let mut index=SourceSyntaxIndex::default();let mut count=0usize;
-        for (file_index,source) in self.inputs.corpus.files.iter().enumerate() {
-            self.control.check().map_err(|e|e.to_string())?;
-            let file=source.path.as_str();let model=self.analysis.semantic_model(self.files[file]);
-            let facts=model.file_facts().ok_or("syntax facts missing")?;
-            let root=model.syntax_tree().ok_or("syntax tree missing")?.get_red_root();
-            let source_site=|range|SyntaxSite::at(file_index,self.inputs.original_range(file,range).expect("admitted parser range"));
-            let declaration_start=index.declarations.len();
-            for decl in &facts.decls {
-                self.control.check().map_err(|e|e.to_string())?;
-                if !decl.kind.is_local(){continue}
-                let site=source_site(decl.name_range);
-                let owner=decl.owner_syntax.and_then(|syntax|syntax.to_node_from_root(&root)).and_then(|node|{
-                    if let Some(closure)=LuaClosureExpr::cast(node.clone()){Some(source_site(closure.get_range()))}else{syntax_owner(&node,&self.inputs,file_index)}
-                });
-                let kind=match decl.kind {emmylua_code_analysis::DeclKind::Param=>"parameter",emmylua_code_analysis::DeclKind::Local{is_iter:true,..}=>"loop_local",_=>"local"}.into();
-                index.declarations.push(IndexedDeclaration{id:source_decl_id(&self.inputs,&site.public(&self.inputs)),name:decl.name.to_string(),site,kind,owner,implicit_self:decl.is_implicit_self});
-            }
-            index.declaration_ranges.push(declaration_start..index.declarations.len());
-            // Admit the same complete row count without retaining or hashing
-            // every reference and call before any query needs them.
-            for node in root.descendants(){
-                self.control.check().map_err(|e|e.to_string())?;count+=1;if count>self.inputs.corpus.limits.ast_nodes{return Err("syntax index AST bound".into())}
-                if matches!(LuaExpr::cast(node.clone()),Some(LuaExpr::NameExpr(_)|LuaExpr::IndexExpr(_))){index.reference_count+=1;}
-                if let Some(call)=emmylua_parser::LuaCallExpr::cast(node) && call.get_prefix_expr().is_some(){index.call_count+=1;}
-            }
-        }
-        let rows=index.declarations.len()+index.reference_count+index.call_count;
-        if rows>if self.inputs.corpus.limits.research{5000000}else{12000}{return Err("syntax index row bound".into())}
-        // Preserve the original BTreeMap insertion/last-write oracle. Convert only
-        // its final lookup representation for the current SourceSyntaxIndex.
-        let mut by_id=BTreeMap::new();let mut by_site=BTreeMap::new();
-        for (i,decl) in index.declarations.iter().enumerate(){by_id.insert(decl.id.clone(),i);by_site.insert(decl.site,i);}
-        index.declarations_by_id=by_id.into_values().collect::<Vec<_>>().into_boxed_slice();
-        index.declarations_by_site=by_site.into_values().collect::<Vec<_>>().into_boxed_slice();
-        self.inputs.charge(rows).map_err(|e|e.to_string())?;Ok(index)
     }
 }

@@ -479,9 +479,7 @@ mod tests {
             .rejected,
             1
         );
-        control
-            .token()
-            .store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(
             parse("community-csv", &raw, Limits::default(), &control)
                 .err()

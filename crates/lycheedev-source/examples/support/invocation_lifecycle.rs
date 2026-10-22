@@ -193,9 +193,7 @@ fn lifecycle_site(file: &str, marker: &str, expression: &str) -> Result<Site> {
     })
 }
 fn native_invocation_lifecycle_selected(out: &mut NativeOutput, only: &str) -> Result<()> {
-    let patch =
-        option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256").ok_or("missing compiled patch")?;
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":patch,"scope":"invocation-lifecycle"}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256,"scope":"invocation-lifecycle"}))?;
     for name in [
         "profile.lua",
         "invocation-captures.lua",
@@ -218,8 +216,7 @@ fn native_invocation_lifecycle_selected(out: &mut NativeOutput, only: &str) -> R
             name,
             "after_load",
             files,
-            patch,
-            Some("invocation-lifecycle-v1"),
+                Some("invocation-lifecycle-v1"),
         )?;
         let provider = input.freeze(&graph)?;
         let session = probe_session(provider.clone(), input.operation_control())?;

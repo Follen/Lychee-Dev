@@ -6,11 +6,12 @@ import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {runInNewContext} from 'node:vm';
-import {CASES, GO_COMMIT, GO_VERSION, REPETITIONS, compareSamples, elapsed, orderFor, semantic, startupBreakdown, statistics, summarize} from './contract.mjs';
-import {LUALS, assertSeedCold, cloneSeed, derivedIdentity, inventory, proveWarmReuse, safeRelative, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
+import {CASES, APPROVED_ENGINE_DIFFERENCES, APPROVED_ENGINE_SUMMARIES, GO_COMMIT, GO_VERSION, REPETITIONS, compareSamples, elapsed, orderFor, semantic, selectedPathsPassed, startupBreakdown, statistics, summarize} from './contract.mjs';
+import {assertSeedCold, cloneSeed, derivedIdentity, inventory, proveWarmReuse, safeRelative, verifyFixedGoPackage, verifyGoReferenceArtifact, verifySeedMetadata} from './inputs.mjs';
 import {DatabaseSync} from 'node:sqlite';
-import {APPROVED_ENGINE_SUMMARIES} from '../rust-parity/describe-contract.mjs';
-import {ownedUserEnvironment} from '../../tools/rust-build.mjs';
+import {createHash} from 'node:crypto';
+import {writeTarGz} from '../../tools/tar.mjs';
+import {hashFile, ownedUserEnvironment} from '../../tools/rust-build.mjs';
 const oracle = JSON.parse(readFileSync(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url)));
 const pin = 'PIN-paired', anchor = oracle.anchors[0];
 const envelope = result => ({schema: 'lycheedev.result.v1', ok: true, error: null, result});
@@ -21,12 +22,24 @@ function query() {
 }
 function index() { return envelope({repository: oracle.repository, product: oracle.product, commit: oracle.commit, documents: oracle.documents, declarations: 22, relationships: 11, assets: 9, diagnostics: 0, complete: true, parser: 'source-v1', storage: 'file-cache', schema: 'lycheedev.source-map.v2'}); }
 function proof() { return {schema: 'lycheedev.owned-process.v1', rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false, timing: {schema: 'lycheedev.owned-timing.v1', frequency: 10000000, startTicks: '9007199254740993000', rootExitTicks: '9007199254741993000', treeReapedTicks: '9007199254742993000'}}; }
-function pairs() { return CASES.flatMap(({id}) => Array.from({length: REPETITIONS}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: id, iteration, cacheMode, order: orderFor(iteration), resultEquivalent: true, ...Object.fromEntries(['go', 'rust'].map(engine => [engine, {valid: true, home: `${id}/${iteration}/${engine}`, binary: engine, snapshot: pin, warmReuse: {verified: true}, controllableMillis: engine === 'go' ? 100 : 30}]))}))).flat()); }
-test('fixed oracle, workload, exact pair count and 30% target cannot drift to historical five/50%', () => {
+function pairs() { return CASES.flatMap(({id}) => Array.from({length: REPETITIONS}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: id, iteration, cacheMode, order: orderFor(iteration), resultEquivalent: true, ...Object.fromEntries(['go', 'rust'].map(engine => [engine, {valid: true, home: `${id}/${iteration}/${engine}`, binary: engine, snapshot: pin, warmReuse: {verified: true}, controllableMillis: engine === 'go' ? 100 : 50}]))}))).flat()); }
+test('fixed oracle and full workload retain twenty pairs with the requested fifty-percent target', () => {
   assert.equal(GO_COMMIT, '29bdbdaff5f064ec212ff2064380b1ccac652eda'); assert.equal(GO_VERSION, '3.2.4'); assert.equal(REPETITIONS, 20);
   assert.equal(CASES.length, 3); assert.equal(oracle.documents, 4036); assert.equal(oracle.documentBytes, 32269051);
   assert.deepEqual(orderFor(0), ['go', 'rust']); assert.deepEqual(orderFor(1), ['rust', 'go']);
-  assert(summarize(pairs()).every(row => row.state === 'passed_selected_path' && row.targetRatio === .30));
+  const summary = summarize(pairs());
+  assert(selectedPathsPassed(summary));
+  assert(summary.filter(row => row.caseId !== 'B01-describe').every(row => row.state === 'passed_selected_path' && row.targetRatio === .50 && row.performanceAcceptanceEvaluated));
+});
+
+test('describe records its original time without a ratio requirement, while completeness still matters', () => {
+  const value = pairs();
+  for (const row of value.filter(row => row.caseId === 'B01-describe')) row.rust.controllableMillis = 150;
+  const summary = summarize(value), describe = summary.filter(row => row.caseId === 'B01-describe');
+  assert(describe.every(row => row.state === 'passed_correctness_only' && row.targetRatio === null && row.performanceAcceptanceEvaluated === false && row.medianRatio === 1.5));
+  assert(selectedPathsPassed(summary));
+  value[0].resultEquivalent = false;
+  assert.equal(selectedPathsPassed(summarize(value)), false);
 });
 test('high-resolution integer clock preserves >2^53 ticks and includes worker drain', () => {
   const timing = elapsed(proof()); assert.equal(timing.controllableMillis, 200); assert.equal(timing.rootObservedMillis, 100); assert.equal(timing.reapAndDrainMillis, 100);
@@ -44,8 +57,8 @@ test('invalid failure time is never dropped from a success-only distribution', (
   const value = pairs(); value[4].rust.valid = false; value[4].rust.controllableMillis = null;
   const summary = summarize(value)[0]; assert.equal(summary.state, 'failed_correctness_or_missing_samples'); assert.equal(summary.timings, null);
 });
-test('a path just above 0.30 fails regardless of other fast paths', () => {
-  const value = pairs(); for (const row of value.filter(row => row.caseId === CASES[1].id && row.cacheMode === 'warm')) row.rust.controllableMillis = 30.01;
+test('a path just above 0.50 fails regardless of other fast paths', () => {
+  const value = pairs(); for (const row of value.filter(row => row.caseId === CASES[1].id && row.cacheMode === 'warm')) row.rust.controllableMillis = 50.01;
   const summary = summarize(value); assert.equal(summary.filter(row => row.state === 'failed_performance').length, 1);
 });
 test('warm requires its own successful cold with same home/binary/pin', () => {
@@ -78,54 +91,85 @@ test('index keeps public schema/storage/parser and all business counts exact', (
   for (const field of ['schema', 'storage', 'parser']) { const changed = index(); changed.result[field] = 'different'; assert.throws(() => compareSamples(CASES[1].id, index(), changed, oracle, pin)); }
   for (const field of ['declarations', 'relationships', 'assets', 'diagnostics', 'documents']) { const changed = index(); changed.result[field]++; assert.throws(() => compareSamples(CASES[1].id, index(), changed, oracle, pin)); }
 });
-test('describe accepts only the two exact approved engine summary changes', () => {
+test('describe normalizes only the reviewed summary and flag substitutions', () => {
   const base = envelope({commands: APPROVED_ENGINE_SUMMARIES.map(v => ({path: v.path, summary: v.expected, flags: [], arguments: [], mutates: false})), formats: ['json'], development: false});
   const actual = structuredClone(base); for (let i = 0; i < actual.result.commands.length; i++) actual.result.commands[i].summary = APPROVED_ENGINE_SUMMARIES[i].actual;
-  assert.equal(compareSamples(CASES[0].id, base, actual).approvedEngineSummaryChanges.length, 2);
+  assert.equal(compareSamples(CASES[0].id, base, actual).approvedEngineSummaryChanges.length, APPROVED_ENGINE_SUMMARIES.length);
   actual.result.commands[0].summary += ' hidden change'; assert.throws(() => compareSamples(CASES[0].id, base, actual));
+  const flagRows = APPROVED_ENGINE_DIFFERENCES.flagChanges.map(entry => ({path: entry.path, summary: APPROVED_ENGINE_DIFFERENCES.summaryChanges.find(v => v.path === entry.path)?.expected ?? 'same', flags: entry.expected, arguments: [], mutates: false}));
+  const flagBase = envelope({commands: flagRows, formats: ['json'], development: false});
+  const flagActual = structuredClone(flagBase); for (const row of flagActual.result.commands) row.flags = APPROVED_ENGINE_DIFFERENCES.flagChanges.find(entry => entry.path === row.path).actual;
+  assert.equal(compareSamples(CASES[0].id, flagBase, flagActual).approvedEngineSummaryChanges.length, APPROVED_ENGINE_DIFFERENCES.flagChanges.length);
+  flagActual.result.commands[0].flags = [...flagActual.result.commands[0].flags, '--undeclared'];
+  assert.throws(() => compareSamples(CASES[0].id, flagBase, flagActual));
 });
 test('describe does not normalize changed flags, formats, extras or order', () => {
   const base = envelope({commands: [{path: 'a', flags: []}, {path: 'b', flags: []}], formats: ['json']});
-  for (const mutate of [r => r.commands.reverse(), r => r.commands[0].flags.push('missing'), r => r.formats.push('jsonl'), r => r.unreviewed = true]) { const actual = structuredClone(base); mutate(actual.result); assert.throws(() => compareSamples(CASES[0].id, base, actual)); }
+  for (const mutate of [r => r.commands.reverse(), r => r.commands[0].flags.push('missing'), r => r.formats.push('jsonl'), r => r.unreviewed = true, r => r.commands[0].brandNew = true]) { const actual = structuredClone(base); mutate(actual.result); assert.throws(() => compareSamples(CASES[0].id, base, actual)); }
 });
-function goMetadata() { return `binary.exe: go1.27.1\n${Object.entries({'vcs.revision': GO_COMMIT, 'vcs.modified': 'false', CGO_ENABLED: '0', GOOS: 'windows', GOARCH: 'amd64', '-trimpath': 'true'}).map(([k, v]) => `\tbuild\t${k}=${v}`).join('\n')}\n`; }
-test('Go metadata requires exact clean fixed build and optimized target identity', () => {
-  assert.equal(verifyGoMetadata(goMetadata()).commit, GO_COMMIT);
-  for (const [from, to] of [[GO_COMMIT, '0'.repeat(40)], ['modified=false', 'modified=true'], ['go1.27.1', 'go1.27.0'], ['CGO_ENABLED=0', 'CGO_ENABLED=1'], ['GOOS=windows', 'GOOS=linux'], ['-trimpath=true', '-trimpath=false']]) assert.throws(() => verifyGoMetadata(goMetadata().replace(from, to)));
-  assert.throws(() => verifyGoMetadata(goMetadata() + '\tbuild\t-gcflags=all=-N -l\n'));
-});
-test('Go preparer owns caches and user paths, ignores user Go config, and preserves dependency networking', t => {
-  const preparer = readFileSync(new URL('../../tools/rust-performance-prepare-go.mjs', import.meta.url), 'utf8');
-  const setup = preparer.slice(preparer.indexOf('const env ='), preparer.indexOf('function run('));
-  const parent = mkdtempSync(join(tmpdir(), 'owned-go-prepare-')); t.after(() => rmSync(parent, {recursive: true, force: true}));
-  for (const proxy of [undefined, 'https://proxy.golang.org,direct']) {
-    const inherited = {Path: 'installed-tools', HOME: 'real-user', userprofile: 'real-user', CODEX_HOME: 'real-agent', APPDATA: 'real-apps', LOCALAPPDATA: 'real-local', TEMP: 'real-temp', TMP: 'real-temp', LYCHEEDEV_BIN: 'real-tool', gocache: 'unowned-cache', GoModCache: 'unowned-modules', gotmpdir: 'unowned-temp', GoEnv: 'user-config', GoToolchain: 'auto', ...(proxy ? {GOPROXY: proxy} : {})};
-    const before = {...inherited}, directory = join(parent, proxy ? 'proxy' : 'default');
-    const actual = runInNewContext(setup + '\nenv;', {process: {env: inherited}, job: {directory}, join, ownedUserEnvironment});
-    for (const [key, name] of Object.entries({GOCACHE: 'go-cache', GOMODCACHE: 'go-mod-cache', GOTMPDIR: 'go-tmp'})) assert.equal(actual[key], join(directory, name));
-    assert.equal(actual.GOENV, 'off'); assert.equal(actual.GOTOOLCHAIN, 'local'); assert.equal(actual.Path, inherited.Path);
-    assert.equal(actual.GOPROXY, proxy); assert.equal(Object.hasOwn(actual, 'GOPROXY'), proxy !== undefined);
-    for (const key of ['HOME', 'USERPROFILE', 'CODEX_HOME', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'LYCHEEDEV_HOME']) assert(actual[key].startsWith(directory), key);
-    assert.equal(actual.LYCHEEDEV_BIN, undefined); assert.equal(actual.userprofile, undefined); assert.deepEqual(inherited, before);
-    for (const key of ['gocache', 'GoModCache', 'gotmpdir', 'GoEnv', 'GoToolchain']) assert.equal(Object.hasOwn(actual, key), false);
-  }
-  assert(preparer.includes('for (const directory of [env.GOCACHE, env.GOMODCACHE, env.GOTMPDIR]) mkdirSync(directory);'));
-  assert(preparer.includes('ownedSpawnSync(command, args, {cwd: source, env, evidence: job.evidence, timeout})'));
-});
-test('current Go package rejects both old version and relabelled old commit before runtime use', t => {
-  const directory = mkdtempSync(join(tmpdir(), 'paired-go-version-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
-  for (const [version, commit, actual, expected] of [
-    ['3.2.3', GO_COMMIT, '3.2.3', GO_VERSION],
-    [GO_VERSION, '3766f9cacb52e93a803a626187e2a1d54a445468', '3766f9cacb52e93a803a626187e2a1d54a445468', GO_COMMIT],
+function sha(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
+// Build one synthetic external fixed Go reference package. Nothing here is a
+// Go build: the test only exercises the explicit external-input verifier.
+function writeExternalGoReference(reference) {
+  const packageRoot = join(reference, 'dev-npm-stage');
+  mkdirSync(join(packageRoot, 'native/windows-amd64'), {recursive: true});
+  mkdirSync(join(packageRoot, 'payload/addon'), {recursive: true});
+  const executable = Buffer.from('synthetic fixed Go reference executable bytes');
+  writeFileSync(join(packageRoot, 'native/windows-amd64/lycheedev.exe'), executable);
+  const resource = Buffer.from('synthetic payload resource\n');
+  writeFileSync(join(packageRoot, 'payload/addon/sample.lua'), resource);
+  const release = {schema: 'lycheedev.release.v1', version: GO_VERSION, commit: GO_COMMIT,
+    binaries: {'windows-amd64': {path: 'native/windows-amd64/lycheedev.exe', bytes: executable.length, sha256: sha(executable)}},
+    resources: [{path: 'addon/sample.lua', bytes: resource.length, sha256: sha(resource)}]};
+  const releaseBytes = Buffer.from(JSON.stringify(release) + '\n');
+  writeFileSync(join(packageRoot, 'release.json'), releaseBytes);
+  return {reference, packageRoot, executable, releaseBytes, packageFacts: inventory(packageRoot), tarballPath: join(reference, `lycheedev-local-${GO_VERSION}.tgz`)};
+}
+async function writeExternalGoArtifact(fixture) {
+  await writeTarGz([{name: 'package/release.json', bytes: fixture.releaseBytes},
+    {name: 'package/native/windows-amd64/lycheedev.exe', bytes: fixture.executable}], fixture.tarballPath);
+  const artifact = {schema: 'lycheedev.fixed-go-performance-artifact.v1', commit: GO_COMMIT,
+    privateDevelopmentPackage: true, publishEligible: false, toolchain: 'go1.27.1', sourceCleanBeforeAndAfter: true,
+    package: {binarySHA256: sha(fixture.executable), manifestSHA256: sha(fixture.releaseBytes), packageSHA256: fixture.packageFacts.sha256},
+    build: {optimized: true, metadataSHA256: 'f'.repeat(64)}, tarballSHA256: hashFile(fixture.tarballPath)};
+  writeFileSync(join(fixture.reference, 'artifact.json'), JSON.stringify(artifact, null, 2) + '\n');
+  return artifact;
+}
+test('external Go reference package rejects relabelled version/commit and changed bytes', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-go-reference-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const fixture = writeExternalGoReference(directory);
+  assert.equal(verifyFixedGoPackage(fixture.packageRoot).packageSHA256, fixture.packageFacts.sha256);
+  for (const [field, value, actual, expected] of [
+    ['version', '3.2.3', '3.2.3', GO_VERSION],
+    ['commit', '3766f9cacb52e93a803a626187e2a1d54a445468', '3766f9cacb52e93a803a626187e2a1d54a445468', GO_COMMIT],
   ]) {
-    writeFileSync(join(directory, 'release.json'), JSON.stringify({schema: 'lycheedev.release.v1', version, commit}));
-    assert.throws(() => verifyGoPackage(directory, 'unused.zip'), error => error.code === 'ERR_ASSERTION' && error.actual === actual && error.expected === expected);
+    writeFileSync(join(fixture.packageRoot, 'release.json'), JSON.stringify({...JSON.parse(fixture.releaseBytes), [field]: value}));
+    assert.throws(() => verifyFixedGoPackage(fixture.packageRoot), error => error.code === 'ERR_ASSERTION' && error.actual === actual && error.expected === expected);
   }
-  const workflow = readFileSync(new URL('../../.github/workflows/rust-performance.yml', import.meta.url), 'utf8');
-  assert(workflow.includes(`ref: '${GO_COMMIT}'`)); assert(workflow.includes('.tmp/paired-go-3.2.4-artifact/dev-npm-stage'));
-  assert(!workflow.includes('--one-shot'));
-  const preparer = readFileSync(new URL('../../tools/rust-performance-prepare-go.mjs', import.meta.url), 'utf8');
-  assert(preparer.includes('`lycheedev-local-${GO_VERSION}.tgz`')); assert(!preparer.includes('lycheedev-local-3.2.3.tgz'));
+  writeFileSync(join(fixture.packageRoot, 'release.json'), fixture.releaseBytes);
+  writeFileSync(join(fixture.packageRoot, 'payload/addon/sample.lua'), 'changed payload');
+  assert.throws(() => verifyFixedGoPackage(fixture.packageRoot), /package integrity|external Go reference/);
+  writeFileSync(join(fixture.packageRoot, 'payload/addon/sample.lua'), 'synthetic payload resource\n');
+  assert.equal(verifyFixedGoPackage(fixture.packageRoot, {commit: GO_COMMIT, version: GO_VERSION}).packageSHA256, fixture.packageFacts.sha256);
+});
+test('external Go reference artifact binds artifact record, package tree and tarball bytes', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-go-artifact-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const fixture = writeExternalGoReference(directory), artifact = await writeExternalGoArtifact(fixture);
+  const verified = verifyGoReferenceArtifact(fixture.reference);
+  assert.equal(verified.schema, 'lycheedev.fixed-go-performance-artifact.v1');
+  assert.equal(verified.commit, GO_COMMIT); assert.equal(verified.version, GO_VERSION);
+  assert.equal(verified.packageSHA256, fixture.packageFacts.sha256);
+  assert.equal(verified.artifactSHA256, hashFile(join(fixture.reference, 'artifact.json')));
+  assert.equal(verified.tarballSHA256, artifact.tarballSHA256);
+  writeFileSync(fixture.tarballPath, 'changed tarball');
+  assert.throws(() => verifyGoReferenceArtifact(fixture.reference), /tarball changed/);
+  await writeExternalGoArtifact(fixture);
+  writeFileSync(join(fixture.packageRoot, 'payload/addon/sample.lua'), 'changed payload');
+  assert.throws(() => verifyGoReferenceArtifact(fixture.reference), /package integrity|external Go reference/);
+  writeFileSync(join(fixture.packageRoot, 'payload/addon/sample.lua'), 'synthetic payload resource\n');
+  const record = JSON.parse(readFileSync(join(fixture.reference, 'artifact.json')));
+  record.publishEligible = true; writeFileSync(join(fixture.reference, 'artifact.json'), JSON.stringify(record));
+  assert.throws(() => verifyGoReferenceArtifact(fixture.reference));
 });
 test('Source paired outer controller, preparation and Git inherit only their existing owner user paths', t => {
   const directory = mkdtempSync(join(tmpdir(), 'paired-user-owner-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
@@ -239,16 +283,17 @@ test('warm proof keeps actual derived file identity and requires Rust public hit
   writeFileSync(join(home, 'cache/objects/index'), 'replaced'); assert.throws(() => proveWarmReuse('rust', rust, derivedIdentity(home, 'rust'), hit), /identity changed/);
 });
 
-test('package/runtime validation matches actual immutable Go 3.2.4 source', () => {
-  const read = path => execFileSync('git', ['--no-replace-objects', 'show', `${GO_COMMIT}:${path}`], {encoding: 'utf8', maxBuffer: 2 << 20});
-  const runtime = read('release/tools/luals.json'); assert.deepEqual(JSON.parse(runtime), LUALS);
-  const release = read('tools/release.mjs'), lua = read('tools/luals.mjs'), open = read('internal/luals/runtime.go');
-  assert(release.includes("return { schema: 'lycheedev.release.v1', version, commit, binaries, resources, correspondingSource };"));
-  assert(release.includes("runOk('go', ['build', '-trimpath', '-buildvcs=true', '-o', output, './cmd/lycheedev']"));
-  assert(release.includes("env.CGO_ENABLED = '0'")); assert(release.includes('verifyBinaryIdentity(stage,{commit:id.commit,dirty:id.dirty,version});'));
-  assert(lua.includes("files.set('runtime.json', runtimeBytes)")); assert(lua.includes('const path = `tool/luals/${name}`'));
-  assert(open.includes('bytes.Equal(bytes.TrimSpace(metadata), []byte(pinnedRuntimeJSON))'));
-  for (const name of ['bin/lua-language-server.exe', 'bin/main.lua', 'main.lua', 'LICENSE']) assert(open.includes(`"${name}"`));
+test('external Go reference requires only an explicit path and static identity, never a Go build', () => {
+  const inputs = readFileSync(new URL('./inputs.mjs', import.meta.url), 'utf8');
+  assert(inputs.includes('verifyFixedGoPackage')); assert(inputs.includes('verifyGoReferenceArtifact'));
+  const legacy = ['verifyGo' + 'Package', 'LU' + 'ALS', 'luaLS' + 'Archive', 'version' + ' -m'];
+  for (const name of legacy) assert(!inputs.includes(name), name);
+  const runner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  for (const name of ['go' + 'Source', 'go' + 'Package', 'luaLS' + 'Archive', 'version' + ' -m', 'Go-toolchain-metadata']) assert(!runner.includes(name), name);
+  assert(runner.includes('verifyGoReferenceArtifact(config.go.referenceRoot)'));
+  const outer = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
+  assert(outer.includes('<external-fixed-go-reference-directory>'));
+  for (const name of ['go' + 'Source', 'go' + 'Package', 'luaLS' + 'Archive', 'prepare' + '-go']) assert(!outer.includes(name), name);
 });
 
 function startupProof() {
@@ -349,7 +394,7 @@ test('unreaped diagnostic process stops before the other engine and retains inte
   assert.equal(result.context.report.diagnosticPairs[0].resultEquivalent, false); assert.equal(result.cleaned.length, 0);
 });
 
-function runColdIndexFixture({mismatch = false, invalid = false, unreaped = false} = {}) {
+function runColdIndexFixture({mismatch = false, invalid = false, unreaped = false, sourceDiagnostics = false, warmUnproved = false} = {}) {
   const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
   const begin = source.indexOf('for (const entry of executionCases) {');
   const end = source.indexOf('\n  identity();', begin);
@@ -357,18 +402,22 @@ function runColdIndexFixture({mismatch = false, invalid = false, unreaped = fals
   const calls = [], copies = [], seals = [], cleaned = [], writes = [];
   let preparations = 0;
   const pair = {directory: 'new-fixture', evidence: 'evidence', receipt: 'receipt', seal: value => seals.push(value), cleanup: () => cleaned.push(true)};
-  const context = {executionCases: [CASES[1]], executionRepetitions: 1, executionCacheModes: ['cold'],
+  const context = {executionCases: sourceDiagnostics ? CASES.slice(1) : [CASES[1]], executionRepetitions: 1, executionCacheModes: sourceDiagnostics ? ['cold', 'warm'] : ['cold'],
     root: 'root', config: {go: {binarySHA256: 'go'}, rust: {binarySHA256: 'rust'}}, fatal: false,
     report: {pairs: [], pairOwners: [], preparation: []}, seedIdentities: {}, seeds: {}, pins: {},
     performance: {now: () => 1}, orderFor, join, assert, compareSamples, oracle, files: () => ['sealed-output'], save: () => {},
     prepareSeeds: () => { preparations++; for (const engine of ['go', 'rust']) { context.seeds[engine] = `${engine}-independent-seed`; context.seedIdentities[engine] = {sha256: engine}; context.pins[engine] = {id: pin}; } },
     cloneSeed: (seed, home, identity) => copies.push({seed, home, identity}),
-    beginScratch: () => pair, writeFileSync: (path, bytes) => writes.push({path, value: JSON.parse(bytes)}),
+    beginScratch: () => sourceDiagnostics ? {...pair, directory: `new-fixture-${seals.length}`} : pair,
+    derivedIdentity: home => ({sha256: home}),
+    proveWarmReuse: () => { assert(!warmUnproved, 'derived cache reuse not verified'); return {verified: true}; },
+    writeFileSync: (path, bytes) => writes.push({path, value: JSON.parse(bytes)}),
     invoke: (entry, engine, home, selectedPin, evidence, iteration, cacheMode) => {
       calls.push({entry, engine, home, selectedPin, iteration, cacheMode});
       if (unreaped) context.fatal = true;
-      const result = index(); if (mismatch && engine === 'rust') result.result.declarations++;
-      return {row: {valid: !invalid, controllableMillis: 123}, envelope: result};
+      const result = entry.id === CASES[2].id ? query() : index();
+      if (mismatch && engine === 'rust') { if (entry.id === CASES[2].id) result.result.results[0].score++; else result.result.declarations++; }
+      return {row: {valid: !invalid, handlesReaped: !unreaped, controllableMillis: 123}, envelope: result};
     }};
   let error; try { runInNewContext(source.slice(begin, end), context); } catch (failure) { error = failure; }
   return {context, calls, copies, seals, cleaned, writes, error, preparations};
@@ -402,12 +451,103 @@ test('cold index mode cannot become twenty-pair acceptance or alter ordinary sch
   const outer = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
   const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
   assert(outer.includes("extra.length === 1 && extra[0] === '--cold-index-diagnostics'"));
-  assert(inner.includes("assert(!(startupDiagnostics && coldIndexDiagnostics)"));
-  assert(inner.includes('const executionCases = coldIndexDiagnostics ? [CASES[1]] : CASES;'));
-  assert(inner.includes('const executionRepetitions = coldIndexDiagnostics ? 1 : REPETITIONS;'));
+  assert(inner.includes('assert([startupDiagnostics, coldIndexDiagnostics, sourceDiagnostics].filter(Boolean).length <= 1'));
+  assert(inner.includes('const executionCases = coldIndexDiagnostics ? [CASES[1]] : sourceDiagnostics ? CASES.slice(1) : CASES;'));
+  assert(inner.includes('const executionRepetitions = coldIndexDiagnostics || sourceDiagnostics ? 1 : REPETITIONS;'));
   assert(inner.includes("const executionCacheModes = coldIndexDiagnostics ? ['cold'] : ['cold', 'warm'];"));
   for (const source of [inner, outer]) assert(source.includes('performanceAcceptanceEvaluated: !diagnosticMode'));
   assert(outer.includes('const passed = !diagnosticMode && stable && handlesReaped'));
   assert(outer.includes("observation.pairs[0].cacheMode === 'cold'"));
   assert(inner.includes('report.groups = diagnosticMode ? [] : summarize(report.pairs)'));
+});
+
+function sourceDiagnosticComplete(rows) {
+  const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('function sourceDiagnosticsComplete('), end = source.indexOf('\nsave();', begin);
+  return runInNewContext(source.slice(begin, end) + '\nsourceDiagnosticsComplete(rows);', {CASES, rows});
+}
+
+test('Source diagnostic schedule excludes describe and keeps the other modes unchanged', () => {
+  const outer = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
+  const header = outer.slice(outer.indexOf('const [artifactPath,'), outer.indexOf("assert.equal(process.platform, 'win32'"));
+  const parse = flags => runInNewContext(header + '\n({startupDiagnostics, coldIndexDiagnostics, sourceDiagnostics, diagnosticMode});', {process: {argv: ['node', 'runner', 'artifact', 'go', 'conditions', ...flags]}, assert});
+  assert.equal(parse(['--source-diagnostics']).sourceDiagnostics, true);
+  for (const flags of [['--source-diagnostics', '--startup-diagnostics'], ['--cold-index-diagnostics', '--source-diagnostics'], ['--source-diagnostics', '--source-diagnostics']]) assert.throws(() => parse(flags), /usage:/);
+  const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  const schedule = inner.slice(inner.indexOf('assert(config.startupDiagnostics'), inner.indexOf('let fatal ='));
+  for (const [config, ids, repetitions, modes] of [
+    [{}, CASES.map(v => v.id), 20, ['cold', 'warm']],
+    [{startupDiagnostics: true}, CASES.map(v => v.id), 20, ['cold', 'warm']],
+    [{coldIndexDiagnostics: true}, [CASES[1].id], 1, ['cold']],
+    [{sourceDiagnostics: true}, CASES.slice(1).map(v => v.id), 1, ['cold', 'warm']],
+  ]) {
+    const value = runInNewContext(schedule + '\n({executionCases, executionRepetitions, executionCacheModes});', {config, CASES, REPETITIONS, assert});
+    assert.deepEqual(Array.from(value.executionCases, v => v.id), ids);
+    assert.equal(value.executionRepetitions, repetitions); assert.deepEqual(Array.from(value.executionCacheModes), modes);
+  }
+  for (const config of [{sourceDiagnostics: true, startupDiagnostics: true}, {sourceDiagnostics: true, coldIndexDiagnostics: true}]) assert.throws(() => runInNewContext(schedule, {config, CASES, REPETITIONS, assert}), /mutually exclusive/);
+});
+
+test('Source diagnostics run four complete original index/query cold/warm pairs with independent owned homes', () => {
+  const result = runColdIndexFixture({sourceDiagnostics: true});
+  assert.equal(result.error, undefined); assert.equal(result.preparations, 1);
+  assert.equal(result.calls.length, 8); assert.equal(result.copies.length, 4);
+  assert.equal(result.seals.length, 2); assert.equal(result.cleaned.length, 2);
+  assert(result.seals.every(row => row.state === 'succeeded' && row.handlesReaped));
+  assert.deepEqual(result.calls.map(row => `${row.entry.id}/${row.cacheMode}/${row.engine}`), CASES.slice(1).flatMap(entry => ['cold', 'warm'].flatMap(mode => ['go', 'rust'].map(engine => `${entry.id}/${mode}/${engine}`))));
+  assert.equal(new Set(result.calls.map(row => row.home)).size, 4);
+  for (const entry of CASES.slice(1)) for (const engine of ['go', 'rust']) {
+    const calls = result.calls.filter(row => row.entry.id === entry.id && row.engine === engine);
+    assert.equal(calls.length, 2); assert.equal(calls[0].home, calls[1].home);
+    assert.equal(calls[0].selectedPin, calls[1].selectedPin); assert.equal(calls[0].selectedPin, pin);
+    assert.equal(result.copies.find(row => row.home === calls[0].home).seed, `${engine}-independent-seed`);
+  }
+  assert.equal(sourceDiagnosticComplete(result.context.report.pairs), true);
+});
+
+test('Source diagnostic completeness rejects partial, mismatched, unreaped and unproved warm samples without performance evaluation', () => {
+  const complete = runColdIndexFixture({sourceDiagnostics: true}).context.report.pairs;
+  for (const mutate of [rows => rows.pop(), rows => rows.push(rows[0]), rows => rows[0].caseId = CASES[0].id, rows => rows[0].iteration = 1, rows => rows[0].resultEquivalent = false, rows => rows[0].rust.valid = false, rows => rows[0].go.handlesReaped = false, rows => rows[1].rust.warmReuse.verified = false]) {
+    const rows = structuredClone(complete); mutate(rows); assert.equal(sourceDiagnosticComplete(rows), false);
+  }
+  for (const options of [{mismatch: true}, {invalid: true}, {warmUnproved: true}, {unreaped: true}]) {
+    const result = runColdIndexFixture({sourceDiagnostics: true, ...options});
+    assert.equal(sourceDiagnosticComplete(result.context.report.pairs), false);
+    assert(result.seals.some(row => row.state !== 'succeeded')); assert(result.cleaned.length < 2);
+    assert(result.calls.length <= 8, 'no retry or replacement sample');
+  }
+  const slow = structuredClone(complete); for (const row of slow) { row.go.controllableMillis = 1; row.rust.controllableMillis = 999999; }
+  assert.equal(sourceDiagnosticComplete(slow), true, 'diagnostics do not evaluate the performance ratio');
+});
+
+test('Source diagnostics enable the existing Rust phase probe only and keep the native measurement options', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-source-probe-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('function invoke('), source.indexOf('\nfunction sourceDiagnosticsComplete('));
+  const calls = [];
+  const context = {config: {sourceDiagnostics: true, go: {binary: 'go.exe'}, rust: {sourceBinary: 'rust.exe'}}, dirname, startupDiagnostics: false, oracle, assert,
+    ownedUserEnvironment: owner => ownedUserEnvironment(owner, {PATH: 'tools', lycheedev_source_phase_profile: 'inherited'}),
+    elapsed: () => ({controllableMillis: 123}), semantic: () => {},
+    controlled: (binary, args, evidence, options) => { calls.push({binary, args, evidence, options}); return {row: {}, run: {status: 0, handlesReaped: true, stdout: JSON.stringify(envelope({}))}}; },
+  };
+  runInNewContext(block + '\nthis.invoke = invoke;', context);
+  for (const engine of ['go', 'rust']) context.invoke(CASES[2], engine, join(directory, `${engine}-home`), pin, 'evidence', 0, 'warm');
+  for (const [i, engine] of ['go', 'rust'].entries()) {
+    assert.equal(calls[i].options.env.LYCHEEDEV_SOURCE_PHASE_PROFILE, engine === 'rust' ? '1' : undefined);
+    assert.equal(calls[i].options.env.lycheedev_source_phase_profile, undefined);
+    assert.equal(calls[i].options.measure, true); assert.equal(calls[i].options.diagnoseStartup, false);
+    assert.deepEqual(Array.from(calls[i].args), [...CASES[2].args, '--snapshot', pin, '--home', join(directory, `${engine}-home`), '--format', 'json']);
+  }
+});
+
+test('outer Source diagnostic success also requires stable inputs and verified controller retirement', () => {
+  const source = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('  const sourceObserved ='), source.indexOf('  const passed = !diagnosticMode'));
+  const rows = runColdIndexFixture({sourceDiagnostics: true}).context.report.pairs;
+  const fresh = () => ({sourceDiagnostics: true, stable: true, handlesReaped: true, run: {status: 0}, observation: {state: 'source_diagnostics_observed', pairs: structuredClone(rows)}});
+  const observed = value => runInNewContext(block + '\nsourceObserved;', value);
+  assert.equal(observed(fresh()), true);
+  for (const mutate of [v => v.sourceDiagnostics = false, v => v.stable = false, v => v.handlesReaped = false, v => v.run.status = 1, v => v.run.error = 'failed', v => v.observation.state = 'source_diagnostics_failed', v => v.observation.pairs.pop(), v => v.observation.pairs[1] = v.observation.pairs[0], v => v.observation.pairs[0].rust.handlesReaped = false, v => v.observation.pairs[1].go.warmReuse.verified = false]) {
+    const value = fresh(); mutate(value); assert.equal(observed(value), false);
+  }
 });

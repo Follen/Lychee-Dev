@@ -427,7 +427,7 @@ fn read_admission_waits_on_actual_quota_with_the_same_independent_budget() {
     let stopped = Rc::new(Cell::new(false));
     let observe = stopped.clone();
     // acquire_inner uses the existing same-handle wait primitive, whose hook
-    // runs only after real kernel contention (unlike historical_lease retries).
+    // runs only after real kernel contention (unlike owned_lease retries).
     ExclusiveLock::set_blob_wait_observer(move || observe.set(true));
     let check = || {
         if stopped.get() {

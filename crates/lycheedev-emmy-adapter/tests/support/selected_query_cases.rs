@@ -161,6 +161,7 @@ pub fn load(tail: &str) -> (EmmyLuaAnalysis, Provider) {
             capability_profile: "typed-call-v1".into(),
         }),
         observation: BindingDecision::Bound(CallObservation {
+            open_tail: false,
             callee: ObservedCallee::Source(function.clone()),
             selected_callee_identity: "selected-function".into(),
             closure_identity: "closure-identity".into(),

@@ -16,7 +16,7 @@ fn home() -> PathBuf {
     path
 }
 #[test]
-fn controlled_marker_preserves_existing_wire_and_original_ordered_scope() {
+fn controlled_marker_rejects_unknown_fields_and_preserves_original_ordered_scope() {
     let home = home();
     let control = OperationControl::default();
     let expected = open(&home).unwrap();
@@ -26,7 +26,12 @@ fn controlled_marker_preserves_existing_wire_and_original_ordered_scope() {
     value.pop();
     value.push_str(&format!(",\"ignored\":\"{}\"}}", "a".repeat(2 * 65536 + 3)));
     fs::write(home.join("workspace.json"), value).unwrap();
-    assert_eq!(open_controlled(&home, &control).unwrap(), expected);
+    // Current typed identity decoding denies unknown fields; the removed Go
+    // decoder ignored them.
+    assert_eq!(
+        open_controlled(&home, &control).unwrap_err().code,
+        "vault.unsupported_workspace"
+    );
     control.stop_cause().unwrap();
     control.ordered_child(control.deadline()).unwrap();
     fs::remove_dir_all(home).unwrap();

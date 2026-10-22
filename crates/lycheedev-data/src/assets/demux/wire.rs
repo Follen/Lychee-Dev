@@ -137,7 +137,7 @@ impl Formatter for GoPretty {
     begin_object;end_object;begin_object_key,first:bool;end_object_key;
     begin_object_value;end_object_value;}
     fn write_string_fragment<W: ?Sized + Write>(&mut self, w: &mut W, s: &str) -> io::Result<()> {
-        crate::capture::GoCaptureFormatter.write_string_fragment(w, s)
+        crate::capture::EvidenceFormatter.write_string_fragment(w, s)
     }
     fn write_f64<W: ?Sized + Write>(&mut self, w: &mut W, n: f64) -> io::Result<()> {
         // Reuse the established Go binary64 formatter, never parse/round a
@@ -214,19 +214,16 @@ pub(super) fn encode(value: &Value, meter: &Meter<'_>) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
-    #[test]
+        #[test]
     fn fixed_typed_manifest_order_float_and_html_escaping_without_terminal_lf() {
-        let inv = Invocation {
-            command: "asset demux".into(),
-            positional: None,
-            flags: BTreeMap::new(),
+        let ctx = DataContext {
             home: std::path::PathBuf::new(),
             cwd: std::path::PathBuf::new(),
             control: Default::default(),
+            source: Default::default(),
         };
         let meter = Meter {
-            inv: &inv,
+            ctx: &ctx,
             budget: None,
         };
         let value = json!({"schema":"s","input":"<&> ","source":{"kind":"file","input":"f","bytes":0,"sha256":"abc"},"output":"out","width":0,"height":0,"frameRate":25.0,"frameCount":0,"enumeratedFrames":0,"enumeratedBytes":0,"frames":[],"complete":true,"truncated":false,"limits":{"maxInputBytes":12,"maxFrames":1,"maxFrameBytes":2,"maxOutputBytes":3},"sourceCapture":"id"});

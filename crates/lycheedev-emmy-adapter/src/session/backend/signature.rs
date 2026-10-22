@@ -3,6 +3,7 @@
 mod expected;
 mod local;
 
+use super::return_pack::{return_arity, return_expands};
 use super::{OwnedQuery, OwnedQueryCapability, ProjectionResult, QueryResult};
 use crate::session::{BindingCoverage, BindingSite, OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
@@ -247,34 +248,35 @@ impl<E> OwnedQuery<'_, '_, E> {
             for (index, expr) in exprs.iter().enumerate() {
                 self.checkpoint()?;
                 let ty = self.type_of_expr(expr.get_syntax_id())?;
-                if index + 1 == exprs.len()
-                    && matches!(expr, LuaExpr::CallExpr(_))
-                    && matches!(ty.structural_type(), LuaType::Unknown | LuaType::Any)
-                {
-                    slots.push(OwnedValue::plain(LuaType::Variadic(Arc::new(
-                        VariadicType::Base(LuaType::Unknown),
-                    ))));
-                } else if index + 1 == exprs.len()
-                    && let LuaType::Variadic(values) = ty.structural_type()
-                {
-                    match values.as_ref() {
-                        VariadicType::Multi(values) => {
-                            for (slot, value) in values.iter().enumerate() {
-                                self.checkpoint()?;
-                                slots.push(
-                                    ty.carried_slots()
-                                        .map(|slots| slots[slot].clone())
-                                        .unwrap_or_else(|| OwnedValue::plain(value.clone())),
-                                );
+                if matches!(ty.structural_type(), LuaType::Never) {
+                    slots.clear();
+                    slots.push(ty);
+                    break;
+                }
+                if return_expands(expr, index + 1 == exprs.len()) {
+                    if matches!(ty.structural_type(), LuaType::Unknown | LuaType::Any) {
+                        slots.push(OwnedValue::plain(LuaType::Variadic(Arc::new(
+                            VariadicType::Base(LuaType::Unknown),
+                        ))));
+                    } else if let Some(arity) = return_arity(ty.structural_type()) {
+                        if matches!(ty.structural_type(), LuaType::Union(_)) {
+                            slots.push(ty);
+                        } else if let Some(count) = arity.max.filter(|max| *max == arity.min) {
+                            for slot in 0..count {
+                                if let Some(value) = self.owned_return_slot(&ty, slot)? {
+                                    slots.push(value);
+                                }
                             }
+                        } else {
+                            // Preserve the original branch/tail value instead
+                            // of flattening an unknown length into fixed slots.
+                            slots.push(ty);
                         }
-                        VariadicType::Base(_) => slots.push(ty),
+                    } else {
+                        slots.push(ty);
                     }
                 } else {
-                    slots.push(
-                        ty.result_slot(0)
-                            .unwrap_or_else(|| OwnedValue::plain(LuaType::Nil)),
-                    );
+                    slots.push(self.owned_return_scalar(&ty)?);
                 }
                 if slots.len() > 32 {
                     return Ok(OwnedValue::plain(LuaType::Unknown));

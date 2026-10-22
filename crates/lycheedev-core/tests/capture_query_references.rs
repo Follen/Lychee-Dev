@@ -1,5 +1,6 @@
-//! Fixed Go records.QueryData's WriteMetadata publication boundary. Required
-//! SQL inputs are atomic checks, not persistent CaptureDraft dependencies.
+//! External fixed reference records.QueryData's WriteMetadata publication
+//! boundary. Required SQL inputs are atomic checks, not persistent
+//! CaptureDraft dependencies.
 use lycheedev_core::{
     Result, ToolkitError,
     control::OperationControl,
@@ -112,7 +113,7 @@ fn query_references_preserve_identity_shape_without_lifetime_ownership() {
     assert_eq!(
         evidence::remove_capture(&home.0, id(&source)).unwrap()["manifestRemoved"],
         true,
-        "Go does not classify data-query payloads as persistent dependencies"
+        "The fixed reference does not classify data-query payloads as persistent dependencies"
     );
     assert_eq!(evidence::read_capture(&home.0, id(&query)).unwrap(), query);
 }

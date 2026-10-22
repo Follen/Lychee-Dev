@@ -3,7 +3,7 @@ use lycheedev_core::control::OperationControl;
 use std::{collections::BTreeSet, thread, time::Instant};
 
 const FACT_LIMIT: usize = 4 << 20;
-const SOURCE_LIMIT: usize = 64 << 10;
+const SOURCE_LIMIT: usize = WORKER_SOURCE_BYTES;
 
 #[test]
 fn xml_linear_scans_keep_bytes_and_bound_mid_scan_cancellation() {
@@ -245,6 +245,90 @@ fn worker_matches_original(raw: &[u8], mode: ParseMode, context: &str) -> Facts 
 }
 
 #[test]
+fn worker_128k_lua_generated_and_xml_preserve_full_facts_on_original_stack() {
+    on_worker_stack(|| {
+        let padding = "p".repeat(88 << 10);
+        let calls = (0..128)
+            .map(|ordinal| format!("local value{ordinal} = Large({ordinal})\n"))
+            .collect::<String>();
+        let ordinary = format!(
+            "--{padding}\nlocal function Large(value) Target(value); return value end\n{calls}T[\"\\255\"]()\n"
+        );
+        let functions = (0..128)
+            .map(|ordinal| format!("{{Type='Function',Name='Run{ordinal}'}},"))
+            .collect::<String>();
+        let generated = [
+            "--",
+            &padding,
+            "\nlocal T = {Type='System',Name='C_Large',Functions={",
+            &functions,
+            "{Type='Function',Name='Detailed',Arguments={{Name='value',Type='string'}}}}}\nCall()\n",
+        ]
+        .concat();
+        let frames = (0..64)
+            .map(|ordinal| {
+                format!(
+                    "<Frame name='Frame{ordinal}'><Scripts><OnLoad><![CDATA[T[\"\\255\"](); Call{ordinal}()]]></OnLoad></Scripts></Frame>"
+                )
+            })
+            .collect::<String>();
+        let xml = format!("<Ui><!--{padding}--><Script file='Other.lua'/>{frames}</Ui>");
+        for (mode, source) in [
+            (ParseMode::LuaOrdinary, ordinary),
+            (ParseMode::LuaGenerated, generated),
+            (ParseMode::Xml, xml),
+        ] {
+            assert!(source.len() > 64 << 10, "newly admitted range: {mode:?}");
+            assert!(
+                source.len() <= SOURCE_LIMIT,
+                "worker source bound: {mode:?}"
+            );
+            let facts = worker_matches_original(
+                source.as_bytes(),
+                mode,
+                "64–128 KiB input on the unchanged 2 MiB worker stack",
+            );
+            assert!(facts.diagnostics.is_empty(), "{mode:?}");
+            assert!(!facts.relationships.is_empty(), "{mode:?}");
+            match mode {
+                ParseMode::LuaOrdinary => {
+                    assert!(facts.declarations.iter().any(|row| row.name == "Large"));
+                    assert_eq!(
+                        facts
+                            .relationships
+                            .iter()
+                            .filter(|row| row.to == "Large")
+                            .count(),
+                        128
+                    );
+                    assert!(!facts.raw_relationship_targets.as_ref().unwrap().is_empty());
+                }
+                ParseMode::LuaGenerated => {
+                    assert!(
+                        facts
+                            .declarations
+                            .iter()
+                            .any(|row| row.name == "C_Large.Run127")
+                    );
+                    assert!(facts.declarations.iter().any(|row| {
+                        row.name == "C_Large.Detailed"
+                            && row.signature == "C_Large.Detailed(value: string)"
+                    }));
+                    assert!(facts.relationships.iter().any(|row| row.to == "Call"));
+                }
+                ParseMode::Xml => {
+                    assert!(facts.declarations.iter().any(|row| row.name == "Frame0"));
+                    assert!(facts.declarations.iter().any(|row| row.name == "Frame63"));
+                    assert!(facts.loads.iter().any(|row| row.path == "Other.lua"));
+                    assert!(!facts.raw_relationship_targets.as_ref().unwrap().is_empty());
+                }
+                ParseMode::Toc => unreachable!(),
+            }
+        }
+    });
+}
+
+#[test]
 fn lua_worker_local_subtrees_do_not_recharge_unrelated_document_bytes() {
     on_worker_stack(|| {
         let source = format!(
@@ -391,6 +475,10 @@ fn xml_worker_preserves_all_fields_across_tokens_bom_and_newlines() {
                 "<Ui>\n<Frame name=\"Entity\"><OnLoad>R<![CDATA[u]]><!-- omitted\n -->n(); frame:RegisterEvent(&quot;READY&quot;)</OnLoad></Frame>\n</Ui>",
             ),
             (
+                "script declarations with original entity lines",
+                "<Ui>\n<Script>&#10;function InlineEntity()&#10; return Target()&#10;end&#10;InlineEntity()</Script>\n</Ui>",
+            ),
+            (
                 "namespace and ignored attributes",
                 "<?xml version=\"1.0\"?><!DOCTYPE Root><?tool ignored?>\n<Root xmlns:x=\"urn:test\"><x:Frame x:name=\"Namespace\" ignored=\"valid &amp; value\"><OnLoad>Run()</OnLoad></x:Frame></Root>",
             ),
@@ -532,12 +620,12 @@ fn worker_matches_all_84_fixed_malformed_and_xml_diagnostic_cases() {
     on_worker_stack(|| {
         let fixtures = [
             (
-                include_str!("../../../../tests/rust-parity/source-facts-malformed/cases.json"),
+                include_str!("../../../../tests/fixtures/source-native/facts/malformed/cases.json"),
                 52,
             ),
             (
                 include_str!(
-                    "../../../../tests/rust-parity/source-facts-xml-diagnostics/cases.json"
+                    "../../../../tests/fixtures/source-native/facts/xml-diagnostics/cases.json"
                 ),
                 32,
             ),

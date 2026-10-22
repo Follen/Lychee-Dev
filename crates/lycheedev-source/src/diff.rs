@@ -1,12 +1,10 @@
 //! Compare authenticated indexed declarations, retaining duplicate sites and original blob identities.
+use crate::request::{DiffRequest, SourceContext};
 use crate::{
     git,
     index::{self, Index},
 };
-use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError, evidence,
-    selection::{self, SourcePin},
-};
+use lycheedev_core::{Outcome, Result, ToolkitError, evidence, selection::{self, SourcePin}};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
@@ -248,46 +246,28 @@ pub fn compare_with_control(
     }
     Ok(data)
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    let from = inv.required("--from")?;
-    let to = inv.required("--to")?;
-    let left = selection::load_pinned(&inv.home, from)?;
-    let right = selection::load_pinned(&inv.home, to)?;
-    let pair = left
-        .source
-        .as_ref()
-        .zip(right.source.as_ref())
-        .ok_or_else(|| {
-            ToolkitError::new(
-                "codebase.source_pin_required",
-                "codebase.source_pin_required",
-                5,
-            )
-        })?;
-    let data = compare_with_control(
-        &inv.home,
-        pair.0,
-        pair.1,
-        inv.usize_flag("--limit", 50, 1, 200)?,
-        &inv.control,
-    )?;
-    inv.control.check()?;
+pub fn dispatch(ctx: &SourceContext, request: &DiffRequest) -> Result<Outcome> {
+    let from = request.from.source();
+    let to = request.to.source();
+    let data = compare_with_control(&ctx.home, from, to, request.limit, &ctx.control)?;
+    ctx.control.check()?;
     let complete = data["truncated"] != true;
     let capture = evidence::commit_capture_bounded(
-        &inv.home,
+        &ctx.home,
         lycheedev_core::evidence::CaptureInput {
             bytes: &serde_json::to_vec(&data)?,
             maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
             media_type: "application/json",
-            provenance: json!({"kind":"source-diff","locator":format!("{from}..{to}"),"snapshot":to,"sourceCommit":pair.1.exact_commit,"baseSnapshot":from,"baseSourceCommit":pair.0.exact_commit}),
+            provenance: json!({"kind":"source-diff","locator":format!("{}..{}",request.from.snapshot(),request.to.snapshot()),"snapshot":request.to.snapshot(),"sourceCommit":to.exact_commit,"baseSnapshot":request.from.snapshot(),"baseSourceCommit":from.exact_commit}),
             complete: complete,
             truncated: !complete,
         },
-        &inv.control,
+        &ctx.control,
     )?;
     let mut result = Outcome::new(data);
     result.complete = complete;
-    result.selection = json!({"fromSnapshot":from,"toSnapshot":to});
+    result.selection =
+        json!({"fromSnapshot":request.from.snapshot(),"toSnapshot":request.to.snapshot()});
     result.coverage = result.data["coverage"].clone();
     result.provenance.push(capture);
     Ok(result)

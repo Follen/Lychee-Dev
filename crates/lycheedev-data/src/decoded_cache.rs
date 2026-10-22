@@ -302,7 +302,10 @@ pub fn read_content_budgeted(
 ) -> Result<(casc::LocalObject, blte::Content)> {
     let mut unavailable = None;
     for encoding_key in &record.encoding_keys {
-        let physical = index.find_encoding(encoding_key, limits, budget.and_then(Budget::token))?;
+        // Keep cancellation owned by the budget/control instead of a raw token.
+        let physical = index.find_encoding_with_check(encoding_key, limits, None, || {
+            budget.map_or(Ok(()), |budget| budget.check())
+        })?;
         let bytes = usize::try_from(physical.encoded_bytes).map_err(|_| {
             fault(
                 "records.metadata_limit",
@@ -317,14 +320,7 @@ pub fn read_content_budgeted(
                 "Selected encoded content exceeds byte budget",
             ));
         }
-        match casc::open_local_budgeted(
-            root,
-            encoding_key,
-            bytes,
-            limits,
-            budget.and_then(Budget::token),
-            budget,
-        ) {
+        match casc::open_local_budgeted(root, encoding_key, bytes, limits, None, budget) {
             Ok(object) => {
                 let content = decode_budgeted(home, &object, record, limits, keys, stats, budget)?;
                 return Ok((object, content));

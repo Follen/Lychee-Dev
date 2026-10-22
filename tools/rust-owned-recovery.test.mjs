@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
-import {randomUUID} from 'node:crypto';
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
+import {createHash,randomUUID} from 'node:crypto';
+import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {acquireChannel} from './rust-disk.mjs';
 import {runCargo} from './rust-build.mjs';
-import {recover} from './rust-owned-recovery.mjs';
+import {capture,recover} from './rust-owned-recovery.mjs';
 
 const windows = {skip: process.platform !== 'win32', timeout: 120000};
 const tools = fileURLToPath(new URL('.', import.meta.url));
@@ -217,4 +218,44 @@ test('Windows recovery refuses live wrappers and foreign leases, then terminates
   const released = await holder.release();
   assert.equal(released.code, 0, released.stderr);
   assert.equal(json(holder.final).activeProcesses, 0);
+});
+
+function terminalCaptureFixture(t){
+ const root=mkdtempSync(join(tmpdir(),'owned-terminal-capture-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const ownerId=randomUUID(),runId=randomUUID(),evidence=join(root,'.tmp/rust-disk/evidence',ownerId),base=join(evidence,'process-'+runId),lease=join(root,'.tmp/rust-disk/channels/ordinary.lease');
+ mkdirSync(evidence,{recursive:true});mkdirSync(join(root,'.tmp/rust-disk/channels'),{recursive:true});mkdirSync(join(root,'tools'));
+ const hash=b=>createHash('sha256').update(b).digest('hex'),save=(path,value)=>writeFileSync(path,JSON.stringify(value));
+ const programFiles=Object.entries(process.env).find(([key])=>key.toLowerCase()==='programfiles')?.[1];
+ const envKey=Object.keys(process.env).find(key=>key.toLowerCase()==='programfiles')??'ProgramFiles';
+ if(!programFiles){process.env[envKey]=root;t.after(()=>delete process.env[envKey]);}
+ const helper={path:join(programFiles||root,'fixture-vctip.exe'),bytes:64,sha256:'b'.repeat(64),kind:'msvc-vctip',fileVersion:'test',signerSubject:'test signer',signerThumbprint:'test thumbprint',signatureStatus:'WinVerifyTrust:0'},cargo={path:join(root,'cargo.exe'),bytes:128,sha256:'c'.repeat(64)};
+ const q={schema:'lycheedev.owned-request.v2',runId,coordinatorPid:123,command:'cargo',args:['test','--help'],cargoBuild:true,msvcCompile:false,identity:base+'.identity.json',rootIdentity:base+'.root.json',stdout:base+'.stdout.bin',stderr:base+'.stderr.bin',receipt:base+'.receipt.json'};
+ save(base+'.request.json',q);const binding={runId,jobName:'Local\\LycheeDev.Owned.'+runId,requestSHA256:hash(readFileSync(base+'.request.json'))};
+ const start={schema:'lycheedev.owned-start.v1',...binding,coordinatorPid:123,requestPath:base+'.request.json',rootIdentity:q.rootIdentity,jobIdentity:base+'.job.json',rootAssignment:'PROC_THREAD_ATTRIBUTE_JOB_LIST',wrapperPid:456,wrapperCreationFileTime:'100',wrapperSessionId:1};
+ const bad={...binding,wrapperPid:0,wrapperCreationFileTime:''},job={schema:'lycheedev.owned-job.v1',...bad,createdNew:true,limitFlags:8192,jobHandleInherited:false},native={schema:'lycheedev.owned-root.v1',...bad,pid:789,creationFileTime:'101',jobAssignedAtCreation:true,rootAssignment:'PROC_THREAD_ATTRIBUTE_JOB_LIST'};
+ const receipt={schema:'lycheedev.owned-process.v1',identitySource:'request-v2',runId,startupIdentity:q.identity,rootIdentity:q.rootIdentity,pid:789,creationFileTime:'101',binary:cargo.path,rootReaped:true,treeReaped:true,handlesClosed:true,toolIdentityLocksClosed:true,outputReadersComplete:true,activeProcesses:0,exitCode:0,error:null,deadlineHit:false,outputLimit:false,forced:true,knownAuxiliaryCleanup:true,helperAdmission:{state:'enabled',cargo,helpers:[helper]},auxiliaryProcesses:[{pid:790,creationFileTime:'102',jobMember:true,reviewedAuxiliary:true,error:null,image:helper.path}]};
+ const command=[q.command,...q.args],owner={schema:'lycheedev.disk-owner.v1',id:ownerId,owner:'terminal-fixture',directory:join(root,'.tmp/rust-scratch',ownerId),state:'interrupted',activePid:null,handlesReaped:false,command,commandSHA256:hash(Buffer.from(JSON.stringify(command)))};
+ const policy={schema:'lycheedev.build-auxiliary-policy.v1',cargoSHA256:cargo.sha256,helpers:[{...helper,programFilesPath:'fixture-vctip.exe'}]};
+ const documents=new Map([[lease,{schema:'lycheedev.build-lease.v1',state:'active',channel:'ordinary',token:randomUUID(),pid:123,owner:owner.owner}],[join(evidence,'receipt.json'),owner],[q.identity,start],[base+'.job.json',job],[q.rootIdentity,native],[q.receipt,receipt],[join(root,'tools/rust-build-auxiliary.json'),policy]]);
+ for(const [path,value]of documents)save(path,value);writeFileSync(q.stdout,'original stdout');writeFileSync(q.stderr,'original stderr');
+ return {root,ownerId,runId,base,lease,q,receipt,start,job,native,policy,documents,save};
+}
+test('terminal-reaped capture preserves strict default and authenticates the known zero-binding outcome',t=>{
+ const f=terminalCaptureFixture(t),before=new Map([...f.documents.keys(),f.base+'.request.json',f.q.stdout,f.q.stderr].map(path=>[path,readFileSync(path)]));
+ assert.throws(()=>capture(f.root,f.ownerId),/job_identity/);
+ const plan=capture(f.root,f.ownerId,{terminalReaped:true});
+ assert.equal(plan.recoveryMode,'terminal-reaped');assert.equal(plan.wrapperPid,456);assert.equal(plan.rootPid,789);assert.equal(plan.rootCreationFileTime,'101');assert.equal(plan.files.length,8);assert.equal(plan.originalTerminalReceiptPresent,true);
+ for(const[path,bytes]of before)assert.deepEqual(readFileSync(path),bytes);
+ for(const [name,mutate]of Object.entries({root:p=>p.rootReaped=false,tree:p=>p.treeReaped=false,handles:p=>p.handlesClosed=false,tools:p=>p.toolIdentityLocksClosed=false,output:p=>p.outputReadersComplete=false,active:p=>p.activeProcesses=1,pid:p=>p.pid++,creation:p=>p.creationFileTime='102',run:p=>p.runId=randomUUID(),startup:p=>p.startupIdentity+='other',error:p=>p.error='failed',deadline:p=>p.deadlineHit=true,outputLimit:p=>p.outputLimit=true,exit:p=>p.exitCode=1,forced:p=>p.forced=false,cleanup:p=>p.knownAuxiliaryCleanup=false,unreviewed:p=>p.auxiliaryProcesses[0].reviewedAuxiliary=false,foreign:p=>p.auxiliaryProcesses[0].image+='other',policy:p=>p.helperAdmission.helpers[0].sha256='d'.repeat(64)})){
+  const value=structuredClone(f.receipt);mutate(value);f.save(f.q.receipt,value);assert.throws(()=>capture(f.root,f.ownerId,{terminalReaped:true}),undefined,name);f.save(f.q.receipt,f.receipt);
+ }
+ for(const [path,value]of [[f.base+'.job.json',{...f.job,wrapperPid:456}],[f.q.rootIdentity,{...f.native,wrapperCreationFileTime:'100'}],[f.lease,{...f.documents.get(f.lease),owner:'foreign',pid:999}]]){
+  f.save(path,value);assert.throws(()=>capture(f.root,f.ownerId,{terminalReaped:true}));f.save(path,f.documents.get(path));
+ }
+ for(const[path,bytes]of before)assert.deepEqual(readFileSync(path),bytes,'no original evidence changed after rejection');
+});
+test('terminal-reaped native observation checks exact exited identities without opening a Job',()=>{
+ const source=readFileSync(new URL('./rust-owned-recovery.ps1',import.meta.url),'utf8'),terminal=source.slice(source.indexOf(' public static string ObserveTerminal('),source.indexOf(' public static string Observe('));
+ assert.match(terminal,/ObserveExited\(wrapperPid,wrapperCreated,"wrapper"\)/);assert.match(terminal,/ObserveExited\(rootPid,rootCreated,"root"\)/);assert.doesNotMatch(terminal,/OpenJobObjectW|TerminateJobObject/);
+ assert.match(source,/actual==created&&WaitForSingleObject\(process,0\)!=0/);
 });

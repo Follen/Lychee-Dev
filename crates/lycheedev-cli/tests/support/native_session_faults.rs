@@ -42,7 +42,7 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
     // Rejected envelopes must close only their connection. They cannot clear a
     // valid retained snapshot or replace the process that authenticated Hello.
     let status = |scope: &BrokerScope| {
-        let mut stream = BrokerStream::connect(scope, Instant::now() + Duration::from_secs(2), Arc::new(AtomicBool::new(false))).unwrap();
+        let mut stream = BrokerStream::connect_with_control(scope, Instant::now() + Duration::from_secs(2), native_fault_control()).unwrap();
         let hello = read_frame(&mut stream);
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         write_frame(&mut stream, &json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+2_000,"action":"status","work":null}));
@@ -57,7 +57,7 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
         ("unknown_field", json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+30_000,"action":"status","work":null,"unknown_field":true})),
     ];
     for (case, envelope) in invalid_envelopes {
-        let mut rejected = BrokerStream::connect(&scope, Instant::now() + Duration::from_secs(2), Arc::new(AtomicBool::new(false))).unwrap();
+        let mut rejected = BrokerStream::connect_with_control(&scope, Instant::now() + Duration::from_secs(2), native_fault_control()).unwrap();
         let hello = read_frame(&mut rejected);
         assert_eq!(hello["pid"], retained_hello["pid"]);
         assert_eq!(hello["created"], retained_hello["created"]);
@@ -79,7 +79,7 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
         (false, "command.deadline", 5, true),
     ] {
         if warm {
-            let mut prepare = BrokerStream::connect(&scope, Instant::now()+Duration::from_secs(90), Arc::new(AtomicBool::new(false))).unwrap();
+            let mut prepare = BrokerStream::connect_with_control(&scope, Instant::now()+Duration::from_secs(90), native_fault_control()).unwrap();
             let hello = read_frame(&mut prepare);
             assert_eq!(hello["pid"],retained_hello["pid"]);
             assert_eq!(hello["created"],retained_hello["created"]);
@@ -99,10 +99,10 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
             "{}",
             json!({"event":"native_session_fault_started","cancel":cancel,"warm":warm,"budgetMs":total.as_millis()})
         );
-        let mut stream = BrokerStream::connect(
+        let mut stream = BrokerStream::connect_with_control(
             &scope,
             begun + total + Duration::from_secs(1),
-            Arc::new(AtomicBool::new(false)),
+            native_fault_control(),
         )
         .unwrap();
         let hello = read_frame(&mut stream);
@@ -143,10 +143,10 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
         // Failed processing releases the cached snapshot, but retains its owner
         // so a later public CLI request can prepare a fresh analysis.
         let status_started=Instant::now();
-        let mut status = BrokerStream::connect(
+        let mut status = BrokerStream::connect_with_control(
             &scope,
             status_started + Duration::from_secs(1),
-            Arc::new(AtomicBool::new(false)),
+            native_fault_control(),
         )
         .unwrap();
         let status_hello = read_frame(&mut status);
@@ -181,4 +181,9 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
             "phaseObservation":phase_lifetime,"phaseDiagnosticState":if diagnostic.is_some(){"matching_optional_phase"}else{"unavailable"},"status":status}));
     }
     observations
+}
+
+fn native_fault_control() -> Arc<dyn Fn() -> lycheedev_windows::Result<()> + Send + Sync> {
+    let control=lycheedev_core::control::OperationControl::default();
+    Arc::new(move || control.check().map_err(|error|error.to_string()))
 }

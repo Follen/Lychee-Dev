@@ -1,12 +1,12 @@
 // Deliberately separate output mode: the 201-check regression stays within 2 MiB.
-const DEPTH_SOURCE:&str=include_str!("../../../../tests/rust-source-engine/wow/native/host-entry-depth.lua");
-const DEPTH_CALL:&str=include_str!("../../../../tests/rust-source-engine/wow/native/host-entry-depth-call.lua");
-const CONDITIONAL_ENTRY:&str=include_str!("../../../../tests/rust-source-engine/wow/native/host-entry-conditional.lua");
-const UNREACHABLE_ENTRY:&str=include_str!("../../../../tests/rust-source-engine/wow/native/host-entry-unreachable.lua");
-const VARARG_ENTRY:&str=include_str!("../../../../tests/rust-source-engine/wow/native/host-entry-vararg.lua");
+const DEPTH_SOURCE:&str=include_str!("../../../../tests/fixtures/source-native/wow/native/host-entry-depth.lua");
+const DEPTH_CALL:&str=include_str!("../../../../tests/fixtures/source-native/wow/native/host-entry-depth-call.lua");
+const CONDITIONAL_ENTRY:&str=include_str!("../../../../tests/fixtures/source-native/wow/native/host-entry-conditional.lua");
+const UNREACHABLE_ENTRY:&str=include_str!("../../../../tests/fixtures/source-native/wow/native/host-entry-unreachable.lua");
+const VARARG_ENTRY:&str=include_str!("../../../../tests/fixtures/source-native/wow/native/host-entry-vararg.lua");
 fn boundary_nil(graph:&Graph,decision:&Decision)->bool{matches!(decision,Decision::KnownAbsent(_))||matches!(decision,Decision::Bound(value) if matches!(&graph.values[*value].kind,ValueKind::Primitive(kind) if kind=="nil"))}
 fn run_entry_boundaries(out:&mut Output)->Result<()> {
- out.emit(json!({"event":"build_identity","compiledPatchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")}))?;
+ out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}))?;
  for explicit in [false,true]{
   let name=if explicit{"depth-entry"}else{"depth-source-call"};let c=entry_control();
   let prepared=prepare_files(&[("host-entry-depth.lua",DEPTH_SOURCE),("host-entry-depth-call.lua",DEPTH_CALL)],false,&c)?;
@@ -65,7 +65,7 @@ fn run_entry_boundaries(out:&mut Output)->Result<()> {
  let c=entry_control();let prepared=prepare_case("host-entry-unreachable.lua",UNREACHABLE_ENTRY,false,&c)?;
  let candidate=unique_entry(&prepared,"host-entry-unreachable.lua",3,&c)?;
  out.check("boundary:unreachable-entry:syntax_candidate_retained",json!(true),json!(candidate.closure.file=="host-entry-unreachable.lua"))?;
- let graph=prepared.build("unreachable-load",EvaluatorProfile::Native,None,&c).map_err(|error|error.to_string())?;
+ let graph=prepared.build("unreachable-load",None,&c).map_err(|error|error.to_string())?;
  out.check("boundary:unreachable-entry:no_loaded_closure",json!(true),json!(graph.native_invocations.as_ref().is_some_and(|native|native.closures.is_empty())&&graph.calls.is_empty()))?;
  let failure=prepared.build_plan("unreachable-entry","after_load",LoadPlan::Known(vec!["host-entry-unreachable.lua".into()]),Some(entry_request(&candidate,EntryArguments::Exact(vec![]))),None,&c).err().ok_or("unreachable entry accepted")?;
  out.check("boundary:unreachable-entry:selection_rejected",json!(true),json!(failure.to_string().contains("requires one loaded closure instance; candidates=[]")))?;
@@ -74,9 +74,9 @@ fn run_entry_boundaries(out:&mut Output)->Result<()> {
  let c=entry_control();let prepared=prepare_case("host-entry-vararg.lua",VARARG_ENTRY,false,&c)?;let candidate=unique_entry(&prepared,"host-entry-vararg.lua",1,&c)?;
  let failure=prepared.build_plan("unsupported-entry","after_load",LoadPlan::Known(vec!["host-entry-vararg.lua".into()]),Some(entry_request(&candidate,EntryArguments::Exact(vec![]))),None,&c).err().ok_or("unsupported entry accepted")?;
  out.check("boundary:unsupported-entry:not_budget_prefix",json!(true),json!(failure.to_string().contains("native vararg formal shape unavailable")))?;
- c.cancel_handle().store(true,Ordering::Release);
+ c.tracked_cancel_handle().unwrap().cancel();
  out.check("boundary:entry:cancel_priority",json!(7),json!(prepared.build_plan("cancelled-entry","after_load",LoadPlan::Known(vec!["host-entry-vararg.lua".into()]),Some(entry_request(&candidate,EntryArguments::Exact(vec![]))),None,&c).err().map(|error|error.exit_code)))?;
- let c=OperationControl::new(Instant::now()+Duration::from_secs(1),Arc::new(AtomicBool::new(false)));
+ let c=OperationControl::uncancelable(Instant::now()+Duration::from_secs(1));
  let prepared=prepare_case("host-entry-vararg.lua",VARARG_ENTRY,false,&c)?;let candidate=unique_entry(&prepared,"host-entry-vararg.lua",1,&c)?;
  std::thread::sleep(c.remaining().map_err(|error|error.to_string())?+Duration::from_millis(2));
  out.check("boundary:entry:deadline_priority",json!(5),json!(prepared.build_plan("expired-entry","after_load",LoadPlan::Known(vec!["host-entry-vararg.lua".into()]),Some(entry_request(&candidate,EntryArguments::Exact(vec![]))),None,&c).err().map(|error|error.exit_code)))?;

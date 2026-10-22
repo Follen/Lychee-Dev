@@ -190,12 +190,7 @@ fn object_ref(value: &BindingDecision<BoundValue>) -> Option<&ObjectRef> {
     }
 }
 fn native_object_red(out: &mut NativeOutput) -> Result<()> {
-    let patch = option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")
-        .ok_or("missing compile-time context patch identity")?;
-    if patch.len() != 64 || !patch.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("invalid compile-time patch identity".into());
-    }
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":patch,"scope":"object-red"}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256,"scope":"object-red"}))?;
     for name in OBJECT_FILES {
         out.emit(json!({"event":"input_identity","name":name,"file":name,"bytes":source(name).len(),"sha256":hash(source(name).as_bytes())}))?;
     }
@@ -205,7 +200,6 @@ fn native_object_red(out: &mut NativeOutput) -> Result<()> {
         "object-versions",
         "after_load",
         OBJECT_ORDER,
-        patch,
         Some("object-version-structure-red-v1"),
     )?;
     let serialized = serde_json::to_value(&graph).map_err(|error| error.to_string())?;

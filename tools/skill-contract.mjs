@@ -7,10 +7,12 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { loadCliContractOracle } from '../tests/rust-parity/cli-contract-oracle-3.2.4.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
+for (let index = 0; index < argv.length; index += 2) {
+  if (!['--skill-root', '--bin', '--contract-file'].includes(argv[index]) || !argv[index + 1] || argv[index + 1].startsWith('--')) throw new Error(`invalid option: ${argv[index]}`);
+}
 function option(name) {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : undefined;
@@ -18,11 +20,11 @@ function option(name) {
 const skillRoot = option('--skill-root') ?? join(repository, 'skills', 'lycheedev');
 const binary = option('--bin');
 const contractFile = option('--contract-file');
-const approvedRust = argv.includes('--approved-rust');
-if ([binary, contractFile, approvedRust].filter(Boolean).length > 1) throw new Error('choose exactly one of --bin, --contract-file or --approved-rust');
+const canonical = JSON.parse(readFileSync(join(repository, 'crates/lycheedev-cli/src/commands.json'), 'utf8'));
+if (binary && contractFile) throw new Error('choose --bin or --contract-file');
 
 function describe() {
-  if (approvedRust) return loadCliContractOracle(readFileSync(join(repository, 'tests/rust-parity/go-3.2.0.manifest.json'))).expected;
+  if (!binary && !contractFile) return canonical;
   // Static reference checking only. A supplied contract cannot prove that a
   // candidate implements it; --bin remains the actual advertised-surface gate.
   if (contractFile) {
@@ -30,9 +32,7 @@ function describe() {
     if (!Array.isArray(contract.commands) || !contract.commands.length) throw new Error('contract file returned no commands');
     return contract.commands;
   }
-  const result = binary
-    ? spawnSync(binary, ['describe', '--format=json'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 120000 })
-    : spawnSync('go', ['run', './cmd/lycheedev', 'describe', '--format=json'], { cwd: repository, encoding: 'utf8', shell: false, windowsHide: true, timeout: 300000 });
+  const result = spawnSync(binary, ['describe', '--format=json'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 120000 });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`describe failed: ${result.status}\n${result.stdout}\n${result.stderr}`);
   const envelope = JSON.parse(result.stdout);
@@ -47,10 +47,8 @@ for (const command of describe()) {
     flags: new Map(command.flags.map(display => [display.split(/\s+/)[0], display])),
   });
 }
-// Recognize documented commands from the immutable target as well as the
-// candidate. A missing entire group must not make its references disappear.
-const target = loadCliContractOracle(readFileSync(join(repository, 'tests/rust-parity/go-3.2.0.manifest.json')));
-const knownPaths = new Set([...target.commands.map(command => command.path), ...contracts.keys()]);
+// Keep missing groups visible when checking an explicit binary's declarations.
+const knownPaths = new Set([...canonical.map(command => command.path), ...contracts.keys()]);
 const oneTokenPaths = new Set([...knownPaths].filter(path => !path.includes(' ')));
 
 function markdownFiles(root) {
@@ -145,7 +143,7 @@ for (const file of markdownFiles(skillRoot)) {
 
 process.stdout.write(`${JSON.stringify({
   skillRoot,
-  contractSource: approvedRust ? 'independent fixed Go323 plus exact approved Rust extensions' : contractFile ? resolve(contractFile) : binary ?? 'current Go CLI',
+  contractSource: contractFile ? resolve(contractFile) : binary ?? 'crates/lycheedev-cli/src/commands.json',
   checkKind: 'static-reference-consistency',
   files: markdownFiles(skillRoot).length,
   contracts: contracts.size,

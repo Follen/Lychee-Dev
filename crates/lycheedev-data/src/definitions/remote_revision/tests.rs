@@ -65,7 +65,7 @@ fn exact_commit_needs_no_workspace_or_network_but_keeps_original_stop() {
     );
 }
 #[test]
-fn normalized_full_refs_and_go_path_segment_escaping_are_exact() {
+fn normalized_full_refs_and_wire_path_segment_escaping_are_exact() {
     assert_eq!(normalized_reference("").unwrap(), "refs/heads/master");
     for bad in [
         "master",
@@ -222,32 +222,6 @@ fn revision_body_rejects_oversize_nonhex_and_non_crlf_suffixes() {
             code
         );
     }
-}
-
-#[test]
-fn cached_revision_uses_go_duplicate_case_unknown_and_null_field_rules() {
-    let home = home();
-    let control = OperationControl::default();
-    let store = Store {
-        home: &home,
-        control: &control,
-        budget: None,
-    };
-    let key = format!("definition-ref/{}", storage::sha256(b"refs/heads/master"));
-    let raw = serde_json::value::RawValue::from_string(format!(r#"{{"Reference":"wrong","reference":"refs/heads/master","REFERENCE":null,"commit":"{}","Commit":null,"extra":"\ud800"}}"#, "a".repeat(40))).unwrap();
-    store.put(&key, &raw, None).unwrap();
-    let fetch = Reply {
-        bytes: vec![],
-        calls: Cell::new(0),
-    };
-    assert_eq!(
-        resolve(&home, "", true, &control, None, &fetch).unwrap(),
-        "a".repeat(40)
-    );
-    assert_eq!(fetch.calls.get(), 0);
-    assert!(serde_json::from_str::<Remembered>(r#"{"reference":23}"#).is_err());
-    let empty: Remembered = serde_json::from_str("null").unwrap();
-    assert!(empty.reference.is_empty());
 }
 
 #[test]

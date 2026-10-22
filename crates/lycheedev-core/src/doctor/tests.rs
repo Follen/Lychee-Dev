@@ -1,13 +1,12 @@
 use super::*;
 use crate::control::{StopCause, TrackedCancellation};
 use std::{
-    collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 struct Fixture {
     root: PathBuf,
-    inv: Invocation,
+    inv: RequestContext,
 }
 impl Fixture {
     fn new() -> Self {
@@ -20,10 +19,7 @@ impl Fixture {
         ));
         let home = root.join("home");
         workspace::initialize(&home).unwrap();
-        let inv = Invocation {
-            command: "doctor".into(),
-            positional: None,
-            flags: BTreeMap::new(),
+        let inv = RequestContext {
             cwd: root.clone(),
             home,
             control: OperationControl::uncancelable(Instant::now() + Duration::from_secs(90)),

@@ -238,7 +238,7 @@ impl RepairPublication {
 /// publication namespace. This excludes current Rust installation writers; it
 /// does not replace the separate Go window-admission/connection execution lease.
 /// Keep this value alive from verify + verify_route through the physical burst.
-/// Do not acquire it while already holding an InstallationGuard.
+/// Do not acquire it while already holding an InstallationMaintenanceLease.
 pub struct PublicationLease<'a> {
     store: DiskStore,
     control: &'a OperationControl,

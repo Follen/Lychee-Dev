@@ -2,7 +2,8 @@
 
 Use `lycheedev cli search "data"`, exact `schema data agent serve`, then
 `data agent schema`. Metadata discovery does not open a workspace or worker.
-Installed schemas are authoritative; do not invent an old SQL/DB2 CLI fallback.
+Installed schemas are authoritative; do not invent a SQL/DB2 command outside
+the declared Data tasks.
 
 Within one pinned `data agent serve` session, catalog lists the exact definition
 manifest, not installed availability. Fields/discover resolve authenticated DBD
@@ -21,7 +22,7 @@ correlated limits/order/union have explicit unsupported boundaries. Do not use a
 specific Spell/Encounter navigator as proof of arbitrary recursive-query support.
 
 Keep ordered columns, positional rows, nested arrays and exact 64-bit integers.
-An array is a typed nested value; indexing is an explicit expression, not an old
+An array is a typed nested value; indexing is an explicit expression, not a
 quoted `Field[0]` SQL identifier. Use a suitable exact-number decoder, never
 round IDs or masks through JavaScript Number. Filter user values as typed literals.
 

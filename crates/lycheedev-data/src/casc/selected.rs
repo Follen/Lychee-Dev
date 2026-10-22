@@ -147,7 +147,16 @@ fn open_selected_source<'a>(
             let opened = if let Some(source) = source {
                 source.open_file(&span.filename())
             } else {
-                directory.open_file_controlled(std::ffi::OsStr::new(&span.filename()), &mut scope)
+                directory
+                    .open_shared_file_controlled(std::ffi::OsStr::new(&span.filename()), &mut scope)
+                    .map_err(|mut error| {
+                        error.message = format!(
+                            "Open local CASC file '{}': {}",
+                            directory.path().join(span.filename()).display(),
+                            error.message
+                        );
+                        error
+                    })
             };
             let file = match opened {
                 Ok(file) => file,

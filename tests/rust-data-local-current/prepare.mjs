@@ -8,7 +8,7 @@ import {beginScratch, contained} from '../../tools/rust-disk.mjs';
 import {hashFile, ownedUserEnvironment} from '../../tools/rust-build.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
 import {parseAgentJson, isExactNumber} from '../../tools/rust-agent-client.mjs';
-import {verifyGoPackage} from '../rust-performance-paired/inputs.mjs';
+import {verifyGoReferenceArtifact} from '../rust-performance-paired/inputs.mjs';
 
 export const SCHEMA = 'lycheedev.local-data-go-oracle.v1';
 export const GO_COMMIT = '29bdbdaff5f064ec212ff2064380b1ccac652eda';
@@ -65,11 +65,11 @@ export function profileCommands(next,probes) {
 
 export function prepare(root, request, {execute=ownedSpawnSync}={}) {
   assert.equal(process.platform,'win32');assert.equal(process.arch,'x64');root=fs.realpathSync(root);
-  assert.deepEqual(Object.keys(request).sort(),['goArtifact','installation','luaLSArchive']);
+  assert.deepEqual(Object.keys(request).sort(),['goArtifact','installation']);
   const artifactPath=contained(root,path.resolve(request.goArtifact)),artifact=json(fs.readFileSync(artifactPath));
   assert.equal(artifact.schema,'lycheedev.fixed-go-performance-artifact.v1');assert.equal(artifact.commit,GO_COMMIT);
-  const go=verifyGoPackage(artifact.package.root,path.resolve(request.luaLSArchive));
-  assert.equal(go.binarySHA256,artifact.package.binarySHA256);assert.equal(go.packageSHA256,artifact.package.packageSHA256);
+  const go=verifyGoReferenceArtifact(path.dirname(artifactPath));
+  assert.equal(go.artifactSHA256,hashFile(artifactPath));assert.equal(go.binarySHA256,artifact.package.binarySHA256);assert.equal(go.packageSHA256,artifact.package.packageSHA256);
   const installation=fs.realpathSync(request.installation);
   const buildInfoPath=path.join(path.dirname(installation),'.build.info'),buildInfo=record(buildInfoPath),row=currentRetailRow(fs.readFileSync(buildInfoPath));
   const inputFiles=[import.meta.filename,'tools/rust-disk.mjs','tools/rust-build.mjs','tools/rust-owned-process.mjs','tools/rust-owned-process.ps1','tools/rust-agent-client.mjs','tests/rust-performance-paired/inputs.mjs','tests/rust-performance-paired/contract.mjs'].map(p=>record(path.resolve(root,p)));

@@ -245,6 +245,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         visiting: &mut Vec<LuaTypeDeclId>,
     ) -> QueryResult<OwnedValue, E> {
         self.checkpoint()?;
+        if value.nominal_identity().is_some() {
+            return Ok(value);
+        }
         let value = if let Transform::SanitizeModel(allowed) = op {
             self.transform_owned(value, Transform::Sanitize(allowed), visiting)?
         } else {

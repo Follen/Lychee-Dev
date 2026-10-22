@@ -153,7 +153,7 @@ impl<'a> OwnedDerivedReadLease<'a> {
         // marker, but can never authorize eviction or hide corruption. Preserve
         // checked quota-close before full hashing and the original pin lifetime.
         let marked = self.lease.owner.touch_object(sha256);
-        let result = crate::metadata::historical_write::finish_historical(
+        let result = crate::metadata::owned_write::finish_owned(
             marked, finish_owner(self.lease.owner))
             .and_then(|()| reader.authenticate(sha256));
         match result {

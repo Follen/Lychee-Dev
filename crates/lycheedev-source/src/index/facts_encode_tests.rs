@@ -2,27 +2,9 @@ use super::*;
 use crate::facts::{Declaration, HeaderValue, LoadReference, Relationship, SyntaxNote};
 const FACTS_HASH_BUFFER_BYTES: usize = 8 << 10;
 
-// Keep the complete previous producer independent of the move and buffered
-// hash. It intentionally retains the old temporary Vec and json!(f) cloning.
-pub(super) fn historical_encode(parsed: &Facts, sha256: &str) -> Result<Vec<u8>> {
-    let f = serde_json::to_value(parsed)?;
-    let envelope = serde_json::to_vec(
-        &json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
-    )?;
-    if envelope.len() > 32 << 20 {
-        return Err(ToolkitError::new(
-            "codebase.fact_budget",
-            "Source fact cache exceeds the 32 MiB limit",
-            3,
-        ));
-    }
-    Ok(envelope)
-}
-
 fn same_public_bytes(facts: &Facts, input: &str) -> Value {
     let before = serde_json::to_vec(facts).unwrap();
     let raw_targets = facts.raw_relationship_targets.clone();
-    let expected = historical_encode(facts, input).unwrap();
     let actual = encode_facts(facts, input, None).unwrap();
     let decoded = decode_facts(
         &actual,
@@ -39,19 +21,9 @@ fn same_public_bytes(facts: &Facts, input: &str) -> Value {
     assert!(decoded.raw_relationship_targets.is_none());
     assert_eq!(serde_json::to_vec(facts).unwrap(), before);
     assert_eq!(facts.raw_relationship_targets, raw_targets);
-    // Full historical producer remains an independent canonical JSON oracle;
-    // cache bytes themselves deliberately use a new private version.
-    let envelope: Value = serde_json::from_slice(&expected).unwrap();
-    assert_eq!(serde_json::to_value(decoded).unwrap(), envelope["facts"]);
-    assert_eq!(envelope["schema"], "lycheedev.source-facts.rust.v11");
-    assert_eq!(envelope["inputSHA256"], input);
-    assert_eq!(envelope["facts"], serde_json::to_value(facts).unwrap());
-    assert_eq!(
-        envelope["factsSHA256"],
-        storage::sha256(&serde_json::to_vec(&envelope["facts"]).unwrap())
-    );
-    assert_eq!(envelope.as_object().unwrap().len(), 4);
-    envelope
+    let public = serde_json::to_value(decoded).unwrap();
+    assert_eq!(public, serde_json::to_value(facts).unwrap());
+    public
 }
 
 #[test]
@@ -66,7 +38,7 @@ fn binary_facts_preserves_empty_arrays_and_skipped_raw_identity() {
         .insert(usize::MAX, vec![0xff, 0, b'"']);
     assert_eq!(same_public_bytes(&fresh, &input), empty);
     assert_eq!(
-        empty["facts"],
+        empty,
         json!({
             "declarations":[], "relationships":[], "loads":[], "headers":[], "diagnostics":[]
         })
@@ -131,7 +103,7 @@ fn binary_facts_matches_all_typed_fields_unicode_order_and_duplicates() {
         .unwrap()
         .insert(0, vec![0xff, b'\n']);
     let envelope = same_public_bytes(&facts, &storage::sha256(text.as_bytes()));
-    let rows = &envelope["facts"];
+    let rows = &envelope;
     assert_eq!(rows["declarations"].as_array().unwrap().len(), 5);
     for field in ["relationships", "loads", "headers", "diagnostics"] {
         assert_eq!(rows[field].as_array().unwrap().len(), 3);
@@ -182,7 +154,7 @@ fn binary_facts_matches_canonical_hash_across_buffer_boundaries() {
         );
         let envelope = same_public_bytes(&facts, &input);
         assert_eq!(
-            envelope["facts"]["headers"][0]["value"],
+            envelope["headers"][0]["value"],
             facts.headers[0].value
         );
     }

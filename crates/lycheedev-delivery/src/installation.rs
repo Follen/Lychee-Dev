@@ -26,7 +26,6 @@ pub struct Receipt {
 pub struct VerifiedInstallation {
     pub canonical_path: PathBuf,
     pub manifest_sha256: String,
-    pub generation: u64,
 }
 /// Fixed Go sameReceipt ignores inventory order but never duplicate paths.
 pub(crate) fn same_receipt(left: &Receipt, right: &Receipt) -> Result<bool> {
@@ -167,10 +166,6 @@ pub fn verify_clean_controlled(
             1 << 20,
             control,
         )?),
-        // Compatibility field for the disabled historical driver. Formal Go
-        // slot metadata has no synthetic generation counter. New business
-        // adapters must bind the exact receipt and runtime/consumer instead.
-        generation: 1,
     })
 }
 
@@ -288,7 +283,6 @@ pub fn verify_main_addon_controlled(
     Ok(VerifiedInstallation {
         canonical_path,
         manifest_sha256: digest,
-        generation: 1,
     })
 }
 

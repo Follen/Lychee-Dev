@@ -242,3 +242,25 @@ foreach($field in @('identity','rootIdentity')){
   assert.equal(execution.error, undefined); assert.equal(execution.status, 0, execution.stderr);
   assert.equal(JSON.parse(execution.stdout.replace(/^\uFEFF/, '')).passed, true);
 });
+
+// PowerShell try/foreach blocks share script scope. Cargo admission used to
+// replace the startup identity with a helper file identity before Run's call.
+test('startup wrapper binding is independent of Cargo helper admission variables',()=>{
+ assert.match(source,/\$wrapperIdentity=@\{schema='lycheedev.owned-start.v1'/);
+ assert.match(source,/GetBytes\(\(\$wrapperIdentity\|ConvertTo-Json -Depth 4\)\)/);
+ assert.match(source,/\[int\]\$wrapperIdentity.wrapperPid,\[string\]\$wrapperIdentity.wrapperCreationFileTime/);
+ assert.equal((source.match(/\$wrapperIdentity\s*=/g)||[]).length,1,'only startup creates the wrapper binding');
+ const cargo=source.slice(source.indexOf('}elseif($requestData.cargoBuild'),source.indexOf('# Process creation is suspended'));
+ assert.match(cargo,/\$helperIdentity=Open-IdentityFile \$helperPath/);
+ assert.doesNotMatch(cargo,/\$identity\b/);
+});
+
+test('Windows Cargo helper admission retains identical startup job and root wrapper binding',windows,t=>{
+ const policy=JSON.parse(readFileSync(new URL('./rust-build-auxiliary.json',import.meta.url)));
+ const programFiles=Object.entries(process.env).find(([key])=>key.toLowerCase()==='programfiles')?.[1];
+ if(!programFiles||!policy.helpers.some(row=>existsSync(join(programFiles,row.programFilesPath))))return t.skip('reviewed installed Cargo helper required');
+ const f=fixture(t,'cargo-helper-binding',{v2:true});f.request.command='cargo';f.request.args=['test','--help'];f.request.cargoBuild=true;
+ const result=run(f);assert.equal(result.status,0,result.stderr);const terminal=proof(f);assert.equal(terminal.helperAdmission.state,'enabled');assert.equal(terminal.handlesClosed,true);assert.equal(terminal.treeReaped,true);
+ const start=JSON.parse(readFileSync(f.request.identity)),job=JSON.parse(readFileSync(f.base+'.job.json')),root=JSON.parse(readFileSync(f.request.rootIdentity));
+ for(const sidecar of [job,root]){assert.equal(sidecar.wrapperPid,start.wrapperPid);assert.equal(sidecar.wrapperCreationFileTime,start.wrapperCreationFileTime);assert.equal(sidecar.runId,start.runId);assert.equal(sidecar.requestSHA256,start.requestSHA256);}
+});

@@ -13,6 +13,23 @@ use std::{
 const TEXT: u64 = 0x2000;
 const TABLE: usize = 0x188;
 #[derive(Clone, Debug)]
+
+struct FixtureClearControl;
+impl lycheedev_windows::process::RuntimeControl for FixtureClearControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
+struct FixtureFlagControl(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl lycheedev_windows::process::RuntimeControl for FixtureFlagControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        if self.0.load(std::sync::atomic::Ordering::Acquire) {
+            Err("memory.runtime_cancelled".into())
+        } else {
+            Ok(())
+        }
+    }
+}
 struct Read {
     rva: u64,
     bytes: usize,
@@ -223,11 +240,9 @@ impl Source for Fixture {
     }
 }
 fn budget(limits: lycheedev_windows::process::RuntimeLimits) -> RuntimeBudget {
-    RuntimeBudget::new(
-        limits,
-        Instant::now() + Duration::from_secs(10),
-        Arc::new(AtomicBool::new(false)),
-    )
+    RuntimeBudget::with_control_factory(limits, Instant::now() + Duration::from_secs(10), 0, || {
+        FixtureClearControl
+    })
     .unwrap()
 }
 fn defaults() -> RuntimeBudget {
@@ -717,15 +732,14 @@ fn cancelled_expired_and_during_read_control_never_produces_a_binding() {
         } else {
             Instant::now() + Duration::from_secs(10)
         };
-        let mut budget = RuntimeBudget::new(
-            RuntimeCost::defaults(),
-            deadline,
-            Arc::new(AtomicBool::new(cancelled)),
-        )
-        .unwrap();
-        let failure = resolve(&source, &mut budget).err().unwrap();
+        let admission =
+            RuntimeBudget::with_control_factory(RuntimeCost::defaults(), deadline, 0, || {
+                FixtureFlagControl(Arc::new(AtomicBool::new(cancelled)))
+            })
+            .err()
+            .unwrap();
         assert_eq!(
-            failure.cause,
+            admission,
             if cancelled {
                 "memory.runtime_cancelled"
             } else {
@@ -733,15 +747,15 @@ fn cancelled_expired_and_during_read_control_never_produces_a_binding() {
             }
         );
         assert!(source.reads.borrow().is_empty());
-        assert_eq!(budget.usage(), RuntimeCost::default());
     }
     let source = ready(RecipeId::Retail);
     let cancel = Arc::new(AtomicBool::new(false));
     source.trigger(TEXT, 1, Change::Cancel(cancel.clone()));
-    let mut budget = RuntimeBudget::new(
+    let mut budget = RuntimeBudget::with_control_factory(
         RuntimeCost::defaults(),
         Instant::now() + Duration::from_secs(10),
-        cancel,
+        0,
+        || FixtureFlagControl(cancel),
     )
     .unwrap();
     assert_eq!(
@@ -767,10 +781,11 @@ fn a_real_source_fault_cannot_be_reclassified_by_simultaneous_cancellation() {
         1,
         Change::CancelAndError(cancel.clone(), "fixture.os_denied:5".into()),
     );
-    let mut budget = RuntimeBudget::new(
+    let mut budget = RuntimeBudget::with_control_factory(
         RuntimeCost::defaults(),
         Instant::now() + Duration::from_secs(10),
-        cancel,
+        0,
+        || FixtureFlagControl(cancel),
     )
     .unwrap();
     let failure = resolve(&source, &mut budget).err().unwrap();
@@ -781,10 +796,11 @@ fn a_real_source_fault_cannot_be_reclassified_by_simultaneous_cancellation() {
 fn deadline_overrun_on_successful_read_is_preserved_without_retry() {
     let source = ready(RecipeId::Retail);
     source.trigger(TEXT, 1, Change::Expire);
-    let mut budget = RuntimeBudget::new(
+    let mut budget = RuntimeBudget::with_control_factory(
         RuntimeCost::defaults(),
         Instant::now() + Duration::from_millis(100),
-        Arc::new(AtomicBool::new(false)),
+        0,
+        || FixtureClearControl,
     )
     .unwrap();
     let failure = resolve(&source, &mut budget).err().unwrap();
@@ -1067,10 +1083,10 @@ fn go320_root_recipe_failure_retains_original_read_facts_without_diagnostic_io()
             into: &mut [u8],
             kind: RuntimeReadKind,
             b: &mut RuntimeBudget,
-        ) -> std::result::Result<(), crate::mailbox::ReadError> {
+        ) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
             if self.fail.get() && matches!(kind, RuntimeReadKind::Code) {
                 self.failed_reads.set(self.failed_reads.get() + 1);
-                return Err(crate::mailbox::ReadError {
+                return Err(crate::mailbox::lookup::ReadError {
                     cause: "fixture.native_read_failed".into(),
                     returned_bytes: Some(7),
                     reason: "native_read_failed",
@@ -1080,7 +1096,7 @@ fn go320_root_recipe_failure_retains_original_read_facts_without_diagnostic_io()
                 });
             }
             self.read(rva, into, kind, b)
-                .map_err(crate::mailbox::ReadError::unknown)
+                .map_err(crate::mailbox::lookup::ReadError::unknown)
         }
     }
     let fixture = ready(RecipeId::Retail);

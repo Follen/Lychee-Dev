@@ -2,10 +2,7 @@
 //! footer/TOC/page/EKey verifiers; a successful open does not claim a whole CKey.
 use super::{
     availability_failure,
-    cache::{
-        Store, pure_expected,
-        wire::{Object, ObjectSeed, folded, scalar},
-    },
+    cache::{Store, pure_expected},
     catalog,
     fragments::{Fragment, Fragments},
     index::{self, Span},
@@ -13,12 +10,9 @@ use super::{
     transport::RangeRequest,
 };
 use crate::{fault, installed::BuildMetadata};
-use lycheedev_core::{Result, ToolkitError, evidence::GoSignedInteger};
+use lycheedev_core::{Result, ToolkitError};
 use md5::{Digest, Md5};
-use serde::{
-    Deserialize, Deserializer, Serialize,
-    de::{DeserializeSeed, IgnoredAny, MapAccess},
-};
+use serde::{Deserialize, Serialize};
 use std::{
     io::Read,
     sync::{
@@ -55,41 +49,11 @@ fn terminal(error: &ToolkitError) -> bool {
     !pure_expected(error, "records.content_missing") && !availability_failure(error)
         || error.details.get("cleanup").is_some()
 }
-#[derive(Default, Serialize)]
+#[derive(Default, Serialize, Deserialize)]
 struct Location {
     object: String,
     offset: i64,
     bytes: i64,
-}
-impl Object for Location {
-    fn fields<'de, A: MapAccess<'de>>(&mut self, mut map: A) -> std::result::Result<(), A::Error> {
-        while let Some(key) = map.next_key::<String>()? {
-            match folded(&key).as_str() {
-                "object" => scalar(&mut map, &mut self.object)?,
-                "offset" => {
-                    let mut n = GoSignedInteger(self.offset);
-                    scalar(&mut map, &mut n)?;
-                    self.offset = n.0;
-                }
-                "bytes" => {
-                    let mut n = GoSignedInteger(self.bytes);
-                    scalar(&mut map, &mut n)?;
-                    self.bytes = n.0;
-                }
-                _ => {
-                    map.next_value::<IgnoredAny>()?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-impl<'de> Deserialize<'de> for Location {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let mut value = Self::default();
-        ObjectSeed(&mut value).deserialize(d)?;
-        Ok(value)
-    }
 }
 impl From<Span> for Location {
     fn from(span: Span) -> Self {
@@ -582,9 +546,6 @@ pub(crate) struct Encoded<'f, 'a> {
     position: usize,
 }
 impl Encoded<'_, '_> {
-    pub fn encoded_size(&self) -> usize {
-        self.size
-    }
     pub fn rewind(&mut self) -> Result<()> {
         rewind(self.source.files, &mut self.position)
     }
@@ -642,16 +603,6 @@ pub(crate) struct OwnedEncoded<'a> {
 impl OwnedEncoded<'_> {
     pub(crate) fn rewind(&mut self) -> Result<()> {
         rewind(&self.files, &mut self.position)
-    }
-    pub(crate) fn read_at(&self, out: &mut [u8], offset: usize) -> Result<()> {
-        section_read_at(
-            &self.files,
-            &self.state,
-            self.offset,
-            self.size,
-            out,
-            offset,
-        )
     }
 }
 impl crate::blte::EncodedRead for OwnedEncoded<'_> {

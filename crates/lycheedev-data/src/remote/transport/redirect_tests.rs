@@ -20,7 +20,7 @@ fn response(length: Option<usize>, body: &[u8], extra: &str) -> Vec<u8> {
     .concat()
 }
 #[test]
-fn redirect_drain_counts_only_go_prefix_without_a_limit_probe() {
+fn redirect_drain_counts_only_prefix_without_a_limit_probe() {
     for (declared, size, expected) in [
         (Some(2049), 2049, 0),
         (Some(2048), 2048, 2048),
@@ -373,7 +373,7 @@ fn fixed_consumer_headers_reject_injection_before_attempt() {
 }
 
 #[test]
-fn absent_network_budget_allows_go_page_bound_beyond_shared_default_caps() {
+fn absent_network_budget_allows_page_bound_beyond_shared_default_caps() {
     let control = OperationControl::default();
     let unrelated = Budget::controlled(
         Cost {

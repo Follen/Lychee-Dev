@@ -2,10 +2,10 @@
 use crate::{
     environment, git,
     index::{self, Index},
-    luals,
+    request::{RelationRequest, ResearchMode, ResearchSelection, SourceContext},
 };
 use lycheedev_core::{
-    Invocation, Result, ToolkitError,
+    Result, ToolkitError,
     selection::{self, PinnedSet},
     storage,
 };
@@ -21,162 +21,73 @@ pub struct Reading {
 /// One authenticated preparation shared by every item in a public batch.
 /// Immutable handles avoid rebuilding or copying the full index per item.
 pub(crate) struct PreparedResearch {
-    pub pin: PinnedSet,
+    pub selection: ResearchSelection,
     pub index: Arc<Index>,
     pub environment: Option<Arc<environment::Environment>>,
     pub load_facts: Arc<Vec<index::LoadFact>>,
     pub native_unavailable: Option<String>,
 }
 pub(crate) fn with_prepared(
-    inv: &Invocation,
+    ctx: &SourceContext,
+    request: &RelationRequest,
+    mode: ResearchMode,
     tools: &crate::SourceTools<'_>,
     prepared: &PreparedResearch,
     native_response: Option<Value>,
 ) -> Result<Reading> {
     with_engine(
-        inv,
-        None,
-        None,
-        tools.luac.filter(|_| !inv.flag_bool("--static-only")),
+        ctx,
+        &prepared.selection,
+        request,
+        mode,
+        tools.luac.filter(|_| mode.uses_native()),
         Some(prepared),
         native_response,
-        None,
     )
 }
 fn invalid(code: &str, message: &str) -> ToolkitError {
     ToolkitError::new(code, message, 2)
 }
-pub fn structural(inv: &Invocation) -> Result<Reading> {
-    with_runtime(inv, None)
-}
-pub fn with_runtime(inv: &Invocation, runtime: Option<&luals::Runtime>) -> Result<Reading> {
-    with_services(inv, runtime, None)
-}
-pub fn with_services(
-    inv: &Invocation,
-    runtime: Option<&luals::Runtime>,
-    broker: Option<&crate::session::BrokerIdentity>,
-) -> Result<Reading> {
-    with_engine(inv, runtime, broker, None, None, None, None)
-}
-pub fn with_native_services(
-    inv: &Invocation,
+pub fn with_tools(
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
+    request: &RelationRequest,
+    mode: ResearchMode,
     tools: &crate::SourceTools<'_>,
-    broker: Option<&crate::session::BrokerIdentity>,
 ) -> Result<Reading> {
     with_engine(
-        inv,
-        None,
-        broker,
-        tools.luac.filter(|_| !inv.flag_bool("--static-only")),
-        None,
+        ctx,
+        selection,
+        request,
+        mode,
+        tools.luac.filter(|_| mode.uses_native()),
         None,
         None,
     )
-}
-/// Context has already authenticated the cursor's source selection. Move that
-/// same pin into relation evaluation, without reopening a mutable project lock
-/// or replacing the caller's control/deadline.
-pub(crate) fn with_selected_pin(
-    inv: &Invocation,
-    tools: &crate::SourceTools<'_>,
-    broker: Option<&crate::session::BrokerIdentity>,
-    pin: PinnedSet,
-) -> Result<Reading> {
-    with_engine(
-        inv,
-        None,
-        broker,
-        tools.luac.filter(|_| !inv.flag_bool("--static-only")),
-        None,
-        None,
-        Some(pin),
-    )
-}
-fn selection_arguments() -> ToolkitError {
-    ToolkitError::arguments(
-        "source refs/context require --snapshot and exactly one of --symbol-id or --symbol",
-    )
-}
-/// Match Go's command-level project fallback: an absent implicit project leaves
-/// the original argument error, while an explicit or malformed project fails.
-pub(crate) fn resolve_research_pin(inv: &Invocation) -> Result<PinnedSet> {
-    if let Some((_, pin)) = selection::resolve_optional_project(inv)? {
-        return Ok(pin);
-    }
-    if inv.flag("--snapshot").is_none_or(str::is_empty) {
-        return Err(selection_arguments());
-    }
-    selection::resolve_pinned(inv)
 }
 fn with_engine(
-    inv: &Invocation,
-    runtime: Option<&luals::Runtime>,
-    broker: Option<&crate::session::BrokerIdentity>,
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
+    request: &RelationRequest,
+    mode: ResearchMode,
     native: Option<&crate::luac::Runtime>,
     prepared: Option<&PreparedResearch>,
     native_response: Option<Value>,
-    selected_pin: Option<PinnedSet>,
 ) -> Result<Reading> {
-    inv.control.check()?;
-    // The fixed Go entry resolves an omitted snapshot before research selector
-    // checks. Prepared/context callers already own that authenticated winner.
-    let selected_pin = match selected_pin {
-        Some(pin) => Some(pin),
-        None if prepared.is_none() => selection::resolve_optional_project(inv)?.map(|(_, pin)| pin),
-        None => None,
-    };
-    if (prepared.is_none()
-        && selected_pin.is_none()
-        && inv.flag("--snapshot").is_none_or(str::is_empty))
-        || inv.flag("--symbol-id").is_some() == inv.flag("--symbol").is_some()
-    {
-        return Err(selection_arguments());
-    }
-    if inv.flag_bool("--static-only")
-        && (inv.flag("--release").is_some() || inv.flag_bool("--session-reuse"))
-    {
-        return Err(ToolkitError::arguments(
-            "--static-only cannot be combined with --release or --session-reuse",
-        ));
-    }
-    if inv.flag_bool("--flow") {
-        return Err(ToolkitError::arguments(
-            "--flow is evaluated by source context",
-        ));
-    }
+    ctx.control.check()?;
     if native.is_none()
-        && inv.flag_bool("--session-reuse")
-        && (broker.is_none() || runtime.is_none())
+        && mode.uses_native()
+        && prepared.is_none_or(|shared| shared.native_unavailable.is_none())
     {
         return Err(ToolkitError::new(
-            "luals.session_unavailable",
-            "verified persistent broker provider is not yet connected",
+            "source.native_unavailable",
+            "Source research requires the verified bundled Lua compiler and native semantic provider",
             3,
         ));
     }
-    if native.is_none() && inv.flag("--release").is_some() && runtime.is_none() {
-        return Err(ToolkitError::new(
-            "luals.research_provider_unavailable",
-            "explicit verified semantic runtime must be connected before research can use --release",
-            3,
-        ));
-    }
-    let runtime = runtime.filter(|_| !inv.flag_bool("--static-only"));
-    let limit = inv.usize_flag("--limit", 50, 1, 200)?;
-    let direction = inv.flag("--direction").unwrap_or("both");
-    if !["incoming", "outgoing", "both"].contains(&direction) {
-        return Err(ToolkitError::arguments(
-            "--direction must be incoming, outgoing, or both",
-        ));
-    }
-    let pin = match prepared {
-        Some(shared) => shared.pin.clone(),
-        None => match selected_pin {
-            Some(pin) => pin,
-            None => selection::resolve_pinned(inv)?,
-        },
-    };
+    let limit = request.limit;
+    let direction = request.direction.as_str();
+    let pin = selection.pin.clone();
     let source = pin.source.as_ref().ok_or_else(|| {
         ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
     })?;
@@ -184,20 +95,16 @@ fn with_engine(
         (Arc::clone(&shared.index), String::new())
     } else {
         let (index, digest) = crate::research_material::measured("source.index", || {
-            index::build_material_with_control(&inv.home, source, &inv.control)
+            index::build_material_with_control(&ctx.home, source, &ctx.control)
         })?;
         (Arc::new(index), digest)
     };
     let declarations: Vec<_> = index
         .symbols
         .iter()
-        .filter(|symbol| {
-            symbol.kind == "declaration"
-                && (inv.flag("--symbol-id").is_some_and(|id| symbol.id == id)
-                    || inv.flag("--symbol").is_some_and(|name| symbol.name == name))
-        })
+        .filter(|symbol| symbol.kind == "declaration" && request.selector.matches(symbol))
         .collect();
-    if inv.flag("--symbol-id").is_some() && declarations.is_empty() {
+    if request.selector.id().is_some() && declarations.is_empty() {
         return Err(invalid(
             "codebase.invalid_symbol",
             "selected symbol ID is absent from the fixed index",
@@ -205,34 +112,12 @@ fn with_engine(
     }
     let mut reasons = vec![];
     let mut data = json!({"repository":source.repository,"product":source.product,"commit":source.exact_commit,"snapshot":pin.id,"relations":[],"truncated":false,"complete":false});
-    let selected_environment = inv
-        .flag("--environment")
-        .filter(|_| prepared.is_none())
-        .map(|id| selection::load_pinned(&inv.home, id))
-        .transpose()?;
-    if selected_environment
-        .as_ref()
-        .is_some_and(|pin| pin.source.is_none())
-    {
-        return Err(ToolkitError::new(
-            "selection.source_missing",
-            "selected environment pin has no source",
-            3,
-        ));
-    }
-    let environment_source = selected_environment
-        .as_ref()
-        .and_then(|pin| pin.source.as_ref())
-        .or(if source.repository == "wow-ui-source" {
-            Some(source)
-        } else {
-            None
-        });
+    let environment_source = selection.environment_source()?;
     let material = if prepared.is_none() && declarations.len() == 1 {
         native
             .map(|runtime| {
                 crate::research_material::load_or_build(
-                    inv,
+                    ctx,
                     source,
                     environment_source,
                     &index,
@@ -261,7 +146,7 @@ fn with_engine(
         (
             crate::research_material::measured("source.environment", || {
                 environment_source
-                    .map(|source| environment::from_pin(&inv.home, source, &inv.control))
+                    .map(|source| environment::from_pin(&ctx.home, source, &ctx.control))
                     .transpose()
             })?
             .map(Arc::new),
@@ -287,7 +172,7 @@ fn with_engine(
         "partial"
     };
     let scanned = declarations.len();
-    if declarations.len() > 1 && inv.flag("--symbol-id").is_none() {
+    if declarations.len() > 1 && request.selector.id().is_none() {
         data["candidates"] =
             serde_json::to_value(declarations.iter().take(limit).collect::<Vec<_>>())?;
         data["truncated"] = json!(declarations.len() > limit);
@@ -297,23 +182,15 @@ fn with_engine(
             data["symbol"] = serde_json::to_value(symbol)?;
             symbol.name.as_str()
         } else {
-            inv.required("--symbol")?
+            request.selector.value()
         };
         let runtime_key = if native.is_some() {
-            crate::native_research::RESEARCH_RULES.into()
+            crate::native_research::RESEARCH_RULES
         } else {
-            runtime
-                .map(|runtime| {
-                    format!(
-                        "{}:{}",
-                        runtime.identity()["version"].as_str().unwrap_or(""),
-                        runtime.identity()["sha256"].as_str().unwrap_or("")
-                    )
-                })
-                .unwrap_or_else(|| "static".into())
+            "static"
         };
         let (offset, key) = relation_cursor(
-            inv,
+            request,
             source,
             limit,
             direction,
@@ -327,7 +204,7 @@ fn with_engine(
             .iter()
             .filter(|symbol| symbol.kind == "relationship")
         {
-            inv.control.check()?;
+            ctx.control.check()?;
             if !(direction != "outgoing" && edge.target == name
                 || direction != "incoming" && edge.name == name)
             {
@@ -370,7 +247,7 @@ fn with_engine(
                     let (snapshot, facts) =
                         crate::research_material::measured("source.snapshot", || {
                             crate::native_research::snapshot_material(
-                                inv,
+                                ctx,
                                 source,
                                 &index,
                                 client_environment.as_deref(),
@@ -388,10 +265,10 @@ fn with_engine(
                     },
                 };
                 crate::research_material::measured("source.native_analyze", || {
-                    if inv.flag_bool("--session-reuse") {
-                        crate::native_session::analyze(inv, request)
+                    if mode.reuses_session() {
+                        crate::native_session::analyze(ctx, request)
                     } else {
-                        crate::native_research::one_shot(inv, request)
+                        crate::native_research::one_shot(ctx, request)
                     }
                 })?
             };
@@ -401,95 +278,6 @@ fn with_engine(
                 relations.extend(rows);
             }
             data["nativeResearch"] = response;
-        } else if let (Some(runtime), Some(symbol)) = (runtime, declarations.first()) {
-            let cache = SemanticCache::admit(
-                inv,
-                source,
-                &index,
-                declarations[0],
-                direction,
-                client_environment.as_deref(),
-                SemanticProvider {
-                    runtime,
-                    broker,
-                    environment_pin: environment_source,
-                },
-            )?;
-            let semantic_result = (|| {
-                let cached = match cache.as_ref().map(|cache| cache.read(inv)).transpose() {
-                    Ok(value) => value.flatten(),
-                    Err(error) => {
-                        let error = crate::persistence::finish_control::<()>(
-                            Err(error),
-                            inv.control.check(),
-                        )
-                        .unwrap_err();
-                        if !error.details.is_null()
-                            || matches!(
-                                error.code.as_str(),
-                                "command.cancelled" | "command.deadline"
-                            )
-                        {
-                            return Err(error);
-                        }
-                        None
-                    }
-                };
-                inv.control.check()?;
-                let (semantic, analysis) = if let Some(rows) = cached {
-                    (
-                        rows,
-                        json!({"state":"complete","cacheHit":true,"queryBatches":0,"results":[],"coverage":{"state":"complete","basis":"authenticated complete semantic cache"}}),
-                    )
-                } else {
-                    let mut computed = semantic_relations(
-                        inv,
-                        source,
-                        &index,
-                        symbol,
-                        direction,
-                        client_environment.as_deref(),
-                        SemanticProvider {
-                            runtime,
-                            environment_pin: environment_source,
-                            broker: broker.filter(|_| inv.flag_bool("--session-reuse")),
-                        },
-                    )?;
-                    if computed.1["state"] == "complete"
-                        && let Some(cache) = &cache
-                        && let Err(error) = cache.write(inv, &computed.0)
-                    {
-                        let error = crate::persistence::finish_control::<()>(
-                            Err(error),
-                            inv.control.check(),
-                        )
-                        .unwrap_err();
-                        if !error.details.is_null()
-                            || matches!(
-                                error.code.as_str(),
-                                "command.cancelled" | "command.deadline"
-                            )
-                        {
-                            return Err(error);
-                        }
-                        computed.1["cacheWriteState"] =
-                            json!({"state":"not_stored","reason":error.code});
-                    }
-                    computed
-                };
-                Ok((semantic, analysis))
-            })();
-            let released = cache.map_or(Ok(()), |cache| cache._lease.close());
-            let (semantic, analysis) = crate::persistence::finish_control(
-                lycheedev_core::metadata::historical_write::finish_historical(
-                    semantic_result,
-                    released,
-                ),
-                inv.control.check(),
-            )?;
-            data["semanticRuntime"] = runtime.identity();
-            data["semanticAnalysis"] = json!({"state":analysis["state"],"cacheHit":analysis["cacheHit"]==true,"queryCount":analysis["results"].as_array().map_or(0,Vec::len),"queryBatches":analysis["queryBatches"],"workspaceCoverage":analysis["coverage"],"positionCoverage":analysis["positionCoverage"]});
-            relations.extend(semantic);
         }
         crate::research_material::measured("source.relation_page", || {
             project_relation_page(&mut data, &mut relations, offset, &key, limit, overflow)
@@ -501,15 +289,14 @@ fn with_engine(
             reasons.push("no declaration or structural relation in indexed coverage");
         }
     }
-    let semantic_state =
-        if (runtime.is_some() || native.is_some()) && data.get("semanticAnalysis").is_some() {
-            data["semanticAnalysis"]["state"]
-                .as_str()
-                .unwrap_or("partial")
-        } else {
-            "unavailable"
-        }
-        .to_owned();
+    let semantic_state = if native.is_some() && data.get("semanticAnalysis").is_some() {
+        data["semanticAnalysis"]["state"]
+            .as_str()
+            .unwrap_or("partial")
+    } else {
+        "unavailable"
+    }
+    .to_owned();
     if semantic_state == "unavailable" {
         reasons.push("semantic source provider unavailable or static-only requested");
     }
@@ -572,7 +359,7 @@ fn project_relation_page(
     Ok(())
 }
 fn relation_cursor(
-    inv: &Invocation,
+    request: &RelationRequest,
     source: &selection::SourcePin,
     limit: usize,
     direction: &str,
@@ -595,11 +382,12 @@ fn relation_cursor(
         source.repository,
         source.product,
         source.exact_commit,
-        inv.flag("--symbol-id").unwrap_or(""),
-        inv.flag("--symbol").unwrap_or("")
+        request.selector.id().unwrap_or(""),
+        request.selector.name().unwrap_or("")
     );
     let key = storage::sha256(identity.as_bytes())[..16].to_owned();
-    let offset = if let Some(cursor) = inv.flag("--cursor") {
+    let offset = if !request.cursor.is_empty() {
+        let cursor = &request.cursor;
         let Some((found, n)) = cursor.split_once(':') else {
             return Err(invalid(
                 "codebase.invalid_search_cursor",
@@ -627,496 +415,36 @@ fn relation_cursor(
     Ok((offset, key))
 }
 pub(crate) fn validate_prepared_cursor(
-    inv: &Invocation,
+    request: &RelationRequest,
+    mode: ResearchMode,
     tools: &crate::SourceTools<'_>,
     prepared: &PreparedResearch,
 ) -> Result<()> {
-    let runtime_key = if tools.luac.is_some() && !inv.flag_bool("--static-only") {
+    let runtime_key = if tools.luac.is_some() && mode.uses_native() {
         crate::native_research::RESEARCH_RULES
     } else {
         "static"
     };
     relation_cursor(
-        inv,
-        prepared.pin.source.as_ref().expect("prepared source pin"),
-        inv.usize_flag("--limit", 50, 1, 200)?,
-        inv.flag("--direction").unwrap_or("both"),
+        request,
+        prepared.selection.source()?,
+        request.limit,
+        request.direction.as_str(),
         runtime_key,
         prepared.environment.as_deref(),
     )
     .map(|_| ())
 }
-fn position(
-    inv: &Invocation,
-    pin: &selection::SourcePin,
-    path: &str,
-    line: usize,
-    name: &str,
-    documents: &mut std::collections::BTreeMap<String, Vec<u8>>,
-) -> Result<Option<Value>> {
-    if !documents.contains_key(path) {
-        let (raw, _) =
-            git::blob_with_control(&inv.home, pin, path, git::MAX_SOURCE_BYTES, &inv.control)?;
-        documents.insert(path.into(), raw);
-    }
-    let text = std::str::from_utf8(&documents[path])
-        .map_err(|_| ToolkitError::invalid("semantic source is not UTF-8"))?;
-    let Some(row) = text.lines().nth(line.saturating_sub(1)) else {
-        return Ok(None);
-    };
-    let leaf = name.rsplit(['.', ':']).next().unwrap_or(name);
-    let matches: Vec<_> = row.match_indices(leaf).collect();
-    if matches.len() != 1 {
-        return Ok(None);
-    };
-    let column = row[..matches[0].0].encode_utf16().count();
-    Ok(Some(
-        json!({"line":line.saturating_sub(1),"character":column}),
-    ))
-}
-struct SemanticProvider<'a> {
-    runtime: &'a luals::Runtime,
-    environment_pin: Option<&'a selection::SourcePin>,
-    broker: Option<&'a crate::session::BrokerIdentity>,
-}
-struct SemanticCache {
-    key: String,
-    _lease: storage::ExclusiveLock,
-}
-impl SemanticCache {
-    fn admit(
-        inv: &Invocation,
-        pin: &selection::SourcePin,
-        index: &Index,
-        symbol: &index::Symbol,
-        direction: &str,
-        environment: Option<&environment::Environment>,
-        services: SemanticProvider<'_>,
-    ) -> Result<Option<Self>> {
-        inv.control.check()?;
-        let runtime = services.runtime;
-        let broker = services.broker;
-        let Some(environment) =
-            environment.filter(|env| env.coverage.complete && index.summary.complete)
-        else {
-            return Ok(None);
-        };
-        let manifest: Value = crate::persistence::read(
-            &inv.home,
-            &format!("source/rust-index/{}", index::fingerprint(pin)),
-            &inv.control,
-        )?;
-        let key = storage::sha256(&serde_json::to_vec(
-            &json!({"schema":"lycheedev.source-semantic.rust.v1","source":pin,"indexFingerprint":index::fingerprint(pin),"recordsHash":manifest["blob"]["sha256"],"environment":environment.manifest,"runtime":runtime.identity(),"executable":runtime.executable_identity()["sha256"],"release":broker.map(|id|(&id.release_manifest_sha256,&id.exe_sha256)),"configuration":luals::configuration(std::path::Path::new("@environment")),"symbolId":symbol.id,"direction":direction}),
-        )?);
-        let lease = match storage::ExclusiveLock::resource_controlled(
-            &inv.home.join("locks"),
-            &format!("source:v1:semantic:{key}"),
-            &inv.control,
-        ) {
-            Ok(lease) => lease,
-            Err(error) if error.exit_code == 6 && error.details.is_null() => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        Ok(Some(Self { key, _lease: lease }))
-    }
-    fn metadata_key(&self) -> String {
-        format!("source/rust-semantics/v1/{}", self.key)
-    }
-    fn read(&self, inv: &Invocation) -> Result<Option<Vec<Value>>> {
-        inv.control.check()?;
-        let manifest: Value =
-            match crate::persistence::read(&inv.home, &self.metadata_key(), &inv.control) {
-                Ok(value) => value,
-                Err(error) if error.code == "vault.record_missing" && error.details.is_null() => {
-                    return Ok(None);
-                }
-                Err(error) => return Err(error),
-            };
-        if manifest["schema"] != "lycheedev.source-semantic.rust.v1" || manifest["key"] != self.key
-        {
-            return Ok(None);
-        }
-        let raw = lycheedev_core::cache::read_object(
-            &inv.home,
-            &manifest["blob"],
-            4 << 20,
-            &inv.control,
-        )?;
-        inv.control.check()?;
-        let value: Value = serde_json::from_slice(&raw)?;
-        let Some(rows) = value["rows"].as_array().filter(|rows| rows.len() <= 10000) else {
-            return Ok(None);
-        };
-        if value["schema"] != "lycheedev.source-semantic.rust.v1"
-            || value["key"] != self.key
-            || value["rowsHash"] != storage::sha256(&serde_json::to_vec(rows)?)
-        {
-            return Ok(None);
-        }
-        Ok(Some(rows.clone()))
-    }
-    fn write(&self, inv: &Invocation, rows: &[Value]) -> Result<()> {
-        inv.control.check()?;
-        let rows_raw = storage::bounded_json(&rows, 4 << 20)?;
-        let value = json!({"schema":"lycheedev.source-semantic.rust.v1","key":self.key,"rowsHash":storage::sha256(&rows_raw),"rows":rows});
-        let raw = storage::bounded_json(&value, 4 << 20)?;
-        if raw.len() > 4 << 20 {
-            return Ok(());
-        }
-        let blob = lycheedev_core::cache::publish_derived_controlled(
-            &inv.home,
-            &raw,
-            4 << 20,
-            &inv.control,
-        )?;
-        inv.control.check()?;
-        crate::persistence::put_manifest(
-            &inv.home,
-            &self.metadata_key(),
-            &json!({"schema":"lycheedev.source-semantic.rust.v1","key":self.key,"blob":blob}),
-            &inv.control,
-        )?;
-        Ok(())
-    }
-}
-fn semantic_relations(
-    inv: &Invocation,
-    pin: &selection::SourcePin,
-    index: &Index,
-    symbol: &index::Symbol,
-    direction: &str,
-    environment: Option<&environment::Environment>,
-    services: SemanticProvider<'_>,
-) -> Result<(Vec<Value>, Value)> {
-    let definitions = environment
-        .map(|env| env.definitions.as_bytes())
-        .unwrap_or(b"");
-    let mut queries = Vec::new();
-    let mut sites = Vec::new();
-    let mut uncertain = false;
-    let mut documents = std::collections::BTreeMap::new();
-    if direction != "outgoing" {
-        let reference_position = if symbol.category.starts_with("api-") {
-            let mappings = environment
-                .map(|env| {
-                    env.mappings
-                        .iter()
-                        .filter(|m| {
-                            m.kind == "function"
-                                && m.source_path == symbol.path
-                                && m.callable == symbol.name
-                                && m.source_line >= symbol.line
-                                && m.source_line <= symbol.end_line.max(symbol.line)
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            if mappings.len() == 1 {
-                Some((
-                    "@environment/api.d.lua".to_owned(),
-                    json!({"line":mappings[0].generated_line,"character":mappings[0].generated_utf16_column}),
-                ))
-            } else {
-                None
-            }
-        } else if symbol.path.to_ascii_lowercase().ends_with(".lua") {
-            position(
-                inv,
-                pin,
-                &symbol.path,
-                symbol.line,
-                &symbol.name,
-                &mut documents,
-            )?
-            .map(|pos| (symbol.path.clone(), pos))
-        } else {
-            None
-        };
-        if let Some((path, position)) = reference_position {
-            queries.push(json!({"kind":"references","path":path,"position":position}));
-            sites.push(None);
-            queries.push(json!({"kind":"hover","path":path,"position":position}));
-            sites.push(None);
-        } else {
-            uncertain = true;
-        }
-    }
-    if direction != "incoming" {
-        let mut outgoing_count = 0usize;
-        for edge in index.symbols.iter().filter(|edge| {
-            edge.kind == "relationship"
-                && edge.name == symbol.name
-                && edge.category == "call"
-                && edge.path == symbol.path
-                && edge.line >= symbol.line
-                && edge.line <= symbol.end_line.max(symbol.line)
-        }) {
-            inv.control.check()?;
-            if outgoing_count >= 128 {
-                uncertain = true;
-                break;
-            }
-            if let Some(position) = position(
-                inv,
-                pin,
-                &edge.path,
-                edge.line,
-                &edge.target,
-                &mut documents,
-            )? {
-                queries.push(json!({"kind":"definition","path":edge.path,"position":position}));
-                sites.push(Some(edge));
-                outgoing_count += 1;
-            } else {
-                uncertain = true;
-            }
-        }
-    }
-    if queries.is_empty() {
-        return Ok((
-            vec![],
-            json!({"state":"partial","reason":"no unique semantic query position","results":[]}),
-        ));
-    }
-    let mut analysis = if let Some(identity) = services.broker {
-        crate::session::analyze(
-            inv,
-            identity,
-            pin.clone(),
-            services.environment_pin.cloned(),
-            queries.chunks(128).map(<[Value]>::to_vec).collect(),
-        )?
-    } else {
-        let mut session = services.runtime.open_source_session_with_control(
-            &inv.home,
-            pin,
-            index,
-            definitions,
-            &inv.control,
-        )?;
-        let analysis = (|| -> Result<Value> {
-            let mut combined = json!({"state":"complete","results":[],"queryBatches":0});
-            for batch in queries.chunks(128) {
-                let mut part = session.analyze_with_control(batch, &inv.control)?;
-                if part["state"] != "complete" {
-                    combined["state"] = json!("partial");
-                }
-                combined["coverage"] = part["coverage"].clone();
-                combined["queryBatches"] = json!(combined["queryBatches"].as_u64().unwrap() + 1);
-                combined["results"]
-                    .as_array_mut()
-                    .unwrap()
-                    .append(part["results"].as_array_mut().unwrap());
-            }
-            Ok(combined)
-        })();
-        session.close();
-        analysis?
-    };
-    if uncertain {
-        analysis["state"] = json!("partial");
-        analysis["positionCoverage"] = json!("some structural sites were not uniquely positioned");
-    }
-    analysis["queryBatches"] = json!(queries.len().div_ceil(128));
-    let mut result = vec![];
-    let mut partial_results = false;
-    for (query_result, site) in analysis["results"]
-        .as_array()
-        .unwrap_or(&Vec::new())
-        .iter()
-        .zip(sites)
-    {
-        if query_result["state"] != "complete" {
-            partial_results = true;
-            continue;
-        }
-        if query_result["query"]["kind"] == "hover" {
-            continue;
-        }
-        if site.is_some() && query_result["locations"].as_array().map_or(0, Vec::len) != 1 {
-            partial_results = true;
-            continue;
-        }
-        for location in query_result["locations"].as_array().unwrap_or(&Vec::new()) {
-            if result.len() >= 10000 {
-                partial_results = true;
-                break;
-            }
-            let Some(path) = location["path"].as_str() else {
-                continue;
-            };
-            let line = location["range"]["start"]["line"].as_u64().unwrap_or(0) as usize;
-            let (target_path, target_line) = if path == "@environment/api.d.lua" {
-                let Some(mapping) = environment.and_then(|env| {
-                    env.mappings.iter().find(|mapping| {
-                        mapping.generated_line == line
-                            && mapping.generated_utf16_column
-                                == location["range"]["start"]["character"]
-                                    .as_u64()
-                                    .unwrap_or(u64::MAX) as usize
-                    })
-                }) else {
-                    partial_results = true;
-                    continue;
-                };
-                (mapping.source_path.clone(), mapping.source_line)
-            } else {
-                (path.into(), line + 1)
-            };
-            if let Some(site) = site {
-                let identity = if path == "@environment/api.d.lua" {
-                    environment
-                        .map(|env| {
-                            (
-                                &env.manifest.identity.repository,
-                                &env.manifest.identity.commit,
-                            )
-                        })
-                        .unwrap()
-                } else {
-                    (&pin.repository, &pin.exact_commit)
-                };
-                let mut row = json!({"source":site.name,"target":site.target,"kind":"call","state":"resolved","path":site.path,"line":site.line,"basis":["LuaLS public textDocument/definition",format!("fixed worktree {}",pin.exact_commit)],"targetRepository":identity.0,"targetCommit":identity.1,"targetPath":target_path,"targetLine":target_line});
-                let declarations = index
-                    .symbols
-                    .iter()
-                    .filter(|s| {
-                        s.kind == "declaration" && s.path == target_path && s.line == target_line
-                    })
-                    .collect::<Vec<_>>();
-                if path == "@environment/api.d.lua" {
-                    let mapping = environment
-                        .unwrap()
-                        .mappings
-                        .iter()
-                        .find(|m| {
-                            m.generated_line == line
-                                && m.generated_utf16_column
-                                    == location["range"]["start"]["character"]
-                                        .as_u64()
-                                        .unwrap_or(u64::MAX)
-                                        as usize
-                        })
-                        .unwrap();
-                    let identity = format!(
-                        "{}\0{}\0{}\0{}\0{}",
-                        identity.0,
-                        identity.1,
-                        mapping.callable,
-                        mapping.source_path,
-                        mapping.source_line
-                    );
-                    row["targetId"] = json!(format!(
-                        "API-{}",
-                        &storage::sha256(identity.as_bytes())[..32]
-                    ));
-                    row["target"] = json!(mapping.callable);
-                    row["basis"] = json!([
-                        "LuaLS public textDocument/definition",
-                        "generated declaration mapped to pinned API source"
-                    ]);
-                } else if declarations.len() == 1 {
-                    row["targetId"] = json!(declarations[0].id);
-                    row["target"] = json!(declarations[0].name);
-                } else {
-                    partial_results = true;
-                    continue;
-                }
-                row["sourceId"] = json!(symbol.id);
-                result.push(row);
-            } else {
-                if path == "@environment/api.d.lua" {
-                    continue;
-                }
-                if target_path == symbol.path && target_line == symbol.line {
-                    continue;
-                }
-                let row = json!({"source":target_path,"target":symbol.name,"kind":"reference","state":"resolved","path":target_path,"line":target_line,"endLine":location["range"]["end"]["line"].as_u64().unwrap_or(line as u64)+1,"basis":["LuaLS public textDocument/references",format!("fixed worktree {}",pin.exact_commit)],"targetId":symbol.id});
-                result.push(row);
-            }
-        }
-    }
-    if partial_results {
-        analysis["state"] = json!("partial");
-    }
-    Ok((result, analysis))
-}
 #[cfg(test)]
-mod cache_tests {
-    use super::*;
-    #[test]
-    fn semantic_cache_roundtrip_detects_corruption_and_bounds_serialization() {
-        let home = std::env::temp_dir().join(format!(
-            "lycheedev-semantic-cache-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        lycheedev_core::workspace::initialize(&home).unwrap();
-        let inv = Invocation {
-            command: "source refs".into(),
-            positional: None,
-            flags: Default::default(),
-            home: home.clone(),
-            cwd: home.clone(),
-            control: Default::default(),
-        };
-        let cache = SemanticCache {
-            key: "1".repeat(64),
-            _lease: storage::ExclusiveLock::resource(
-                &home.join("locks"),
-                "source:v1:semantic:test",
-            )
-            .unwrap(),
-        };
-        let rows = vec![
-            json!({"source":"First","target":"FixtureAPI","kind":"call","state":"resolved","path":"probe.lua","line":2}),
-        ];
-        cache.write(&inv, &rows).unwrap();
-        assert_eq!(cache.read(&inv).unwrap(), Some(rows.clone()));
-        let store = lycheedev_core::metadata::Metadata::open(&home, false).unwrap();
-        let value: Value = store.read(&cache.metadata_key()).unwrap();
-        let digest = value["blob"]["sha256"].as_str().unwrap();
-        let path = home
-            .join("cache/objects")
-            .join(&digest[..2])
-            .join(&digest[2..]);
-        let raw = std::fs::read(&path).unwrap();
-        let mut wrong = raw.clone();
-        wrong[0] = b'!';
-        std::fs::write(&path, wrong).unwrap();
-        assert_eq!(cache.read(&inv).unwrap_err().exit_code, 4);
-        // Missing ordinary derived objects may be recomputed; forensic corrupt
-        // bytes remain until explicit repair/prune rather than silent adoption.
-        std::fs::remove_file(&path).unwrap();
-        assert!(cache.read(&inv).is_err());
-        cache.write(&inv, &rows).unwrap();
-        assert_eq!(cache.read(&inv).unwrap(), Some(rows));
-        assert!(storage::bounded_json(&json!({"large":"x".repeat((4<<20)+1)}), 4 << 20).is_err());
-        drop(store);
-        drop(cache);
-        std::fs::remove_dir_all(&home).unwrap();
-    }
-}
-
-#[cfg(all(test, feature = "emmy-prototype"))]
 mod incoming_caller_cursor_tests {
     use super::*;
-    fn fixture() -> (Invocation, selection::SourcePin) {
+    fn fixture() -> (RelationRequest, selection::SourcePin) {
         (
-            Invocation {
-                command: "source refs".into(),
-                positional: None,
-                flags: std::collections::BTreeMap::from([(
-                    "--symbol".into(),
-                    "GetActionButtonForID".into(),
-                )]),
-                home: Default::default(),
-                cwd: Default::default(),
-                control: Default::default(),
+            RelationRequest {
+                selector: crate::request::SymbolSelector::Name("GetActionButtonForID".into()),
+                direction: crate::request::RelationDirection::Incoming,
+                limit: 2,
+                cursor: String::new(),
             },
             selection::SourcePin {
                 repository: "wow-ui-source".into(),
@@ -1129,10 +457,10 @@ mod incoming_caller_cursor_tests {
     }
     #[test]
     fn incoming_caller_v7_cursor_rejected_v8_pages_keep_every_proof_row() {
-        let (mut inv, source) = fixture();
+        let (mut request, source) = fixture();
         let rules = crate::native_research::RESEARCH_RULES;
         let (_, old) = relation_cursor(
-            &inv,
+            &request,
             &source,
             2,
             "incoming",
@@ -1140,16 +468,16 @@ mod incoming_caller_cursor_tests {
             None,
         )
         .unwrap();
-        let (_, key) = relation_cursor(&inv, &source, 2, "incoming", rules, None).unwrap();
+        let (_, key) = relation_cursor(&request, &source, 2, "incoming", rules, None).unwrap();
         assert_ne!(old, key);
-        inv.flags.insert("--cursor".into(), format!("{old}:2"));
+        request.cursor = format!("{old}:2");
         assert_eq!(
-            relation_cursor(&inv, &source, 2, "incoming", rules, None)
+            relation_cursor(&request, &source, 2, "incoming", rules, None)
                 .unwrap_err()
                 .code,
             "codebase.invalid_search_cursor"
         );
-        inv.flags.remove("--cursor");
+        request.cursor.clear();
         // Same corrected caller across two independent scopes is intentionally
         // still two native rows plus its structural proof. Source ties preserve
         // append order under Rust's stable sort; no deduplication is permitted.
@@ -1187,7 +515,7 @@ mod incoming_caller_cursor_tests {
         let mut pages = 0;
         loop {
             let (offset, current) =
-                relation_cursor(&inv, &source, 2, "incoming", rules, None).unwrap();
+                relation_cursor(&request, &source, 2, "incoming", rules, None).unwrap();
             assert_eq!(current, key);
             let mut rows = input.clone();
             let mut data = json!({"coverage":{"semantic":"partial"},"complete":false});
@@ -1203,7 +531,7 @@ mod incoming_caller_cursor_tests {
             );
             if let Some(next) = data["nextCursor"].as_str() {
                 assert_eq!(data["truncated"], true);
-                inv.flags.insert("--cursor".into(), next.into());
+                request.cursor = next.into();
             } else {
                 assert_eq!(data["truncated"], false);
                 break;
@@ -1266,7 +594,3 @@ mod incoming_caller_cursor_tests {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "relations/project_selection_tests.rs"]
-mod project_selection_tests;

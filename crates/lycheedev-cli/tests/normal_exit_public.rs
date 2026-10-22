@@ -84,7 +84,11 @@ fn actual_normal_exit_preserves_default_help_and_success_output() {
     assert!(describe_bytes.len() > 8192);
     assert_eq!(describe, success(describe["result"].clone()));
     let commands = describe["result"]["commands"].as_array().unwrap();
-    assert_eq!(commands.len(), 71);
+    let directory: Vec<Value> = serde_json::from_str(include_str!("../src/commands.json")).unwrap();
+    assert_eq!(
+        commands.iter().map(|command| &command["path"]).collect::<Vec<_>>(),
+        directory.iter().map(|command| &command["path"]).collect::<Vec<_>>()
+    );
     for child in children {
         let path = child["command"].as_str().unwrap();
         assert!(commands.iter().any(|command| {

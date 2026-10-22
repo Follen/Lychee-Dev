@@ -1,14 +1,14 @@
 //! Reuse only a complete, authenticated publication for the freshly prepared key.
-//! The original source owner remains alive; no SQL/effective/Hotfix route changes.
+//! The original source owner remains alive; no Engine static/effective/Hotfix route changes.
 pub(super) mod ipc;
 #[cfg(test)]
 mod tests;
 
 use super::{StaticIdentity, application};
 use crate::{
-    db2::Prepared,
     resource::{Budget, Cost},
     table::Table,
+    table_source::Prepared,
 };
 use arrow_schema::SchemaRef;
 use lycheedev_core::{

@@ -183,7 +183,7 @@ impl<C: FnMut() -> Result<()>> Scope<'_, C> {
         (self.check)()
     }
     fn finish<T>(&mut self, result: Result<T>, cleanup: Result<()>) -> Result<T> {
-        let result = crate::metadata::historical_write::finish_historical(result, cleanup);
+        let result = crate::metadata::owned_write::finish_owned(result, cleanup);
         let result = super::selection_finish(result, self.control.check());
         super::selection_finish(result, (self.check)())
     }
@@ -192,11 +192,11 @@ fn pure(error: &ToolkitError, code: &str) -> bool {
     error.code == code && error.details.is_null()
 }
 fn decode(raw: &[u8], control: &OperationControl) -> Result<TargetConfig> {
+    control.check()?;
     if !crate::raw_json::is_valid(raw) {
         return Err(format("invalid JSON document"));
     }
-    let normalized = crate::evidence::normalize_go_json_strings(raw, control)?;
-    let config: TargetConfig = serde_json::from_slice(&normalized).map_err(format)?;
+    let config: TargetConfig = serde_json::from_slice(raw).map_err(format)?;
     config.validate()?;
     Ok(config)
 }
@@ -220,12 +220,12 @@ fn read_metadata(
             error
         },
     )?;
-    let result = metadata.require_historical_schema_with_check(control, &mut check);
+    let result = metadata.require_current_schema_with_check(control, &mut check);
     match result {
         Ok(()) => Ok(metadata),
         Err(error) => {
             let result =
-                crate::metadata::historical_write::finish_historical(Err(error), metadata.close());
+                crate::metadata::owned_write::finish_owned(Err(error), metadata.close());
             let result = super::selection_finish(result, control.check());
             super::selection_finish(result, check())
         }
@@ -406,5 +406,5 @@ pub fn resolve_controlled_with_check(
 mod tests;
 
 mod management;
-pub use management::dispatch;
+pub use management::{TargetRequest, execute};
 pub(crate) use management::list_configurations;

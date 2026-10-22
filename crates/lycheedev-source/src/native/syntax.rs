@@ -28,12 +28,12 @@ impl SyntaxSite {
 }
 #[derive(Clone, Debug)]
 struct IndexedDeclaration {
-    id:String, name:String, site:SyntaxSite, kind:&'static str,
+    id:DeclarationId, name:String, site:SyntaxSite, kind:&'static str,
     owner:Option<SyntaxSite>, implicit_self:bool,
 }
 impl IndexedDeclaration {
     fn public(&self,inputs:&SourceInputs)->SourceDeclaration {
-        SourceDeclaration{id:self.id.clone(),name:self.name.clone(),site:self.site.public(inputs),kind:self.kind.into(),owner:self.owner.map(|site|site.public(inputs)),implicit_self:self.implicit_self}
+        SourceDeclaration{id:self.id.public(),name:self.name.clone(),site:self.site.public(inputs),kind:self.kind.into(),owner:self.owner.map(|site|site.public(inputs)),implicit_self:self.implicit_self}
     }
 }
 #[derive(Clone, Debug)]
@@ -100,8 +100,12 @@ impl SourceSyntaxIndex {
         // The former insertion loop had no control or step charge. Preserve
         // that ordering: the original shared row charge follows this freeze.
     }
+    #[cfg(test)]
     fn declaration_by_id(&self,id:&str)->Option<usize> {
-        self.declarations_by_id.binary_search_by(|&index|self.declarations[index].id.as_str().cmp(id))
+        self.declaration_by_key(&DeclarationId::parse(id)?)
+    }
+    fn declaration_by_key(&self,id:&DeclarationId)->Option<usize> {
+        self.declarations_by_id.binary_search_by(|&index|self.declarations[index].id.cmp(id))
             .ok().map(|index|self.declarations_by_id[index])
     }
     fn declaration_by_site(&self,site:SyntaxSite)->Option<usize> {
@@ -126,7 +130,35 @@ impl SourceFileSyntax {
         self.references_by_site.get(&SyntaxSite::from_site(inputs,site)?).map(|id|&self.references[*id])
     }
 }
+#[cfg(test)]
 fn source_decl_id(inputs:&SourceInputs,site:&Site)->String {digest(&(inputs.identity_sha256(),"declaration",site))}
+// Binary SHA256 order is identical to the public fixed-width lowercase hex
+// order. Keep one inline digest per retained declaration; public rows alone
+// allocate the text representation.
+#[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord)]
+struct DeclarationId([u8;32]);
+impl DeclarationId {
+    fn parse(public:&str)->Option<Self> {
+        if public.len()!=64{return None;}
+        let nibble=|byte|match byte{b'0'..=b'9'=>Some(byte-b'0'),b'a'..=b'f'=>Some(byte-b'a'+10),_=>None};
+        let mut bytes=[0;32];
+        for (byte,pair) in bytes.iter_mut().zip(public.as_bytes().chunks_exact(2)) {
+            *byte=nibble(pair[0])?<<4|nibble(pair[1])?;
+        }
+        Some(Self(bytes))
+    }
+    fn public(self)->String {
+        const HEX:&[u8;16]=b"0123456789abcdef";
+        let mut public=String::with_capacity(64);
+        for byte in self.0{public.push(HEX[(byte>>4)as usize]as char);public.push(HEX[(byte&15)as usize]as char);}
+        public
+    }
+}
+fn source_decl_key(inputs:&SourceInputs,site:&Site)->DeclarationId {
+    let mut writer=JsonDigestWriter(Sha256::new());
+    serde_json::to_writer(&mut writer,&(inputs.identity_sha256(),"declaration",site)).expect("serializable bounded facts");
+    DeclarationId(writer.0.finalize().into())
+}
 fn syntax_owner(node:&emmylua_parser::LuaSyntaxNode,inputs:&SourceInputs,file:usize)->Option<SyntaxSite> {
     node.ancestors().skip(1).find_map(LuaClosureExpr::cast).map(|closure|SyntaxSite::at(file,inputs.original_range(&inputs.corpus.files[file].path,closure.get_range()).expect("admitted parser range")))
 }
@@ -136,7 +168,22 @@ fn unparen(mut expr:LuaExpr)->LuaExpr {
 impl PreparedSnapshot {
     fn build_syntax_index(&self,counts:&[SourceSyntaxCounts])->Result<SourceSyntaxIndex> {
         assert_eq!(counts.len(),self.inputs.corpus.files.len(),"same immutable admitted file set");
-        let mut index=SourceSyntaxIndex::default();let mut count=0usize;
+        // The immutable Emmy facts already give the exact declaration count.
+        // Avoid growing and reallocating this large native collection beside
+        // the fully loaded workspace: the previous and new capacities overlap.
+        let mut declarations=0usize;
+        for source in &self.inputs.corpus.files {
+            self.control.check().map_err(|e|e.to_string())?;
+            let model=self.analysis.semantic_model(self.files[&source.path]);
+            declarations+=model.file_facts().ok_or("syntax facts missing")?.decls.iter()
+                .filter(|decl|decl.kind.is_local()).count();
+        }
+        self.control.check().map_err(|e|e.to_string())?;
+        let mut index=SourceSyntaxIndex{
+            declarations:Vec::with_capacity(declarations),
+            declaration_ranges:Vec::with_capacity(counts.len()),
+            ..SourceSyntaxIndex::default()
+        };let mut count=0usize;
         for (file_index,source) in self.inputs.corpus.files.iter().enumerate() {
             self.control.check().map_err(|e|e.to_string())?;
             let file=source.path.as_str();let model=self.analysis.semantic_model(self.files[file]);
@@ -152,7 +199,7 @@ impl PreparedSnapshot {
                     if let Some(closure)=LuaClosureExpr::cast(node.clone()){Some(source_site(closure.get_range()))}else{syntax_owner(&node,&self.inputs,file_index)}
                 });
                 let kind=match decl.kind {emmylua_code_analysis::DeclKind::Param=>"parameter",emmylua_code_analysis::DeclKind::Local{is_iter:true,..}=>"loop_local",_=>"local"}.into();
-                index.declarations.push(IndexedDeclaration{id:source_decl_id(&self.inputs,&site.public(&self.inputs)),name:decl.name.to_string(),site,kind,owner,implicit_self:decl.is_implicit_self});
+                index.declarations.push(IndexedDeclaration{id:source_decl_key(&self.inputs,&site.public(&self.inputs)),name:decl.name.to_string(),site,kind,owner,implicit_self:decl.is_implicit_self});
             }
             index.declaration_ranges.push(declaration_start..index.declarations.len());
             // Admit the same complete row count without retaining or hashing

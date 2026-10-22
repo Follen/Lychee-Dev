@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Go 3.2.3 compact-index regressions. The frozen Go fixture and test hashes are
+//! Retained wire compact-index regressions. The frozen reference fixture and test hashes are
 //! recorded separately; declarations here are not evidence of execution.
 use super::*;
 use crate::schema::Document;
@@ -164,7 +164,7 @@ fn compact_copy_chains_share_one_physical_slot_and_preserve_sorted_logical_rows(
 
 #[test]
 fn compact_record_index_fits_large_table_after_source_preparation() {
-    // Exact Go 3.2.3 shape: 189102 physical rows + 227231 explicit copies,
+    // Exact retained wire shape: 189102 physical rows + 227231 explicit copies,
     // with 96 MiB already admitted and only 48 MiB of query metadata left.
     const PHYSICAL: u32 = 189102;
     const COPIES: u32 = 227231;

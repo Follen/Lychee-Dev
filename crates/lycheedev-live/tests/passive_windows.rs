@@ -78,9 +78,7 @@ fn actual_windows_source_keeps_visible_owned_windows_and_excludes_hidden_window(
 #[test]
 fn native_enumeration_retains_the_control_cause() {
     let control = OperationControl::default();
-    control
-        .cancel_handle()
-        .store(true, std::sync::atomic::Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(
         WindowsSource.windows(&control).unwrap_err().code,
         "command.cancelled"

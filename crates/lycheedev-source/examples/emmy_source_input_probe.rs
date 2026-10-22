@@ -2,11 +2,11 @@
 use std::{path::PathBuf,sync::{Arc,atomic::AtomicBool},time::{Duration,Instant}};
 use emmylua_code_analysis::{Emmyrc,EmmyrcLuaVersion};
 use lycheedev_core::control::OperationControl;
-use lycheedev_source::native::{SourceInputs,SourceInputSpec,SourceFileInput,SourceMap,SourceLimits,TrustedHostEnvironment,LuacIdentity,hash,prepare};
+use lycheedev_source::native::{ENGINE_ARCHIVE_SHA256,ENGINE_COMMIT,SourceInputs,SourceInputSpec,SourceFileInput,SourceMap,SourceLimits,TrustedHostEnvironment,LuacIdentity,hash,prepare};
 use rowan::TextRange;
 use serde_json::{Value,json};
 
-fn control()->OperationControl { OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(false))) }
+fn control()->OperationControl { OperationControl::uncancelable(Instant::now()+Duration::from_secs(30)) }
 fn file(path:&str,text:&str)->SourceFileInput {SourceFileInput{path:path.into(),original_utf8:text.into(),content_sha256:hash(text.as_bytes()),analysis_utf8:text.into(),map:SourceMap::Identity}}
 fn spec(c:&OperationControl)->SourceInputSpec {
     let mut config=Emmyrc::default();config.runtime.version=EmmyrcLuaVersion::Lua51;
@@ -19,7 +19,7 @@ fn assertion(name:&str,expected:Value,actual:Value,failed:&mut usize) {
 }
 fn main(){
     let mut failed=0;let c=control();let good=SourceInputs::admit(spec(&c),&c).expect("valid fixed owned inputs");
-    println!("{}",json!({"schema":"lycheedev.native-source-input-probe.v1","event":"admission","identity":good.identity(),"identitySHA256":good.identity_sha256(),"compiledPatchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")}));
+    println!("{}",json!({"schema":"lycheedev.native-source-input-probe.v1","event":"admission","identity":good.identity(),"identitySHA256":good.identity_sha256(),"engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}));
     let invalid=json!({"code":"source.native_invalid_input","exit":4});
     assertion("input:actual_original_bytes",json!("local value = 1\n"),json!(good.original("owned.lua").unwrap()),&mut failed);
     assertion("input:syntax_is_pending",json!("pending"),good.identity()["syntaxCheck"]["state"].clone(),&mut failed);
@@ -51,22 +51,23 @@ fn main(){
     let mut s=spec(&c);s.source_identity["identity"]=json!("two");let changed=SourceInputs::admit(s,&c).unwrap();assertion("input:source_identity_invalidates_key",json!(true),json!(changed.identity_sha256()!=good.identity_sha256()),&mut failed);
     let mut s=spec(&c);s.limits.construction_steps-=1;let changed=SourceInputs::admit(s,&c).unwrap();assertion("input:actual_limits_in_key",json!(true),json!(changed.identity_sha256()!=good.identity_sha256()),&mut failed);
     let mut s=spec(&c);s.luac.executable_sha256="1".repeat(64);let changed=SourceInputs::admit(s,&c).unwrap();assertion("input:luac_identity_invalidates_key",json!(true),json!(changed.identity_sha256()!=good.identity_sha256()),&mut failed);
-    let cancelled=OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(true)));
+    let cancelled_signal=lycheedev_core::control::TrackedCancellation::new();cancelled_signal.cancel();
+    let cancelled=OperationControl::tracked(Instant::now()+Duration::from_secs(30),cancelled_signal);
     assertion("input:cancel_classification",json!({"code":"command.cancelled","exit":7}),error(spec(&c),&cancelled),&mut failed);
-    let expired=OperationControl::new(Instant::now()-Duration::from_millis(1),Arc::new(AtomicBool::new(false)));
+    let expired=OperationControl::uncancelable(Instant::now()-Duration::from_millis(1));
     assertion("input:deadline_classification",json!({"code":"command.deadline","exit":5}),error(spec(&c),&expired),&mut failed);
-    let excessive=OperationControl::new(Instant::now()+Duration::from_secs(31),Arc::new(AtomicBool::new(false)));
+    let excessive=OperationControl::uncancelable(Instant::now()+Duration::from_secs(31));
     assertion("input:larger_control_budget_refused",invalid.clone(),error(spec(&c),&excessive),&mut failed);
     let prepared=prepare(good.clone(),&c).expect("same operation prepares exact admitted inputs");
     assertion("input:prepare_uses_admitted_file",json!(["owned.lua"]),json!(prepared.files().keys().collect::<Vec<_>>()),&mut failed);
     let replacement=control();let result=prepare(good.clone(),&replacement).err().map(|e|json!({"code":e.code,"exit":e.exit_code}));
     assertion("input:prepare_clock_reset_refused",invalid.clone(),json!(result),&mut failed);
-    let foreign_token=OperationControl::new(c.deadline(),Arc::new(AtomicBool::new(false)));let result=prepare(good,&foreign_token).err().map(|e|json!({"code":e.code,"exit":e.exit_code}));
+    let foreign_token=OperationControl::uncancelable(c.deadline());let result=prepare(good,&foreign_token).err().map(|e|json!({"code":e.code,"exit":e.exit_code}));
     assertion("input:prepare_foreign_token_refused",invalid,json!(result),&mut failed);
-    let cancelled=control();let admitted=SourceInputs::admit(spec(&cancelled),&cancelled).unwrap();cancelled.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+    let cancelled=control();let admitted=SourceInputs::admit(spec(&cancelled),&cancelled).unwrap();cancelled.tracked_cancel_handle().unwrap().cancel();
     let result=prepare(admitted,&cancelled).err().map(|e|json!({"code":e.code,"exit":e.exit_code}));
     assertion("input:cancel_after_admit",json!({"code":"command.cancelled","exit":7}),json!(result),&mut failed);
-    let short=OperationControl::new(Instant::now()+Duration::from_millis(500),Arc::new(AtomicBool::new(false)));let admitted=SourceInputs::admit(spec(&short),&short).unwrap();std::thread::sleep(Duration::from_millis(600));
+    let short=OperationControl::uncancelable(Instant::now()+Duration::from_millis(500));let admitted=SourceInputs::admit(spec(&short),&short).unwrap();std::thread::sleep(Duration::from_millis(600));
     let result=prepare(admitted,&short).err().map(|e|json!({"code":e.code,"exit":e.exit_code}));
     assertion("input:deadline_after_admit",json!({"code":"command.deadline","exit":5}),json!(result),&mut failed);
     println!("{}",json!({"schema":"lycheedev.native-source-input-probe.v1","event":"end","complete":true,"failed":failed,"fullSourceAcceptance":false}));

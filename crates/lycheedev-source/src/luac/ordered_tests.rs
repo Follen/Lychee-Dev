@@ -24,7 +24,7 @@ fn ordered_cancel_before_io_retains_caller_lineage() {
     );
     cancellation.cancel();
     let error = runtime(Path::new("nonexistent-owned-fixture"))
-        .check_with_ordered_control(Path::new("must-not-exist"), &BTreeMap::new(), &control)
+        .check_with_control(Path::new("must-not-exist"), &BTreeMap::new(), &control)
         .unwrap_err();
     assert_eq!(error.code, "command.cancelled");
     assert_eq!(control.stop_cause().unwrap(), Some(StopCause::Cancelled));
@@ -38,7 +38,7 @@ fn ordered_expired_short_parent_wins_over_later_cancel() {
     );
     cancellation.cancel();
     let error = runtime(Path::new("nonexistent-owned-fixture"))
-        .check_with_ordered_control(Path::new("must-not-exist"), &BTreeMap::new(), &parent)
+        .check_with_control(Path::new("must-not-exist"), &BTreeMap::new(), &parent)
         .unwrap_err();
     assert_eq!(error.code, "command.deadline");
     assert_eq!(
@@ -61,7 +61,7 @@ fn ordered_empty_compile_checks_closes_and_keeps_parent_ordered() {
     fs::write(root.join("LICENSE"), b"license").unwrap();
     let control = OperationControl::default();
     let checked = runtime(&root)
-        .check_with_ordered_control(&root.join("staging"), &BTreeMap::new(), &control)
+        .check_with_control(&root.join("staging"), &BTreeMap::new(), &control)
         .unwrap();
     assert_eq!(checked["checkedLua"], 0);
     assert_eq!(control.stop_cause().unwrap(), None);
@@ -84,7 +84,7 @@ fn ordered_identity_failure_releases_already_acquired_runtime() {
     fs::write(root.join("never.exe"), b"not executed").unwrap();
     fs::write(root.join("LICENSE"), b"changed").unwrap();
     let error = runtime(&root)
-        .check_with_ordered_control(
+        .check_with_control(
             &root.join("staging"),
             &BTreeMap::new(),
             &OperationControl::default(),
@@ -193,5 +193,5 @@ fn ordered_retention_marker_survives_checked_close_cause_tree() {
 }
 
 // Keep the shared ownership regression family under the existing CI selector.
-#[path = "legacy_tests.rs"]
-mod legacy_tests;
+#[path = "ownership_tests.rs"]
+mod ownership_tests;

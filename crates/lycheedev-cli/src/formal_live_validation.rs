@@ -37,7 +37,7 @@ impl AddonValidator for CliAddonValidator {
             // remove the parent of potentially live child/pipe scratch either.
             scratch.1 = false;
             let compiled =
-                compiler.check_with_ordered_control(&scratch.0.join("compile"), &inputs, control);
+                compiler.check_with_control(&scratch.0.join("compile"), &inputs, control);
             scratch.1 = !compiled
                 .as_ref()
                 .err()
@@ -261,10 +261,16 @@ fn requires_validation_retention(error: &ToolkitError) -> bool {
 struct Scratch(PathBuf, bool);
 impl Scratch {
     fn new(control: &OperationControl) -> Result<Self> {
-        Self::new_in(
-            &std::env::temp_dir().join("lycheedev-addon-validator-v1"),
-            control,
-        )
+        // Production validation reuses one installation-level parent so stale
+        // roots are admitted deliberately. Unit tests run in parallel, so each
+        // test gets its own parent to avoid lock contention between fixtures.
+        static PARENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let parent = std::env::temp_dir().join(format!(
+            "lycheedev-addon-validator-v1-{}-{}",
+            std::process::id(),
+            PARENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        Self::new_in(&parent, control)
     }
     fn new_in(parent: &Path, control: &OperationControl) -> Result<Self> {
         Self::new_in_with(parent, control, storage::atomic_write_controlled)
@@ -432,7 +438,7 @@ mod tests {
             .collect()
     }
     #[test]
-    fn repair_manifest_accepts_exact_fixed_go_identity_and_all_interfaces() {
+    fn repair_manifest_accepts_exact_reference_identity_and_all_interfaces() {
         let rows = resources();
         let files = rows.iter().map(|r| (r.path.as_str(), r)).collect();
         assert!(manifest(&toc(""), "test", &files).is_ok());

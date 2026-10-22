@@ -21,7 +21,7 @@ use crate::{
 };
 pub(crate) use cache_projection::{build_summary_with_control, decode_summary};
 use lycheedev_core::{
-    Result, ToolkitError, evidence, metadata::historical_write::finish_historical,
+    Result, ToolkitError, evidence, metadata::owned_write::finish_owned,
     selection::SourcePin, storage,
 };
 use profile::{Phase, Profile};
@@ -381,7 +381,7 @@ fn fingerprint_fields_checked(
     use sha2::Digest;
     let mut hash = sha2::Sha256::new();
     check()?;
-    hash.update(b"rust-index-v18\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0");
+    hash.update(b"rust-index-v20\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0TS0.26.3\0Lua0.5.0\0XML0.38\0xml-inline-v2-original-lines\0generator-v6\0");
     for (ordinal, field) in [repository, product, commit, parser]
         .into_iter()
         .enumerate()
@@ -443,7 +443,7 @@ where
         Err(e) => return Err(e),
     };
     let manifest = metadata.read_controlled::<Value>(&key, control);
-    let manifest = finish_historical(manifest, metadata.close());
+    let manifest = finish_owned(manifest, metadata.close());
     drop(metadata_phase);
     if let Ok(manifest) = &manifest {
         if manifest["schema"] == persistence_wire::SCHEMA && manifest["identity"] == identity {
@@ -542,7 +542,7 @@ where
         Ok((map, blob["sha256"].as_str().unwrap().to_owned()))
     })();
     let (map, digest) = crate::persistence::finish_control(
-        finish_historical(result, lock.close()),
+        finish_owned(result, lock.close()),
         control.check(),
     )?;
     // The cold path still builds, serializes and publishes the complete index.
@@ -604,11 +604,11 @@ pub fn is_ready_with_control(
             Err(e) => Err(e.into()),
         }
     })();
-    crate::persistence::finish_control(finish_historical(result, metadata.close()), control.check())
+    crate::persistence::finish_control(finish_owned(result, metadata.close()), control.check())
 }
 fn facts_cache_key(path: &str, sha256: &str) -> String {
     storage::sha256(format!(
-        "facts-layout-v13-postcard-1.1.3\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
+        "facts-layout-v13-postcard-1.1.3\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0xml-inline-v2-original-lines\0generator-v6\0{path}\0{sha256}"
     ).as_bytes())
 }
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
@@ -775,6 +775,8 @@ fn build_uncached_cached<S: BuiltSymbols>(
         home: home.into(),
     };
     let (mut skipped, mut diagnostics, mut relationships) = (0, Vec::new(), 0usize);
+    let mut warnings = 0usize;
+    let mut warning_sample: Vec<model::EncodingWarning> = Vec::new();
     let document_count = files
         .iter()
         .filter(|file| !file.asset && !file.oversized)
@@ -855,6 +857,20 @@ fn build_uncached_cached<S: BuiltSymbols>(
                 return Ok(());
             }
             let sha256 = document_input_sha(file, &data, &mut retained)?;
+            // Encoding is a display observation independent of parsing. It is
+            // counted separately from syntax diagnostics and never removes the
+            // document from the analyzed/AST counts.
+            if let Some(warning) = crate::encoding::warning(&data) {
+                warnings += 1;
+                if warning_sample.len() < 20 {
+                    warning_sample.push(model::EncodingWarning {
+                        path: file.path.clone(),
+                        line: warning.line,
+                        byte_offset: warning.byte_offset,
+                        message: warning.message(),
+                    });
+                }
+            }
             let (facts, cache_hit, facts_locator) =
                 grouped.document(file, &data, &sha256, prepared, &mut index.documents)?;
             if cache_hit {
@@ -927,11 +943,20 @@ fn build_uncached_cached<S: BuiltSymbols>(
         }
         index.summary.diagnostic_sample = Some(sample);
     }
+    index.summary.warnings = warnings;
+    if warnings != 0 {
+        let mut sample = model::Samples::default();
+        for warning in warning_sample {
+            sample.push(warning);
+        }
+        index.summary.warning_sample = Some(sample);
+    }
     Ok(index)
 }
 
-// The ordered consumer's original retention/encoding prelude remains before
-// every cache error, including a deferred read-admission error for this row.
+// The ordered consumer's original retention prelude remains before every cache
+// error, including a deferred read-admission error for this row. Bytes are
+// archived and hashed as-is; invalid UTF-8 is a display/engine concern only.
 fn document_input_sha(file: &git::TreeFile, data: &[u8], retained: &mut usize) -> Result<String> {
     *retained = retained.checked_add(file.bytes).ok_or_else(|| {
         ToolkitError::new(
@@ -945,16 +970,6 @@ fn document_input_sha(file: &git::TreeFile, data: &[u8], retained: &mut usize) -
             "codebase.source_budget",
             "Source query memory budget exceeded",
             3,
-        ));
-    }
-    if std::str::from_utf8(data).is_err() {
-        // Fixed Go AnalyzeDocument returns an untyped error here, which
-        // aborts the index and maps to command.failed / dispatch / exit 5.
-        // It is not a recoverable parse note or an oversized-file skip.
-        return Err(ToolkitError::new(
-            "command.failed",
-            "codebase.analysis_encoding_or_budget",
-            5,
         ));
     }
     Ok(storage::sha256(data))
@@ -1391,6 +1406,125 @@ mod facts_cache_tests {
         process::{Command, Stdio},
     };
 
+    pub(super) struct Fixture {
+        pub(super) home: PathBuf,
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.home);
+        }
+    }
+    impl Fixture {
+        pub(super) fn new() -> Self {
+            let home = std::env::temp_dir().join(format!(
+                "lycheedev-load-cache-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            workspace::initialize(&home).unwrap();
+            let mirror = git::mirror(&home, "elvui");
+            assert!(
+                Command::new("git")
+                    .args(["init", "--bare"])
+                    .arg(&mirror)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
+            Self { home }
+        }
+        fn git(&self, input: &str, args: &[&str]) -> String {
+            self.git_bytes(input.as_bytes(), args)
+        }
+        fn git_bytes(&self, input: &[u8], args: &[&str]) -> String {
+            let mut child = Command::new("git")
+                .arg("--git-dir")
+                .arg(git::mirror(&self.home, "elvui"))
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "Facts Fixture")
+                .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
+                .env("GIT_COMMITTER_NAME", "Facts Fixture")
+                .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child.stdin.take().unwrap().write_all(input).unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        }
+        fn write_tree(&self, blobs: &BTreeMap<String, String>, prefix: &str) -> String {
+            let mut entries = String::new();
+            let mut directories = BTreeSet::new();
+            for (path, blob) in blobs {
+                if let Some(relative) = path.strip_prefix(prefix) {
+                    if let Some((directory, _)) = relative.split_once('/') {
+                        directories.insert(directory);
+                    } else {
+                        entries.push_str(&format!("100644 blob {blob}\t{relative}\n"));
+                    }
+                }
+            }
+            for directory in directories {
+                let child = self.write_tree(blobs, &format!("{prefix}{directory}/"));
+                entries.push_str(&format!("040000 tree {child}\t{directory}\n"));
+            }
+            self.git(&entries, &["mktree"])
+        }
+        fn pinned(&self, message: &str, blobs: &BTreeMap<String, String>) -> SourcePin {
+            let tree = self.write_tree(blobs, "");
+            SourcePin {
+                repository: "elvui".into(),
+                product: "main".into(),
+                requested_ref: "fixture".into(),
+                exact_commit: self.git(message, &["commit-tree", &tree]),
+                parser_revision: git::PARSER.into(),
+            }
+        }
+        pub(super) fn pin(&self, documents: &BTreeMap<String, String>) -> SourcePin {
+            // Large path-partition fixtures intentionally reuse a handful of
+            // source bodies. Authenticate each distinct body once rather than
+            // launching a redundant hash-object child for every path.
+            let mut objects = BTreeMap::new();
+            let blobs = documents
+                .iter()
+                .map(|(path, raw)| {
+                    (
+                        path.clone(),
+                        objects
+                            .entry(raw.as_str())
+                            .or_insert_with(|| self.git(raw, &["hash-object", "-w", "--stdin"]))
+                            .clone(),
+                    )
+                })
+                .collect();
+            self.pinned("facts", &blobs)
+        }
+        /// Byte exact pin for inputs that are not valid UTF-8.
+        pub(super) fn pin_raw(&self, documents: &BTreeMap<String, Vec<u8>>) -> SourcePin {
+            let blobs = documents
+                .iter()
+                .map(|(path, raw)| {
+                    (
+                        path.clone(),
+                        self.git_bytes(raw, &["hash-object", "-w", "--stdin"]),
+                    )
+                })
+                .collect();
+            self.pinned("raw facts", &blobs)
+        }
+    }
+
     fn evict_document_facts(home: &Path, document: &Document) {
         if let Some(locator) = &document.facts_locator {
             let key = locator
@@ -1544,472 +1678,6 @@ mod facts_cache_tests {
         assert_eq!(profile.calls(Phase::FactsParse), 0);
     }
 
-    // These two public rows are the actual 9a generated-20 observations retained
-    // in PR #14 comment 6232293175. The fixture source/path bytes stay original.
-    fn generated_contract_9a_cases() -> Vec<(String, Vec<u8>, Value)> {
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../../../tests/rust-parity/source-facts-generated/cases.json"
-        ))
-        .unwrap();
-        [
-            (
-                "parenthesized_field_and_entry",
-                json!({
-                    "declarations":[
-                        {"name":"Root","category":"api-system","line":1,"endLine":1,"signature":"Root"},
-                        {"name":"Run","category":"api-function","line":1,"endLine":1,"signature":"Run(y: string)"}
-                    ],
-                    "relationships":[],"loads":[],"headers":[],"diagnostics":[]
-                }),
-            ),
-            (
-                "unsupported_clears_all",
-                json!({
-                    "declarations":[],"relationships":[],"loads":[],"headers":[],
-                    "diagnostics":[{"message":"Syntax unavailable in fixed Go Lua parser","line":1}]
-                }),
-            ),
-        ]
-        .into_iter()
-        .map(|(id, facts)| {
-            let case = fixture["cases"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|case| case["id"] == id)
-                .unwrap();
-            (
-                case["path"].as_str().unwrap().to_owned(),
-                case["source"].as_str().unwrap().as_bytes().to_vec(),
-                facts,
-            )
-        })
-        .collect()
-    }
-    fn generated_contract_9a_fingerprint(pin: &SourcePin) -> String {
-        storage::sha256(format!("rust-index-v11\0facts-layout-v10-go323-xml-lexical\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes())
-    }
-    fn generated_contract_9a_envelope(raw: &[u8], facts: &Value) -> Value {
-        json!({
-            "schema":"lycheedev.source-facts.rust.v10",
-            "inputSHA256":storage::sha256(raw),
-            "factsSHA256":storage::sha256(&serde_json::to_vec(facts).unwrap()),
-            "facts":facts
-        })
-    }
-    fn generated_contract_9a_file(home: &Path, path: &str, raw: &[u8]) -> PathBuf {
-        let digest = storage::sha256(raw);
-        let key = storage::sha256(format!("facts-layout-v10-go323-xml-lexical\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{digest}").as_bytes());
-        home.join("cache/source-facts-rust")
-            .join(format!("{key}.json"))
-    }
-    fn assert_corrected_generated_contract(path: &str, facts: &Facts) {
-        if path.ends_with("parenthesized_field_and_entry.lua") {
-            assert_eq!(
-                facts
-                    .declarations
-                    .iter()
-                    .map(|row| (row.name.as_str(), row.signature.as_str()))
-                    .collect::<Vec<_>>(),
-                [
-                    ("Root", "Root"),
-                    ("Ignored", "Ignored()"),
-                    ("Run", "Run(x: number, y: string)")
-                ]
-            );
-        } else {
-            assert!(path.ends_with("unsupported_clears_all.lua"));
-            assert_eq!(facts.diagnostics.len(), 1);
-            assert_eq!(facts.diagnostics[0].line, 1);
-            assert_eq!(
-                facts.diagnostics[0].message,
-                "source line:1(column:48) near '/':   syntax error\n"
-            );
-        }
-    }
-
-    #[test]
-    fn generated_contract_rebuilds_valid_9a_file_caches_and_reuses_current_envelopes() {
-        let fixture = Fixture::new();
-        let control = OperationControl::default();
-        for (path, raw, old_facts) in generated_contract_9a_cases() {
-            let digest = storage::sha256(&raw);
-            let old_path = generated_contract_9a_file(&fixture.home, &path, &raw);
-            let old_envelope = generated_contract_9a_envelope(&raw, &old_facts);
-            storage::atomic_json(&old_path, &old_envelope).unwrap();
-            let old_bytes = fs::read(&old_path).unwrap();
-            let current_path = facts_cache_path(&fixture.home, &path, &digest);
-            assert_ne!(old_path, current_path);
-            let expected = facts::lua(&raw, true);
-            assert_corrected_generated_contract(&path, &expected);
-            assert_ne!(serde_json::to_value(&expected).unwrap(), old_facts);
-            let (rebuilt, hit) =
-                document_facts(&fixture.home, &path, &raw, &digest, &control).unwrap();
-            assert!(
-                !hit,
-                "the authenticated old layout cannot satisfy current facts"
-            );
-            assert_eq!(
-                serde_json::to_value(&rebuilt).unwrap(),
-                serde_json::to_value(&expected).unwrap()
-            );
-            let current = fs::read(&current_path).unwrap();
-            assert_eq!(&current[..8], facts::binary::MAGIC);
-            assert_eq!(fs::read(&old_path).unwrap(), old_bytes);
-            // Even valid old digests copied under the new key cannot bypass
-            // the envelope schema gate. Rebuild, then prove a real warm hit.
-            storage::atomic_json(&current_path, &old_envelope).unwrap();
-            let (rebuilt, hit) =
-                document_facts(&fixture.home, &path, &raw, &digest, &control).unwrap();
-            assert!(!hit);
-            assert_eq!(
-                serde_json::to_value(&rebuilt).unwrap(),
-                serde_json::to_value(&expected).unwrap()
-            );
-            assert_eq!(fs::read(&current_path).unwrap(), current);
-            let (warm, hit) =
-                document_facts(&fixture.home, &path, &raw, &digest, &control).unwrap();
-            assert!(hit);
-            assert_eq!(
-                serde_json::to_value(&warm).unwrap(),
-                serde_json::to_value(&expected).unwrap()
-            );
-            assert_eq!(fs::read(&old_path).unwrap(), old_bytes);
-        }
-    }
-
-    #[test]
-    fn generated_contract_rejects_9a_index_and_rekeys_query_readiness_and_warm_hits() {
-        let fixture = Fixture::new();
-        let control = OperationControl::default();
-        let cases = generated_contract_9a_cases();
-        let raw = cases
-            .iter()
-            .map(|(path, raw, _)| (path.clone(), String::from_utf8(raw.clone()).unwrap()))
-            .collect();
-        let pin = fixture.pin(&raw);
-        assert_eq!(pin.parser_revision, "source-v1");
-        let old_identity = generated_contract_9a_fingerprint(&pin);
-        let identity = fingerprint(&pin);
-        assert_ne!(identity, old_identity);
-        let current = build_uncached(&fixture.home, &pin, &control).unwrap();
-        let without_io = |index: &Index| {
-            let mut value = serde_json::to_value(index).unwrap();
-            value["summary"].as_object_mut().unwrap().remove("io");
-            value
-        };
-        let expected = without_io(&current);
-        // Reconstruct the valid v6 index container from the sealed old public
-        // rows. Recompute its declaration ordinals/IDs, content hash and manifest
-        // exactly; rejection must be due to the new identity, not bad bytes.
-        let mut old = current;
-        old.symbols.retain(|symbol| symbol.name != "Ignored");
-        for (ordinal, symbol) in old.symbols.iter_mut().enumerate() {
-            symbol.ordinal = ordinal;
-            if symbol.name == "Run" {
-                symbol.signature = "Run(y: string)".into();
-            }
-            symbol.id = stable_id(&pin, symbol);
-        }
-        old.summary.declarations = 2;
-        old.summary
-            .diagnostic_sample
-            .as_mut()
-            .unwrap()
-            .iter_mut()
-            .next()
-            .unwrap()
-            .message = "Syntax unavailable in fixed Go Lua parser".into();
-        for (path, raw, facts) in &cases {
-            old.documents
-                .iter_mut()
-                .find(|doc| doc.path == *path)
-                .unwrap()
-                .facts = serde_json::from_value(facts.clone()).unwrap();
-            let doc = old.documents.iter_mut().find(|d| d.path == *path).unwrap();
-            evict_document_facts(&fixture.home, doc);
-            // The reconstructed 9a index never contained a packed locator.
-            doc.facts_locator = None;
-            storage::atomic_json(
-                &generated_contract_9a_file(&fixture.home, path, raw),
-                &generated_contract_9a_envelope(raw, facts),
-            )
-            .unwrap();
-        }
-        let old_raw = serde_json::to_vec(&without_io(&old)).unwrap();
-        let old_blob = lycheedev_core::cache::publish_derived_controlled(
-            &fixture.home,
-            &old_raw,
-            128 << 20,
-            &control,
-        )
-        .unwrap();
-        let old_key = format!("source/rust-index/{old_identity}");
-        let old_manifest = json!({"schema":"lycheedev.source-index.rust.v6","identity":old_identity,"blob":old_blob});
-        crate::persistence::put_manifest(&fixture.home, &old_key, &old_manifest, &control).unwrap();
-        assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
-        assert_eq!(
-            crate::query_store::status_with_control(&fixture.home, &pin, &control).unwrap()["ready"],
-            false
-        );
-        let (rebuilt, _) = build_material_with_control(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(rebuilt.summary.io["parsedDocuments"], 2);
-        assert_eq!(rebuilt.summary.io["cachedFacts"], 0);
-        assert_eq!(without_io(&rebuilt), expected);
-        for doc in &rebuilt.documents {
-            assert_corrected_generated_contract(&doc.path, &doc.facts);
-        }
-        assert!(is_ready_with_control(&fixture.home, &pin, &control).unwrap());
-        assert_eq!(
-            crate::query_store::status_with_control(&fixture.home, &pin, &control).unwrap()["ready"],
-            true
-        );
-        let (warm, _) = build_material_with_control(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(warm.summary.io["cachedIndex"], true);
-        assert_eq!(without_io(&warm), expected);
-        let query = crate::query_store::load_with_control(
-            &fixture.home,
-            &pin,
-            "Ignored",
-            "precise",
-            "api",
-            &control,
-        )
-        .unwrap();
-        assert_eq!(query.summary.io["cachedIndex"], false);
-        assert!(
-            query
-                .symbols
-                .iter()
-                .any(|symbol| symbol.name == "Ignored" && symbol.signature == "Ignored()")
-        );
-        let query_manifest: Value = crate::persistence::read(
-            &fixture.home,
-            &format!("source/rust-query-file/{identity}"),
-            &control,
-        )
-        .unwrap();
-        assert_eq!(query_manifest["identity"], identity);
-        let query = crate::query_store::load_with_control(
-            &fixture.home,
-            &pin,
-            "Ignored",
-            "precise",
-            "api",
-            &control,
-        )
-        .unwrap();
-        assert_eq!(query.summary.io["cachedIndex"], true);
-        assert!(query.symbols.iter().any(|symbol| symbol.name == "Ignored"));
-        assert_eq!(
-            crate::persistence::read::<Value>(&fixture.home, &old_key, &control).unwrap(),
-            old_manifest
-        );
-        let digest = old_blob["sha256"].as_str().unwrap();
-        assert_eq!(
-            fs::read(
-                fixture
-                    .home
-                    .join("cache/objects")
-                    .join(&digest[..2])
-                    .join(&digest[2..])
-            )
-            .unwrap(),
-            old_raw
-        );
-    }
-
-    #[test]
-    fn malformed_contract_invalidates_previous_index_and_file_facts() {
-        let pin = SourcePin {
-            repository: "elvui".into(),
-            product: "main".into(),
-            requested_ref: "fixture".into(),
-            exact_commit: "a".repeat(40),
-            parser_revision: git::PARSER.into(),
-        };
-        let previous = storage::sha256(format!("rust-index-v8\0facts-layout-v7-go323-public\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes());
-        assert_ne!(fingerprint(&pin), previous);
-        let previous_observation = storage::sha256(format!("rust-index-v9\0facts-layout-v8-go323-malformed\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes());
-        assert_ne!(fingerprint(&pin), previous_observation);
-        let input = storage::sha256(b"function goto() end");
-        let previous_file = storage::sha256(format!("facts-layout-v7-go323-public\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0Example.lua\0{input}").as_bytes());
-        let current = facts_cache_path(Path::new("fixture-home"), "Example.lua", &input);
-        assert_ne!(
-            current,
-            Path::new("fixture-home")
-                .join("cache/source-facts-rust")
-                .join(format!("{previous_file}.json"))
-        );
-    }
-
-    #[test]
-    fn xml_lexical_contract_invalidates_previous_index_and_file_facts() {
-        let pin = SourcePin {
-            repository: "elvui".into(),
-            product: "main".into(),
-            requested_ref: "fixture".into(),
-            exact_commit: "a".repeat(40),
-            parser_revision: git::PARSER.into(),
-        };
-        let previous = storage::sha256(format!("rust-index-v10\0facts-layout-v9-go323-observed\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes());
-        assert_ne!(fingerprint(&pin), previous);
-        let input = storage::sha256(b"<Ui></Ui junk>");
-        let previous_file = storage::sha256(format!("facts-layout-v9-go323-observed\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0Example.xml\0{input}").as_bytes());
-        assert_ne!(
-            facts_cache_path(Path::new("fixture-home"), "Example.xml", &input),
-            Path::new("fixture-home")
-                .join("cache/source-facts-rust")
-                .join(format!("{previous_file}.json"))
-        );
-    }
-
-    #[test]
-    fn xml_lexical_contract_rebuilds_previous_schema_even_with_valid_digests() {
-        let fixture = Fixture::new();
-        let control = OperationControl::default();
-        let raw = b"<Ui><Frame name=\"Before\"/></Ui junk>";
-        let digest = storage::sha256(raw);
-        let (expected, hit) =
-            document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
-        assert!(!hit);
-        assert_eq!(expected.declarations.len(), 1);
-        assert_eq!(
-            expected.diagnostics[0].message,
-            "XML syntax error on line 1: invalid characters between </Ui and >"
-        );
-        let path = facts_cache_path(&fixture.home, "Example.xml", &digest);
-        let original = fs::read(&path).unwrap();
-        let mut obsolete: Value = serde_json::from_slice(
-            &super::facts_encode_tests::historical_encode(&expected, &digest).unwrap(),
-        )
-        .unwrap();
-        obsolete["schema"] = json!("lycheedev.source-facts.rust.v9");
-        obsolete["facts"]["diagnostics"][0]["message"] =
-            json!("XML syntax error on line 1: element <Ui> closed by </Ui junk>");
-        obsolete["factsSHA256"] = json!(storage::sha256(
-            &serde_json::to_vec(&obsolete["facts"]).unwrap()
-        ));
-        storage::atomic_json(&path, &obsolete).unwrap();
-        let (rebuilt, hit) =
-            document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
-        assert!(!hit);
-        assert_eq!(
-            serde_json::to_value(&rebuilt).unwrap(),
-            serde_json::to_value(&expected).unwrap()
-        );
-        assert_eq!(fs::read(&path).unwrap(), original);
-        let (warm, hit) =
-            document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
-        assert!(hit);
-        assert_eq!(
-            serde_json::to_value(&warm).unwrap(),
-            serde_json::to_value(&expected).unwrap()
-        );
-    }
-
-    pub(super) struct Fixture {
-        pub(super) home: PathBuf,
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.home);
-        }
-    }
-    impl Fixture {
-        pub(super) fn new() -> Self {
-            let home = std::env::temp_dir().join(format!(
-                "lycheedev-load-cache-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            workspace::initialize(&home).unwrap();
-            let mirror = git::mirror(&home, "elvui");
-            assert!(
-                Command::new("git")
-                    .args(["init", "--bare"])
-                    .arg(&mirror)
-                    .output()
-                    .unwrap()
-                    .status
-                    .success()
-            );
-            Self { home }
-        }
-        fn git(&self, input: &str, args: &[&str]) -> String {
-            self.git_bytes(input.as_bytes(), args)
-        }
-        fn git_bytes(&self, input: &[u8], args: &[&str]) -> String {
-            let mut child = Command::new("git")
-                .arg("--git-dir")
-                .arg(git::mirror(&self.home, "elvui"))
-                .args(args)
-                .env("GIT_AUTHOR_NAME", "Facts Fixture")
-                .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
-                .env("GIT_COMMITTER_NAME", "Facts Fixture")
-                .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap();
-            child.stdin.take().unwrap().write_all(input).unwrap();
-            let output = child.wait_with_output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8(output.stdout).unwrap().trim().to_owned()
-        }
-        pub(super) fn pin(&self, documents: &BTreeMap<String, String>) -> SourcePin {
-            fn tree(fixture: &Fixture, blobs: &BTreeMap<String, String>, prefix: &str) -> String {
-                let mut entries = String::new();
-                let mut directories = BTreeSet::new();
-                for (path, blob) in blobs {
-                    if let Some(relative) = path.strip_prefix(prefix) {
-                        if let Some((directory, _)) = relative.split_once('/') {
-                            directories.insert(directory);
-                        } else {
-                            entries.push_str(&format!("100644 blob {blob}\t{relative}\n"));
-                        }
-                    }
-                }
-                for directory in directories {
-                    let child = tree(fixture, blobs, &format!("{prefix}{directory}/"));
-                    entries.push_str(&format!("040000 tree {child}\t{directory}\n"));
-                }
-                fixture.git(&entries, &["mktree"])
-            }
-            // Large path-partition fixtures intentionally reuse a handful of
-            // source bodies. Authenticate each distinct body once rather than
-            // launching a redundant hash-object child for every path.
-            let mut objects = BTreeMap::new();
-            let blobs = documents
-                .iter()
-                .map(|(path, raw)| {
-                    (
-                        path.clone(),
-                        objects
-                            .entry(raw.as_str())
-                            .or_insert_with(|| self.git(raw, &["hash-object", "-w", "--stdin"]))
-                            .clone(),
-                    )
-                })
-                .collect();
-            let tree = tree(self, &blobs, "");
-            SourcePin {
-                repository: "elvui".into(),
-                product: "main".into(),
-                requested_ref: "fixture".into(),
-                exact_commit: self.git("facts", &["commit-tree", &tree]),
-                parser_revision: git::PARSER.into(),
-            }
-        }
-    }
     fn assert_load_bytes(home: &Path, loads: &[LoadFact], raw: &BTreeMap<String, String>) {
         for load in loads {
             assert_eq!(
@@ -2230,7 +1898,7 @@ mod facts_cache_tests {
         let control = OperationControl::default();
         let raw = BTreeMap::from([
             ("First.xml".into(), "<Ui>\n<Frame name=\"First\"/>\n</Ui>".into()),
-            ("Second.xml".into(), "<Ui>\n<Frame name=\"Second\"><Scripts><OnLoad>self:Show()</OnLoad></Scripts></Frame>\n</Ui>".into()),
+            ("Second.xml".into(), "<Ui>\r\n<Frame name=\"Second\"><Scripts><OnLoad>self:Show()</OnLoad></Scripts></Frame>\r\n<Script>&#10;function InlineEntity()&#10; return Run()&#10;end&#10;InlineEntity()</Script>\r\n</Ui>".into()),
             ("Main.toc".into(), "First.xml\nSecond.xml\n".into()),
             ("Main.lua".into(), "function Run() end\n".into()),
         ]);
@@ -2239,6 +1907,9 @@ mod facts_cache_tests {
         let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
         assert_eq!(crate::xml_program::catalog_verifications(), before);
         assert_eq!(cold.summary.io["parsedDocuments"], 4);
+        let inline = cold.symbols.iter().find(|symbol| symbol.kind == "declaration" && symbol.name == "InlineEntity").unwrap();
+        assert_eq!((inline.path.as_str(), inline.line, inline.end_line), ("Second.xml", 3, 3));
+        assert!(!inline.id.is_empty());
         let hit = build_uncached(&fixture.home, &pin, &control).unwrap();
         assert_eq!(crate::xml_program::catalog_verifications(), before);
         assert_eq!(hit.summary.io["cachedFacts"], 4);
@@ -2291,9 +1962,9 @@ mod facts_cache_tests {
         assert_eq!(crate::xml_program::catalog_verifications(), before);
         let raw = b"<Ui><Frame name=\"Stopped\"/></Ui>";
         let digest = storage::sha256(raw);
-        let cancelled = OperationControl::new(
+        let cancelled = crate::native::stopped_control(
+            false,
             Instant::now() + Duration::from_secs(180),
-            Arc::new(AtomicBool::new(true)),
         );
         let expired = OperationControl::uncancelable(Instant::now());
         for (stopped, code) in [
@@ -2322,42 +1993,230 @@ mod facts_cache_tests {
         assert_eq!(crate::xml_program::catalog_verifications(), before);
     }
     #[test]
-    fn invalid_utf8_git_blob_aborts_index_without_publishing_a_ready_manifest() {
+    fn public_index_reports_oversized_source_without_losing_valid_ast_or_encoding_warning() {
         let fixture = Fixture::new();
         let control = OperationControl::default();
-        let good = fixture.git("function Before() end\n", &["hash-object", "-w", "--stdin"]);
-        let bad_raw = b"local broken = \xff\n";
-        let bad = fixture.git_bytes(bad_raw, &["hash-object", "-w", "--stdin"]);
-        let tree = fixture.git(
-            &format!("100644 blob {good}\tAAGood.lua\n100644 blob {bad}\tZZBad.lua\n"),
-            &["mktree"],
+        let limit = 32 << 20;
+        assert_eq!(git::MAX_SOURCE_BYTES, limit);
+        let oversized_bytes = limit + 17;
+        let oversized_path = "Interface/AddOns/Oversized/TooLarge.lua";
+        let valid_path = "Interface/AddOns/Oversized/Valid.lua";
+        let warning_path = "Interface/AddOns/Oversized/Encoding.lua";
+        let mut oversized = b"--".to_vec();
+        oversized.resize(oversized_bytes, b'x');
+        let pin = fixture.pin_raw(&BTreeMap::from([
+            (oversized_path.to_owned(), oversized),
+            (valid_path.to_owned(), b"function WithinLimit() end\n".to_vec()),
+            (
+                warning_path.to_owned(),
+                b"-- original \x92 comment\nfunction EncodingStillValid() end\n".to_vec(),
+            ),
+        ]));
+        let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let message = format!(
+            "source file has {oversized_bytes} bytes, exceeding the {limit}-byte analysis limit; skipped"
         );
-        let pin = SourcePin {
-            repository: "elvui".into(),
-            product: "main".into(),
-            requested_ref: "fixture".into(),
-            exact_commit: fixture.git("invalid encoding fixture", &["commit-tree", &tree]),
-            parser_revision: git::PARSER.into(),
-        };
-        let key = format!("source/rust-index/{}", fingerprint(&pin));
-        // A failed partial cohort is discarded. A retry must still preserve
-        // the invalid-document error and never publish a partial index.
-        for _ in 0..2 {
-            let error = build_material_with_control(&fixture.home, &pin, &control)
-                .err()
+        for index in [&cold, &warm] {
+            assert_eq!(index.summary.documents, 2);
+            assert_eq!(index.summary.ast_files, 2, "both admitted Lua files retain AST coverage");
+            assert_eq!(index.summary.skipped_documents, 1);
+            assert_eq!(index.summary.diagnostics, 1);
+            assert!(!index.summary.complete, "the skipped file makes the full index partial");
+            assert_eq!(index.summary.declarations, 2);
+            assert!(!index.documents.iter().any(|document| document.path == oversized_path));
+            for (path, name) in [(valid_path, "WithinLimit"), (warning_path, "EncodingStillValid")] {
+                assert!(index.documents.iter().any(|document| document.path == path));
+                assert!(index.symbols.iter().any(|symbol| {
+                    symbol.kind == "declaration" && symbol.path == path && symbol.name == name
+                }));
+            }
+            let diagnostics = index.summary.diagnostic_sample.as_ref().unwrap();
+            assert_eq!(diagnostics.len(), 1);
+            let skipped = diagnostics.iter().next().unwrap();
+            assert_eq!(skipped.path, oversized_path);
+            assert_eq!(skipped.line, 0);
+            assert_eq!(skipped.message, message, "report the original path's actual size and limit");
+            assert_eq!(index.summary.warnings, 1, "encoding remains an independent observation");
+            let warnings = index.summary.warning_sample.as_ref().unwrap();
+            assert_eq!(warnings.len(), 1);
+            let warning = warnings.iter().next().unwrap();
+            assert_eq!(warning.path, warning_path);
+            assert_eq!(warning.line, 1);
+            assert_eq!(warning.byte_offset, 12);
+            assert!(warning.message.contains("0x92"));
+            let coverage = index.coverage();
+            assert_eq!(coverage["analyzedDocuments"], 2);
+            assert_eq!(coverage["skippedDocuments"], 1);
+            assert_eq!(coverage["diagnostics"], 1);
+            assert_eq!(coverage["complete"], false);
+            assert_eq!(coverage["diagnosticSample"][0]["path"], oversized_path);
+            assert_eq!(coverage["diagnosticSample"][0]["message"], message);
+            assert_eq!(coverage["warnings"], 1);
+            assert_eq!(coverage["warningSample"][0]["path"], warning_path);
+            let result = index
+                .search_with_control(&pin, "snapshot", "WithinLimit", "exploratory", "", 20, "", &control)
                 .unwrap();
-            assert_eq!(error.code, "command.failed");
-            assert_eq!(error.message, "codebase.analysis_encoding_or_budget");
-            assert_eq!(error.exit_code, 5);
-            assert!(error.details.is_null());
-            assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
-            let missing =
-                crate::persistence::read::<Value>(&fixture.home, &key, &control).unwrap_err();
-            assert_eq!(missing.code, "vault.record_missing");
-            assert!(
-                !facts_cache_path(&fixture.home, "ZZBad.lua", &storage::sha256(bad_raw)).exists()
-            );
+            assert!(result["results"].as_array().unwrap().iter().any(|row| row["path"] == valid_path));
+            assert_eq!(result["complete"], false, "a successful normal match retains partial-index coverage");
+            assert_eq!(result["truncated"], false);
+            assert_eq!(result["coverage"]["skippedDocuments"], 1);
+            assert_eq!(result["coverage"]["warnings"], 1);
         }
+    }
+
+    // N11: a non-UTF-8 comment byte is a display observation. It must not drop
+    // the document, its declarations, the AST count, the load validity or the
+    // archived identity, and cold/warm indexes must agree exactly.
+    #[test]
+    fn non_utf8_lua_comment_keeps_analysis_identity_and_reports_encoding_warning() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let path = "Interface/AddOns/Blizzard_NewPlayerExperience/Camelot/Blizzard_TutorialData.lua";
+        let mut raw = b"function TutorialBefore() end\n".to_vec();
+        raw.extend_from_slice(b"-- Night Web\x92s Hollow\r\n");
+        raw.extend_from_slice(b"function TutorialAfter() end\n");
+        let offset = raw.iter().position(|byte| *byte == 0x92).unwrap();
+        let pin = fixture.pin_raw(&BTreeMap::from([
+            (path.to_owned(), raw.clone()),
+            ("Other.lua".to_owned(), b"function Other() end\n".to_vec()),
+        ]));
+        let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        for index in [&cold, &warm] {
+            assert_eq!(index.summary.documents, 2);
+            assert_eq!(index.summary.ast_files, 2, "AST count unchanged");
+            assert_eq!(index.summary.skipped_documents, 0);
+            assert_eq!(index.summary.diagnostics, 0, "encoding is not a syntax diagnostic");
+            assert!(index.summary.complete, "encoding warning must not make the index partial");
+            assert_eq!(index.summary.declarations, 3);
+            assert_eq!(index.summary.warnings, 1);
+            let sample = index.summary.warning_sample.as_ref().unwrap();
+            assert_eq!(sample.len(), 1);
+            let warning = sample.iter().next().unwrap();
+            assert_eq!(warning.path, path);
+            assert_eq!(warning.line, 2);
+            assert_eq!(warning.byte_offset, offset);
+            assert!(warning.message.contains("0x92"), "{}", warning.message);
+            assert_eq!(index.coverage()["warnings"], 1);
+            assert_eq!(index.coverage()["warningSample"][0]["line"], 2);
+            assert_eq!(index.coverage()["warningSample"][0]["byteOffset"], offset);
+            let names = index
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.kind == "declaration" && symbol.path == path)
+                .map(|symbol| symbol.name.as_str())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(names, BTreeSet::from(["TutorialAfter", "TutorialBefore"]));
+            let doc = index.documents.iter().find(|doc| doc.path == path).unwrap();
+            assert_eq!(doc.bytes, raw.len());
+            assert_eq!(doc.sha256, storage::sha256(&raw), "archived hash is the original bytes");
+            assert_eq!(
+                index.read_document_controlled(doc, Some(&control)).unwrap(),
+                raw,
+                "archived bytes are preserved"
+            );
+            // query, inspect and context share the same U+FFFD display rule.
+            let search = index
+                .search_with_control(&pin, "snapshot", "Night Web", "exploratory", "", 20, "", &control)
+                .unwrap();
+            assert_eq!(search["results"].as_array().unwrap().len(), 1);
+            let row = &search["results"][0];
+            assert_eq!(row["path"], path);
+            assert_eq!(row["contentHash"], doc.sha256);
+            let excerpt = row["excerpt"].as_str().unwrap();
+            assert!(
+                excerpt.contains("Night Web\u{fffd}s Hollow"),
+                "query display must use U+FFFD: {excerpt}"
+            );
+            assert!(row["sourceSpan"].is_object());
+            assert_eq!(index.span(path, 2, 2).unwrap()["contentHash"], doc.sha256);
+            assert_eq!(index.summary.complete, true);
+        }
+        assert_eq!(cold.summary.warnings, warm.summary.warnings);
+        assert_eq!(
+            serde_json::to_value(&cold.summary.warning_sample).unwrap(),
+            serde_json::to_value(&warm.summary.warning_sample).unwrap(),
+            "cold and warm index expose the same encoding warning"
+        );
+        let expected = cold
+            .search_with_control(
+                &pin, "snapshot", "Night Web", "exploratory", "", 20, "", &control,
+            )
+            .unwrap();
+        for _ in 0..2 {
+            let query = crate::query_store::load_with_control(
+                &fixture.home, &pin, "Night Web", "exploratory", "", &control,
+            )
+            .unwrap();
+            let actual = query
+                .search_with_control(
+                    &pin, "snapshot", "Night Web", "exploratory", "", 20, "", &control,
+                )
+                .unwrap();
+            assert_eq!(without_query_io(actual), without_query_io(expected.clone()));
+        }
+        assert!(is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+    }
+
+    // CRLF and multibyte neighbours must not shift the warning line/offset or
+    // the analyzed document count.
+    #[test]
+    fn non_utf8_comment_next_to_crlf_and_multibyte_bytes_keeps_positions() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let path = "Interface/AddOns/EncodingNeighbours.lua";
+        let mut raw = "-- 雪".as_bytes().to_vec();
+        raw.push(0x92);
+        raw.extend_from_slice("雪\r\nfunction AfterComment() end\r\n".as_bytes());
+        let offset = raw.iter().position(|byte| *byte == 0x92).unwrap();
+        let pin = fixture.pin_raw(&BTreeMap::from([(path.to_owned(), raw)]));
+        let index = build_with_control(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(index.summary.documents, 1);
+        assert_eq!(index.summary.ast_files, 1);
+        assert!(index.summary.complete);
+        assert_eq!(index.summary.warnings, 1);
+        assert_eq!(index.summary.declarations, 1);
+        let warning = index.summary.warning_sample.as_ref().unwrap().iter().next().unwrap();
+        assert_eq!(warning.line, 1);
+        assert_eq!(warning.byte_offset, offset);
+    }
+
+    // A non-UTF-8 byte in a real token stays a syntax problem: no declaration
+    // and no substituted name may be published.
+    #[test]
+    fn non_utf8_token_is_a_syntax_problem_and_never_fabricates_a_declaration() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let path = "Interface/AddOns/EncodingToken.lua";
+        let raw = b"function Br\x92oken() end\nfunction Good() end\n";
+        let offset = raw.iter().position(|byte| *byte == 0x92).unwrap();
+        let pin = fixture.pin_raw(&BTreeMap::from([(path.to_owned(), raw.to_vec())]));
+        let index = build_with_control(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(index.summary.documents, 1);
+        assert!(!index.summary.complete, "token invalid bytes are a real syntax problem");
+        assert!(index.summary.diagnostics >= 1);
+        let sample = index.summary.diagnostic_sample.as_ref().unwrap();
+        assert!(
+            sample
+                .iter()
+                .any(|row| row.path == path && row.line == 1),
+            "the invalid token must stay a located syntax diagnostic: {sample:?}"
+        );
+        assert_eq!(index.summary.warnings, 1);
+        let warning = index.summary.warning_sample.as_ref().unwrap().iter().next().unwrap();
+        assert_eq!(warning.byte_offset, offset);
+        assert!(
+            !index.symbols.iter().any(|symbol| symbol.path == path),
+            "a malformed program must not publish recovered declarations or calls"
+        );
+        assert!(
+            !index
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name.contains('\u{fffd}') || symbol.name.contains('?')),
+            "no substituted declaration or call name is published"
+        );
     }
     #[test]
     fn compatibility_gaps_cover_unsampled_diagnostics_and_survive_warm_index() {
@@ -2391,7 +2250,7 @@ mod facts_cache_tests {
         assert!(all.contains("interface"));
     }
     #[test]
-    fn generated_mode_matches_exact_go_path_and_load_symbols_are_public() {
+    fn generated_mode_matches_exact_reference_path_and_load_symbols_are_public() {
         let fixture = Fixture::new();
         let control = OperationControl::default();
         let source = "local api={Name='System',Type='System'}";
@@ -2442,13 +2301,15 @@ mod facts_cache_tests {
         let raw = BTreeMap::from([
             (
                 "Main.lua".into(),
-                "function CacheProbe()\n  return 'literal-original-marker'\nend\n".into(),
+                "function Namespace.CacheProbe()\n  return Helper(), 'literal-original-marker'\nend\nfunction Other.CacheProbe()\n  return 'literal-original-marker'\nend\n".into(),
             ),
             ("Empty.lua".into(), String::new()),
             (
                 "Main.xml".into(),
                 "<Ui><Script file=\"Main.lua\"/></Ui>".into(),
             ),
+            ("Main.toc".into(), "## Interface: 120100\nMain.xml\n".into()),
+            ("Textures/CacheProbe.blp".into(), "asset-header".into()),
         ]);
         let pin = fixture.pin(&raw);
         let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
@@ -2469,28 +2330,61 @@ mod facts_cache_tests {
                 raw[&doc.path].as_bytes()
             );
         }
-        for (text, mode) in [
-            ("CacheProbe", "precise"),
-            ("literal-original-marker", "exploratory"),
+        for (text, mode, topic) in [
+            ("CacheProbe", "precise", "lua"),
+            ("Namespace.CacheProbe", "precise", ""),
+            ("Namespace.C", "precise", "lua"),
+            ("literal-original-marker", "exploratory", ""),
+            ("Helper", "precise", ""),
+            ("Interface", "precise", "toc"),
+            ("Textures/CacheProbe", "precise", "asset"),
         ] {
             let expected = without_query_io(
-                cold.search_with_control(&pin, "snapshot", text, mode, "", 20, "", &control)
+                cold.search_with_control(&pin, "snapshot", text, mode, topic, 1, "", &control)
                     .unwrap(),
             );
-            for _ in 0..2 {
-                let projected = crate::query_store::load_with_control(
+            assert!(!expected["results"].as_array().unwrap().is_empty(), "{text}");
+            if text == "Helper" {
+                assert!(
+                    expected["relations"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|row| row["target"] == "Helper")
+                );
+            }
+            for invocation in 0..2 {
+                let loaded = crate::query_store::load_with_control(
                     &fixture.home,
                     &pin,
                     text,
                     mode,
-                    "",
+                    topic,
                     &control,
                 )
                 .unwrap();
-                let actual = projected
-                    .search_with_control(&pin, "snapshot", text, mode, "", 20, "", &control)
+                assert_eq!(loaded.summary.io["cachedIndex"], true);
+                if text == "CacheProbe" && invocation == 0 {
+                    // The full index is warm, but its query image is absent.
+                    // This branch retains the authenticated complete Index.
+                    assert_eq!(loaded.summary.io["projection"], "full-index");
+                    assert_eq!(loaded.symbols.len(), cold.symbols.len());
+                } else {
+                    assert_eq!(loaded.summary.io["projection"], "file-posting");
+                }
+                let actual = loaded
+                    .search_with_control(&pin, "snapshot", text, mode, topic, 1, "", &control)
                     .unwrap();
-                assert_eq!(without_query_io(actual), expected);
+                assert_eq!(without_query_io(actual), expected, "{text}/{mode}/{topic}");
+                if let Some(cursor) = expected["nextCursor"].as_str() {
+                    let next = loaded
+                        .search_with_control(&pin, "snapshot", text, mode, topic, 1, cursor, &control)
+                        .unwrap();
+                    let next_expected = cold
+                        .search_with_control(&pin, "snapshot", text, mode, topic, 1, cursor, &control)
+                        .unwrap();
+                    assert_eq!(without_query_io(next), without_query_io(next_expected));
+                }
             }
         }
         assert_eq!(
@@ -2615,9 +2509,7 @@ mod facts_cache_tests {
         let path = original_path(&fixture.home, &warm.documents[0]);
         assert!(!path.exists());
         let cancelled = OperationControl::default();
-        cancelled
-            .cancel_handle()
-            .store(true, std::sync::atomic::Ordering::Release);
+        cancelled.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(
             warm.read_document_controlled(&warm.documents[0], Some(&cancelled))
                 .unwrap_err()
@@ -2730,6 +2622,10 @@ mod facts_cache_tests {
             &control,
         )
         .unwrap();
+        assert_eq!(cold.summary.io["projection"], "full-index");
+        assert_eq!(cold.summary.io["gitTreeProcesses"], 1);
+        assert!(cold.summary.io.get("cachedIndex").is_none());
+        assert!(cold.symbols.iter().any(|symbol| symbol.name == "Unused"));
         assert!(cold.documents.iter().all(|doc| doc.text.is_some()));
         assert!(!fixture.home.join("cache/source-originals-rust").exists());
         // A genuinely cold query must own its authenticated bytes after full
@@ -2775,6 +2671,9 @@ mod facts_cache_tests {
             &control,
         )
         .unwrap();
+        assert_eq!(warm.summary.io["projection"], "file-posting");
+        assert_eq!(warm.summary.io["cachedIndex"], true);
+        assert!(!warm.symbols.iter().any(|symbol| symbol.name == "Unused"));
         assert!(warm.documents.iter().all(|doc| doc.text.is_none()));
         let second = warm
             .search_with_control(
@@ -2980,7 +2879,7 @@ mod facts_cache_tests {
         build_with_control(&fixture.home, &pin, &control).unwrap();
         let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
         let cancelled = OperationControl::default();
-        let cancel = cancelled.cancel_handle();
+        let cancel = cancelled.tracked_cancel_handle().unwrap();
         let error = warm
             .search_observed(
                 &pin,
@@ -2993,7 +2892,7 @@ mod facts_cache_tests {
                 Some(&cancelled),
                 &mut |phase, number| {
                     if phase == "document" && number == 1 {
-                        cancel.store(true, std::sync::atomic::Ordering::Release);
+                        cancel.cancel();
                     }
                 },
             )

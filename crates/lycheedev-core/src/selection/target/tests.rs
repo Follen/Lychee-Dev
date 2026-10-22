@@ -123,7 +123,7 @@ fn named_case_collision_exact_fold_and_prefix_match_fixed_order() {
     f.cleanup();
 }
 #[test]
-fn named_wire_retains_go_duplicate_null_unknown_and_depth_contract() {
+fn named_wire_retains_duplicate_null_unknown_and_depth_contract() {
     let f = Fixture::new();
     let raw=br#"{"schema":"lycheedev.target.v1","name":"wrong","NAME":"wire","Name":null,"product":"retail","region":"cn","locale":"zhCN","source":"remote","unknown":{"a":1}}"#;
     f.seed([("target/wire".into(), raw.to_vec())]);
@@ -348,7 +348,7 @@ fn named_raw_page_checks_independent_stop_after_actual_row_without_replaying_vis
 fn named_expected_conflict_with_cleanup_is_not_silently_accepted() {
     let conflict = ToolkitError::new("vault.generation_conflict", "conflict", 3);
     assert!(pure(&conflict, "vault.generation_conflict"));
-    let compound = crate::metadata::historical_write::finish_historical::<()>(
+    let compound = crate::metadata::owned_write::finish_owned::<()>(
         Err(conflict),
         Err(ToolkitError::new("test.close", "close", 5)),
     )

@@ -2,14 +2,13 @@
 use crate::Result;
 // Windows SDK winnt.h, SE_GROUP_LOGON_ID (not an account-SID attribute).
 const LOGON_ID_GROUP: u32 = 0xc0000000;
+/// Caller-owned complete cancellation/deadline check. Never exposes a writable token.
+pub type BrokerCheck = Arc<dyn Fn() -> Result<()> + Send + Sync>;
 use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 use windows::{
@@ -64,9 +63,6 @@ pub struct BrokerScope {
     sddl: String,
 }
 impl BrokerScope {
-    pub fn for_home(home: &Path) -> Result<Self> {
-        Self::for_kind(home, "source")
-    }
     pub fn for_native_source(home: &Path) -> Result<Self> {
         Self::for_kind(home, "native-source")
     }
@@ -97,17 +93,6 @@ impl BrokerScope {
     pub fn scope_dir(&self) -> &Path {
         &self.scope_dir
     }
-}
-
-/// Retire only the already authenticated local CLI owner, holding its exact
-/// creation identity throughout termination and waiting.
-pub fn retire_native_source_peer(
-    pid: u32,
-    created: u64,
-    executable: &Path,
-    deadline: Instant,
-) -> Result<()> {
-    NativeSourcePeer::open(pid, created, executable)?.retire(deadline)
 }
 
 /// Hold retirement access before submitting a request. Reopening a dying
@@ -241,8 +226,12 @@ impl BrokerListener {
             pending: create(scope, true)?,
         })
     }
-    pub fn accept(&mut self, deadline: Instant, cancel: &AtomicBool) -> Result<BrokerStream> {
-        check(deadline, cancel)?;
+    pub fn accept_with_control(
+        &mut self,
+        deadline: Instant,
+        control_check: BrokerCheck,
+    ) -> Result<BrokerStream> {
+        check(deadline, control_check.as_ref())?;
         let event = event()?;
         let mut overlapped = Box::new(OVERLAPPED::default());
         overlapped.hEvent = event.0;
@@ -251,7 +240,12 @@ impl BrokerListener {
                 Ok(()) => {}
                 Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => {}
                 Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {
-                    complete(self.pending.0, &overlapped, deadline, cancel)?;
+                    complete(
+                        self.pending.0,
+                        &overlapped,
+                        deadline,
+                        control_check.as_ref(),
+                    )?;
                 }
                 Err(error) => return Err(error.to_string()),
             }
@@ -264,7 +258,7 @@ impl BrokerListener {
             handle: connected,
             server: true,
             deadline,
-            cancel: Arc::new(AtomicBool::new(false)),
+            control_check,
         })
     }
 }
@@ -316,10 +310,10 @@ fn event() -> Result<Handle> {
             .map_err(|e| e.to_string())
     }
 }
-fn check(deadline: Instant, cancel: &AtomicBool) -> Result<()> {
-    if cancel.load(Ordering::Acquire) {
-        Err("broker.cancelled".into())
-    } else if Instant::now() >= deadline {
+fn check(deadline: Instant, control_check: &(dyn Fn() -> Result<()> + Send + Sync)) -> Result<()> {
+    control_check()?;
+    if Instant::now() >= deadline {
+        control_check()?;
         Err("broker.deadline".into())
     } else {
         Ok(())
@@ -329,10 +323,10 @@ fn complete(
     handle: HANDLE,
     overlapped: &OVERLAPPED,
     deadline: Instant,
-    cancel: &AtomicBool,
+    control_check: &(dyn Fn() -> Result<()> + Send + Sync),
 ) -> Result<u32> {
     loop {
-        if let Err(reason) = check(deadline, cancel) {
+        if let Err(reason) = check(deadline, control_check) {
             unsafe {
                 let _ = CancelIoEx(handle, Some(overlapped));
                 let mut bytes = 0;
@@ -369,6 +363,7 @@ fn complete(
                 }
             })?;
         }
+        check(deadline, control_check)?;
         return Ok(bytes);
     }
 }
@@ -376,7 +371,7 @@ pub struct BrokerStream {
     handle: Handle,
     server: bool,
     deadline: Instant,
-    cancel: Arc<AtomicBool>,
+    control_check: BrokerCheck,
 }
 impl BrokerStream {
     pub fn try_clone(&self) -> Result<Self> {
@@ -397,15 +392,15 @@ impl BrokerStream {
             handle: Handle(duplicate),
             server: self.server,
             deadline: self.deadline,
-            cancel: self.cancel.clone(),
+            control_check: self.control_check.clone(),
         })
     }
-    pub fn connect(
+    pub fn connect_with_control(
         scope: &BrokerScope,
         deadline: Instant,
-        cancel: Arc<AtomicBool>,
+        control_check: BrokerCheck,
     ) -> Result<Self> {
-        check(deadline, &cancel)?;
+        check(deadline, control_check.as_ref())?;
         let name = wide(&scope.endpoint);
         let handle = unsafe {
             CreateFileW(
@@ -423,12 +418,12 @@ impl BrokerStream {
             handle: Handle(handle),
             server: false,
             deadline,
-            cancel,
+            control_check,
         })
     }
-    pub fn set_deadline(&mut self, deadline: Instant, cancel: Arc<AtomicBool>) {
+    pub fn set_deadline_with_control(&mut self, deadline: Instant, control_check: BrokerCheck) {
         self.deadline = deadline;
-        self.cancel = cancel
+        self.control_check = control_check
     }
     pub fn peer_pid(&self) -> Result<u32> {
         let mut pid = 0;
@@ -447,7 +442,7 @@ impl BrokerStream {
         }
     }
     fn transfer(&mut self, buffer: &mut [u8], write: bool) -> Result<usize> {
-        check(self.deadline, &self.cancel)?;
+        check(self.deadline, self.control_check.as_ref())?;
         if buffer.is_empty() {
             return Ok(0);
         }
@@ -473,9 +468,17 @@ impl BrokerStream {
             }
         };
         match result {
-            Ok(()) => Ok(bytes as usize),
+            Ok(()) => {
+                check(self.deadline, self.control_check.as_ref())?;
+                Ok(bytes as usize)
+            }
             Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
-                match complete(self.handle.0, &overlapped, self.deadline, &self.cancel) {
+                match complete(
+                    self.handle.0,
+                    &overlapped,
+                    self.deadline,
+                    self.control_check.as_ref(),
+                ) {
                     Err(reason) if !write && reason == "broker.eof" => Ok(0),
                     result => result.map(|n| n as usize),
                 }
@@ -514,13 +517,39 @@ impl Write for BrokerStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn ready() -> BrokerCheck {
+        Arc::new(|| Ok(()))
+    }
+    fn cancelled() -> BrokerCheck {
+        Arc::new(|| Err("broker.cancelled".into()))
+    }
+    #[test]
+    fn caller_stop_cause_precedes_pipe_deadline_at_both_checks() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let expired = Instant::now();
+        assert_eq!(
+            check(expired, &|| Err("fixture.ancestor_cancelled".into())),
+            Err("fixture.ancestor_cancelled".into())
+        );
+        let checks = AtomicUsize::new(0);
+        let result = check(expired, &|| {
+            if checks.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(())
+            } else {
+                Err("fixture.original_deadline".into())
+            }
+        });
+        assert_eq!(result, Err("fixture.original_deadline".into()));
+        assert_eq!(checks.load(Ordering::SeqCst), 2);
+    }
+
     fn scope() -> BrokerScope {
         let path = std::env::temp_dir().join(format!(
             "lycheedev-pipe-{}",
             crate::random::token().unwrap()
         ));
         std::fs::create_dir_all(&path).unwrap();
-        BrokerScope::for_home(&path).unwrap()
+        BrokerScope::for_native_source(&path).unwrap()
     }
     #[test]
     fn actual_local_pipe_peer_and_first_instance_guard() {
@@ -529,10 +558,10 @@ mod tests {
         assert!(BrokerListener::bind(&scope).is_err());
         let client_scope = scope.clone();
         let client = std::thread::spawn(move || {
-            let mut stream = BrokerStream::connect(
+            let mut stream = BrokerStream::connect_with_control(
                 &client_scope,
                 Instant::now() + Duration::from_secs(3),
-                Arc::new(AtomicBool::new(false)),
+                ready(),
             )
             .unwrap();
             assert_eq!(stream.peer_pid().unwrap(), std::process::id());
@@ -542,10 +571,7 @@ mod tests {
             assert_eq!(&response, b"pong");
         });
         let mut server = listener
-            .accept(
-                Instant::now() + Duration::from_secs(3),
-                &AtomicBool::new(false),
-            )
+            .accept_with_control(Instant::now() + Duration::from_secs(3), ready())
             .unwrap();
         assert_eq!(server.peer_pid().unwrap(), std::process::id());
         let mut request = [0; 4];
@@ -565,10 +591,10 @@ mod tests {
         for round in 0..4u8 {
             let client_scope = scope.clone();
             let client = std::thread::spawn(move || {
-                let mut stream = BrokerStream::connect(
+                let mut stream = BrokerStream::connect_with_control(
                     &client_scope,
                     Instant::now() + Duration::from_secs(3),
-                    Arc::new(AtomicBool::new(false)),
+                    ready(),
                 )
                 .unwrap();
                 stream.write_all(&[round]).unwrap();
@@ -577,10 +603,7 @@ mod tests {
                 assert_eq!(reply[0], round + 1);
             });
             let mut server = listener
-                .accept(
-                    Instant::now() + Duration::from_secs(3),
-                    &AtomicBool::new(false),
-                )
+                .accept_with_control(Instant::now() + Duration::from_secs(3), ready())
                 .unwrap();
             let observer = server.try_clone().unwrap();
             drop(observer);
@@ -606,67 +629,49 @@ mod tests {
         let start = Instant::now();
         assert!(
             listener
-                .accept(start + Duration::from_millis(20), &AtomicBool::new(false))
+                .accept_with_control(start + Duration::from_millis(20), ready())
                 .is_err()
         );
         assert!(start.elapsed() < Duration::from_secs(1));
         assert!(
             listener
-                .accept(
-                    Instant::now() + Duration::from_secs(1),
-                    &AtomicBool::new(true)
-                )
+                .accept_with_control(Instant::now() + Duration::from_secs(1), cancelled())
                 .is_err()
         );
         let client_scope = scope.clone();
         let client = std::thread::spawn(move || {
-            BrokerStream::connect(
+            BrokerStream::connect_with_control(
                 &client_scope,
                 Instant::now() + Duration::from_secs(2),
-                Arc::new(AtomicBool::new(false)),
+                ready(),
             )
             .unwrap()
         });
         let server = listener
-            .accept(
-                Instant::now() + Duration::from_secs(2),
-                &AtomicBool::new(false),
-            )
+            .accept_with_control(Instant::now() + Duration::from_secs(2), ready())
             .unwrap();
         let mut client = client.join().unwrap();
-        client.set_deadline(
-            Instant::now() + Duration::from_millis(20),
-            Arc::new(AtomicBool::new(false)),
-        );
+        client.set_deadline_with_control(Instant::now() + Duration::from_millis(20), ready());
         assert!(client.read(&mut [0; 1]).is_err());
         drop(server);
-        client.set_deadline(
-            Instant::now() + Duration::from_secs(1),
-            Arc::new(AtomicBool::new(false)),
-        );
+        client.set_deadline_with_control(Instant::now() + Duration::from_secs(1), ready());
         assert_eq!(client.read(&mut [0; 1]).unwrap(), 0);
     }
     #[test]
     fn duplicate_observer_cancel_and_drop_does_not_disconnect_writer() {
         let scope = scope();
         let mut listener = BrokerListener::bind(&scope).unwrap();
-        let mut client = BrokerStream::connect(
+        let mut client = BrokerStream::connect_with_control(
             &scope,
             Instant::now() + Duration::from_secs(2),
-            Arc::new(AtomicBool::new(false)),
+            ready(),
         )
         .unwrap();
         let mut server = listener
-            .accept(
-                Instant::now() + Duration::from_secs(2),
-                &AtomicBool::new(false),
-            )
+            .accept_with_control(Instant::now() + Duration::from_secs(2), ready())
             .unwrap();
         let mut observer = server.try_clone().unwrap();
-        observer.set_deadline(
-            Instant::now() + Duration::from_millis(20),
-            Arc::new(AtomicBool::new(false)),
-        );
+        observer.set_deadline_with_control(Instant::now() + Duration::from_millis(20), ready());
         let observed = std::thread::spawn(move || {
             assert!(observer.read(&mut [0; 1]).is_err());
             drop(observer)

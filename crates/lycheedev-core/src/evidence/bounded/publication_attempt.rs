@@ -60,6 +60,7 @@ pub(crate) fn publish_blob_attempt_with_check(
         maximum,
         Some(control),
         &mut supplemental,
+        None,
         &mut settlement,
     );
     BlobPublishAttempt { result, settlement }
@@ -70,9 +71,12 @@ mod tests;
 
 /// Data quota has durably predeclared this finite name before entering the
 /// ordinary canonical blob lock. No quota acquisition occurs in this helper.
+/// The caller computed `reference` from these same borrowed immutable bytes;
+/// external expected identities must have been compared at their public entry.
 pub(crate) fn publish_blob_attempt_predeclared_with_check(
     home: &Path,
     bytes: &[u8],
+    reference: &BlobRef,
     maximum: usize,
     control: &OperationControl,
     mut supplemental: impl FnMut() -> Result<()>,
@@ -86,6 +90,7 @@ pub(crate) fn publish_blob_attempt_predeclared_with_check(
         maximum,
         Some(control),
         &mut supplemental,
+        Some(reference),
         &mut settlement,
     );
     BlobPublishAttempt { result, settlement }

@@ -432,43 +432,6 @@ fn formal_repair_cleanup_joins_primary_close_and_original_cancel() {
 }
 
 #[test]
-fn formal_repair_migrates_old_two_hundred_slots_without_deleting_archive() {
-    let f = Fixture::new();
-    f.old();
-    let c = OperationControl::default();
-    {
-        let phase =
-            crate::slot_test_diagnostics::SlotPhase::begin("repair.fixture_install", Some(&c));
-        let result = slots::install_controlled(&f.parent(), "3.0.0", &c);
-        phase.finish(result.as_ref().err());
-        result.unwrap();
-    }
-    let mut pool = slots::read_pool_controlled(&f.parent(), &c).unwrap();
-    pool.files.truncate(200);
-    slots::save_pool(&f.parent(), &pool, &c).unwrap();
-    for index in 201..=500 {
-        fs::remove_dir_all(slots::directory(&f.parent(), index)).unwrap();
-    }
-    let archive = f.root.join("archive");
-    f.run(Some(&archive)).unwrap();
-    // This is a new postcondition observation after apply's separate control.
-    // The setup control must not acquire an unrelated apply's elapsed time.
-    // This does not fix a deadline inside the preceding fixture installation.
-    let observation = OperationControl::default();
-    let phase =
-        crate::slot_test_diagnostics::SlotPhase::begin("repair.postcondition", Some(&observation));
-    let result = slots::read_pool_controlled(&f.parent(), &observation);
-    phase.finish(result.as_ref().err());
-    let pool = result.unwrap();
-    assert_eq!(pool.files.len(), 500);
-    assert_eq!(pool.version, lycheedev_core::VERSION);
-    assert_eq!(pool.state, "ready");
-    assert_eq!(
-        fs::read(archive.join("previous/old.lua")).unwrap(),
-        b"old\n"
-    );
-}
-#[test]
 fn formal_repair_pending_old_slot_refuses_main_upgrade_without_replay() {
     let f = Fixture::new();
     f.old();

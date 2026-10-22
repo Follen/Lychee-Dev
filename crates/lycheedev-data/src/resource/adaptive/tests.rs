@@ -332,7 +332,7 @@ fn public_report_has_exact_fixed_fields_and_shared_peak() {
 }
 
 #[test]
-fn safety_growth_never_inflates_go_report_and_uses_same_ceiling() {
+fn safety_growth_never_inflates_retained_report_and_uses_same_ceiling() {
     let f = fixture(2, 4 << 30);
     let b = &f.budget;
     let safety = b.safety_only();

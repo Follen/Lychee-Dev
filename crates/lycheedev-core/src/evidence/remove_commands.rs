@@ -5,13 +5,13 @@ use crate::{
     control::OperationControl,
     metadata::{
         RawDocument,
-        historical_write::{
-            HistoricalWriter, finish_historical, historical_lease,
+        owned_write::{
+            OwnedWriter, finish_owned, owned_lease,
             removal::{RemovalCommit, RemovalTransaction},
         },
     },
 };
-use dependencies::GoCaptureDecode;
+
 use serde_json::value::RawValue;
 mod deletion;
 
@@ -87,8 +87,8 @@ fn authenticate_pending(
     raw: &RawValue,
     id: &str,
     control: &OperationControl,
-) -> Result<GoCaptureDecode> {
-    dependencies::inspect_capture_projection(raw.get().as_bytes(), id, control).map_err(|error| {
+) -> Result<CaptureRef> {
+    dependencies::inspect_capture_ref(raw.get().as_bytes(), id, control).map_err(|error| {
         if matches!(
             error.code.as_str(),
             "command.cancelled" | "command.deadline"
@@ -140,15 +140,15 @@ pub(super) fn run(home: &Path, id: &str, control: &OperationControl) -> Result<V
                 authenticate_pending(&raw, id, control)?
             } else {
                 let row = writer.document(&format!("capture/{id}"))?;
-                dependencies::inspect_capture_projection(&row.bytes, id, control)?
+                dependencies::inspect_capture_ref(&row.bytes, id, control)?
             };
-            let (digest, _) = capture.signed_blob();
+            let (digest, _) = capture.blob_identity();
             // A blob lease precedes BEGIN IMMEDIATE, matching capture publishers'
             // order. The metadata-write lease is not mistaken for a SQLite fence.
             let blob_key = format!("blob:{}", digest.to_ascii_lowercase());
             #[cfg(test)]
             tests::before_blob_lease(&blob_key, control);
-            let lease = historical_lease(home, &blob_key, control)?;
+            let lease = owned_lease(home, &blob_key, control)?;
             let result = (|| {
                 if optional(writer.document(&key))?.is_none() {
                     prepare(home, writer, &key, id, &capture, control, &mut progress)?;
@@ -156,7 +156,7 @@ pub(super) fn run(home: &Path, id: &str, control: &OperationControl) -> Result<V
                 complete(home, writer, &key, id, control, &mut progress)
             })();
             crate::selection::selection_finish(
-                finish_historical(result, lease.close()),
+                finish_owned(result, lease.close()),
                 control.check(),
             )
         })
@@ -165,10 +165,10 @@ pub(super) fn run(home: &Path, id: &str, control: &OperationControl) -> Result<V
 }
 fn prepare(
     home: &Path,
-    writer: &HistoricalWriter<'_>,
+    writer: &OwnedWriter<'_>,
     key: &str,
     id: &str,
-    locked: &GoCaptureDecode,
+    locked: &CaptureRef,
     control: &OperationControl,
     progress: &mut Progress,
 ) -> Result<()> {
@@ -178,8 +178,8 @@ fn prepare(
         let capture_key = format!("capture/{id}");
         let keep_key = format!("evidence/keep/{id}");
         let row = tx.document(&capture_key)?;
-        let capture = dependencies::inspect_capture_projection(&row.bytes, id, control)?;
-        if capture.signed_blob() != locked.signed_blob() {
+        let capture = dependencies::inspect_capture_ref(&row.bytes, id, control)?;
+        if capture.blob_identity() != locked.blob_identity() {
             return Err(integrity("capture changed after blob lease acquisition"));
         }
         let keep = optional(tx.document(&keep_key))?;
@@ -239,7 +239,7 @@ fn prepare(
 }
 fn complete(
     home: &Path,
-    writer: &HistoricalWriter<'_>,
+    writer: &OwnedWriter<'_>,
     key: &str,
     id: &str,
     control: &OperationControl,
@@ -290,23 +290,23 @@ fn complete(
 }
 fn verified_present(
     home: &Path,
-    capture: &GoCaptureDecode,
+    capture: &CaptureRef,
     control: &OperationControl,
 ) -> Result<bool> {
-    let (digest, bytes) = capture.signed_blob();
+    let (digest, bytes) = capture.blob_identity();
     // Stream only: no production payload-size cap, no DELETE access before
     // committing the recovery intent, and every original owner closes checked.
-    bounded::verify_historical_blob_optional(home, digest, bytes, control)
+    bounded::verify_capture_blob_optional(home, digest, bytes, control)
 }
 fn references(
     home: &Path,
     tx: &RemovalTransaction<'_>,
     removal_key: &str,
-    target: &GoCaptureDecode,
+    target: &CaptureRef,
     control: &OperationControl,
 ) -> Result<()> {
-    let capture_key = format!("capture/{}", target.id());
-    let keep_key = format!("evidence/keep/{}", target.id());
+    let capture_key = format!("capture/{}", &target.id);
+    let keep_key = format!("evidence/keep/{}", &target.id);
     let mut after = String::new();
     for _ in 0..100 {
         let (count, last) = tx.visit_raw_page("", &after, |key, _, raw| {
@@ -337,17 +337,17 @@ fn references(
 fn shared(
     home: &Path,
     tx: &RemovalTransaction<'_>,
-    target: &GoCaptureDecode,
+    target: &CaptureRef,
     control: &OperationControl,
 ) -> Result<bool> {
-    let key = format!("capture/{}", target.id());
+    let key = format!("capture/{}", &target.id);
     let mut after = String::from("capture/");
     for _ in 0..100 {
         let mut found = false;
         let (count, last) = tx.visit_raw_page("capture/", &after, |other, _, raw| {
             if other != key && !found {
-                found = dependencies::decode_capture_projection(raw, control)?.signed_blob()
-                    == target.signed_blob();
+                found = dependencies::decode_capture_ref(raw, control)?.blob_identity()
+                    == target.blob_identity();
             }
             Ok(())
         })?;
@@ -355,7 +355,7 @@ fn shared(
             return Ok(true);
         }
         if count < 1000 {
-            let (digest, bytes) = target.signed_blob();
+            let (digest, bytes) = target.blob_identity();
             // The same physical CAS body can have an independent Data owner.
             // This read stays under our existing blob lease; it never takes
             // quota (Data publishers use quota -> blob, not the reverse).

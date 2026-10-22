@@ -388,12 +388,12 @@ pub fn cases(query: BindingSite, statement: BindingSite) -> Vec<Case> {
             }
             "opaque-nominal" => {
                 f.declaration.parameters[0].type_name = "Frame".into();
-                Some("environment_type_unavailable")
+                None
             }
             "inner-table" => {
                 f.declaration.parameters[0].type_name = "table".into();
                 f.declaration.parameters[0].inner_type = "string".into();
-                Some("environment_type_unavailable")
+                None
             }
             "inner-number" => {
                 f.declaration.parameters[0].inner_type = "ignored-by-fixed-baseline".into();

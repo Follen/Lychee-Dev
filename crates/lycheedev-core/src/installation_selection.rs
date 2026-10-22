@@ -355,12 +355,10 @@ pub fn select_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::control::TrackedCancellation;
     use std::{
         path::PathBuf,
-        sync::{
-            Arc,
-            atomic::{AtomicBool, AtomicU64, Ordering},
-        },
+        sync::atomic::{AtomicU64, Ordering},
         time::{Duration, Instant},
     };
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -695,8 +693,9 @@ mod tests {
             "command.cancelled"
         );
         assert!(meter.calls > 0);
-        let cancel = Arc::new(AtomicBool::new(true));
-        let control = OperationControl::new(Instant::now() + Duration::from_secs(30), cancel);
+        let cancel = TrackedCancellation::new();
+        cancel.cancel();
+        let control = OperationControl::tracked(Instant::now() + Duration::from_secs(30), cancel);
         assert_eq!(
             select_with(&fixture.0, "", &mut InvocationMetadata(&control))
                 .unwrap_err()
@@ -705,8 +704,9 @@ mod tests {
         );
         let missing = select(&fixture.0.join("missing"), "titan").unwrap_err();
         assert_eq!(missing.code, "selection.installation_missing");
-        // Discover's missing-scope error predates selection, so Go leaves the
-        // requested product empty but still emits the context field.
+        // Discover's missing-scope error predates selection, so the fixed
+        // reference leaves the requested product empty but still emits the
+        // context field.
         assert_eq!(missing.details["__commandContext"]["requestedProduct"], "");
         assert!(
             missing.details["__commandContext"]
@@ -768,7 +768,7 @@ mod tests {
         }
     }
     #[test]
-    fn issue_reasons_match_fixed_go_identity_errors_and_precedence() {
+    fn issue_reasons_match_reference_identity_errors_and_precedence() {
         struct Case {
             name: &'static str,
             folder: &'static str,
@@ -994,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn client_text_issues_publish_bare_go_sentinel_for_kind_size_and_utf8() {
+    fn client_text_issues_publish_retained_sentinel_for_kind_size_and_utf8() {
         for name in [".flavor.info", "flavor.info", "version.txt"] {
             for invalid in ["directory", "oversized", "invalid-utf8"] {
                 let fixture = Fixture::new();
@@ -1023,7 +1023,7 @@ mod tests {
     }
 
     #[test]
-    fn observed_product_survives_the_exact_go_failure_stage() {
+    fn observed_product_survives_the_exact_reference_failure_stage() {
         for (name, flavor, version, expected) in [
             ("custom", "wow_beta", "", "wow_beta"),
             ("custom", "invalid", "", ""),

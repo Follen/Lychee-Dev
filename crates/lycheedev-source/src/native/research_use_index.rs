@@ -1,15 +1,19 @@
-//! Query-local borrowed observations, with one flat pointer array instead of a
-//! B-tree node and independently allocated Vec for every observed source site.
-use super::{Site, UseFact};
+//! Query-local borrowed observations, with flat read/write pointer arrays instead
+//! of a B-tree node and independently allocated Vec for every observed source site.
+use super::{Site, UseFact, WriteVersion};
 use serde_json::Value;
 
 #[derive(Default)]
 pub(super) struct ResearchUses<'a> {
     rows: Vec<&'a UseFact>,
+    writes: Vec<&'a WriteVersion>,
 }
 impl<'a> ResearchUses<'a> {
     pub(super) fn push(&mut self, fact: &'a UseFact) {
         self.rows.push(fact);
+    }
+    pub(super) fn push_write(&mut self, fact: &'a WriteVersion) {
+        self.writes.push(fact);
     }
     pub(super) fn finish<E>(&mut self, mut check: impl FnMut() -> Result<(), E>) -> Result<(), E> {
         check()?;
@@ -18,6 +22,8 @@ impl<'a> ResearchUses<'a> {
         // its scratch dies here, before any relation JSON is allocated.
         self.rows
             .sort_by(|left, right| key(&left.site).cmp(&key(&right.site)));
+        self.writes
+            .sort_by(|left, right| key(&left.site).cmp(&key(&right.site)));
         check()
     }
     pub(super) fn get(&self, site: &Site) -> Option<&[&'a UseFact]> {
@@ -25,6 +31,12 @@ impl<'a> ResearchUses<'a> {
         let first = self.rows.partition_point(|row| self::key(&row.site) < key);
         let count = self.rows[first..].partition_point(|row| self::key(&row.site) == key);
         (count > 0).then_some(&self.rows[first..first + count])
+    }
+    pub(super) fn get_writes(&self, site: &Site) -> Option<&[&'a WriteVersion]> {
+        let key = key(site);
+        let first = self.writes.partition_point(|row| self::key(&row.site) < key);
+        let count = self.writes[first..].partition_point(|row| self::key(&row.site) == key);
+        (count > 0).then_some(&self.writes[first..first + count])
     }
 }
 fn key(site: &Site) -> (&str, u32, u32) {
@@ -88,6 +100,26 @@ mod tests {
                 .is_none()
         );
         assert!(ResearchUses::default().get(&facts[0].site).is_none());
+    }
+
+    #[test]
+    fn same_site_write_index_preserves_unknown_reads_and_write_context_order() {
+        let site=Site{file:"same.lua".into(),start:9,end:15};
+        let read=UseFact{id:0,site:site.clone(),context:"read-context".into(),
+            decision:Decision::Unavailable("read_not_proved".into()),writes:vec![],proof_id:"read-proof".into(),
+            object_view:None,host_return_slot:None};
+        let first=WriteVersion{id:0,cell:"global:Target".into(),site:site.clone(),decision:Decision::Bound(0),
+            previous:None,inputs:vec![],context:"write-z".into(),conditional_branch:None};
+        let second=WriteVersion{id:1,context:"write-a".into(),previous:Some(0),..first.clone()};
+        let mut index=ResearchUses::default();
+        index.push(&read);index.push_write(&first);index.push_write(&second);
+        index.finish(||Ok::<_,()>(())).unwrap();
+        let reads=index.get(&site).unwrap();assert_eq!(reads.len(),1);assert!(std::ptr::eq(reads[0],&read));
+        assert!(matches!(&reads[0].decision,Decision::Unavailable(reason) if reason=="read_not_proved"));
+        let writes=index.get_writes(&site).unwrap();assert_eq!(writes.len(),2);
+        assert!(std::ptr::eq(writes[0],&first));assert!(std::ptr::eq(writes[1],&second));
+        assert!(index.get_writes(&Site{file:site.file.clone(),start:site.start+1,end:site.end}).is_none());
+        assert!(index.get_writes(&Site{file:"foreign.lua".into(),..site}).is_none());
     }
 
     #[test]

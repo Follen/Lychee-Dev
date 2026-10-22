@@ -1,11 +1,11 @@
 use super::*;
+use crate::hotfix::CacheFilter;
 use lycheedev_core::{
     control::{OperationControl, TrackedCancellation},
     selection::{DataPin, SelectionSpec},
     workspace,
 };
 use std::{
-    collections::BTreeMap,
     fs,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
@@ -13,7 +13,8 @@ use std::{
 };
 struct Fixture {
     root: PathBuf,
-    inv: Invocation,
+    ctx: DataContext,
+    request: LocalRequest,
 }
 impl Fixture {
     fn new() -> Self {
@@ -52,20 +53,10 @@ impl Fixture {
             TrackedCancellation::new(),
         );
         let source=evidence::commit_capture_bounded(&home,evidence::CaptureInput {bytes:&raw,maximum_bytes:44,media_type:"application/octet-stream",provenance:json!({"kind":"hotfix-cache","locator":format!("dbcache:sha256:{}",storage::sha256(&raw)),"snapshot":pin.id,"dataBuild":"12.1.0.69875"}),complete:true,truncated:false},&control).unwrap();
-        let inv = Invocation {
-            command: "data hotfix".into(),
-            positional: None,
-            cwd: root.clone(),
-            home,
-            control,
-            flags: BTreeMap::from([
-                ("--source".into(), "dbcache".into()),
-                ("--snapshot".into(), pin.id),
-                ("--from".into(), source["id"].as_str().unwrap().into()),
-                ("--offline".into(), "true".into()),
-            ]),
-        };
-        Self { root, inv }
+        let ctx = DataContext { home, cwd: root.clone(), control, source: Default::default() };
+        let request = LocalRequest { snapshot: pin.id, input: LocalInput::Capture(source["id"].as_str().unwrap().into()),
+            table: None, offline: true, max_bytes: 128 << 20, filter: CacheFilter { limit:20, ..Default::default() } };
+        Self { root, ctx, request }
     }
     fn cleanup(self) {
         fs::remove_dir_all(self.root).unwrap()
@@ -74,14 +65,14 @@ impl Fixture {
 #[test]
 fn archived_default_hotfix_keeps_original_scope_through_pin_blob_derived_pin_and_capture() {
     let f = Fixture::new();
-    let result = dispatch(&f.inv).unwrap();
+    let result = dispatch(&f.ctx, &f.request).unwrap();
     assert!(result.complete);
     assert_eq!(result.provenance.len(), 2);
-    assert_eq!(result.provenance[0]["id"], f.inv.flag("--from").unwrap());
-    assert_eq!(f.inv.control.stop_cause().unwrap(), None);
-    f.inv
+    assert_eq!(result.provenance[0]["id"], match &f.request.input { LocalInput::Capture(id) => id.as_str(), _ => unreachable!() });
+    assert_eq!(f.ctx.control.stop_cause().unwrap(), None);
+    f.ctx
         .control
-        .ordered_child(f.inv.control.deadline())
+        .ordered_child(f.ctx.control.deadline())
         .unwrap()
         .check()
         .unwrap();
@@ -94,8 +85,8 @@ fn local_source_file_success_and_failed_read_release_their_original_handles() {
     fs::write(&path, b"body").unwrap();
     let budget = Budget::controlled(
         Cost::defaults(),
-        f.inv.control.deadline(),
-        f.inv.control.clone(),
+        f.ctx.control.deadline(),
+        f.ctx.control.clone(),
     );
     assert_eq!(read_file(&path, 4, &budget).unwrap(), b"body");
     fs::rename(&path, f.root.join("moved")).unwrap();
@@ -105,8 +96,8 @@ fn local_source_file_success_and_failed_read_release_their_original_handles() {
             metadata_bytes: 0,
             ..Cost::defaults()
         },
-        f.inv.control.deadline(),
-        f.inv.control.clone(),
+        f.ctx.control.deadline(),
+        f.ctx.control.clone(),
     );
     assert_eq!(
         read_file(&path, 4, &budget).unwrap_err().code,

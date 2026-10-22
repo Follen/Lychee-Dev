@@ -158,9 +158,9 @@ fn init_resume_recovers_planned_moved_and_created_checkpoints_without_reimport()
         }
         let previous_identity = if already_created {
             let mut identity = workspace::initialize(&root).unwrap();
-            // Go's time.Time JSON reader canonicalizes insignificant fractional
-            // zeros. Resume must preserve the persisted identity and its bytes,
-            // while returning the same complete decoded identity as a read.
+            // The current identity reader reports the canonical instant without
+            // rewriting the persisted manifest; resume must preserve its bytes
+            // and return the same decoded identity as a read.
             identity["createdAt"] = json!("2026-10-18T02:51:12.135524800Z");
             storage::atomic_json(&root.join("workspace.json"), &identity).unwrap();
             let decoded = workspace::open(&root).unwrap();
@@ -215,11 +215,8 @@ fn init_resume_invalid_journal_is_read_only_and_never_falls_back_to_initialize()
 
 #[test]
 fn init_original_stop_scope_is_checked_before_any_mode_touches_the_filesystem() {
-    use lycheedev_core::control::OperationControl;
-    use std::{
-        sync::{Arc, atomic::AtomicBool},
-        time::{Duration, Instant},
-    };
+    use lycheedev_core::control::{OperationControl, TrackedCancellation};
+    use std::time::{Duration, Instant};
     let f = Fixture::new();
     let root = f.0.join("missing-parent/home");
     let before = snapshot(&f.0);
@@ -237,13 +234,17 @@ fn init_original_stop_scope_is_checked_before_any_mode_touches_the_filesystem() 
                 args.push(mode.into());
             }
             let mut invocation = parse(&args).unwrap();
-            invocation.control = OperationControl::new(
+            let token = TrackedCancellation::new();
+            if cancelled {
+                token.cancel();
+            }
+            invocation.control = OperationControl::tracked(
                 if expired {
                     Instant::now() - Duration::from_secs(1)
                 } else {
                     Instant::now() + Duration::from_secs(60)
                 },
-                Arc::new(AtomicBool::new(cancelled)),
+                token,
             );
             assert_eq!(dispatch(&invocation).unwrap_err().code, expected);
             assert_eq!(snapshot(&f.0), before);

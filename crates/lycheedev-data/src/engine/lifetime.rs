@@ -30,7 +30,7 @@ pub fn begin_bounded(&self, work:u64, control:OperationControl, max_bytes:usize)
     if allowance==0 {return Err(bound());}
     let reservation=self.budget.reserve_retained(allowance)?.into_owned(&self.budget)?;
     let mut costs=Cost::defaults();costs.retained_bytes=allowance as u64;costs.decode_work=work;
-    let budget=Arc::new(Budget::controlled(costs,control.deadline(),control));
+    let budget=Arc::new(Budget::controlled(costs,control.deadline(),control).with_query_phase_profile());
     Ok(Arc::new(RequestLifetime{budget,session:Mutex::new(reservation)}))
 }
 
@@ -65,7 +65,9 @@ pub fn begin_bounded(&self, work:u64, control:OperationControl, max_bytes:usize)
         let mut costs = Cost::defaults();
         costs.retained_bytes = available as u64;
         costs.decode_work = work;
-        let budget = Arc::new(Budget::controlled(costs, control.deadline(), control));
+        let budget = Arc::new(
+            Budget::controlled(costs, control.deadline(), control).with_query_phase_profile(),
+        );
         Ok(Arc::new(RequestLifetime {
             budget,
             session: Mutex::new(reservation),

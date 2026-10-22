@@ -5,10 +5,10 @@ use super::*;
 use crate::{
     control::OperationControl, storage::ExclusiveLock, workspace::data_disk::EvidenceQuota,
 };
-use historical_write::finish_historical;
+use owned_write::finish_owned;
 mod checked_delete;
-mod historical_anchor;
 mod keys;
+mod shared_anchor;
 pub(crate) use checked_delete::run as checked_delete;
 mod store;
 pub(crate) use keys::{EvidenceKey, intersects};
@@ -23,26 +23,26 @@ fn integrity() -> ToolkitError {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EvidenceDomain {
-    Historical,
+    General,
     Data,
 }
 
 pub(crate) struct Catalog {
-    historical: Option<Metadata>,
+    general: Option<Metadata>,
     data: Option<Metadata>,
-    historical_anchor: Option<historical_anchor::Anchor>,
+    shared_anchor: Option<shared_anchor::Anchor>,
 }
 impl Catalog {
     fn close(self) -> Result<()> {
         let first = self.data.map_or(Ok(()), Metadata::close);
-        let first = finish_historical(first, self.historical.map_or(Ok(()), Metadata::close));
-        finish_historical(
+        let first = finish_owned(first, self.general.map_or(Ok(()), Metadata::close));
+        finish_owned(
             first,
-            self.historical_anchor
-                .map_or(Ok(()), historical_anchor::Anchor::close),
+            self.shared_anchor
+                .map_or(Ok(()), shared_anchor::Anchor::close),
         )
     }
-    fn open_historical(
+    fn open_general(
         &mut self,
         home: &Path,
         write: bool,
@@ -50,7 +50,7 @@ impl Catalog {
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Metadata> {
         if write {
-            self.historical_anchor
+            self.shared_anchor
                 .as_mut()
                 .ok_or_else(integrity)?
                 .ensure_main(control, check)?;
@@ -90,7 +90,7 @@ impl Catalog {
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Option<EvidenceDomain>> {
         let Some(reserved) = EvidenceKey::parse(key) else {
-            return Ok(Some(EvidenceDomain::Historical));
+            return Ok(Some(EvidenceDomain::General));
         };
         let id = reserved.capture_id();
         let keys = [
@@ -100,7 +100,12 @@ impl Catalog {
             format!("evidence/remove/{id}"),
         ];
         let owns = |metadata: &Metadata| -> Result<bool> {
-            for candidate in &keys {
+            for (index, candidate) in keys.iter().enumerate() {
+                // A reserved key already appears among its three related keys.
+                // Preserve first-match order without querying the same row/history twice.
+                if keys[..index].contains(candidate) {
+                    continue;
+                }
                 if Self::length_in(metadata, candidate, control, check)?.is_some()
                     || Self::has_history(metadata, candidate, control, check)?
                 {
@@ -110,7 +115,7 @@ impl Catalog {
             Ok(false)
         };
         let old = self
-            .historical
+            .general
             .as_ref()
             .map(&owns)
             .transpose()?
@@ -118,19 +123,19 @@ impl Catalog {
         let data = self.data.as_ref().map(&owns).transpose()?.unwrap_or(false);
         match (old, data) {
             (true, true) => Err(integrity()),
-            (true, false) => Ok(Some(EvidenceDomain::Historical)),
+            (true, false) => Ok(Some(EvidenceDomain::General)),
             (false, true) => Ok(Some(EvidenceDomain::Data)),
             (false, false) => Ok(None),
         }
     }
-    pub(crate) fn visit_historical(
+    pub(crate) fn visit_general(
         &self,
         prefix: &str,
         after: &str,
         control: &OperationControl,
         visit: impl FnMut(&str, i64, &[u8]) -> Result<()>,
     ) -> Result<(usize, String)> {
-        match &self.historical {
+        match &self.general {
             Some(metadata) => super::raw_page::visit_raw_page(
                 &metadata.connection,
                 prefix,
@@ -182,7 +187,7 @@ impl Catalog {
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Option<RawDocument>> {
         let old = self
-            .historical
+            .general
             .as_ref()
             .map(|metadata| Self::raw_in(metadata, key, control, check))
             .transpose()?
@@ -223,42 +228,43 @@ pub(crate) fn with_catalog<T>(
         EvidenceQuota::acquire_read(home, control, check)?
     };
     let result = (|| {
-        let gate = ExclusiveLock::resource_wait_checked(
-            &home.join("locks"),
+        let gate = ExclusiveLock::resource_wait_in_directory_checked(
+            owner.lock_directory(),
             GATE,
-            Some(control.deadline()),
+            control.deadline(),
             || {
                 control.check()?;
                 check()
             },
+            None,
         )?;
         let mut catalog = Catalog {
-            historical: None,
+            general: None,
             data: None,
-            historical_anchor: None,
+            shared_anchor: None,
         };
         let result = (|| {
             catalog.data = store::open(home, &mut owner, false, control, check)?;
             // Native absence is the only historical-store miss. No corruption,
             // permission, cancellation or ambiguous SQLite error is swallowed.
-            let anchor = historical_anchor::Anchor::open(home, control, check)?;
+            let anchor = shared_anchor::Anchor::open(home, control, check)?;
             let old_present = anchor.present();
-            catalog.historical_anchor = Some(anchor);
-            if old_present || domain == Some(EvidenceDomain::Historical) {
-                catalog.historical = Some(catalog.open_historical(
+            catalog.shared_anchor = Some(anchor);
+            if old_present || domain == Some(EvidenceDomain::General) {
+                catalog.general = Some(catalog.open_general(
                     home,
-                    domain == Some(EvidenceDomain::Historical),
+                    domain == Some(EvidenceDomain::General),
                     control,
                     check,
                 )?);
             }
-            if let Some(metadata) = &mut catalog.historical {
+            if let Some(metadata) = &mut catalog.general {
                 metadata.evidence_gate_held = true;
             }
             run(&mut catalog, &mut owner)
         })();
-        let result = finish_historical(result, catalog.close());
-        finish_historical(result, gate.close())
+        let result = finish_owned(result, catalog.close());
+        finish_owned(result, gate.close())
     })();
     owner.finish(result)
 }
@@ -307,7 +313,7 @@ impl Catalog {
         admit: &mut impl FnMut(usize) -> Result<()>,
     ) -> Result<Option<RawDocument>> {
         let old = self
-            .historical
+            .general
             .as_ref()
             .map(|metadata| Self::length_in(metadata, key, control, check))
             .transpose()?
@@ -374,7 +380,7 @@ impl Catalog {
             control.check()?;
             check()?;
             let old = self
-                .historical
+                .general
                 .as_ref()
                 .map(|metadata| Self::next_key(metadata, prefix, &last, false, control, check))
                 .transpose()?
@@ -453,7 +459,7 @@ pub(crate) fn put_capture(
         // Never create a second copy of a historical CAP merely because its
         // producer is now Data-aware. Existing identity retains its owner.
         let historical = catalog
-            .historical
+            .general
             .as_ref()
             .map(|metadata| Catalog::length_in(metadata, key, control, check))
             .transpose()?
@@ -489,27 +495,28 @@ pub(crate) fn put_capture(
         if destination == EvidenceDomain::Data {
             if catalog.data.is_none() {
                 catalog.data = store::open(home, owner, true, control, check)?;
+            } else {
+                store::admit_mutation(
+                    catalog.data.as_mut().ok_or_else(integrity)?,
+                    owner,
+                    control,
+                    check,
+                )?;
             }
-            store::admit_mutation(
-                catalog.data.as_mut().ok_or_else(integrity)?,
-                owner,
-                control,
-                check,
-            )?;
         } else if catalog
-            .historical
+            .general
             .as_ref()
             .is_none_or(|metadata| !metadata.writable)
         {
-            if let Some(metadata) = catalog.historical.take() {
+            if let Some(metadata) = catalog.general.take() {
                 metadata.close()?;
             }
-            let mut metadata = catalog.open_historical(home, true, control, check)?;
+            let mut metadata = catalog.open_general(home, true, control, check)?;
             metadata.evidence_gate_held = true;
-            catalog.historical = Some(metadata);
+            catalog.general = Some(metadata);
         }
         let metadata = match destination {
-            EvidenceDomain::Historical => catalog.historical.as_mut(),
+            EvidenceDomain::General => catalog.general.as_mut(),
             EvidenceDomain::Data => catalog.data.as_mut(),
         }
         .ok_or_else(integrity)?;
@@ -562,9 +569,9 @@ pub(crate) fn with_existing_writer<T>(
     home: &Path,
     id: &str,
     control: &OperationControl,
-    run: impl FnOnce(&HistoricalWriter<'_>) -> Result<T>,
+    run: impl FnOnce(&OwnedWriter<'_>) -> Result<T>,
 ) -> Result<T> {
-    with_catalog(
+    let result = with_catalog(
         home,
         Some(EvidenceDomain::Data),
         control,
@@ -579,7 +586,7 @@ pub(crate) fn with_existing_writer<T>(
                 )
             };
             let old = catalog
-                .historical
+                .general
                 .as_ref()
                 .map(&owns)
                 .transpose()?
@@ -601,21 +608,17 @@ pub(crate) fn with_existing_writer<T>(
                 ));
             }
             if !data {
-                if let Some(metadata) = catalog.historical.take() {
+                if let Some(metadata) = catalog.general.take() {
                     metadata.close()?;
                 }
-                let mut metadata = catalog.open_historical(home, true, control, &|| Ok(()))?;
+                let mut metadata = catalog.open_general(home, true, control, &|| Ok(()))?;
                 metadata.evidence_gate_held = true;
-                catalog.historical = Some(metadata);
+                catalog.general = Some(metadata);
             }
             let connection = if data {
                 &catalog.data.as_ref().ok_or_else(integrity)?.connection
             } else {
-                &catalog
-                    .historical
-                    .as_ref()
-                    .ok_or_else(integrity)?
-                    .connection
+                &catalog.general.as_ref().ok_or_else(integrity)?.connection
             };
             // Pure retries of completed removal/keep facts must remain readable
             // after a limit reduction. Admit only immediately before a real
@@ -633,11 +636,22 @@ pub(crate) fn with_existing_writer<T>(
                     Ok(())
                 }
             };
-            let writer =
-                HistoricalWriter::for_catalog(connection, home, control, catalog, Some(&admit));
+            let writer = OwnedWriter::for_catalog(connection, home, control, catalog, Some(&admit));
             run(&writer)
         },
-    )
+    );
+    // A lock observation must never mask a stop which already happened at the
+    // original caller scope. Contention caused by an earlier owner remains the
+    // primary failure only while the original control is still live.
+    match result {
+        Err(error) if error.code == "workspace.busy" && error.details.is_null() => {
+            match control.check() {
+                Err(stop) => Err(stop),
+                Ok(()) => Err(error),
+            }
+        }
+        result => result,
+    }
 }
 
 /// Generic metadata APIs keep their CAS semantics but cannot accidentally write
@@ -668,13 +682,13 @@ pub(crate) fn mutate<T>(
                 metadata.evidence_gate_held = true;
                 run(metadata)
             } else {
-                if let Some(metadata) = catalog.historical.take() {
+                if let Some(metadata) = catalog.general.take() {
                     metadata.close()?;
                 }
-                let mut metadata = catalog.open_historical(home, true, control, check)?;
+                let mut metadata = catalog.open_general(home, true, control, check)?;
                 metadata.evidence_gate_held = true;
-                catalog.historical = Some(metadata);
-                run(catalog.historical.as_mut().ok_or_else(integrity)?)
+                catalog.general = Some(metadata);
+                run(catalog.general.as_mut().ok_or_else(integrity)?)
             }
         },
     )
@@ -712,7 +726,7 @@ pub(crate) fn read_carrier(
             evidence_gate_held: false,
             catalog_only: true,
         }),
-        Err(error) => finish_historical(
+        Err(error) => finish_owned(
             Err(error),
             connection.close().map_err(|(_, error)| error.into()),
         ),
@@ -726,7 +740,7 @@ pub(crate) fn with_batch_writer<T>(
     home: &Path,
     keys: &[&str],
     control: &OperationControl,
-    run: impl FnOnce(&HistoricalWriter<'_>) -> Result<T>,
+    run: impl FnOnce(&OwnedWriter<'_>) -> Result<T>,
 ) -> Result<T> {
     with_catalog(
         home,
@@ -753,23 +767,19 @@ pub(crate) fn with_batch_writer<T>(
                     &|| Ok(()),
                 )?;
             } else {
-                if let Some(metadata) = catalog.historical.take() {
+                if let Some(metadata) = catalog.general.take() {
                     metadata.close()?;
                 }
-                let mut metadata = catalog.open_historical(home, true, control, &|| Ok(()))?;
+                let mut metadata = catalog.open_general(home, true, control, &|| Ok(()))?;
                 metadata.evidence_gate_held = true;
-                catalog.historical = Some(metadata);
+                catalog.general = Some(metadata);
             }
             let connection = if data {
                 &catalog.data.as_ref().ok_or_else(integrity)?.connection
             } else {
-                &catalog
-                    .historical
-                    .as_ref()
-                    .ok_or_else(integrity)?
-                    .connection
+                &catalog.general.as_ref().ok_or_else(integrity)?.connection
             };
-            let writer = HistoricalWriter::for_catalog(connection, home, control, catalog, None);
+            let writer = OwnedWriter::for_catalog(connection, home, control, catalog, None);
             run(&writer)
         },
     )

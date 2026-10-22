@@ -1,125 +1,27 @@
 //! Doctor's read-only journal boundary. It does not prepare or resume a switch.
 use super::*;
 use crate::control::OperationControl;
-use serde::{
-    Deserialize, Deserializer,
-    de::{MapAccess, Visitor},
-};
-use serde_json::value::RawValue;
+use serde::Deserialize;
 use std::{fmt, io::Read};
-#[derive(Debug, Default)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Journal {
     pub state: String,
+    #[serde(default)]
     pub archive_path: String,
     schema: String,
     root: String,
-    path: String,
+    journal_path: String,
+    created_at: String,
+    #[serde(default)]
+    completed_at: Option<String>,
+    #[serde(default)]
+    markers: Vec<String>,
+    steps: Vec<Step>,
 }
-fn field(k: &str) -> String {
-    k.chars()
-        .map(|c| match c {
-            '\u{017f}' => 's',
-            '\u{212a}' => 'k',
-            _ => c.to_ascii_lowercase(),
-        })
-        .collect()
-}
-fn timestamp<E: serde::de::Error>(raw: &RawValue) -> std::result::Result<(), E> {
-    if raw.get() == "null" {
-        return Ok(());
-    }
-    let time = raw
-        .get()
-        .strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .ok_or_else(|| E::custom("Time.UnmarshalJSON: input is not a JSON string"))?;
-    crate::evidence::parse_go_timestamp(time)
-        .ok_or_else(|| E::custom("invalid archive timestamp"))?;
-    Ok(())
-}
-#[derive(Default)]
-struct Step;
-impl<'de> Deserialize<'de> for Step {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        struct Fields;
-        impl<'de> Visitor<'de> for Fields {
-            type Value = Step;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("an archive step")
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Step, E> {
-                Ok(Step)
-            }
-            fn visit_map<M: MapAccess<'de>>(self, mut m: M) -> std::result::Result<Step, M::Error> {
-                while let Some(key) = m.next_key::<String>()? {
-                    match field(&key).as_str() {
-                        "id" | "detail" => {
-                            m.next_value::<Option<String>>()?;
-                        }
-                        _ => {
-                            return Err(serde::de::Error::custom(format!(
-                                "json: unknown field {key:?}"
-                            )));
-                        }
-                    }
-                }
-                Ok(Step)
-            }
-        }
-        d.deserialize_any(Fields)
-    }
-}
-impl<'de> Deserialize<'de> for Journal {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        struct Fields;
-        impl<'de> Visitor<'de> for Fields {
-            type Value = Journal;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("an archive journal")
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Journal, E> {
-                Ok(Journal::default())
-            }
-            fn visit_map<M: MapAccess<'de>>(
-                self,
-                mut m: M,
-            ) -> std::result::Result<Journal, M::Error> {
-                let mut value = Journal::default();
-                while let Some(key) = m.next_key::<String>()? {
-                    let into = match field(&key).as_str() {
-                        "schema" => &mut value.schema,
-                        "root" => &mut value.root,
-                        "archivepath" => &mut value.archive_path,
-                        "journalpath" => &mut value.path,
-                        "state" => &mut value.state,
-                        "createdat" | "completedat" => {
-                            timestamp::<M::Error>(&m.next_value::<Box<RawValue>>()?)?;
-                            continue;
-                        }
-                        "markers" => {
-                            m.next_value::<Option<Vec<Option<String>>>>()?;
-                            continue;
-                        }
-                        "steps" => {
-                            m.next_value::<Option<Vec<Step>>>()?;
-                            continue;
-                        }
-                        _ => {
-                            return Err(serde::de::Error::custom(format!(
-                                "json: unknown field {key:?}"
-                            )));
-                        }
-                    };
-                    if let Some(v) = m.next_value::<Option<String>>()? {
-                        *into = v;
-                    }
-                }
-                Ok(value)
-            }
-        }
-        d.deserialize_any(Fields)
-    }
-}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Step { id: String, detail: String }
 fn invalid(detail: impl fmt::Display) -> ToolkitError {
     ToolkitError::new(
         "vault.archive_state",
@@ -128,18 +30,11 @@ fn invalid(detail: impl fmt::Display) -> ToolkitError {
     )
 }
 fn decode(raw: &[u8], root: &Path, path: &Path, control: &OperationControl) -> Result<Journal> {
-    std::str::from_utf8(raw).map_err(|_| invalid("archive journal encoding"))?;
-    // Go uses Decoder.Decode once; trailing bytes belong to a later JSON value
-    // and are not read as a second journal. Preserve original first-token bytes.
-    let end = crate::raw_json::first_value_end(raw)
-        .map_err(|e| invalid(format!("archive journal format: {e}")))?;
-    let first = &raw[..end];
-    let normalized = crate::evidence::normalize_go_json_strings(first, control)?;
-    let value: Journal = serde_json::from_slice(&normalized)
-        .map_err(|e| invalid(format!("archive journal format: {e}")))?;
+    let value: Journal = serde_json::from_slice(raw).map_err(|e| invalid(format!("archive journal format: {e}")))?;
+    if storage::parse_timestamp(&value.created_at).is_none() || value.completed_at.as_deref().is_some_and(|time| storage::parse_timestamp(time).is_none()) { return Err(invalid("invalid archive timestamp")); }
     if value.schema != "lycheedev.archive.v1"
         || value.root != root.to_string_lossy()
-        || value.path != path.to_string_lossy()
+        || value.journal_path != path.to_string_lossy()
     {
         return Err(invalid("archive journal identity"));
     }

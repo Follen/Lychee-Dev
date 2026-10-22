@@ -1,12 +1,10 @@
 //! Public Delivery consumers stop at the entry to the real Core acquisition.
 //! Core's own coordination tests cover cancellation after maintenance and during
-//! registry reads, including checked-close faults. These hooks do not claim to
+//! maintenance acquisition, including checked-close faults. These hooks do not claim to
 //! inject inside those Core phases, replace acquisition, or refresh its budget.
 use lycheedev_core::{
-    Invocation, ToolkitError, VERSION,
-    control::OperationControl,
-    coordination::{ClaimRegistry, InstallationMaintenanceLease},
-    storage,
+    VERSION, control::OperationControl, request::RequestContext,
+    coordination::InstallationMaintenanceLease, storage,
 };
 use serde_json::json;
 use std::{
@@ -96,42 +94,24 @@ impl Fixture {
             root,
         }
     }
-    fn registry(&self) -> PathBuf {
-        self.target.parent().unwrap().join(".lycheedev-claims.json")
-    }
-    fn invocation(&self, point: AcquirePoint, plan: bool) -> Invocation {
-        let mut flags = BTreeMap::from([
-            (
-                "--installation".into(),
-                self.client.to_string_lossy().into_owned(),
-            ),
-            ("--release".into(), self.next.to_string_lossy().into_owned()),
-        ]);
-        if point == AcquirePoint::Install {
-            flags.insert(
-                "--output".into(),
-                self.archive.to_string_lossy().into_owned(),
-            );
-        } else if point == AcquirePoint::UpdateMutation {
-            flags.insert("--path".into(), self.skill.to_string_lossy().into_owned());
-        }
-        if plan {
-            flags.insert("--plan".into(), "true".into());
-        }
-        Invocation {
-            command: if point == AcquirePoint::Install {
-                "addon install"
-            } else {
-                "update"
+    fn request(&self, point: AcquirePoint, plan: bool) -> (RequestContext, crate::Request) {
+        let ctx = RequestContext { home: self.root.join("home"), cwd: self.root.clone(), control: OperationControl::default() };
+        let request = if point == AcquirePoint::Install {
+            crate::Request::AddonInstall { installation: self.client.clone(), mode: crate::InstallMode::Release { root: self.next.clone(), archive: Some(self.archive.clone()) } }
+        } else {
+            let mut targets = Vec::new();
+            if point == AcquirePoint::UpdateMutation {
+                targets.push(crate::update::UpdateTarget { component: "skill".into(), path: self.skill.clone() });
             }
-            .into(),
-            positional: None,
-            flags,
-            home: self.root.join("home"),
-            cwd: self.root.clone(),
-            control: OperationControl::default(),
-        }
+            targets.push(crate::update::UpdateTarget { component: "addon".into(), path: self.client.clone() });
+            crate::Request::Update(crate::update::Request {
+                selection: crate::update::TargetSelection::Explicit(targets),
+                action: crate::update::Action::Managed { release: self.next.clone(), plan },
+            })
+        };
+        (ctx, request)
     }
+
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -199,41 +179,24 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
 enum Stop {
     Cancel,
     Deadline,
-    None,
 }
 fn public_acquisition(point: AcquirePoint, stop: Stop, plan: bool) {
     let f = Fixture::new();
-    if matches!(stop, Stop::None) {
-        // A live acquisition can legitimately create its empty lock file before
-        // detecting malformed JSON. Seed that namespace for the byte comparison.
-        InstallationMaintenanceLease::acquire(&f.target)
-            .unwrap()
-            .close()
-            .unwrap();
-    }
     if point == AcquirePoint::UpdateMutation {
         let old = f.root.join("old");
         candidate(&old, b"old skill", 'a');
         crate::deploy::fresh(&old, &f.skill, "skill", VERSION).unwrap();
-        // Preflight must succeed so the public update reaches its second guard
-        // acquisition after committing the first (skill) target.
-        fs::write(
-            f.registry(),
-            br#"{"schema":"lycheedev.claims.v1","claims":[]}"#,
-        )
-        .unwrap();
     }
-    let mut inv = f.invocation(point, plan);
+    let (mut ctx, request) = f.request(point, plan);
     if matches!(stop, Stop::Deadline) {
-        inv.control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
+        ctx.control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
     }
-    let original = inv.control.clone();
+    let original = ctx.control.clone();
     let cancel = original.tracked_cancel_handle().unwrap();
     let observed = Rc::new(RefCell::new(Vec::new()));
     let expected = Rc::new(RefCell::new(None));
     let seen = observed.clone();
     let saved = expected.clone();
-    let registry = f.registry();
     let root = f.root.clone();
     let observer = Observation::install(move |at, control| {
         assert!(control.same_scope(&original));
@@ -243,19 +206,15 @@ fn public_acquisition(point: AcquirePoint, stop: Stop, plan: bool) {
         if at != point {
             return;
         }
-        // With the old default-control wrapper this exact public consumer
-        // returns input.invalid, rather than the original request's stop.
-        fs::write(&registry, b"{").unwrap();
         *saved.borrow_mut() = Some(snapshot(&root));
         match stop {
             Stop::Cancel => cancel.cancel(),
             Stop::Deadline => {
                 std::thread::sleep(control.remaining().unwrap() + Duration::from_millis(1));
             }
-            Stop::None => (),
         }
     });
-    let error = crate::dispatch(&inv).unwrap_err();
+    let error = crate::dispatch(&ctx, &request).unwrap_err();
     drop(observer);
     assert_eq!(
         observed.borrow().as_slice(),
@@ -265,12 +224,7 @@ fn public_acquisition(point: AcquirePoint, stop: Stop, plan: bool) {
             std::slice::from_ref(&point)
         },
     );
-    let expected_error = match stop {
-        Stop::Cancel | Stop::Deadline => inv.control.check().unwrap_err(),
-        Stop::None => {
-            ToolkitError::from(serde_json::from_slice::<ClaimRegistry>(b"{").unwrap_err())
-        }
-    };
+    let expected_error = ctx.control.check().unwrap_err();
     assert_eq!(error.code, expected_error.code);
     assert_eq!(error.message, expected_error.message);
     assert_eq!(error.exit_code, expected_error.exit_code);
@@ -309,9 +263,7 @@ fn public_acquisition(point: AcquirePoint, stop: Stop, plan: bool) {
         assert_eq!(error.details, expected_error.details);
         assert!(!f.state.exists());
         assert!(!f.skill.exists());
-        if !matches!(stop, Stop::None) {
-            assert!(!f.target.parent().unwrap().join(".lycheedev-locks").exists());
-        }
+        assert!(!f.target.parent().unwrap().join(".lycheedev-locks").exists());
     }
     InstallationMaintenanceLease::acquire(&f.target)
         .unwrap()
@@ -336,14 +288,4 @@ fn public_update_preflight_acquisition_uses_original_cancellation_for_plan_and_a
 #[test]
 fn public_update_mutation_acquisition_stop_preserves_prior_commit_and_inventory() {
     public_acquisition(AcquirePoint::UpdateMutation, Stop::Cancel, false);
-}
-#[test]
-fn public_acquisition_registry_error_stays_primary_without_a_stop() {
-    for point in [
-        AcquirePoint::Install,
-        AcquirePoint::UpdatePreflight,
-        AcquirePoint::UpdateMutation,
-    ] {
-        public_acquisition(point, Stop::None, false);
-    }
 }

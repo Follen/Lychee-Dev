@@ -13,6 +13,11 @@ fetching network data. JSON results use stdout; diagnostics use stderr.
 A successful discovery call identifies available commands; use the operation's
 result to establish what it actually completed.
 
+The `effects` fields describe possible effects. `gameInput: true` includes
+connection, recovery and cleanup exchanges; it does not mean input was already
+sent. `gameInputWhen` lists required options: `live doctor` can send input only
+with `--fix`. Its default diagnosis, `live status` and `live session` send none.
+
 For Data, `data agent schema` gives the authoritative versioned task contract.
 `schema data agent serve` includes it and exact CLI inputs. Open a single bounded
 `data agent serve` process, send typed tasks and keep owned handles for paging.

@@ -128,7 +128,7 @@ impl Fixture {
         version: &str,
         resume: bool,
         control: &OperationControl,
-        guard: &InstallationGuard,
+        guard: &InstallationMaintenanceLease,
     ) -> Result<Value> {
         apply(
             &self.target,
@@ -229,7 +229,7 @@ fn seed_main(f: &Fixture) {
 fn pause_combined(f: &Fixture, archive: Option<&Path>, cut: Step) -> (PathBuf, Value) {
     let control = OperationControl::default();
     let cancel = control.tracked_cancel_handle().unwrap();
-    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
     let lease = deploy::InstallationLease::acquire(&f.target, &control).unwrap();
     let path = f.intent(&f.release, archive, VERSION);
     let phase = match cut {
@@ -304,7 +304,7 @@ fn source_change_during_prepared(
     commit_only: bool,
 ) -> (ToolkitError, BTreeMap<PathBuf, Option<Vec<u8>>>, Value) {
     let control = OperationControl::default();
-    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
     let lease = deploy::InstallationLease::acquire(&f.target, &control).unwrap();
     let path = f.intent(&f.release, archive, VERSION);
     let mut frozen = None;
@@ -423,7 +423,7 @@ fn assert_pending_conflict(
     message: &str,
 ) -> ToolkitError {
     let control = OperationControl::default();
-    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
     let before = f.snapshot();
     let mut last = None;
     for (release, resume) in [
@@ -567,7 +567,7 @@ fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
                 assert_eq!(fs::read(&path).unwrap(), checkpoint_bytes);
                 assert_eq!(f.snapshot(), expected_start);
                 let control = OperationControl::default();
-                let guard = InstallationGuard::acquire(&f.target).unwrap();
+                let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
                 let release = (request_kind != 2).then_some(f.release.as_path());
                 // Re-entering slot installation would rewrite even a ready
                 // pool. Deny that replay without blocking the legitimate
@@ -835,7 +835,7 @@ fn prepared_archive_checkpoint_resumes_each_matching_nested_state() {
             }
             let nested_bytes = fs::read(archive.join("replacement.json")).unwrap();
             let control = OperationControl::default();
-            let guard = InstallationGuard::acquire(&f.target).unwrap();
+            let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
             let result = f
                 .apply(None, Some(&archive), VERSION, true, &control, &guard)
                 .unwrap();
@@ -890,7 +890,7 @@ fn prepared_checkpoint_resumes_matching_fresh_and_upgrade_without_nested_record(
         }
         let (path, record) = pause_combined(&f, selected, Step::Prepared);
         let control = OperationControl::default();
-        let guard = InstallationGuard::acquire(&f.target).unwrap();
+        let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
         let before = f.snapshot();
         let error = f
             .apply(None, selected, VERSION, true, &control, &guard)
@@ -972,7 +972,7 @@ fn main_checkpoint_resumes_matching_and_reordered_receipts() {
             reverse_resources(&f.release.join("release.json"));
         }
         let control = OperationControl::default();
-        let guard = InstallationGuard::acquire(&f.target).unwrap();
+        let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
         assert_eq!(
             f.apply(Some(&f.release), None, VERSION, true, &control, &guard)
                 .unwrap(),
@@ -992,7 +992,7 @@ fn pending_checkpoints_preserve_cancellation_and_deadline_without_mutation() {
     for cut in [Step::Prepared, Step::Main, Step::Slots] {
         let f = Fixture::new();
         let (path, record) = pause_combined(&f, None, cut);
-        let guard = InstallationGuard::acquire(&f.target).unwrap();
+        let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
         let before = f.snapshot();
         let cancelled = OperationControl::default();
         cancelled.tracked_cancel_handle().unwrap().cancel();
@@ -1019,7 +1019,7 @@ fn completed_intent_rejects_same_version_replacement_without_replay_or_mutation(
     for archived_original in [false, true] {
         let f = Fixture::new();
         let control = OperationControl::default();
-        let guard = InstallationGuard::acquire(&f.target).unwrap();
+        let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
         let archive_a = f.root.join("archive-a");
         let original_archive = archived_original.then_some(archive_a.as_path());
         if archived_original {
@@ -1102,7 +1102,7 @@ fn completed_intent_rejects_same_version_replacement_without_replay_or_mutation(
 fn completed_intent_is_read_only_for_matching_and_reordered_receipts() {
     let f = Fixture::new();
     let control = OperationControl::default();
-    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
     let result = f
         .apply(Some(&f.release), None, VERSION, false, &control, &guard)
         .unwrap();
@@ -1146,7 +1146,7 @@ fn completed_intent_is_read_only_for_matching_and_reordered_receipts() {
 fn equivalent_intent_ambiguity_stops_without_creating_a_third_journal() {
     let f = Fixture::new();
     let control = OperationControl::default();
-    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
     f.apply(Some(&f.release), None, VERSION, false, &control, &guard)
         .unwrap();
     let original_path = f.intent(&f.release, None, VERSION);
@@ -1178,7 +1178,7 @@ fn equivalent_intent_ambiguity_stops_without_creating_a_third_journal() {
 fn reordered_intent_lookup_preserves_control_and_scan_limit_without_mutation() {
     let f = Fixture::new();
     let control = OperationControl::default();
-    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
     f.apply(Some(&f.release), None, VERSION, false, &control, &guard)
         .unwrap();
     let original_path = f.intent(&f.release, None, VERSION);
@@ -1254,7 +1254,7 @@ fn pending_original_release_reorders_resume_the_same_journal_and_changed_bytes_d
     use std::os::windows::fs::OpenOptionsExt;
     let f = Fixture::new();
     let control = OperationControl::default();
-    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let guard = InstallationMaintenanceLease::acquire(&f.target).unwrap();
     let old = f.root.join("old");
     candidate(&old, "3.4.9", b"-- old\n");
     f.apply(Some(&old), None, "3.4.9", false, &control, &guard)

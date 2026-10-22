@@ -204,6 +204,54 @@ fn spool_inventory_replaces_actual_sample_and_reserves_missing_payload() {
     assert_eq!(f.usage().temporary_namespace_bytes, 9);
 }
 #[test]
+fn spool_inventory_refreshes_sparse_case_insensitive_slots_and_retains_torn_records() {
+    let f = Fixture::new();
+    let high = f.seed(ManagedStageKind::Spool, 63, &source(), b"body", None);
+    let records = f.paths().shared_blobs();
+    let high_name = high.record_name().unwrap();
+    fs::rename(
+        records.join(&high_name),
+        records.join(high_name.to_ascii_uppercase()),
+    )
+    .unwrap();
+    let usage = f.usage();
+    assert_eq!(usage.temporary_namespace_bytes, 4);
+    assert_eq!(usage.generation_namespace_bytes, 128);
+
+    f.seed(ManagedStageKind::Spool, 31, &source(), b"new", None);
+    let torn =
+        records.join(ManagedStageDeclaration::record_name(ManagedStageKind::Spool, 7).unwrap());
+    fs::write(&torn, b"torn").unwrap();
+    let usage = f.usage();
+    assert_eq!(usage.temporary_namespace_bytes, 7);
+    assert_eq!(usage.generation_namespace_bytes, 260);
+    assert_eq!(fs::read(&torn).unwrap(), b"torn");
+
+    let control = OperationControl::default();
+    let owner = DerivedReservation::acquire_inner(
+        None,
+        &f.0,
+        0,
+        AdditionalPeak::default(),
+        &control,
+        None,
+        true,
+    )
+    .unwrap();
+    assert_eq!(
+        existing_record_slots(
+            record_directory(&owner),
+            ManagedStageKind::Spool,
+            &owner.control
+        )
+        .unwrap()
+        .collect::<Vec<_>>(),
+        [7, 31, 63],
+    );
+    owner.finish(Ok(())).unwrap();
+}
+
+#[test]
 fn all_spool_slots_at_exact_quota_recover_without_new_spool_or_producer_replay() {
     struct Once {
         bytes: Cursor<Vec<u8>>,
@@ -282,6 +330,45 @@ fn producer_business_eof_error_survives_and_never_authorizes_cleanup() {
     assert_eq!(e.code, "fixture.business_eof");
     assert_eq!(f.usage(), before);
 }
+#[test]
+fn spool_slot_preserves_foreign_payload_and_keeps_staging_pinned_until_owner_close() {
+    let f = Fixture::new();
+    let staging = f.paths().staging;
+    let foreign =
+        staging.join(ManagedStageDeclaration::payload_name(ManagedStageKind::Spool, 0).unwrap());
+    fs::write(&foreign, b"foreign").unwrap();
+    let control = OperationControl::default();
+    let mut owner = DerivedReservation::acquire_inner(
+        None,
+        &f.0,
+        0,
+        AdditionalPeak::default(),
+        &control,
+        None,
+        true,
+    )
+    .unwrap();
+    owner.admit_shared(128, 4).unwrap();
+    let slot = StageSlot::create_spool(&owner, &source(), 4).unwrap();
+    assert_eq!(slot.declaration.slot, 1);
+    assert_eq!(fs::read(&foreign).unwrap(), b"foreign");
+    assert!(
+        !f.paths()
+            .shared_blobs()
+            .join(ManagedStageDeclaration::record_name(ManagedStageKind::Spool, 0).unwrap())
+            .exists()
+    );
+    slot.finish(&owner, true).unwrap();
+    let moved = staging.with_extension("moved");
+    assert!(fs::rename(&staging, &moved).is_err());
+    owner.finish(Ok(())).unwrap();
+    fs::rename(&staging, &moved).unwrap();
+    assert_eq!(
+        fs::read(moved.join(foreign.file_name().unwrap())).unwrap(),
+        b"foreign",
+    );
+}
+
 #[test]
 fn active_slot_is_skipped_without_consuming_source_or_inferring_pid_liveness() {
     let f = Fixture::new();
@@ -425,13 +512,17 @@ fn declaration_only_memory_crash_retries_at_original_exact_peak() {
         sha256: storage::sha256(body),
         bytes: body.len() as u64,
     };
-    f.seed(
+    let record = f.seed(
         ManagedStageKind::Shard,
-        0,
+        63,
         &SourceIdentity::memory(&reference),
         body,
         None,
     );
+    let records = f.paths().shared_blobs();
+    let name = record.record_name().unwrap();
+    let retained = records.join(name.to_ascii_uppercase());
+    fs::rename(records.join(&name), &retained).unwrap();
     f.limit(128 + 80 + 2 * 4);
     let actual = super::super::publish_shared_blob_with_check(
         &f.0,
@@ -443,6 +534,7 @@ fn declaration_only_memory_crash_retries_at_original_exact_peak() {
     .unwrap();
     assert_eq!(actual.sha256, reference.sha256);
     assert_eq!(f.usage().total().unwrap(), 84);
+    assert!(!retained.exists());
 }
 
 #[test]

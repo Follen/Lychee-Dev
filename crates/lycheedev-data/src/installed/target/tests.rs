@@ -50,7 +50,7 @@ impl Fixture {
     }
 }
 #[test]
-fn local_target_publishes_exact_go_capture_body_and_original_scope() {
+fn local_target_publishes_exact_capture_body_and_original_scope() {
     let f = Fixture::new();
     let result = prepare_target(&f.home, &f.request, &f.control).unwrap();
     assert_eq!(result.pin.data.as_ref().unwrap().build_config, f.key);

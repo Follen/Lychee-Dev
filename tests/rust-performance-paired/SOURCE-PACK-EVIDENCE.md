@@ -8,28 +8,27 @@ The historical bbfe/ab4 cold-only validator remains unchanged.
 ## Export and Node verification
 
 Use one reviewed saved runner commit, independently of the b3d artifact source.
-Export **all 18** paths in `RUNNER_FILES` from
+Export **all** paths in `RUNNER_FILES` from
 `tests/rust-performance-paired/source-candidates.mjs`, plus:
 
 - `tools/rust-source-pack-evidence.mjs`
 - `tests/rust-performance-paired/source-pack-resume.mjs`
 - `tools/rust-source-pack-evidence.test.mjs`
-- `tests/rust-performance-paired/source-pack-resume.test.mjs`
 - this document
 
-The existing 18 paths include `tools/rust-build.mjs`, `rust-disk.mjs`,
+The current runner paths include `tools/rust-build.mjs`, `rust-disk.mjs`,
 `rust-emmy-identity.mjs`, `rust-owned-process.mjs/.ps1`,
 `rust-owned-memory.mjs`, `rust-build-auxiliary.json`, `zip.mjs`,
 `release/rust-disk-policy.json`, the paired `source-candidates.mjs`,
 `read-fact-delta.mjs`, `inputs.mjs`, `contract.mjs`,
 `tests/rust-source-full-corpus/assertions.mjs`, `retail-oracle.json`,
-`tests/rust-parity/describe-contract.mjs`, `oracle.mjs`, and
+`tests/rust-performance-paired/owned-proof.mjs`, and
 `tools/rust-source-candidate-diagnostics.mjs`. Preserve their relative paths.
 No package installation or build is needed. Use the already selected Node 24.
 The export must be byte-checked against the chosen commit before invocation.
 
 ```powershell
-node --test "$runner/tools/rust-source-pack-evidence.test.mjs" "$runner/tests/rust-performance-paired/source-pack-resume.test.mjs"
+node --test "$runner/tools/rust-source-pack-evidence.test.mjs" "$runner/tests/rust-performance-paired/source-pack-custody.test.mjs"
 ```
 
 Tests use synthetic bytes and native-proof fixtures. The 82,228,560-byte test

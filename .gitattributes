@@ -1,17 +1,5 @@
 * text=auto eol=lf
-tests/fixtures/legacy-addon/Definitions.lua text eol=lf
-# Historical source custody is byte-exact, including original line endings.
-tests/history/legacy-ui-00fd643/source/** -text
-# Research seals cover the original bytes, including captured JSON line endings.
-# Raw investigation evidence stays in Git, outside release source archives.
-docs/toolkit/research export-ignore
-docs/toolkit/research/** -text export-ignore whitespace=cr-at-eol,-blank-at-eof
-
-# Preserve the original authenticated native-call contract input bytes.
-tests/rust-source-engine/wow/native/generic-defs.lua -text whitespace=cr-at-eol
-tests/rust-source-engine/wow/native/generic-calls.lua -text whitespace=cr-at-eol
-tests/rust-source-engine/wow/native/generic-replace.lua -text whitespace=cr-at-eol
-
-# Fixed XML source-map golden inputs include physical CRLF bytes.
-tests/rust-source-engine/xml-golden-204.xml -text whitespace=cr-at-eol
-tests/rust-source-engine/xml-bindings-394.xml -text whitespace=cr-at-eol
+# Fixed external inputs keep their original bytes, including line endings.
+tests/fixtures/source-native/** -text
+tests/fixtures/db2/** -text
+tests/fixtures/hotfix-wago/** -text

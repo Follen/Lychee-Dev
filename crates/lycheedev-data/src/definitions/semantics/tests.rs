@@ -1,14 +1,12 @@
 use super::*;
-use std::{
-    sync::{Arc, atomic::AtomicBool},
-    time::Duration,
-};
+use lycheedev_core::control::TrackedCancellation;
+use std::time::Duration;
 
 fn budget(limits: Cost) -> Budget {
     Budget::new(limits, Instant::now() + Duration::from_secs(30), None)
 }
 #[test]
-fn go_semantic_syntax_builds_conditions_and_exact_numbers() {
+fn semantic_syntax_builds_conditions_and_exact_numbers() {
     let ledger = budget(Cost::defaults());
     let mappings = parse_mappings(b"FLAGS SpellMisc::Attributes[0] SpellAttributes0\nENUM SpellEffect::EffectMiscValue[0] SpellModOp SpellEffect::EffectAura=107\n", "SpellEffect", &ledger).unwrap();
     assert_eq!(
@@ -69,7 +67,7 @@ fn go_semantic_syntax_builds_conditions_and_exact_numbers() {
     }
 }
 #[test]
-fn go_semantic_irrelevant_mapping_empty_catalog_and_strict_selected_syntax() {
+fn semantic_irrelevant_mapping_empty_catalog_and_strict_selected_syntax() {
     let ledger = budget(Cost::defaults());
     assert!(parse_mappings(b"COLOR Sample::Color ignored invalid trailing tokens\nUNKNOWN Other::Value ../../escape\nFLAGS Other::Bad[ Def\n", "Sample", &ledger).unwrap().is_empty());
     for raw in [
@@ -160,7 +158,7 @@ fn semantic_parser_reserves_before_rows_and_keeps_long_names() {
     );
 }
 #[test]
-fn semantic_go_row_and_mapping_limits_and_control_recovery() {
+fn semantic_row_and_mapping_limits_and_control_recovery() {
     let ledger = budget(Cost::defaults());
     assert_eq!(
         parse_values("0\n".repeat(100_000).as_bytes(), "12.1.0.69933", &ledger)
@@ -193,10 +191,12 @@ fn semantic_go_row_and_mapping_limits_and_control_recovery() {
         .code,
         "records.metadata_limit"
     );
+    let token = TrackedCancellation::new();
+    token.cancel();
     let cancelled = Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(30),
-        Some(Arc::new(AtomicBool::new(true))),
+        Some(token),
     );
     assert_eq!(
         parse_values(b"1 X", "12.1.0.69933", &cancelled)
@@ -297,7 +297,7 @@ fn semantic_cached_load_honors_cancellation_after_validation_without_replay() {
 }
 
 #[test]
-fn go_semantic_table_filter_preserves_ascii_unicode_simple_fold_classes() {
+fn semantic_table_filter_preserves_ascii_unicode_simple_fold_classes() {
     for (selected, canonical, expected) in [
         ("Sample", "sample", true),
         ("ſample", "Sample", true),

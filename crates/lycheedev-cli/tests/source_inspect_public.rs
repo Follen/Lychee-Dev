@@ -1,4 +1,4 @@
-//! Actual CLI admission, fixed-Go inspect failures, and committed evidence.
+//! Actual CLI admission, fixed-reference inspect failures, and committed evidence.
 //! No release tools, native engine, external repository, or game are required.
 use lycheedev_core::{
     evidence,
@@ -174,7 +174,7 @@ fn failure(code: &str, message: &str) -> Value {
 }
 
 #[test]
-fn actual_source_inspect_trimmed_target_errors_keep_go_plain_failure_envelope() {
+fn actual_source_inspect_trimmed_target_errors_keep_reference_plain_failure_envelope() {
     let fixture = Fixture::indexed();
     let captures = fixture.captures();
     let too_long = "a".repeat(4097);
@@ -248,7 +248,7 @@ fn actual_source_inspect_raw_admission_precedes_workspace_and_pin() {
 fn actual_source_inspect_empty_argv_values_keep_parser_rejection() {
     let fixture = Fixture::unused();
     // The public parser rejects empty values before the raw-selector route gate.
-    // Injected library Invocation flags have a different admission boundary.
+    // The public CLI admits command arguments before calling typed Source requests.
     for flag in ["--snapshot", "--path", "--symbol", "--target-path"] {
         for args in [
             vec![

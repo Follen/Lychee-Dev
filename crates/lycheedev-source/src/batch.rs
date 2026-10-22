@@ -1,7 +1,13 @@
 //! Fixed-snapshot batch research. Input admission precedes preparation; item
 //! evaluators never call public dispatch, and only the batch publishes evidence.
-use crate::{SourceTools, context, environment, index, native_research, relations};
-use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, evidence, selection};
+use crate::{
+    SourceTools, context, environment, index, native_research, relations,
+    request::{
+        ContextRequest, RelationDirection, RelationRequest, ResearchMode, ResearchSelection,
+        SourceContext, SymbolSelector,
+    },
+};
+use lycheedev_core::{Outcome, Result, ToolkitError, evidence, selection};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -348,7 +354,7 @@ fn decode_context(query: &mut Option<ContextQuery>, value: Json) -> Result<()> {
 // encoding/json replaces invalid UTF-8 bytes and unpaired UTF-16 escapes
 // inside strings. Normalize those representations before the strict JSON parser;
 // malformed JSON syntax and raw control characters still fail normally.
-fn go_json_text(raw: &[u8]) -> String {
+fn wire_json_text(raw: &[u8]) -> String {
     let mut utf8 = String::new();
     let mut rest = raw;
     while !rest.is_empty() {
@@ -423,7 +429,7 @@ pub fn parse(raw: &[u8]) -> Result<BatchRequest> {
     if raw.len() > FILE_BYTES {
         return Err(invalid_batch("request file exceeds 64 KiB"));
     }
-    let tree: Json = serde_json::from_str(&go_json_text(raw))
+    let tree: Json = serde_json::from_str(&wire_json_text(raw))
         .map_err(|error| invalid_batch(error.to_string()))?;
     // Go reuses existing slice elements when a repeated requests array is
     // decoded. Omitted fields (including pointer objects) retain those values.
@@ -468,131 +474,127 @@ pub fn parse(raw: &[u8]) -> Result<BatchRequest> {
     request.validate()?;
     Ok(request)
 }
-pub fn read(inv: &Invocation) -> Result<BatchRequest> {
-    inv.control.check()?;
-    let path = Path::new(inv.required("--file")?);
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        inv.cwd.join(path)
-    };
+pub fn read(
+    path: &Path,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<BatchRequest> {
+    control.check()?;
     let mut raw = Vec::new();
     std::fs::File::open(path)?
         .take(FILE_BYTES as u64 + 1)
         .read_to_end(&mut raw)?;
-    inv.control.check()?;
-    let request = parse(&raw)?;
-    validate_options(inv)?;
-    Ok(request)
+    control.check()?;
+    parse(&raw)
 }
-fn validate_options(inv: &Invocation) -> Result<()> {
-    if inv.flag_bool("--static-only")
-        && (inv.flag("--release").is_some() || inv.flag_bool("--session-reuse"))
-    {
-        return Err(ToolkitError::arguments(
-            "--static-only cannot be combined with --release or --session-reuse",
-        ));
-    }
-    Ok(())
+
+#[derive(Clone, Debug)]
+enum Operation {
+    Query(SearchQuery),
+    Refs(RelationRequest),
+    Context(ContextRequest),
 }
-fn item_invocation(inv: &Invocation, item: &BatchItem) -> Result<Invocation> {
-    let mut next = inv.clone();
-    next.flags.remove("--file");
-    next.positional = None;
-    let set = |next: &mut Invocation, name: &str, value: &str| {
-        if !value.is_empty() {
-            next.flags.insert(name.into(), value.into());
-        }
-    };
-    if let Some(query) = &item.query {
-        next.command = "source query".into();
-        next.positional = Some(query.text.trim().into());
-        next.flags.remove("--flow");
-        set(&mut next, "--mode", &query.mode);
-        set(&mut next, "--topic", &query.topic.trim().to_lowercase());
-        set(
-            &mut next,
-            "--limit",
-            &if query.limit <= 0 { 10 } else { query.limit }.to_string(),
-        );
-        set(&mut next, "--cursor", &query.cursor);
-    } else if let Some(query) = &item.refs {
-        next.command = "source refs".into();
-        next.flags.remove("--flow");
-        set(&mut next, "--symbol-id", &query.symbol_id);
-        set(&mut next, "--symbol", &query.symbol);
-        set(&mut next, "--direction", &query.direction);
-        set(
-            &mut next,
-            "--limit",
-            &research_limit(query.limit)?.to_string(),
-        );
-        set(&mut next, "--cursor", &query.cursor);
-    } else if let Some(query) = &item.context {
-        next.command = "source context".into();
-        set(&mut next, "--symbol-id", &query.symbol_id);
-        set(&mut next, "--symbol", &query.symbol);
-        set(
-            &mut next,
-            "--limit",
-            &research_limit(query.limit)?.to_string(),
-        );
-        set(
-            &mut next,
-            "--max-bytes",
-            &if query.max_bytes == 0 {
-                16 << 10
+fn prepare_calls(request: &BatchRequest, flow: bool) -> Result<Vec<Operation>> {
+    request.validate()?;
+    Ok(request
+        .requests
+        .iter()
+        .map(|item| {
+            if let Some(query) = &item.query {
+                let mut query = query.clone();
+                query.text = query.text.trim().into();
+                query.topic = query.topic.trim().to_lowercase();
+                if query.limit <= 0 {
+                    query.limit = 10;
+                }
+                Operation::Query(query)
+            } else if let Some(query) = &item.refs {
+                Operation::Refs(RelationRequest {
+                    selector: if query.symbol_id.is_empty() {
+                        SymbolSelector::Name(query.symbol.clone())
+                    } else {
+                        SymbolSelector::Id(query.symbol_id.clone())
+                    },
+                    direction: match query.direction.as_str() {
+                        "incoming" => RelationDirection::Incoming,
+                        "outgoing" => RelationDirection::Outgoing,
+                        _ => RelationDirection::Both,
+                    },
+                    limit: if query.limit == 0 {
+                        25
+                    } else {
+                        query.limit as usize
+                    },
+                    cursor: query.cursor.clone(),
+                })
             } else {
-                query.max_bytes
+                let query = item.context.as_ref().expect("admitted batch operation");
+                Operation::Context(ContextRequest {
+                    selector: if query.symbol_id.is_empty() {
+                        SymbolSelector::Name(query.symbol.clone())
+                    } else {
+                        SymbolSelector::Id(query.symbol_id.clone())
+                    },
+                    limit: if query.limit == 0 {
+                        25
+                    } else {
+                        query.limit as usize
+                    },
+                    max_bytes: if query.max_bytes == 0 {
+                        16 << 10
+                    } else {
+                        query.max_bytes as usize
+                    },
+                    max_lines: if query.max_lines == 0 {
+                        80
+                    } else {
+                        query.max_lines as usize
+                    },
+                    depth: query.depth as usize,
+                    cursor: query.cursor.clone(),
+                    flow,
+                })
             }
-            .to_string(),
-        );
-        set(
-            &mut next,
-            "--max-lines",
-            &if query.max_lines == 0 {
-                80
-            } else {
-                query.max_lines
-            }
-            .to_string(),
-        );
-        set(&mut next, "--depth", &query.depth.to_string());
-        set(&mut next, "--cursor", &query.cursor);
-    }
-    Ok(next)
+        })
+        .collect())
 }
-pub fn dispatch(inv: &Invocation, tools: SourceTools<'_>) -> Result<Outcome> {
-    dispatch_request(inv, read(inv)?, tools)
-}
-/// CLI retains the already-admitted request across runtime preparation: a
-/// replaced file cannot change this operation, and the file is read only once.
+/// The entrypoint retains the admitted request across runtime preparation.
+/// Evaluators share one fixed selection and never reconstruct command flags.
 pub fn dispatch_request(
-    inv: &Invocation,
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
     request: BatchRequest,
+    mode: ResearchMode,
+    flow: bool,
     tools: SourceTools<'_>,
 ) -> Result<Outcome> {
-    dispatch_observed(inv, request, tools, None, &mut |_, _| {})
+    dispatch_observed(
+        ctx,
+        selection,
+        request,
+        mode,
+        flow,
+        tools,
+        None,
+        &mut |_, _| {},
+    )
 }
-/// Only the CLI's implicit-runtime admission calls this fallback. A missing or
-/// invalid default runtime is never executed; static evidence stays partial.
+/// An unavailable implicit runtime produces explicitly partial static evidence.
 pub fn dispatch_unavailable(
-    inv: &Invocation,
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
     request: BatchRequest,
+    flow: bool,
     error: ToolkitError,
 ) -> Result<Outcome> {
-    inv.control.check()?;
-    request.validate()?;
-    validate_options(inv)?;
-    if inv.flag("--release").is_some() || terminal_control_error(&error) {
+    if terminal_control_error(&error) {
         return Err(error);
     }
-    let mut inv = inv.clone();
-    // No persistent engine was admitted, just as Go leaves Analyze unset.
-    inv.flags.remove("--session-reuse");
     dispatch_observed(
-        &inv,
+        ctx,
+        selection,
         request,
+        ResearchMode::OneShot,
+        flow,
         SourceTools::default(),
         Some(error),
         &mut |_, _| {},
@@ -606,37 +608,29 @@ pub fn terminal_control_error(error: &ToolkitError) -> bool {
         )
 }
 fn dispatch_observed(
-    inv: &Invocation,
+    ctx: &SourceContext,
+    selection: &ResearchSelection,
     request: BatchRequest,
+    mode: ResearchMode,
+    flow: bool,
     tools: SourceTools<'_>,
     unavailable: Option<ToolkitError>,
     observer: &mut impl FnMut(&'static str, usize),
 ) -> Result<Outcome> {
-    request.validate()?;
-    validate_options(inv)?;
-    let mut inv = inv.clone();
-    inv.control = inv.control.child(
-        Instant::now() + Duration::from_secs(90),
-        inv.control.cancel_handle(),
-    );
-    inv.control.check()?;
-    let pin = selection::resolve_pinned(&inv)?;
-    let source = pin.source.as_ref().ok_or_else(|| {
-        ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
-    })?;
-    inv.flags.insert("--snapshot".into(), pin.id.clone());
-    let calls = request
-        .requests
-        .iter()
-        .map(|item| item_invocation(&inv, item))
-        .collect::<Result<Vec<_>>>()?;
+    let calls = prepare_calls(&request, flow)?;
+    let mut ctx = ctx.clone();
+    ctx.control = ctx
+        .control
+        .ordered_child(Instant::now() + Duration::from_secs(90))?;
+    ctx.control.check()?;
+    let pin = &selection.pin;
+    let source = selection.source()?;
     for (i, item) in request.requests.iter().enumerate() {
         if let Some(query) = &item.query {
             validate_query_cursor(source, query).map_err(|error| item_error(error, i, item))?;
         }
     }
-    let native =
-        request.needs_research() && !inv.flag_bool("--static-only") && unavailable.is_none();
+    let native = request.needs_research() && mode.uses_native() && unavailable.is_none();
     if native && tools.luac.is_none() {
         return Err(ToolkitError::new(
             "source.native_unavailable",
@@ -645,27 +639,22 @@ fn dispatch_observed(
         ));
     }
     let (index, digest) = crate::research_material::measured("source.batch.index", || {
-        index::build_material_with_control(&inv.home, source, &inv.control)
+        index::build_material_with_control(&ctx.home, source, &ctx.control)
     })?;
     let mut queries = Vec::new();
     // Fixed-index selectors for every item are resolved before semantic work.
-    for (i, call) in calls
-        .iter()
-        .enumerate()
-        .filter(|(_, call)| call.command != "source query")
-    {
+    for (i, call) in calls.iter().enumerate() {
+        let (selector, direction, flow) = match call {
+            Operation::Query(_) => continue,
+            Operation::Refs(query) => (&query.selector, query.direction, false),
+            Operation::Context(query) => (&query.selector, RelationDirection::Both, query.flow),
+        };
         let declarations = index
             .symbols
             .iter()
-            .filter(|symbol| {
-                symbol.kind == "declaration"
-                    && (call.flag("--symbol-id").is_some_and(|id| id == symbol.id)
-                        || call
-                            .flag("--symbol")
-                            .is_some_and(|name| name == symbol.name))
-            })
+            .filter(|symbol| symbol.kind == "declaration" && selector.matches(symbol))
             .collect::<Vec<_>>();
-        if call.flag("--symbol-id").is_some() && declarations.is_empty() {
+        if selector.id().is_some() && declarations.is_empty() {
             return Err(item_error(
                 ToolkitError::new(
                     "codebase.invalid_symbol",
@@ -676,42 +665,24 @@ fn dispatch_observed(
                 &request.requests[i],
             ));
         }
-        if native && !call.flag_bool("--flow") && declarations.len() == 1 {
+        if native && !flow && declarations.len() == 1 {
             queries.push(NativeQuery {
                 item: i,
                 query: native_research::QueryRequest {
                     symbol: declarations[0].clone(),
-                    direction: call.flag("--direction").unwrap_or("both").into(),
+                    direction: direction.as_str().into(),
                 },
             });
         }
     }
-    let selected_environment = if request.needs_research() {
-        inv.flag("--environment")
-            .map(|id| selection::load_pinned(&inv.home, id))
-            .transpose()?
+    let environment_source = if request.needs_research() {
+        selection.environment_source()?
     } else {
         None
     };
-    if selected_environment
-        .as_ref()
-        .is_some_and(|pin| pin.source.is_none())
-    {
-        return Err(ToolkitError::new(
-            "selection.source_missing",
-            "selected environment pin has no source",
-            3,
-        ));
-    }
-    let environment_source = selected_environment
-        .as_ref()
-        .and_then(|pin| pin.source.as_ref())
-        .or_else(|| {
-            (request.needs_research() && source.repository == "wow-ui-source").then_some(source)
-        });
     let (environment, load_facts, snapshot) = if !queries.is_empty() {
         let material = crate::research_material::load_or_build(
-            &inv,
+            &ctx,
             source,
             environment_source,
             &index,
@@ -725,32 +696,36 @@ fn dispatch_observed(
         )
     } else {
         let environment = environment_source
-            .map(|pin| environment::from_pin(&inv.home, pin, &inv.control))
+            .map(|pin| environment::from_pin(&ctx.home, pin, &ctx.control))
             .transpose()?;
         let facts = if request.requests.iter().any(|item| item.context.is_some()) {
-            index::load_facts_with_control(&inv.home, source, &index, &inv.control)?
+            index::load_facts_with_control(&ctx.home, source, &index, &ctx.control)?
         } else {
             Vec::new()
         };
         (environment, facts, None)
     };
     let shared = relations::PreparedResearch {
-        pin: pin.clone(),
+        selection: selection.clone(),
         index: Arc::new(index),
         environment: environment.map(Arc::new),
         load_facts: Arc::new(load_facts),
         native_unavailable: unavailable.as_ref().map(ToString::to_string),
     };
     for (i, call) in calls.iter().enumerate() {
-        let checked = match call.command.as_str() {
-            "source refs" => relations::validate_prepared_cursor(call, &tools, &shared),
-            "source context" => context::validate_prepared_cursor(call, &tools, &shared),
-            _ => Ok(()),
+        let checked = match call {
+            Operation::Refs(query) => {
+                relations::validate_prepared_cursor(query, mode, &tools, &shared)
+            }
+            Operation::Context(query) => {
+                context::validate_prepared_cursor(query, mode, &tools, &shared)
+            }
+            Operation::Query(_) => Ok(()),
         };
         checked.map_err(|error| item_error(error, i, &request.requests[i]))?;
     }
     let mut responses = if let Some(snapshot) = snapshot {
-        analyze(&inv, snapshot, queries, &request)?
+        analyze(&ctx, snapshot, queries, &request, mode)?
     } else {
         BTreeMap::new()
     };
@@ -759,39 +734,37 @@ fn dispatch_observed(
     let mut truncated = false;
     let mut documents = BTreeMap::new();
     for (i, (item, call)) in request.requests.iter().zip(&calls).enumerate() {
-        inv.control.check()?;
-        let result = if let Some(query) = &item.query {
-            shared.index.search_observed(
+        ctx.control.check()?;
+        let result = match call {
+            Operation::Query(query) => shared.index.search_observed(
                 source,
                 &pin.id,
-                query.text.trim(),
+                &query.text,
                 &query.mode,
-                &query.topic.trim().to_lowercase(),
-                if query.limit <= 0 {
-                    10
-                } else {
-                    query.limit as usize
-                },
+                &query.topic,
+                query.limit as usize,
                 &query.cursor,
-                Some(&inv.control),
+                Some(&ctx.control),
                 observer,
-            )
-        } else if item.refs.is_some() {
-            relations::with_prepared(call, &tools, &shared, responses.remove(&i))
-                .map(|reading| reading.data)
-        } else {
-            context::evaluate(
-                call,
+            ),
+            Operation::Refs(query) => {
+                relations::with_prepared(&ctx, query, mode, &tools, &shared, responses.remove(&i))
+                    .map(|reading| reading.data)
+            }
+            Operation::Context(query) => context::evaluate(
+                &ctx,
+                selection,
+                query,
+                mode,
                 &tools,
-                None,
                 Some(&shared),
                 responses.remove(&i),
                 &mut documents,
             )
-            .map(|reading| reading.data)
+            .map(|reading| reading.data),
         }
         .map_err(|error| item_error(error, i, item))?;
-        inv.control.check()?;
+        ctx.control.check()?;
         complete &= result["complete"] == true;
         truncated |= result["truncated"] == true;
         let mut row = serde_json::Map::new();
@@ -819,8 +792,8 @@ fn dispatch_observed(
         ));
     }
     let data = json!({"snapshot":pin.id,"results":rows,"complete":complete,"truncated":truncated});
-    inv.control.check()?;
-    let (_, raw) = admit_json(&data, &inv.control, evidence::DEFAULT_CAPTURE_BYTES, true).map_err(
+    ctx.control.check()?;
+    let (_, raw) = admit_json(&data, &ctx.control, evidence::DEFAULT_CAPTURE_BYTES, true).map_err(
         |mut error| {
             if error.code == "source.native_budget" {
                 error.code = "vault.blob_limit".into();
@@ -829,9 +802,9 @@ fn dispatch_observed(
             error
         },
     )?;
-    inv.control.check()?;
+    ctx.control.check()?;
     let capture = evidence::commit_capture_bounded(
-        &inv.home,
+        &ctx.home,
         evidence::CaptureInput {
             bytes: &raw,
             maximum_bytes: evidence::DEFAULT_CAPTURE_BYTES,
@@ -840,7 +813,7 @@ fn dispatch_observed(
             complete,
             truncated,
         },
-        &inv.control,
+        &ctx.control,
     )?;
     let mut result = Outcome::new(data);
     result.complete = complete;
@@ -1014,16 +987,17 @@ fn native_failure(
     }
 }
 fn analyze(
-    inv: &Invocation,
+    ctx: &SourceContext,
     snapshot: native_research::SnapshotRequest,
     queries: Vec<NativeQuery>,
     batch: &BatchRequest,
+    mode: ResearchMode,
 ) -> Result<BTreeMap<usize, Value>> {
     let expected = queries.iter().map(|query| query.item).collect::<Vec<_>>();
-    let values = if inv.flag_bool("--session-reuse") {
-        collect_native_results(queries, &inv.control, RESULT_BYTES, |query| {
+    let values = if mode.reuses_session() {
+        collect_native_results(queries, &ctx.control, RESULT_BYTES, |query| {
             crate::native_session::analyze(
-                inv,
+                ctx,
                 native_research::WorkerRequest {
                     snapshot: snapshot.clone(),
                     query: query.query,
@@ -1036,19 +1010,19 @@ fn analyze(
             schema: WORKER_SCHEMA.into(),
             snapshot,
             queries,
-            remaining_ms: inv.control.remaining()?.as_millis().min(90_000) as u64,
+            remaining_ms: ctx.control.remaining()?.as_millis().min(90_000) as u64,
         };
-        let (_, bytes) = admit_json(&request, &inv.control, WORKER_BYTES, true)?;
+        let (_, bytes) = admit_json(&request, &ctx.control, WORKER_BYTES, true)?;
         let mut command = std::process::Command::new(std::env::current_exe()?);
         command.arg("--source-native-batch-worker");
-        let output = crate::process::run_controlled(
+        let output = crate::process::run_with_operation_control(
             command,
             RESULT_BYTES,
-            inv.control.remaining()?,
+            ctx.control.remaining()?,
             Some(bytes),
-            Some(inv.control.token()),
+            &ctx.control,
         );
-        inv.control.check()?;
+        ctx.control.check()?;
         let output = output?;
         if output.status != 0 {
             return Err(ToolkitError::new(

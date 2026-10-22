@@ -178,7 +178,7 @@ fn a_later_successful_wait_proves_reap_without_erasing_the_prior_failure() {
             .iter()
             .any(|error| error.contains("wait failure"))
     );
-    let error = finish_result(Ok(()), ProcessControl::Legacy(None), &cleanup).unwrap_err();
+    let error = finish_result(Ok(()), ProcessControl(&OperationControl::default()), &cleanup).unwrap_err();
     assert_eq!(error.message, "External process retirement is unconfirmed");
     assert_eq!(error.details["reaped"], true);
     assert_eq!(
@@ -200,7 +200,7 @@ fn primary_cancel_deadline_and_io_errors_survive_late_control_and_cleanup_faults
         let cleanup = immediate_retirement(&mut owner);
         let error = finish_result(
             Err(original.clone()),
-            ProcessControl::Complete(&parent),
+            ProcessControl(&parent),
             &cleanup,
         )
         .unwrap_err();
@@ -315,7 +315,7 @@ fn reader_failure_is_not_an_output_cap_failure_and_both_pipes_are_dropped() {
         .spawn(1, wake, move || read_output(0, pipe, 1024))
         .unwrap();
     let error = collect_until_finished(&mut workers, &mut state).unwrap_err();
-    assert_eq!(error.code, "luals.check_failed");
+    assert_eq!(error.code, "source.process_check_failed");
     assert!(error.message.contains("injected reader error"));
     assert!(dropped.load(Ordering::Acquire));
     dropped.store(false, Ordering::Release);
@@ -350,7 +350,7 @@ fn worker_panic_is_joined_and_reported_even_if_root_and_job_are_terminal() {
     let cleanup = retire(&mut owner, &mut workers, &mut state, &rx, Instant::now());
     assert!(cleanup.complete());
     assert_eq!(cleanup.errors.len(), 1);
-    assert!(finish_result(Ok(()), ProcessControl::Legacy(None), &cleanup).is_err());
+    assert!(finish_result(Ok(()), ProcessControl(&OperationControl::default()), &cleanup).is_err());
 }
 #[test]
 fn output_reader_retains_exact_cap_and_detects_the_next_byte() {
@@ -415,7 +415,7 @@ fn successful_child_with_failed_stdin_returns_joined_cleanup_evidence() {
         Some(vec![b'x'; 4 << 20]),
     )
     .unwrap_err();
-    assert_eq!(error.code, "luals.check_failed");
+    assert_eq!(error.code, "source.process_check_failed");
     assert!(error.message.starts_with("Process stdin failed:"));
     assert_eq!(error.details["ownedJobTerminal"], true);
     assert_eq!(error.details["stdinWriterComplete"], true);
@@ -555,7 +555,7 @@ fn late_worker_errors_keep_their_original_cause_after_root_exit() {
             assert_eq!(state.outputs[0].as_deref(), Some(b"tail".as_slice()));
             let error = super::finish_retired_result(
                 Ok(()),
-                ProcessControl::Legacy(None),
+                ProcessControl(&OperationControl::default()),
                 &mut state,
                 &cleanup,
             )
@@ -563,9 +563,9 @@ fn late_worker_errors_keep_their_original_cause_after_root_exit() {
             assert_eq!(
                 error.code,
                 if overflow {
-                    "luals.input_budget"
+                    "source.process_input_budget"
                 } else {
-                    "luals.check_failed"
+                    "source.process_check_failed"
                 }
             );
             if !overflow {
@@ -574,7 +574,7 @@ fn late_worker_errors_keep_their_original_cause_after_root_exit() {
             let primary = ToolkitError::io(io::Error::other("original root wait failure"));
             let error = super::finish_retired_result(
                 Err(primary.clone()),
-                ProcessControl::Legacy(None),
+                ProcessControl(&OperationControl::default()),
                 &mut state,
                 &cleanup,
             )
@@ -599,7 +599,7 @@ fn retired_completion_preserves_control_stdin_and_nonzero_precedence() {
         state.input_error = Some(io::Error::other("late stdin failure"));
         let result = super::finish_retired_result(
             Ok(()),
-            ProcessControl::Legacy(None),
+            ProcessControl(&OperationControl::default()),
             &mut state,
             &cleanup,
         );
@@ -615,7 +615,7 @@ fn retired_completion_preserves_control_stdin_and_nonzero_precedence() {
     state.status = Some(0);
     let error = super::finish_retired_result(
         Ok(()),
-        ProcessControl::Complete(&control),
+        ProcessControl(&control),
         &mut state,
         &cleanup,
     )
@@ -625,7 +625,7 @@ fn retired_completion_preserves_control_stdin_and_nonzero_precedence() {
     assert!(
         super::finish_retired_result(
             Ok(()),
-            ProcessControl::Legacy(None),
+            ProcessControl(&OperationControl::default()),
             &mut state,
             &incomplete
         )

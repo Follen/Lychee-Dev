@@ -1,5 +1,5 @@
 use super::*;
-use crate::mailbox;
+use crate::mailbox::lookup;
 use std::{
     cell::Cell,
     collections::{BTreeMap, BTreeSet},
@@ -10,15 +10,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-static CATALOG: &[CatalogProfile] = &[CatalogProfile {
-    product: "forever",
-    catalog_product: "wow_classic_beta",
-    channel: "asia-beta",
-    full_build: "1.60.1.70338",
-    recipe: RecipeId::Forever,
-    profile: "synthetic-only-fixed-lua",
-    evidence_sha256: "1111111111111111111111111111111111111111111111111111111111111111",
-}];
+struct FixtureClearControl;
+impl lycheedev_windows::process::RuntimeControl for FixtureClearControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
+struct FixtureFlagControl(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl lycheedev_windows::process::RuntimeControl for FixtureFlagControl {
+    fn check(&self) -> std::result::Result<(), String> {
+        if self.0.load(std::sync::atomic::Ordering::Acquire) {
+            Err("memory.runtime_cancelled".into())
+        } else {
+            Ok(())
+        }
+    }
+}
 fn client() -> ClientInstallation {
     ClientInstallation {
         directory: "synthetic".into(),
@@ -36,13 +43,14 @@ fn client() -> ClientInstallation {
     }
 }
 fn admission() -> RuntimeLayoutAdmission {
-    RuntimeLayoutAdmission::select_from(&client(), RecipeId::Forever, CATALOG).unwrap()
+    RuntimeLayoutAdmission::select_formal(&client(), RecipeId::Forever).unwrap()
 }
 fn budget() -> RuntimeBudget {
-    RuntimeBudget::new(
+    RuntimeBudget::with_control_factory(
         RuntimeCost::defaults(),
         Instant::now() + Duration::from_secs(30),
-        Arc::new(AtomicBool::new(false)),
+        0,
+        || FixtureClearControl,
     )
     .unwrap()
 }
@@ -175,8 +183,8 @@ impl Fixture {
             checksum: 0,
             payload: payload.to_vec(),
         };
-        let record = self.string(&mailbox::encode(&r).unwrap());
-        let schema = self.string(crate::go_mailbox_v1::SCHEMA.as_bytes());
+        let record = self.string(&lookup::encode(&r).unwrap());
+        let schema = self.string(crate::mailbox::SCHEMA.as_bytes());
         let release = self.string(expected_release.as_bytes());
         let runtime = self.string(r.runtime.as_bytes());
         let mailbox = self.table(&[
@@ -282,7 +290,7 @@ mod observation {
     use serde_json::{Value, json};
 
     fn identity() -> Value {
-        json!({"schema":crate::go_mailbox_v1::SCHEMA,"runtime":"2".repeat(32),"nextSlot":1,"inputState":crate::go_mailbox_v1::SCHEMA,
+        json!({"schema":crate::mailbox::SCHEMA,"runtime":"2".repeat(32),"nextSlot":1,"inputState":crate::mailbox::SCHEMA,
             "guid":"Player-1-ABC","character":"测试角色","realm":"测试 realm", "product":"forever",
             "build":"1.60.1.70338","release":lycheedev_core::VERSION,"slots":500,"inventory":500})
     }
@@ -435,30 +443,18 @@ mod observation {
         no_capabilities(&value);
     }
     #[test]
-    fn activation_only_identity_is_observation_without_input_authority() {
+    fn non_current_identity_is_rejected_and_releases_reader() {
         let mut payload = identity();
-        payload["schema"] = crate::go_mailbox_v1::LEGACY_IDENTITY_SCHEMA.into();
-        payload["inputState"] = crate::go_mailbox_v1::LEGACY_HYBRID_SCHEMA.into();
+        payload["schema"] = "lycheedev.slot.identity.v2".into();
+        payload["inputState"] = "lycheedev.input.hybrid.v2".into();
         payload["slots"] = 200.into();
         payload["inventory"] = 200.into();
         let (fixture, dropped) = observation_fixture(Some(&payload));
-        let observed = observe(fixture, RuntimeLimits::defaults()).unwrap();
-        assert!(observed.identity.activation_only);
-        assert_eq!(observed.identity.inventory, Some(200));
-        assert_eq!(
-            observed.identity.compatibility,
-            "manual_activation_required"
-        );
-        assert_eq!(
-            observed.identity.diagnostic_codes,
-            [
-                "memory.mailbox_incompatible",
-                "live.channel_legacy_identity_requires_activation"
-            ]
-        );
-        assert_eq!(
-            serde_json::to_value(&observed).unwrap()["authority"],
-            "observation_only"
+        let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
+        assert!(
+            failure
+                .cause
+                .contains("live.channel_identity_record_invalid")
         );
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
     }
@@ -589,7 +585,7 @@ mod observation {
     #[test]
     fn cancellation_before_open_does_not_issue_a_reader() {
         let control = OperationControl::default();
-        control.cancel_handle().store(true, Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         let opened = Cell::new(false);
         let failure = runtime_observation::observe_with::<Bound<Fixture>>(
             &control,
@@ -624,161 +620,22 @@ mod observation {
 }
 
 #[test]
-fn unrecorded_build_does_not_inherit_historical_or_synthetic_abi() {
-    assert_eq!(
-        RuntimeLayoutAdmission::select_from(&client(), RecipeId::Forever, PROFILES)
-            .err()
-            .unwrap(),
-        "reader.runtime_layout_unsupported"
-    );
-}
-#[test]
-fn historical_admission_matches_archived_lua_layout_and_exact_client_scope() {
-    let profiles: [&[u8]; 4] = [
-        include_bytes!("../../../../docs/toolkit/research/lua-mailbox/root.profile.json"),
-        include_bytes!(
-            "../../../../docs/toolkit/research/lua-mailbox-classic-70032/root.profile.json"
-        ),
-        include_bytes!(
-            "../../../../docs/toolkit/research/lua-mailbox-titan-69874/root.profile.json"
-        ),
-        include_bytes!(
-            "../../../../docs/toolkit/research/lua-mailbox-forever-70124/root-runscript.profile.json"
-        ),
-    ];
-    for (profile, raw) in PROFILES.iter().zip(profiles) {
-        let recorded: serde_json::Value = serde_json::from_slice(raw).unwrap();
-        assert_eq!(
-            lycheedev_core::storage::sha256(raw),
-            profile.evidence_sha256
-        );
-        assert_eq!(recorded["id"], profile.profile);
-        assert_eq!(
-            recorded["publicPath"],
-            serde_json::json!(["_G", "LycheeDevInternal", "Mailbox"])
-        );
-        let known = client::catalog_product(profile.catalog_product).unwrap();
-        let mut c = client();
-        c.product = profile.product.into();
-        c.product_code = if known.family == "forever" {
-            "wow_forever".into()
-        } else {
-            profile.catalog_product.into()
-        };
-        c.catalog_product = if known.id != known.family {
-            profile.catalog_product.into()
-        } else {
-            String::new()
-        };
-        c.channel = profile.channel.into();
-        c.full_build = profile.full_build.into();
-        c.interface = known.interface.unwrap();
-        let admitted = RuntimeLayoutAdmission::select_from(&c, profile.recipe, PROFILES).unwrap();
-        let layout = admitted.layout();
-        let offset = |value: &serde_json::Value| {
-            u64::from_str_radix(value.as_str().unwrap().trim_start_matches("0x"), 16).unwrap()
-        };
-        assert_eq!(
-            offset(&recorded["layoutAssumptions"]["globalsTValueOffset"]),
-            layout.state_globals
-        );
-        assert_eq!(
-            offset(&recorded["types"]["Table"]["fields"]["tag"]["offset"]),
-            layout.tag_offset
-        );
-        assert_eq!(
-            offset(&recorded["types"]["TString"]["fields"]["length"]["offset"]),
-            layout.string_length
-        );
-        assert_eq!(
-            offset(&recorded["layoutAssumptions"]["stringDataOffset"]),
-            layout.string_data
-        );
-        assert_eq!(
-            offset(&recorded["types"]["Table"]["fields"]["nodes"]["offset"]),
-            layout.table_nodes
-        );
-        assert_eq!(
-            offset(&recorded["types"]["Table"]["fields"]["logNodes"]["offset"]),
-            layout.table_log2
-        );
-        assert_eq!(
-            recorded["types"]["Node"]["size"].as_u64().unwrap(),
-            layout.node_bytes
-        );
-        assert_eq!(recorded["types"]["TValue"]["size"], 24);
-        for (path, expected) in [
-            ("/types/TValue/fields/tag/offset", 8),
-            ("/types/TValue/fields/secret/offset", 9),
-            ("/types/Node/fields/value/offset", 0),
-            ("/types/Node/fields/valueTag/offset", 8),
-            ("/types/Node/fields/valueSecret/offset", 9),
-            ("/types/Node/fields/key/offset", 24),
-            ("/types/Node/fields/keyTag/offset", 32),
-            ("/types/Node/fields/keySecret/offset", 33),
-            ("/types/Node/fields/next/offset", 48),
-            ("/types/TString/fields/hash/offset", 20),
-        ] {
-            assert_eq!(offset(recorded.pointer(path).unwrap()), expected);
-        }
-        c.full_build.push('1');
-        assert!(RuntimeLayoutAdmission::select_from(&c, profile.recipe, PROFILES).is_err());
-        c.full_build = profile.full_build.into();
-        c.product = "forever".into();
-        c.catalog_product = "wow_cn_beta".into();
-        c.product_code = "wow_forever".into();
-        c.channel = "cn-beta".into();
-        assert!(RuntimeLayoutAdmission::select_from(&c, profile.recipe, PROFILES).is_err());
-    }
-}
-#[test]
-fn admission_requires_exact_product_channel_build_and_recipe() {
+fn layout_admission_rejects_every_altered_field() {
     let a = admission();
-    assert_eq!(a.profile_id(), "synthetic-only-fixed-lua");
-    assert_eq!(a.evidence_sha256(), CATALOG[0].evidence_sha256);
-    assert!(RuntimeLayoutAdmission::select_from(&client(), RecipeId::Retail, CATALOG).is_err());
-    for which in 0..5 {
-        let mut c = client();
-        match which {
-            0 => c.product = "cn-beta".into(),
-            1 => c.catalog_product = "wow_cn_beta".into(),
-            2 => c.channel = "cn-beta".into(),
-            3 => c.full_build = "1.60.1.70339".into(),
-            _ => c.product_code = "wow_cn_beta".into(),
-        }
-        assert!(RuntimeLayoutAdmission::select_from(&c, RecipeId::Forever, CATALOG).is_err());
-    }
-    let mut cn = client();
-    cn.product = "forever".into();
-    cn.product_code = "wow_forever".into();
-    cn.catalog_product = "wow_cn_beta".into();
-    cn.channel = "cn-beta".into();
-    assert_eq!(
-        RuntimeLayoutAdmission::select_from(&cn, RecipeId::Forever, CATALOG)
-            .err()
-            .unwrap(),
-        "reader.runtime_layout_unsupported"
-    );
-}
-#[test]
-fn layout_admission_rejects_every_altered_field_and_fake_hash() {
-    let a = admission();
-    for field in 0..9 {
+    for field in 0..8 {
         let mut l = a.layout();
         match field {
             0 => l.id.push('x'),
-            1 => l.applicable_hashes.push("fake".into()),
-            2 => l.state_globals += 1,
-            3 => l.tag_offset += 1,
-            4 => l.string_length += 1,
-            5 => l.string_data += 1,
-            6 => l.table_nodes += 1,
-            7 => l.table_log2 += 1,
+            1 => l.state_globals += 1,
+            2 => l.tag_offset += 1,
+            3 => l.string_length += 1,
+            4 => l.string_data += 1,
+            5 => l.table_nodes += 1,
+            6 => l.table_log2 += 1,
             _ => l.node_bytes += 1,
         }
         assert!(a.admits_layout(&l).is_err());
     }
-    assert!(a.layout().admit("").is_err());
     assert!(a.admits_layout(&a.layout()).is_ok());
 }
 #[test]
@@ -848,10 +705,11 @@ fn replacement_budget_poison_cannot_reset_ledger() {
 #[test]
 fn cancellation_before_lookup_reads_nothing() {
     let cancel = Arc::new(AtomicBool::new(false));
-    let mut b = RuntimeBudget::new(
+    let mut b = RuntimeBudget::with_control_factory(
         RuntimeCost::defaults(),
         Instant::now() + Duration::from_secs(30),
-        cancel.clone(),
+        0,
+        || FixtureFlagControl(cancel.clone()),
     )
     .unwrap();
     let mut reader = bound(Fixture::new(), &mut b);
@@ -932,10 +790,11 @@ fn reader_root_path_tearing_discards_observation() {
 fn exhausted_shared_allocation_budget_fails_before_path_read() {
     let mut limits = RuntimeCost::defaults();
     limits.allocation_bytes = 5;
-    let mut b = RuntimeBudget::new(
+    let mut b = RuntimeBudget::with_control_factory(
         limits,
         Instant::now() + Duration::from_secs(30),
-        Arc::new(AtomicBool::new(false)),
+        0,
+        || FixtureClearControl,
     )
     .unwrap();
     let mut reader = bound(Fixture::new(), &mut b);
@@ -969,17 +828,11 @@ fn invalid_selector_cannot_reach_heap() {
 
 #[test]
 fn expired_deadline_and_invalid_release_refuse_binding() {
-    let mut expired = RuntimeBudget::new(
-        RuntimeCost::defaults(),
-        Instant::now(),
-        Arc::new(AtomicBool::new(false)),
-    )
-    .unwrap();
-    let e = Bound::bind(Fixture::new(), admission(), "3.1.2", &mut expired)
-        .err()
-        .unwrap();
-    assert_eq!(e.cause, "memory.runtime_deadline");
-    assert_eq!(e.usage, RuntimeCost::default());
+    let expired =
+        RuntimeBudget::with_control_factory(RuntimeCost::defaults(), Instant::now(), 0, || {
+            FixtureClearControl
+        });
+    assert_eq!(expired.err().unwrap(), "memory.runtime_deadline");
     for release in ["", "版本"] {
         let e = Bound::bind(Fixture::new(), admission(), release, &mut budget())
             .err()
@@ -1007,7 +860,7 @@ fn malformed_build_does_not_enter_catalog_matching() {
         let mut c = client();
         c.full_build = build.into();
         assert_eq!(
-            RuntimeLayoutAdmission::select_from(&c, RecipeId::Forever, CATALOG)
+            RuntimeLayoutAdmission::select_formal(&c, RecipeId::Forever)
                 .err()
                 .unwrap(),
             "reader.runtime_client_identity"
@@ -1062,15 +915,15 @@ fn metadata_change_after_lookup_discards_record_and_poisons() {
 
 #[test]
 fn runtime_budget_observes_parent_cancel_after_issuance() {
-    use lycheedev_core::control::OperationControl;
-    let parent_token = Arc::new(AtomicBool::new(false));
-    let parent = OperationControl::new(
+    use lycheedev_core::control::{OperationControl, TrackedCancellation};
+    let parent_token = TrackedCancellation::new();
+    let parent = OperationControl::tracked(
         Instant::now() + Duration::from_secs(30),
         parent_token.clone(),
     );
-    let child = parent.child(parent.deadline(), Arc::new(AtomicBool::new(false)));
+    let child = parent.ordered_child(parent.deadline()).unwrap();
     let mut b = runtime_budget(&child, RuntimeLimits::defaults()).unwrap();
-    parent_token.store(true, Ordering::Release);
+    parent_token.cancel();
     assert_eq!(b.check().unwrap_err(), "memory.runtime_cancelled");
     let before = b.usage();
     assert_eq!(
@@ -1082,23 +935,24 @@ fn runtime_budget_observes_parent_cancel_after_issuance() {
 
 #[test]
 fn runtime_budget_keeps_nested_ancestry_and_independent_child_cancellation() {
-    use lycheedev_core::control::OperationControl;
-    let top_token = Arc::new(AtomicBool::new(false));
-    let top = OperationControl::new(Instant::now() + Duration::from_secs(30), top_token.clone());
-    let middle = top.child(top.deadline(), Arc::new(AtomicBool::new(false)));
-    let leaf_token = Arc::new(AtomicBool::new(false));
-    let leaf = middle.child(middle.deadline(), leaf_token.clone());
+    use lycheedev_core::control::{OperationControl, TrackedCancellation};
+    let top_token = TrackedCancellation::new();
+    let top = OperationControl::tracked(Instant::now() + Duration::from_secs(30), top_token.clone());
+    let middle = top.ordered_child(top.deadline()).unwrap();
+    let leaf = middle.ordered_child(middle.deadline()).unwrap();
     let b = runtime_budget(&leaf, RuntimeLimits::defaults()).unwrap();
     assert!(b.usage().allocation_bytes >= leaf.clone_allocation_bytes() as u64);
-    top_token.store(true, Ordering::Release);
+    top_token.cancel();
     assert_eq!(b.check().unwrap_err(), "memory.runtime_cancelled");
     let independent_top = OperationControl::default();
-    let independent_child =
-        independent_top.child(independent_top.deadline(), Arc::new(AtomicBool::new(false)));
+    let independent_child = independent_top
+        .ordered_child(independent_top.deadline())
+        .unwrap();
     let b = runtime_budget(&independent_child, RuntimeLimits::defaults()).unwrap();
     independent_child
-        .cancel_handle()
-        .store(true, Ordering::Release);
+        .tracked_cancel_handle()
+        .unwrap()
+        .cancel();
     assert_eq!(b.check().unwrap_err(), "memory.runtime_cancelled");
     assert!(independent_top.check().is_ok());
 }
@@ -1106,11 +960,10 @@ fn runtime_budget_keeps_nested_ancestry_and_independent_child_cancellation() {
 #[test]
 fn runtime_budget_inherits_expired_parent_deadline() {
     use lycheedev_core::control::OperationControl;
-    let parent = OperationControl::new(Instant::now(), Arc::new(AtomicBool::new(false)));
-    let child = parent.child(
-        Instant::now() + Duration::from_secs(30),
-        Arc::new(AtomicBool::new(false)),
-    );
+    let parent = OperationControl::uncancelable(Instant::now());
+    let child = parent
+        .ordered_child(Instant::now() + Duration::from_secs(30))
+        .unwrap();
     assert_eq!(
         runtime_budget(&child, RuntimeLimits::defaults())
             .err()
@@ -1119,44 +972,8 @@ fn runtime_budget_inherits_expired_parent_deadline() {
     );
 }
 
-#[test]
-fn api_family_never_substitutes_for_exact_regional_abi_evidence() {
-    let asia = client();
-    assert_eq!(client::client_data_product(&asia), "forever-asia-beta");
-    RuntimeLayoutAdmission::select_from(&asia, RecipeId::Forever, CATALOG).unwrap();
-    let mut cn = asia.clone();
-    cn.catalog_product = "wow_cn_beta".into();
-    cn.channel = "cn-beta".into();
-    assert_eq!(client::client_data_product(&cn), "forever-cn-beta");
-    assert_eq!(
-        RuntimeLayoutAdmission::select_from(&cn, RecipeId::Forever, CATALOG)
-            .err()
-            .unwrap(),
-        "reader.runtime_layout_unsupported"
-    );
-    let mut legacy = asia.clone();
-    legacy.catalog_product.clear();
-    legacy.channel.clear();
-    assert_eq!(client::client_data_product(&legacy), "forever");
-    assert_eq!(
-        RuntimeLayoutAdmission::select_from(&legacy, RecipeId::Forever, CATALOG)
-            .err()
-            .unwrap(),
-        "reader.runtime_layout_unsupported"
-    );
-    for mut conflicting in [asia.clone(), cn] {
-        conflicting.product_code = "wow_classic_beta".into();
-        assert_eq!(
-            RuntimeLayoutAdmission::select_from(&conflicting, RecipeId::Forever, CATALOG)
-                .err()
-                .unwrap(),
-            "reader.runtime_client_identity"
-        );
-    }
-}
-
-fn formal_identity_selector() -> crate::go_mailbox_v1::Selector {
-    use crate::go_mailbox_v1::{Kind, Selector, ZERO_TOKEN};
+fn formal_identity_selector() -> crate::mailbox::Selector {
+    use crate::mailbox::{Kind, Selector, ZERO_TOKEN};
     Selector {
         kind: Kind::Identity,
         nonce: ZERO_TOKEN,
@@ -1248,10 +1065,11 @@ fn go320_formal_accept_runs_after_outer_root_guard_and_cannot_hide_cancellation(
     );
     assert_eq!(calls.get(), 0);
     let cancel = Arc::new(AtomicBool::new(false));
-    let mut b = RuntimeBudget::new(
+    let mut b = RuntimeBudget::with_control_factory(
         RuntimeLimits::defaults(),
         Instant::now() + Duration::from_secs(10),
-        cancel.clone(),
+        0,
+        || FixtureFlagControl(cancel.clone()),
     )
     .unwrap();
     let mut f = Fixture::new();
@@ -1396,10 +1214,11 @@ fn failed_lookup_joins_independent_outer_recipe_and_metadata_changes_without_ret
 #[test]
 fn failed_lookup_retains_original_read_detail_and_cancellation_at_outer_guard_boundary() {
     let cancel = Arc::new(AtomicBool::new(false));
-    let mut b = RuntimeBudget::new(
+    let mut b = RuntimeBudget::with_control_factory(
         RuntimeLimits::defaults(),
         Instant::now() + Duration::from_secs(10),
-        cancel.clone(),
+        0,
+        || FixtureFlagControl(cancel.clone()),
     )
     .unwrap();
     let mut f = Fixture::new();
@@ -1420,7 +1239,7 @@ fn failed_lookup_retains_original_read_detail_and_cancellation_at_outer_guard_bo
 
 #[test]
 fn binding_cleanup_retains_original_diagnostics_and_all_close_failures() {
-    let detail = mailbox::ReadFailure {
+    let detail = lookup::ReadFailure {
         path: "record.wire_header".into(),
         requested_bytes: 80,
         returned_bytes: Some(7),

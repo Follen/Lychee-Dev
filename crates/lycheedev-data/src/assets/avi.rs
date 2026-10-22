@@ -448,9 +448,7 @@ mod tests {
                 .warnings,
             ["riff_size_mismatch"]
         );
-        control
-            .token()
-            .store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(
             parse(&raw, Limits::default(), &control)
                 .unwrap_err()

@@ -66,6 +66,7 @@ impl Budget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
 
     #[test]
@@ -167,7 +168,7 @@ mod tests {
         );
         let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
         let guard = budget.try_reserve_retained(1024).unwrap().unwrap();
-        control.cancel_handle().store(true, Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(budget.try_reserve_retained(1).err().unwrap().exit_code, 7);
         drop(guard);
         assert_eq!(budget.refundable_retained_bytes(), 0);

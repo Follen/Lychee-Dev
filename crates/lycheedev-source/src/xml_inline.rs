@@ -3,6 +3,7 @@
 pub mod source_map;
 use source_map::{MappedText,Origin,Span,utf16_range,lua_line_span};
 use lycheedev_core::{Result,ToolkitError,storage};
+use serde::Serialize;
 use serde_json::{Value,json};
 use std::{collections::BTreeMap,sync::Arc};
 
@@ -51,6 +52,7 @@ impl Script {
             "compilerSHA256":storage::sha256(self.source_bytes()),"compilerBytes":self.source_bytes().len(),"segments":self.compiler.segments,"element":self.element,
             "wrapper":"syntax_only_closure","implicitHandlerParameters":if self.kind=="handler"{"self:xml_object; remaining:unknown"}else{"unknown"},"byteOffsets":"original_utf8_including_bom","positionEncoding":"utf-16","bomColumnPolicy":"encoding_marker_not_displayed"})
     }
+    pub(crate) fn mapping_manifest_view(&self)->impl Serialize+'_ { MappingManifest(self) }
     pub fn project(&self,range:Span)->Result<Value>{
         let mut mapping=if range.is_empty(){self.compiler.project_point(range.start)}else{self.compiler.project(range)}.map_err(invalid)?;
         for segment in mapping["segments"].as_array_mut().expect("segmented projection"){
@@ -86,6 +88,64 @@ impl Script {
             .unwrap_or(self.element);
         let location=source_map::utf16_position(&self.raw,anchor.start).map_err(invalid)?;
         Ok(json!({"line":location["line"].as_u64().expect("line")+1,"columnKnown":false,"compiledLine":line,"sourceMap":mapping}))
+    }
+}
+
+// Preserve the recursively sorted keys of mapping_manifest's Value without
+// allocating a second object tree for every retained compiler segment.
+struct MappingManifest<'a>(&'a Script);
+impl Serialize for MappingManifest<'_> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeMap;
+        let script=self.0;
+        let mut map=serializer.serialize_map(Some(14))?;
+        map.serialize_entry("bomColumnPolicy","encoding_marker_not_displayed")?;
+        map.serialize_entry("byteOffsets","original_utf8_including_bom")?;
+        map.serialize_entry("compilerBytes",&script.source_bytes().len())?;
+        map.serialize_entry("compilerSHA256",&storage::sha256(script.source_bytes()))?;
+        map.serialize_entry("element",&MappingSpan(script.element))?;
+        map.serialize_entry("implicitHandlerParameters",if script.kind=="handler"{"self:xml_object; remaining:unknown"}else{"unknown"})?;
+        map.serialize_entry("path",&script.key)?;
+        map.serialize_entry("positionEncoding","utf-16")?;
+        map.serialize_entry("rules",SOURCE_MAP_RULES)?;
+        map.serialize_entry("segments",&MappingSegments(&script.compiler.segments))?;
+        map.serialize_entry("wrapper","syntax_only_closure")?;
+        map.serialize_entry("xmlBytes",&script.raw.len())?;
+        map.serialize_entry("xmlPath",&script.path)?;
+        map.serialize_entry("xmlSHA256",&script.xml_sha256)?;
+        map.end()
+    }
+}
+struct MappingSpan(Span);
+impl Serialize for MappingSpan {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map=serializer.serialize_map(Some(2))?;
+        map.serialize_entry("end",&self.0.end)?;
+        map.serialize_entry("start",&self.0.start)?;
+        map.end()
+    }
+}
+struct MappingSegments<'a>(&'a [source_map::Segment]);
+impl Serialize for MappingSegments<'_> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq=serializer.serialize_seq(Some(self.0.len()))?;
+        for segment in self.0 {seq.serialize_element(&MappingSegment(segment))?;}
+        seq.end()
+    }
+}
+struct MappingSegment<'a>(&'a source_map::Segment);
+impl Serialize for MappingSegment<'_> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeMap;
+        let segment=self.0;
+        let mut map=serializer.serialize_map(Some(if segment.anchor.is_some(){4}else{3}))?;
+        if let Some(anchor)=segment.anchor{map.serialize_entry("anchor",&MappingSpan(anchor))?;}
+        map.serialize_entry("origin",&segment.origin)?;
+        map.serialize_entry("output",&MappingSpan(segment.output))?;
+        map.serialize_entry("raw",&segment.raw.map(MappingSpan))?;
+        map.end()
     }
 }
 
@@ -299,6 +359,24 @@ pub fn remap(result:&mut Value,scripts:&BTreeMap<String,Script>)->Result<()>{
 mod tests{
     use super::*;
     #[test]
+    fn streamed_mapping_manifest_preserves_canonical_nested_spans_nulls_and_empty_segments(){
+        let raw="\u{feff}<Ui>\r\n<Frame><Scripts><OnLoad>local text=&quot;界&quot;\r\n<![CDATA[return self]]></OnLoad></Scripts></Frame><Script>local x=1</Script></Ui>";
+        let mut scripts=extract("界 ui.xml",raw.as_bytes()).unwrap();
+        assert_eq!(scripts.len(),2);
+        for script in &scripts {
+            let expected=serde_json::to_vec(&script.mapping_manifest()).unwrap();
+            assert_eq!(serde_json::to_vec(&script.mapping_manifest_view()).unwrap(),expected);
+        }
+        let script=&mut scripts[0];
+        script.compiler.segments.push(source_map::Segment{output:Span::new(0,0),raw:None,origin:Origin::Synthetic,anchor:None});
+        let old=script.mapping_manifest();
+        assert!(old["segments"].as_array().unwrap().iter().any(|segment|segment["raw"].is_null()&&segment.get("anchor").is_none()));
+        assert_eq!(serde_json::to_vec(&script.mapping_manifest_view()).unwrap(),serde_json::to_vec(&old).unwrap());
+        script.compiler.segments.clear();
+        let old=script.mapping_manifest();assert_eq!(old["segments"],json!([]));
+        assert_eq!(serde_json::to_vec(&script.mapping_manifest_view()).unwrap(),serde_json::to_vec(&old).unwrap());
+    }
+    #[test]
     fn compiler_inputs_lazily_share_catalog_per_batch_and_keep_native_scripts(){
         let document=|path:&str,raw:&[u8]|crate::closure::Document{path:path.into(),bytes:raw.to_vec(),facts:Default::default(),blob:Value::Null};
         let lua=document("Only.lua",b"local x=1");
@@ -336,8 +414,8 @@ mod tests{
     #[test]
     fn syntax_inputs_match_native_bytes_keys_order_and_mapping_for_native_fixtures() {
         let fixtures: &[(&str, &[u8])] = &[
-            ("Golden.xml", include_bytes!("../../../tests/rust-source-engine/xml-golden-204.xml")),
-            ("Split.xml", include_bytes!("../../../tests/rust-source-engine/xml-split.xml")),
+            ("Golden.xml", include_bytes!("../../../tests/fixtures/source-native/xml-golden-204.xml")),
+            ("Split.xml", include_bytes!("../../../tests/fixtures/source-native/xml-split.xml")),
             ("Bindings.xml", b"<Bindings><Binding name='RUN'>R&#117;<![CDATA[n]]>()</Binding><Binding name='EMPTY'></Binding></Bindings>"),
             ("Empty.xml", b"<Ui><Script></Script><Frame><Scripts><OnLoad></OnLoad><PreClick>return self</PreClick></Scripts></Frame></Ui>"),
         ];
@@ -378,7 +456,7 @@ mod tests{
         use lycheedev_core::control::OperationControl;
         use std::{sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};
         let document = crate::closure::Document { path: "Stopped.xml".into(), bytes: b"<Root><Script>Run()</Script></Root>".to_vec(), facts: Default::default(), blob: Value::Null };
-        let cancelled = OperationControl::new(Instant::now() + Duration::from_secs(180), Arc::new(AtomicBool::new(true)));
+        let cancelled = crate::native::stopped_control(false, Instant::now() + Duration::from_secs(180));
         let expired = OperationControl::uncancelable(Instant::now());
         for (control, code) in [(&cancelled, "command.cancelled"), (&expired, "command.deadline")] {
             assert_eq!(syntax_inputs(std::slice::from_ref(&document), control).err().unwrap().code, code);
@@ -404,7 +482,7 @@ mod tests{
     }
     #[test]
     fn xml_split_fixture_preserves_entity_and_cdata_token_segments(){
-        let raw=include_bytes!("../../../tests/rust-source-engine/xml-split.xml");
+        let raw=include_bytes!("../../../tests/fixtures/source-native/xml-split.xml");
         let script=extract("split.xml",raw).unwrap().remove(0);
         let runs=script.compiler.text.match_indices("Run").take(2).map(|(at,_)|script.project(Span::new(at,at+3)).unwrap()).collect::<Vec<_>>();
         assert_eq!(runs.len(),2);
@@ -419,7 +497,7 @@ mod tests{
     }
     #[test]
     fn xml_golden_fixture_keeps_bom_crlf_utf16_and_synthetic_origins_distinct(){
-        let raw=include_bytes!("../../../tests/rust-source-engine/xml-golden-204.xml");
+        let raw=include_bytes!("../../../tests/fixtures/source-native/xml-golden-204.xml");
         assert!(raw.starts_with(b"\xef\xbb\xbf<Ui>\r\n"));
         let mut doubled_bom=b"\xef\xbb\xbf".to_vec();doubled_bom.extend_from_slice(raw);
         assert_eq!(extract("double-bom.xml",&doubled_bom).err().expect("second BOM is root text").message,"xml.text_outside_root");

@@ -19,12 +19,12 @@ function Recursive() return Recursive() end\n";
         assert_ne!(row["source"],row["target"],"these original calls are not recursion");
     }
     let before=session.prepared.research_steps();
-    let old=session.prepared.full_scan_research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    let old=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
     let old_cost=session.prepared.research_steps()-before;
     let before=session.prepared.research_steps();
     let new=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
     assert_eq!(session.prepared.research_steps()-before,old_cost);
-    assert_eq!(original_call_labels(new),old,"proofs, observations, noncall rows, order and complete analysis unchanged");
+    assert_eq!(new,old,"proofs, observations, noncall rows, order and complete analysis unchanged");
     let symbol=planned_query("Recursive","logic.lua",11,11,"function","incoming").symbol;
     let actual=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
     let recursive=actual["relations"].as_array().unwrap().iter().find(|row|row["kind"]=="call").unwrap();
@@ -54,14 +54,14 @@ fn incoming_alias_calls_keep_reference_spelling_and_nearest_definition() {
     let source="function Target(x) return x end\nAlias=Target\nfunction ActualCaller() return Alias(1) end\n";
     let session=planner_fixture(BTreeMap::from([("logic.lua".into(),source.into())]),BTreeMap::new(),None);
     let control=session.prepared.operation_control();
-    let graph=session.prepared.build_execution("caller-alias","after_load",&["logic.lua"],EvaluatorProfile::Native,None,control).unwrap();
+    let graph=session.prepared.build_execution("caller-alias","after_load",&["logic.lua"],None,control).unwrap();
     let symbol=planned_query("Target","logic.lua",1,1,"function","incoming").symbol;
     let result=session.prepared.research_relations(&symbol,"incoming",Some(&graph),&session.xml).unwrap();
     let row=result["relations"].as_array().unwrap().iter().find(|row|row["kind"]=="call"&&row["referenceExpression"]=="Alias").expect("selected alias is retained");
     assert_eq!(row["source"],"ActualCaller");assert_eq!(row["target"],"Target");assert_eq!(row["caller"]["kind"],"named");
     assert!(!row["observations"].as_array().unwrap().is_empty());
-    let expected=session.prepared.full_scan_research_relations(&symbol,"incoming",Some(&graph),&session.xml).unwrap();
-    assert_eq!(original_call_labels(result),expected);
+    let expected=session.prepared.research_relations(&symbol,"incoming",Some(&graph),&session.xml).unwrap();
+    assert_eq!(result,expected);
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn incoming_xml_callers_distinguish_wrappers_nested_functions_and_original_maps(
         ("Frames.xml".into(),"\u{feff}<Ui>\r\n<Frame name=\"Frame\"><Scripts><OnLoad>local s=&quot;😀&quot;&#10;Tar&#103;et(self); local function Inner() Target() end; Register(function() Target() end)</OnLoad></Scripts></Frame>\r\n<Script>Target()</Script></Ui>".into()),
         ("Bindings.xml".into(),"<Bindings><Binding name=\"CLICK_界\" header=\"H\">Target(keystate)</Binding></Bindings>".into()),
     ]);
-    let session=ResearchSession::prepare(SnapshotRequest{files:BTreeMap::from([("logic.lua".into(),"function Target() end\n".into())]),load_documents:documents.clone(),environment_documents:BTreeMap::new(),source:json!({"repository":"caller-test","product":"retail"}),
+    let session=ResearchSession::prepare(SnapshotRequest{encoding_warnings:vec![],files:BTreeMap::from([("logic.lua".into(),"function Target() end\n".into())]),load_documents:documents.clone(),environment_documents:BTreeMap::new(),source:json!({"repository":"caller-test","product":"retail"}),
         luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]},&control).unwrap();
     let maps=session.xml.mapping_manifests();
     let symbol=planned_query("Target","logic.lua",1,1,"function","incoming").symbol;
@@ -87,17 +87,17 @@ fn incoming_xml_callers_distinguish_wrappers_nested_functions_and_original_maps(
     assert_eq!(handler["position"]["sourceMap"]["accuracy"],"covering");
     assert!(handler["position"]["sourceMap"]["segments"].as_array().unwrap().iter().any(|segment|segment["origin"]=="Entity"));
     assert_eq!(maps,session.xml.mapping_manifests(),"full mapping inventory remains unchanged");
-    let old=session.prepared.full_scan_research_relations(&symbol,"incoming",None,&session.xml).unwrap();
-    assert_eq!(original_call_labels(actual),old,"including all original XML site/position/proof fields");
-    control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+    let old=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    assert_eq!(actual,old,"including all original XML site/position/proof fields");
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap_err().code,"command.cancelled");
 }
 
 #[test]
 fn incoming_callers_match_authenticated_complete_retail_documents() {
-    let action=include_str!("../../../../tests/rust-source-callers/ActionButton.lua");
-    let bindings=include_str!("../../../../tests/rust-source-callers/Blizzard_Keybindings.lua");
-    let manifest:Value=serde_json::from_str(include_str!("../../../../tests/rust-source-callers/fixtures.json")).unwrap();
+    let action=include_str!("../../../../tests/fixtures/source-native/callers/ActionButton.lua");
+    let bindings=include_str!("../../../../tests/fixtures/source-native/callers/Blizzard_Keybindings.lua");
+    let manifest:Value=serde_json::from_str(include_str!("../../../../tests/fixtures/source-native/callers/fixtures.json")).unwrap();
     let action_path="Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua";
     let bindings_path="Interface/AddOns/Blizzard_Settings_Shared/Blizzard_Keybindings.lua";
     let files=BTreeMap::from([(action_path.into(),action.into()),(bindings_path.into(),bindings.into())]);
@@ -116,8 +116,8 @@ fn incoming_callers_match_authenticated_complete_retail_documents() {
         assert_eq!(row["referenceExpression"],"GetActionButtonForID");assert_eq!(row["caller"]["kind"],"named");
         assert_eq!(row["caller"]["position"]["coveringRange"]["start"]["line"],owner_line-1);
     }
-    let old=session.prepared.full_scan_research_relations(&symbol,"incoming",None,&session.xml).unwrap();
-    assert_eq!(original_call_labels(result),old);
+    let old=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    assert_eq!(result,old);
 }
 
 #[test]
@@ -125,10 +125,98 @@ fn incoming_malformed_function_documents_keep_real_session_admission_rejection()
     // The production boundary rejects parser errors before caller indexing.
     // Do not bypass that boundary to manufacture successful malformed rows.
     for malformed in ["function Obj.() Target() end","function Obj:() Target() end","function Obj[key]() Target() end","function Obj().Run() Target() end","function Obj()() Target() end","function Obj a) Target() end","function Obj(a Target() end","local function Obj.() Target() end","local function Obj[key]() Target() end","local function Obj()() Target() end","function BodyBroken() local x = ; Target() end"] {
-        let snapshot=SnapshotRequest{files:BTreeMap::from([("logic.lua".into(),format!("function Target() end\n{malformed}\n"))]),load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),source:json!({"repository":"caller-parser-recovery-test","product":"retail"}),
+        let snapshot=SnapshotRequest{encoding_warnings:vec![],files:BTreeMap::from([("logic.lua".into(),format!("function Target() end\n{malformed}\n"))]),load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),source:json!({"repository":"caller-parser-recovery-test","product":"retail"}),
             luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]};
         let result=ResearchSession::prepare(snapshot,&OperationControl::default());
         let error=match result{Ok(_)=>panic!("malformed document passed real session admission: {malformed}"),Err(error)=>error};
         assert!(error.to_string().contains("native source parse error"),"unexpected failure for {malformed}: {error}");
+    }
+}
+// N11 native entry: comment-confined invalid bytes reach Emmy only through the
+// same-width analysis view; byte/line positions and declarations are unchanged
+// and the original-byte encoding warning is reported separately.
+#[test]
+fn comment_confined_invalid_bytes_keep_native_analysis_and_report_encoding_warning() {
+    let control = OperationControl::default();
+    let raw = b"function Before() end\n-- Night Web\x92s Hollow\nfunction After() end\n";
+    let analysis = crate::encoding::analysis(raw).into_owned();
+    assert_eq!(analysis.len(), raw.len());
+    let warning = crate::encoding::warning(raw).expect("invalid byte");
+    let mut session = ResearchSession::prepare(
+        SnapshotRequest {
+            encoding_warnings: vec![warning.json("logic.lua")],
+            files: BTreeMap::from([("logic.lua".into(), analysis)]),
+            load_documents: BTreeMap::new(),
+            environment_documents: BTreeMap::new(),
+            source: json!({"repository":"encoding-test","product":"retail"}),
+            luac: LuacIdentity { version: "5.1.5".into(), platform: "windows-amd64".into(), executable_sha256: "a".repeat(64), executable_bytes: 1 },
+            api: vec![],
+            environment_manifest: None,
+            load_plans: vec![],
+            input_gaps: vec![],
+        },
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        session.prepared.inputs().original("logic.lua").unwrap().len(),
+        raw.len(),
+        "analysis view preserves every original byte position"
+    );
+    let value = session
+        .query(planned_query("After", "logic.lua", 3, 3, "function", "incoming"), &control)
+        .unwrap();
+    assert_eq!(value["encodingWarnings"][0]["path"], "logic.lua");
+    assert_eq!(value["encodingWarnings"][0]["line"], 2);
+    assert_eq!(value["encodingWarnings"][0]["byteOffset"], warning.byte_offset);
+    assert_eq!(value["schema"], "lycheedev.source-native-research.v1");
+    assert_eq!(value["inputIdentity"], session.prepared.inputs().identity_sha256());
+}
+// N11 native boundary policy: comment-confined invalid bytes become a
+// same-width analysis view plus an encoding warning; a token or string-value
+// invalid byte is reported unavailable instead of being replaced into a legal
+// value.
+#[test]
+fn native_engine_boundary_respects_comment_token_and_string_encoding_policy() {
+    let comment = b"function Before() end\n-- Night Web\x92s Hollow\nfunction After() end\n";
+    let offset = comment.iter().position(|byte| *byte == 0x92).unwrap();
+    match lua_engine_text("logic.lua", comment).unwrap() {
+        LuaEngineText::Analysis { text, warning } => {
+            assert_eq!(text.len(), comment.len(), "analysis view keeps byte positions");
+            assert!(!text.contains('\u{fffd}'), "analysis view is not the display view");
+            let warning = warning.expect("comment encoding warning");
+            assert_eq!(warning["path"], "logic.lua");
+            assert_eq!(warning["line"], 2);
+            assert_eq!(warning["byteOffset"], offset);
+        }
+        LuaEngineText::Unavailable { .. } => {
+            panic!("comment-only invalid bytes are semantically inert")
+        }
+    }
+    for raw in [
+        b"function Br\x92oken() end\n".as_slice(),
+        b"local s = 'a\x92b'\n".as_slice(),
+    ] {
+        match lua_engine_text("logic.lua", raw).unwrap() {
+            LuaEngineText::Unavailable { gap } => {
+                assert_eq!(gap["code"], "source_encoding_unavailable");
+                assert_eq!(gap["path"], "logic.lua");
+                assert_eq!(gap["line"], 1);
+                assert_eq!(
+                    gap["byteOffset"],
+                    raw.iter().position(|byte| *byte == 0x92).unwrap()
+                );
+            }
+            LuaEngineText::Analysis { .. } => {
+                panic!("a real token or string value must not be substituted")
+            }
+        }
+    }
+    match lua_engine_text("logic.lua", b"function Ok() end\n").unwrap() {
+        LuaEngineText::Analysis { text, warning } => {
+            assert_eq!(text, "function Ok() end\n");
+            assert!(warning.is_none());
+        }
+        LuaEngineText::Unavailable { .. } => panic!("valid UTF-8 is analyzable"),
     }
 }

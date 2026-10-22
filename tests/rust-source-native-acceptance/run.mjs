@@ -9,7 +9,7 @@ import {performance} from 'node:perf_hooks';
 import os from 'node:os';
 import {beginMemoryPhase, endMemoryPhase, nativeMemoryPhase} from '../../tools/rust-owned-memory.mjs';
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
-import {jsonFile, loadCurrentWorkflow} from '../rust-skill-usage/assertions.mjs';
+import {GO_CONTRACT, NATIVE_CALLSITE, jsonFile} from './runner-inputs.mjs';
 import {acceptanceCliArgs,admitIdentityVariant,createSessionPeer,parsePeerJson} from './session-ipc.mjs';
 import {snapshotDiagnostics,captureDiagnostics,inspectTerminal} from './diagnostics.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertFullNative, assertMaterial, assertNestedControllerRetired, assertPrerequisite, assertReuse, fixturePin, groupBudget, rebuildXmlInventory} from './assertions.mjs';
@@ -23,12 +23,11 @@ assert.equal(owner.owner, `source-native-${group}`); assert.equal(owner.state, '
 assert.deepEqual(readdirSync(scratch).sort(), ['temp', 'user'], 'fresh controlled scratch');
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
 const runnerRoot = resolve(import.meta.dirname, '../..');
-const workflow = loadCurrentWorkflow(runnerRoot);
 const started = performance.now(), deadline = started + groupBudget(group) - 15000;
-const report = {schema: 'lycheedev.source-native-acceptance.v1', group, goContract: workflow.goContract, runnerRoot, state: 'running', startedAt: new Date().toISOString(), oracle,
+const report = {schema: 'lycheedev.source-native-acceptance.v1', group, goContract: GO_CONTRACT, runnerRoot, state: 'running', startedAt: new Date().toISOString(), oracle,
   binarySHA256: sha256(readFileSync(binary)), checks: [], commands: [], resources: [], memoryWindows: [],
   machine: {platform: process.platform, arch: process.arch, release: os.release(), node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length, totalMemory: os.totalmem()},
-  performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: workflow.goContract, goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; aggregateRSS remains unmeasured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
+  performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: GO_CONTRACT, goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; aggregateRSS remains unmeasured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
   boundaries: ['No studied Lua/configuration execution, game or publication', 'Passed selected cases never mean complete semantic resolution or complete Source acceptance', 'Quota/idle/lifetime are separate real small-material IPC groups, never substitutes for this full Retail group']};
 let sequence = 0, outputBytes = 0, fatal = false, pin, corpus, originals, resourcePeer;
 report.resourceAuthentication=[];
@@ -215,7 +214,7 @@ try {
     let ordinary, first, second, firstOwner, reopenedOwner;
     await check('ordinary-native-cold-refs', () => {
       const {result, observation} = invoke('ordinary-cold-refs', relation('refs'));
-      ordinary = assertFullNative(result, oracle, corpus, workflow.nativeCallsite);
+      ordinary = assertFullNative(result, oracle, corpus, NATIVE_CALLSITE);
       assert.equal(ordinary.analysis.cacheHit, false); assert(observation.phases.some(row => row.phase === 'source.material.write' && row.status === 'ok'), 'cold material preparation');
       return {inputIdentity: ordinary.inputIdentity, coverage: result.coverage, analysis: ordinary.analysis, semanticReceipt: ordinary.semanticExecution.receipt};
     });
@@ -240,7 +239,7 @@ try {
     });
     await check('full-retail-session-cold', async () => {
       assert.equal(invoke('session-before', ['source', 'session', 'status']).result.state, 'closed');
-      first = assertFullNative(invoke('session-cold-refs', relation('refs', {reuse: true})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session'});
+      first = assertFullNative(invoke('session-cold-refs', relation('refs', {reuse: true})).result, oracle, corpus, NATIVE_CALLSITE, {mode: 'session'});
       assert.equal(first.analysis.cacheHit, false); assert.equal(first.nativeSession.snapshotTransfer, 'full'); firstOwner = await diagnostic('session-cold', first.nativeSession.workerPid);
       return {inputIdentity: first.inputIdentity, nativeSession: first.nativeSession, owner: firstOwner};
     });
@@ -265,10 +264,10 @@ try {
     });
     await check('changed-full-corpus-identity-reprepares-and-restores', async () => {
       assert(second); const variant = makeIdentityVariant();
-      const changed = assertFullNative(invoke('session-changed-identity', relation('refs', {reuse: true, snapshot: variant.snapshot})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session', commit: variant.commit});
+      const changed = assertFullNative(invoke('session-changed-identity', relation('refs', {reuse: true, snapshot: variant.snapshot})).result, oracle, corpus, NATIVE_CALLSITE, {mode: 'session', commit: variant.commit});
       assertReuse(second, changed, {changed: true}); assert.deepEqual(await diagnostic('session-changed', changed.nativeSession.workerPid), firstOwner);
       const actualMaterial = materialEvidence('variant', variant.commit);
-      const restored = assertFullNative(invoke('session-restored-retail', relation('refs', {reuse: true})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session'});
+      const restored = assertFullNative(invoke('session-restored-retail', relation('refs', {reuse: true})).result, oracle, corpus, NATIVE_CALLSITE, {mode: 'session'});
       assertReuse(changed, restored, {changed: true}); assert.equal(restored.inputIdentity, first.inputIdentity);
       return {scope: 'Local synthetic commit with one non-source note; all 4036 exact upstream documents retained', variant, actualMaterial, changed: changed.nativeSession, restored: restored.nativeSession};
     });
@@ -276,7 +275,7 @@ try {
       assert(firstOwner); assert.equal(invoke('session-close', ['source', 'session', 'close']).result.state, 'closed');
       assert.equal(invoke('session-closed', ['source', 'session', 'status']).result.state, 'closed');
       await finishResourcePeer('session-closed',{requireExit:true});
-      const reopened = assertFullNative(invoke('session-reopened', relation('refs', {reuse: true})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session'});
+      const reopened = assertFullNative(invoke('session-reopened', relation('refs', {reuse: true})).result, oracle, corpus, NATIVE_CALLSITE, {mode: 'session'});
       assert.equal(reopened.analysis.cacheHit, false); assert.equal(reopened.nativeSession.snapshotTransfer, 'full');
       reopenedOwner = await diagnostic('session-reopened', reopened.nativeSession.workerPid); assert.notDeepEqual(reopenedOwner, firstOwner);
       return {firstOwner, reopenedOwner, closureProof: 'Public close waits for the authenticated held process handle to exit; outer Job independently reaps all descendants'};

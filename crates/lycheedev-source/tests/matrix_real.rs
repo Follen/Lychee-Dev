@@ -1,10 +1,10 @@
-use lycheedev_core::{Invocation, evidence, selection};
-use lycheedev_source::{SourceTools, luac, luals, matrix};
+use lycheedev_core::{request::RequestContext, evidence, selection};
+use lycheedev_source::{SourceTools, luac, matrix};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 #[test]
 #[ignore = "explicit fixed Retail ClientPin and authenticated real bundled tools; two TOC targets, not multiple products"]
-fn two_target_actual_luac_luals_keeps_independent_failure_and_matrix_capture() {
+fn two_target_actual_luac_native_keeps_independent_failure_and_matrix_capture() {
     let home = PathBuf::from(std::env::var_os("LYCHEEDEV_ENVIRONMENT_HOME").expect("source home"));
     let pin_id = std::env::var("LYCHEEDEV_ENVIRONMENT_PIN").expect("fixed pin");
     let selected = selection::load_pinned(&home, &pin_id).unwrap();
@@ -40,29 +40,23 @@ fn two_target_actual_luac_luals_keeps_independent_failure_and_matrix_capture() {
         serde_json::from_value(manifest["runtime"].clone()).unwrap(),
     )
     .unwrap();
-    let runtime_path = stage.join(format!("runtime-{}", std::process::id()));
-    let runtime = luals::Runtime::unpack_pinned(
-        &PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("fixed LuaLS ZIP")),
-        &runtime_path,
-    )
-    .unwrap();
-    let inv = Invocation {
-        command: "source validate".into(),
-        positional: None,
+    let ctx = lycheedev_source::request::SourceContext {
         home: home.clone(),
         cwd: addon.clone(),
-        flags: BTreeMap::from([
-            ("--matrix".into(), config.to_string_lossy().into()),
-            ("--semantic".into(), "true".into()),
-        ]),
         control: Default::default(),
+    };
+    let (configuration, matrix_root) = lycheedev_source::matrix::read_config(&config, &ctx.control).unwrap();
+    let request = lycheedev_source::request::MatrixValidationRequest {
+        configuration: config.clone(),
+        root: matrix_root,
+        targets: configuration.targets,
+        semantic: true,
     };
     let tools = || SourceTools {
         luac: Some(&compiler),
-        luals: Some(&runtime),
     };
     let mut resolutions = 0;
-    let good = matrix::validate_with_resolver(&inv, tools(), &mut |_| {
+    let good = matrix::validate_with_resolver(&ctx, &request, tools(), &mut |_| {
         resolutions += 1;
         Ok(pin.clone())
     })
@@ -78,19 +72,14 @@ fn two_target_actual_luac_luals_keeps_independent_failure_and_matrix_capture() {
         assert_eq!(target["semantic"]["definitions"]["state"], "partial");
     }
     for capture in &good.provenance {
-        let proof = evidence::dispatch(&Invocation {
-            command: "evidence verify".into(),
-            positional: Some(capture["id"].as_str().unwrap().into()),
-            flags: BTreeMap::new(),
-            home: home.clone(),
-            cwd: addon.clone(),
-            control: inv.control.clone(),
-        })
+        let proof = evidence::dispatch(&RequestContext {
+            home: home.clone(), cwd: addon.clone(), control: ctx.control.clone(),
+        }, evidence::EvidenceRequest::Verify { id: capture["id"].as_str().unwrap().into() })
         .unwrap();
         assert_eq!(proof.data["verified"], true);
     }
     fs::write(addon.join("界 面.xml"),"<Ui>\n<Frame><Scripts><OnLoad>\nlocal health = UnitHealth(\"player\", {})\n</OnLoad></Scripts></Frame></Ui>\n").unwrap();
-    let bad = matrix::validate_with_resolver(&inv, tools(), &mut |_| Ok(pin.clone())).unwrap_err();
+    let bad = matrix::validate_with_resolver(&ctx, &request, tools(), &mut |_| Ok(pin.clone())).unwrap_err();
     assert_eq!(bad.exit_code, 4);
     assert_eq!(bad.details["result"]["valid"], false);
     assert_eq!(bad.details["result"]["targets"][0]["valid"], true);
@@ -112,8 +101,5 @@ fn two_target_actual_luac_luals_keeps_independent_failure_and_matrix_capture() {
     assert_eq!(d["path"], "界 面.xml");
     assert_eq!(d["range"]["start"]["line"], 2);
     assert_eq!(good.data["targets"].as_array().unwrap().len(), 2);
-    fs::write(stage.join("two-target-report.json"),serde_json::to_vec_pretty(&json!({"sourcePin":pin,"compiler":manifest["runtime"],"runtime":luals::pinned(),"good":good.data,"bad":bad.details,"scope":"actual SDK matrix resolver/luac/LuaLS; two independent TOCs with one fixed Retail ClientPin; multiple-product and packaged CLI not_run"})).unwrap()).unwrap();
-    drop(runtime);
-    assert!(runtime_path.starts_with(&stage));
-    fs::remove_dir_all(runtime_path).unwrap();
+    fs::write(stage.join("two-target-report.json"),serde_json::to_vec_pretty(&json!({"sourcePin":pin,"compiler":manifest["runtime"],"runtime":"emmy_native_common_facts","good":good.data,"bad":bad.details,"scope":"actual SDK matrix resolver/luac/native Emmy; two independent TOCs with one fixed Retail ClientPin; multiple-product and packaged CLI not_run"})).unwrap()).unwrap();
 }

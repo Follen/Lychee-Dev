@@ -161,6 +161,7 @@ pub(super) fn repair_memory(
         let attempt = evidence::publish_blob_attempt_predeclared_with_check(
             home,
             bytes,
+            reference,
             maximum,
             owner.control.control,
             || owner.control.extra(),

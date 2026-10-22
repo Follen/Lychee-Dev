@@ -1,7 +1,7 @@
 //! Independent expected-value witnesses for pinned DataFusion suitability.
 //! These declarations are NOT_RUN until the coordinator executes them.
 use super::*;
-use crate::{relational::Scalar, resource::Cost};
+use crate::{query_value::Scalar, resource::Cost};
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use datafusion::{

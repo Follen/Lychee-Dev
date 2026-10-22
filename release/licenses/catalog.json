@@ -105,7 +105,7 @@
       "source": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
       "sourcePath": "release/data/unicode-17.0.0/UnicodeData.txt",
       "sourceSHA256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
-      "generatorPath": "tests/rust-source-data/generate-unicode-simple.mjs",
+      "generatorPath": "tools/generate-unicode-simple.mjs",
       "generatedPath": "crates/lycheedev-data/src/unicode_simple.rs",
       "license": "Unicode-3.0",
       "licensePath": "crates/lycheedev-data/UNICODE-LICENSE",

@@ -91,6 +91,12 @@ impl<'a> EvidenceQuota<'a> {
     pub(crate) fn path(&self) -> PathBuf {
         self.owner.paths.metadata.join("evidence-v2.sqlite")
     }
+    pub(crate) fn lock_directory(&self) -> &Directory {
+        self.owner
+            .directories
+            .first()
+            .expect("held quota locks directory")
+    }
     /// Pin the original main file before SQLite sees its path. Absence is a
     /// read-only miss: neither inspection nor inventory creates a database.
     pub(crate) fn pin_existing_main(&mut self) -> Result<Option<u64>> {
@@ -198,8 +204,13 @@ impl<'a> EvidenceQuota<'a> {
         }
         let main = self.length("evidence-v2.sqlite")?.unwrap_or(0);
         let journal = self.length("evidence-v2.sqlite-journal")?.unwrap_or(0);
-        self.owner.report.existing =
-            inventory(&self.owner.home, &self.owner.paths, &self.owner.control)?;
+        self.owner.report.existing = inventory_recovering(
+            &self.owner.home,
+            &self.owner.paths,
+            &self.owner.control,
+            None,
+            &self.owner.directories,
+        )?;
         let existing = self.owner.report.existing.total()?;
         let other = existing
             .checked_sub(sum([main, journal])?)
@@ -265,14 +276,14 @@ impl<'a> EvidenceQuota<'a> {
         // Attempt inventory on errors too; a stopped inventory preserves its
         // exact stop and all files remain counted by the next admission.
         let verified = self.owner.verify_usage().map(|_| ());
-        let result = crate::metadata::historical_write::finish_historical(result, verified);
+        let result = crate::metadata::owned_write::finish_owned(result, verified);
         // with_catalog closes every SQLite connection before owner.finish.
         // Keep directory/quota ownership until the main leaf close completes.
         let result = match self.main {
             Some(file) => finish_file(file, result, &self.owner.control),
             None => result,
         };
-        self.owner.finish(result)
+        self.owner.finish_verified(result)
     }
 }
 fn main_length(file: &fs::File) -> Result<u64> {

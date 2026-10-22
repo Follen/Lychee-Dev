@@ -87,9 +87,7 @@ const RETURN_QUERIES: &[(&str, &str, &str, &[&str])] = &[
 ];
 const RETURN_FILES: &[&str] = &["profile.lua", "invocation-return-slots.lua"];
 fn native_return_slots(out: &mut NativeOutput) -> Result<()> {
-    let patch =
-        option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256").ok_or("missing compiled patch")?;
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":patch,"scope":"invocation-return-slots"}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256,"scope":"invocation-return-slots"}))?;
     let files = RETURN_FILES;
     for file in files {
         out.emit(json!({"event":"input_identity","name":file,"file":file,"bytes":source(file).len(),"sha256":hash(source(file).as_bytes())}))?;
@@ -99,7 +97,6 @@ fn native_return_slots(out: &mut NativeOutput) -> Result<()> {
         "return-slots",
         "after_load",
         files,
-        patch,
         Some("invocation-return-slots-v1"),
     )?;
     let provider = input.freeze(&graph)?;

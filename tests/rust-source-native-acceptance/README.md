@@ -28,13 +28,17 @@ helper exception. Scratch is removed only after terminal evidence sealing and
 complete root/tree/handle/reader reaping. A fatal process/transport failure, including any failed nested full-corpus
 controller or its child timeout/signal evidence, stops new launches and leaves retirement to that Job.
 
-## Current workflow and separately sealed runner
+## Self-contained current inputs and separately sealed runner
 
-Both wrapper and controller call `loadCurrentWorkflow`, authenticating the fixed
-Go3.2.3 contract, original historical workflow, both exact Skill manifests and
-all four cumulative reference fixtures. The old `workflow.json` remains the
-unchanged Go3.2.0 evidence; it cannot be passed to current candidate validation.
-The owner hashes every current workflow input before and after execution.
+Both wrapper and controller use the self-contained current inputs in
+`runner-inputs.mjs` and `native-contract.mjs` in this directory. `runner-inputs`
+holds the fixed external Go 3.2.4 identity label, the retained Retail native
+callsite (`NATIVE_CALLSITE`), bounded JSON/inventory helpers and current candidate
+package verification (release manifest, payload resources, compiler, launcher and
+the packaged Skill bytes equal to `skills/lycheedev`). `native-contract` holds the
+native evidence checks. The retired migration workflow/baseline
+fixtures are not current acceptance inputs and are no longer read (CLEAN-03/04).
+The owner hashes every current runner input before and after execution.
 
 A runner-only repair can test an already sealed candidate without changing its
 product source identity. Export the selected runner commit into a new directory
@@ -44,7 +48,7 @@ with this fixed dependency set (retain commit/archive/file hashes):
 $RunnerCommit = '<exact selected runner commit>'
 $RunnerStage = '<new runner directory>'
 $Archive = '<new archive path>'
-git archive --format=tar --output=$Archive $RunnerCommit -- tools/rust-source-native-acceptance.mjs tools/rust-build.mjs tools/rust-disk.mjs tools/rust-emmy-identity.mjs tools/rust-owned-process.mjs tools/rust-owned-process.ps1 tools/rust-owned-memory.mjs tools/rust-build-auxiliary.json tools/zip.mjs release/rust-disk-policy.json crates/lycheedev-cli/src/commands.json tests/rust-source-native-acceptance tests/rust-source-full-corpus/run.mjs tests/rust-source-full-corpus/assertions.mjs tests/rust-source-full-corpus/retail-oracle.json tests/rust-skill-usage/assertions.mjs tests/rust-skill-usage/workflow.json tests/rust-skill-usage/workflow-go323.json tests/rust-skill-usage/baselines
+git archive --format=tar --output=$Archive $RunnerCommit -- tools/rust-source-native-acceptance.mjs tools/rust-build.mjs tools/rust-disk.mjs tools/rust-emmy-identity.mjs tools/rust-owned-process.mjs tools/rust-owned-process.ps1 tools/rust-owned-memory.mjs tools/rust-build-auxiliary.json tools/zip.mjs release/rust-disk-policy.json crates/lycheedev-cli/src/commands.json tests/rust-source-native-acceptance tests/rust-source-full-corpus/run.mjs tests/rust-source-full-corpus/assertions.mjs tests/rust-source-full-corpus/retail-oracle.json
 if ($LASTEXITCODE -ne 0) { throw "runner archive failed" }
 New-Item -ItemType Directory -Path $RunnerStage -ErrorAction Stop | Out-Null
 tar -xf $Archive -C $RunnerStage
@@ -55,7 +59,7 @@ node "$RunnerStage/tools/rust-source-native-acceptance.mjs" '<sealed-artifact.js
 Run the last command from the unchanged product checkout that matches its
 sealed artifact. Do not overwrite its tools, source or old evidence. Product
 `sourceDigest`, EXE, candidate report, launcher, packaged Skill and resource
-hashes remain verified against that checkout. Executing runner and workflow
+hashes remain verified against that checkout. Executing runner and fixed-input
 hashes are separately recorded and checked at retirement; both reports record
 `runnerRoot` and the current Go contract. The controller launches its full-corpus
 dependency from the same authenticated runner tree. This changes no product

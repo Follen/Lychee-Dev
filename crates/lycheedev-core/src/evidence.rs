@@ -1,6 +1,6 @@
 //! Content-addressed original bytes and immutable provenance, separate from rebuildable cache.
 use crate::{
-    Invocation, Outcome, Result, ToolkitError,
+    Outcome, Result, ToolkitError,
     metadata::Metadata,
     selection::valid_digest,
     storage::{self, ExclusiveLock},
@@ -21,7 +21,7 @@ pub(crate) use bounded::{
 };
 mod budgeted;
 mod dependencies;
-mod history_read;
+mod capture_read;
 mod read_commands;
 mod remove_commands;
 pub use bounded::{
@@ -41,12 +41,8 @@ pub use budgeted::{
     commit_capture_budgeted_with_references, commit_data_capture_bounded_with_check,
     commit_verified_capture_budgeted, commit_verified_capture_budgeted_with_metadata,
 };
-pub use dependencies::{
-    GoCaptureDecode, GoSignedInteger, GoTimestamp, normalize_go_json_strings,
-    normalize_go_json_strings_with_check, parse_go_timestamp,
-};
 pub(crate) use dependencies::{decode_workspace_identity, decode_workspace_identity_with_check};
-pub use history_read::fetch_capture_controlled;
+pub use capture_read::fetch_capture_controlled;
 pub use read_commands::read_capture_controlled_with_check;
 pub fn blob_path(home: &Path, digest: &str) -> Result<PathBuf> {
     if !valid_digest(digest, 64) {
@@ -97,10 +93,12 @@ pub struct CaptureRef {
     pub captured_at: String,
     #[serde(
         default,
-        skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "dependencies::deserialize_dependencies"
+        skip_serializing_if = "Vec::is_empty"
     )]
     pub dependencies: Vec<String>,
+}
+impl CaptureRef {
+    pub(crate) fn blob_identity(&self)->(&str,u64) { (&self.blob.sha256,self.blob.bytes) }
 }
 fn capture_identity(capture: &CaptureRef) -> Result<String> {
     let mut unsigned = capture.clone();
@@ -157,6 +155,7 @@ fn validate_capture(capture: &CaptureRef, id: &str) -> Result<()> {
     if capture.schema != "lycheedev.capture.v1"
         || capture.id != id
         || capture.complete && capture.truncated
+        || storage::parse_timestamp(&capture.captured_at).is_none()
         || capture_identity(capture)? != id
     {
         return Err(ToolkitError::new(
@@ -170,35 +169,27 @@ fn validate_capture(capture: &CaptureRef, id: &str) -> Result<()> {
 pub fn read_blob(home: &Path, blob: &Value, max_bytes: usize) -> Result<Vec<u8>> {
     bounded::read_internal(home, blob, max_bytes, None)
 }
-pub fn commands() -> &'static [&'static str] {
-    &[
-        "evidence show",
-        "evidence verify",
-        "evidence list",
-        "evidence keep",
-        "evidence bundle",
-        "evidence remove",
-    ]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvidenceRequest {
+    Show { id: String },
+    Verify { id: String },
+    List { limit: usize },
+    Keep { id: String },
+    Bundle { ids: Vec<String>, output: PathBuf },
+    Remove { id: String },
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    if matches!(
-        inv.command.as_str(),
-        "evidence show" | "evidence verify" | "evidence list"
-    ) {
-        return read_commands::dispatch(inv);
-    }
-    if matches!(inv.command.as_str(), "evidence keep" | "evidence bundle") {
-        return archive_commands::dispatch(inv);
-    }
-    match inv.command.as_str() {
-        "evidence remove" => {
-            remove_capture_controlled(&inv.home, inv.argument()?, &inv.control).map(Outcome::new)
-        }
-        _ => Err(ToolkitError::new(
-            "evidence.migration_incomplete",
-            "unknown evidence command",
-            3,
-        )),
+pub fn dispatch(
+    context: &crate::request::RequestContext,
+    request: EvidenceRequest,
+) -> Result<Outcome> {
+    use EvidenceRequest as E;
+    match request {
+        E::Show { id } => read_commands::dispatch(context, E::Show { id }),
+        E::Verify { id } => read_commands::dispatch(context, E::Verify { id }),
+        E::List { limit } => read_commands::dispatch(context, E::List { limit }),
+        E::Keep { .. } | E::Bundle { .. } => archive_commands::dispatch(context, request),
+        E::Remove { id } => remove_capture_controlled(&context.home, &id, &context.control)
+            .map(Outcome::new),
     }
 }
 pub fn remove_capture(home: &Path, id: &str) -> Result<Value> {

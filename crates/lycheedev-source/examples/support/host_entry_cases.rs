@@ -1,27 +1,24 @@
 // Additional cases; the original twelve cases and 144 assertions stay intact.
 const ENTRY_SOURCE: &str =
-    include_str!("../../../../tests/rust-source-engine/wow/native/host-entry.lua");
+    include_str!("../../../../tests/fixtures/source-native/wow/native/host-entry.lua");
 const AMBIGUOUS_SOURCE: &str =
-    include_str!("../../../../tests/rust-source-engine/wow/native/host-entry-ambiguous.lua");
+    include_str!("../../../../tests/fixtures/source-native/wow/native/host-entry-ambiguous.lua");
 const ORDER_SOURCES: &[(&str, &str)] = &[
     (
         "host-order-a.lua",
-        include_str!("../../../../tests/rust-source-engine/wow/native/host-order-a.lua"),
+        include_str!("../../../../tests/fixtures/source-native/wow/native/host-order-a.lua"),
     ),
     (
         "host-order-b.lua",
-        include_str!("../../../../tests/rust-source-engine/wow/native/host-order-b.lua"),
+        include_str!("../../../../tests/fixtures/source-native/wow/native/host-order-b.lua"),
     ),
     (
         "host-order-main.lua",
-        include_str!("../../../../tests/rust-source-engine/wow/native/host-order-main.lua"),
+        include_str!("../../../../tests/fixtures/source-native/wow/native/host-order-main.lua"),
     ),
 ];
 fn entry_control() -> OperationControl {
-    OperationControl::new(
-        Instant::now() + Duration::from_secs(30),
-        Arc::new(AtomicBool::new(false)),
-    )
+    OperationControl::uncancelable(Instant::now() + Duration::from_secs(30))
 }
 fn unique_entry(
     prepared: &PreparedSnapshot,
@@ -350,7 +347,7 @@ fn run_entry_cases(out: &mut Output) -> Result<()> {
     )?;
 
     let c = entry_control();
-    let source = include_str!("../../../../tests/rust-source-engine/wow/native/host-transfers.lua");
+    let source = include_str!("../../../../tests/fixtures/source-native/wow/native/host-transfers.lua");
     let prepared = prepare_case("host-transfers.lua", source, false, &c)?;
     let resolution = prepared
         .entry_candidates("host-transfers.lua", 7, &c)
@@ -363,7 +360,7 @@ fn run_entry_cases(out: &mut Output) -> Result<()> {
         .min_by_key(|candidate| candidate.closure.end - candidate.closure.start)
         .ok_or("capture candidate")?;
     let baseline = prepared
-        .build("entry-capture-baseline", EvaluatorProfile::Native, None, &c)
+        .build("entry-capture-baseline", None, &c)
         .map_err(|error| error.to_string())?;
     let native = baseline
         .native_invocations

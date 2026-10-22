@@ -509,14 +509,14 @@ fn close_spool(
 fn close_errors(errors: Vec<io::Error>) -> Result<()> {
     let mut result = Ok(());
     for error in errors {
-        result = crate::metadata::historical_write::finish_historical(
+        result = crate::metadata::owned_write::finish_owned(
             result,
             Err(ToolkitError::from(error)),
         );
     }
     #[cfg(test)]
     {
-        result = crate::metadata::historical_write::finish_historical(
+        result = crate::metadata::owned_write::finish_owned(
             result,
             test_hooks::after_stage_close(),
         );
@@ -533,7 +533,7 @@ pub(super) fn finish_opened(
         (Ok(opened), Ok(())) => Ok(opened),
         (Ok(opened), Err(error)) => close_opened_blob(opened, Err(error), control, supplemental),
         (Err(error), cleanup) => {
-            crate::metadata::historical_write::finish_historical(Err(error), cleanup)
+            crate::metadata::owned_write::finish_owned(Err(error), cleanup)
         }
     }
 }
@@ -746,12 +746,12 @@ fn publish_in_shard(
     }
     let result = match (result, cleanup) {
         (Ok(file), Ok(())) => Ok(file),
-        (Ok(file), Err(error)) => crate::metadata::historical_write::finish_historical(
+        (Ok(file), Err(error)) => crate::metadata::owned_write::finish_owned(
             Err(error),
             lycheedev_windows::filesystem::close_file(file).map_err(ToolkitError::from),
         ),
         (Err(error), cleanup) => {
-            crate::metadata::historical_write::finish_historical(Err(error), cleanup)
+            crate::metadata::owned_write::finish_owned(Err(error), cleanup)
         }
     };
     drop(destination);
@@ -846,7 +846,7 @@ fn open_winner(
         .and_then(|info| validate_metadata(&info, reference.bytes));
     match finish_checks(result, control, supplemental) {
         Ok(()) => Ok(Some(file)),
-        Err(error) => crate::metadata::historical_write::finish_historical(
+        Err(error) => crate::metadata::owned_write::finish_owned(
             Err(error),
             lycheedev_windows::filesystem::close_file(file).map_err(ToolkitError::from),
         ),

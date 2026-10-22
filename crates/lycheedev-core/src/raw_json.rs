@@ -17,7 +17,7 @@ pub struct InvalidJson {
 }
 impl fmt::Display for InvalidJson {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid Go raw JSON at byte {}", self.offset)
+        write!(f, "invalid raw JSON at byte {}", self.offset)
     }
 }
 impl std::error::Error for InvalidJson {}

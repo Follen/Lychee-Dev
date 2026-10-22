@@ -1,5 +1,5 @@
 use super::*;
-use crate::local_query::{File as PublicFile, FileBytes};
+use crate::query_source::{File as PublicFile, FileBytes};
 #[test]
 fn returned_file_owner_outlives_session_without_copy_or_early_refund() {
     let f = Fixture::new();
@@ -17,7 +17,7 @@ fn returned_file_owner_outlives_session_without_copy_or_early_refund() {
     session
         .read_batches(&[7, 7], &mut |files| {
             for file in files {
-                let pointer = file.bytes().as_ptr();
+                let pointer = file.materialized.content.bytes.as_ptr();
                 let reading = serde_json::to_vec(&file.reading).unwrap();
                 let (body, value) = file.into_parts();
                 let file = PublicFile {

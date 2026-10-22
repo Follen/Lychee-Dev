@@ -26,7 +26,7 @@ node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-confi
 node <reviewed-runner-stage>/tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.mjs <postcard-config.json> <machine-conditions.json> [--scratch-6gib]
 ```
 
-Exact runtime export list (25 files; this isolated closure has been imported in
+Exact runtime export list (24 files; this isolated closure has been imported in
 a fresh cloud directory):
 
 ```text
@@ -37,8 +37,7 @@ tests/rust-performance-paired/inputs.mjs
 tests/rust-performance-paired/contract.mjs
 tests/rust-source-full-corpus/assertions.mjs
 tests/rust-source-full-corpus/retail-oracle.json
-tests/rust-parity/describe-contract.mjs
-tests/rust-parity/oracle.mjs
+tests/rust-performance-paired/owned-proof.mjs
 tools/rust-build.mjs
 tools/rust-disk.mjs
 tools/rust-emmy-identity.mjs
@@ -54,7 +53,7 @@ tests/rust-performance-paired/source-pack-scenarios.mjs
 tests/rust-performance-paired/source-pack-resume.mjs
 tests/rust-performance-paired/source-pack-custody.mjs
 tests/rust-source-native-acceptance/assertions.mjs
-tests/rust-skill-usage/assertions.mjs
+tests/rust-source-native-acceptance/native-contract.mjs
 ```
 
 Historical 00d configuration example (all filesystem paths absolute; replace
@@ -75,9 +74,7 @@ SHA; a new fresh candidate requires its own exact identity fields):
     "sourceTreeSHA256": "06a5a0e39c46c786d946b8c429c90c0eb4e9e1291028375e329fc9457776b4e3"
   },
   "go": {
-    "sourceRoot": "C:/fixed-Go323-checkout",
-    "packageRoot": "C:/existing-Go323-package",
-    "luaLSArchive": "C:/official-pinned-LuaLS.zip",
+    "referenceRoot": "C:/external-fixed-Go-package-directory",
     "packageSHA256": "<64 lowercase hex>"
   }
 }
@@ -87,9 +84,12 @@ These fixed artifact/EXE/source hashes bind the existing [00d release build](htt
 
 The existing machine-conditions format requires nonempty `machine`,
 `powerAndThermal`, `competingLoad`, `disk`, and `operator` strings. State unknowns
-honestly. Go source must be clean at
-`3766f9cacb52e93a803a626187e2a1d54a445468`, with its complete existing package,
-pinned LuaLS 3.19.1 archive, and actual `go version -m` identity. Rust source,
+honestly. The fixed Go reference is an external package directory supplied by
+explicit absolute path: its `release.json`, native executable, complete payload
+bytes and package inventory are re-derived from that directory, and the
+historical producer identity is the fixed Go 3.2.3 commit
+`3766f9cacb52e93a803a626187e2a1d54a445468`. The repository never builds, syncs or
+inspects a Go checkout and does not assert a Lua runtime payload. Rust source,
 artifact receipt, optimized EXE and optional matching PDB, source digest,
 unmodified Emmy identity and 3.5.0/beta configuration are reauthenticated.
 
@@ -208,7 +208,7 @@ node --check tools/rust-source-pack-diagnostics.mjs
 node --check tests/rust-performance-paired/source-pack-scenarios.mjs
 node --check tests/rust-performance-paired/source-pack-custody.mjs
 node --check tests/rust-performance-paired/read-fact-delta.mjs
-node --test tests/rust-performance-paired/source-pack-scenarios.test.mjs tests/rust-performance-paired/source-pack-custody.test.mjs tests/rust-performance-paired/source-pack-resume.test.mjs tests/rust-performance-paired/read-fact-delta.test.mjs tests/rust-performance-paired/source-candidates.test.mjs tools/rust-source-pack-evidence.test.mjs
+node --test tests/rust-performance-paired/source-pack-scenarios.test.mjs tests/rust-performance-paired/source-pack-custody.test.mjs tools/rust-source-pack-evidence.test.mjs
 ```
 
 These tests validate configuration, exact mutation identities, shared reader
@@ -561,65 +561,16 @@ estimate, measured against the current healthy base. A candidate that changes
 that format/write behavior needs a reviewed estimate; this is not a generic
 resource bound for arbitrary future products.
 
-## Read-only fresh Postcard receipt-budget reverification
+## Retired Postcard reverification entry
 
-The fresh Postcard runner reads disk-owner receipts with a fixed 16 MiB
-verification ceiling, matching the existing scenario-owner reader ceiling.
-This is not a new `rust-disk` format guarantee: its writer limits each sealed
-log to 16 MiB, while the receipt contains both `sealedLogs` and `logHashes`
-and grows with the number and lengths of those paths. The former fresh-only
-1 MiB receipt read rejected an otherwise complete changed Go owner. Receipts
-above 16 MiB, nonregular/reparse files, changed hashes or admission policies
-still fail. Errors identify the receipt and reader ceiling. The Postcard
-compiler/build owner verifier also receives this ceiling explicitly; its
-historical 2 MiB default, 2,048 flat-log count, 64 MiB total-log cap and all
-other native/config/document readers are unchanged. Product cache,
-Facts, Index, scratch, evidence-output and process budgets do not change.
-
-A completed sealed run with that specific final failure can be verified without
-rerunning products, exporters, builds, preparation or cleanup:
-
-```text
-node tests/rust-performance-paired/source-pack-scenarios-postcard-reverify.mjs REVERIFY.json
-```
-
-The caller supplies this exact configuration, using the original retained
-paths and independently recorded SHA-256 values (never guessed or copied from
-an unrelated run):
-
-```json
-{
-  "schema": "lycheedev.source-postcard-reverify-config.v1",
-  "ownerRoot": "ABSOLUTE_ORIGINAL_OWNER_ROOT",
-  "configuration": {"path": "ABSOLUTE_OUTER_EVIDENCE/fresh-configuration.json", "sha256": "ORIGINAL_CONFIGURATION_SHA256"},
-  "observation": {"path": "ABSOLUTE_OUTER_EVIDENCE/report.json", "sha256": "ORIGINAL_REPORT_SHA256"},
-  "ownedReport": {"path": "ABSOLUTE_OUTER_EVIDENCE/postcard-owned-report.json", "sha256": "ORIGINAL_OWNED_REPORT_SHA256"},
-  "outerReceipt": {"path": "ABSOLUTE_OUTER_EVIDENCE/receipt.json", "sha256": "ORIGINAL_OUTER_RECEIPT_SHA256"},
-  "originalRunnerSHA256": "SHA256_OF_UTF8_JSON_STRINGIFY_ORIGINAL_CONFIG_INPUTS"
-}
-```
-
-The original runner checkout must remain byte-identical to its sealed
-`config.inputs`; invoke the new verifier from a separate checked-out runner.
-Its source identity is recorded separately. This entry only accepts the
-original failed outer/controller state, the exact `Postcard regular file
-budget` blocker, six complete verified scenarios, twelve measured calls, a
-fully reaped failed base and eight retired changed owners, and at least one
-already-retired changed receipt above the former 1 MiB ceiling. The base's
-terminal receipt was written after the failed check, so its eventual size
-cannot establish the original overflow.
-
-It authenticates the complete recursive sealed log sets, original native
-request/start/root/receipt/wrapper/stdout/stderr records, exact scenario order
-and selection, native timings and profiles, fixed candidate/Go/exporter
-identities, and complete archived Facts/Index custody through the existing
-verifiers. Retired changed homes are not needed. Original files are rehashed
-before return. This is a read-only verification of retained evidence, not a
-general failure-recovery or sample-continuation entrypoint.
-
-A successful command emits a new `lycheedev.source-postcard-reverification.v1`
-JSON result on stdout. Preserve it as a new, separately identified result;
-do not overwrite, patch, reseal or relabel any original report/receipt. It
-records the original failed state and `finalIntegrityVerified: false`, the
-current verification result, and zero new product/exporter invocations. It
-does not grant a performance acceptance pass or additional repetitions.
+The former read-only `source-pack-scenarios-postcard-reverify.mjs` entry and its
+`lycheedev.source-postcard-reverify-config.v1` input were retired with the
+historical evidence chain (CLEAN-03): the retained-run inputs and the old runner
+closure no longer authenticate against the current runner. The current Postcard
+checks are the fresh six-scenario fixture tests
+(`source-pack-scenarios-postcard-fresh.test.mjs`), the custody/reader tests
+(`source-pack-custody.test.mjs`, `read-fact-delta-postcard.test.mjs`,
+`read-index-postcard.test.mjs`) and the 16 MiB owner-receipt ceiling exercised
+by `owned-proof.mjs`/`read-fact-delta-postcard.mjs`. Do not recreate a separate
+reverification executor; a future retained-evidence check must consume current
+sealed evidence through the current entrypoints.

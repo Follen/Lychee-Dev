@@ -98,7 +98,7 @@ fn kind(error: &ToolkitError) -> &str {
     }
 }
 #[test]
-fn fixed_go_gzip_fixtures_cover_framing_members_errors_and_delivery_counts() {
+fn fixed_wire_gzip_fixtures_cover_framing_members_errors_and_delivery_counts() {
     for fixture in fixtures() {
         for fragment in [fixture.fragment] {
             let control = OperationControl::default();
@@ -107,12 +107,13 @@ fn fixed_go_gzip_fixtures_cover_framing_members_errors_and_delivery_counts() {
             if fixture.cancel_after_raw_read {
                 input.cancel = Some(control.tracked_cancel_handle().unwrap());
             }
-            let result = run(read_bounded(
+            let result = run(collect_admitted(
                 input,
-                fixture.maximum,
+                ReadLimit::Complete(fixture.maximum),
                 &control,
                 Some(&budget),
                 control.deadline(),
+                &mut |_| Ok(()),
             ));
             let expected = unhex(&fixture.expected_hex);
             assert_eq!(
@@ -160,12 +161,13 @@ fn raw_prefetch_is_distinct_from_delivered_gzip_bytes_and_probe_is_bounded() {
         );
         let input = source(fixture.input.clone(), 8192);
         let raw = input.raw_bytes.clone();
-        let result = run(read_bounded(
+        let result = run(collect_admitted(
             input,
-            100,
+            ReadLimit::Complete(100),
             &control,
             Some(&budget),
             control.deadline(),
+            &mut |_| Ok(()),
         ));
         assert!(raw.load(Ordering::SeqCst) > 3);
         if allowed == 3 {
@@ -203,12 +205,13 @@ fn gzip_footer_error_and_budget_failure_retain_both_causes_and_actual_n() {
         // Another reader charges after our remaining snapshot. Our decode still
         // reports both actual n and CRC/DEFLATE failure; admission stays atomic.
         input.competing_charge = Some(budget.clone());
-        let error = run(read_bounded(
+        let error = run(collect_admitted(
             input,
-            100,
+            ReadLimit::Complete(100),
             &control,
             Some(&budget),
             control.deadline(),
+            &mut |_| Ok(()),
         ))
         .unwrap_err();
         assert_eq!(error.code, "records.query_resource_budget", "{name}");
@@ -243,12 +246,13 @@ fn pending_footer_cancellation_preserves_previously_decoded_n_without_outer_sele
         std::thread::sleep(Duration::from_millis(20));
         cancellation.cancel();
     });
-    let result = run(read_bounded(
+    let result = run(collect_admitted(
         input,
-        100,
+        ReadLimit::Complete(100),
         &control,
         Some(&budget),
         control.deadline(),
+        &mut |_| Ok(()),
     ));
     stop.join().unwrap();
     assert_eq!(result.unwrap_err().code, "command.cancelled");
@@ -491,12 +495,13 @@ fn same_raw_read_cancellation_budget_and_checksum_errors_all_remain_visible() {
     let mut input = source(fixture.input, 8192);
     input.cancel = Some(control.tracked_cancel_handle().unwrap());
     input.competing_charge = Some(budget.clone());
-    let error = run(read_bounded(
+    let error = run(collect_admitted(
         input,
-        100,
+        ReadLimit::Complete(100),
         &control,
         Some(&budget),
         control.deadline(),
+        &mut |_| Ok(()),
     ))
     .unwrap_err();
     assert_eq!(error.code, "command.cancelled");
@@ -546,12 +551,13 @@ fn repeated_empty_members_keep_original_budget_deadline_and_zero_decoded_count()
         Instant::now() + Duration::from_millis(30),
         control.clone(),
     );
-    let error = run(read_bounded(
+    let error = run(collect_admitted(
         input,
-        100,
+        ReadLimit::Complete(100),
         &control,
         Some(&budget),
         control.deadline(),
+        &mut |_| Ok(()),
     ))
     .unwrap_err();
     assert_eq!(error.code, "records.query_resource_budget");
@@ -579,12 +585,13 @@ fn pending_next_member_header_keeps_first_member_delivery_on_cancel() {
             std::thread::sleep(Duration::from_millis(20));
             cancellation.cancel();
         });
-        let result = run(read_bounded(
+        let result = run(collect_admitted(
             input,
-            100,
+            ReadLimit::Complete(100),
             &control,
             Some(&budget),
             control.deadline(),
+            &mut |_| Ok(()),
         ));
         stop.join().unwrap();
         assert_eq!(result.unwrap_err().code, "command.cancelled");
@@ -607,12 +614,13 @@ fn exact_budget_probe_retains_observed_n_with_decode_boundary_errors() {
             control.deadline(),
             control.clone(),
         );
-        let result = run(read_bounded(
+        let result = run(collect_admitted(
             source(fixture.input, 8192),
-            100,
+            ReadLimit::Complete(100),
             &control,
             Some(&budget),
             control.deadline(),
+            &mut |_| Ok(()),
         ));
         let error = result.unwrap_err();
         assert_eq!(error.code, "records.query_resource_budget", "{name}");
@@ -686,12 +694,13 @@ fn empty_stored_flush_returns_limit_without_waiting_for_pending_tail() {
         let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
         let mut input = source(gzip.clone(), fragment);
         input.pending_tail = true;
-        let error = run(read_bounded(
+        let error = run(collect_admitted(
             input,
-            2,
+            ReadLimit::Complete(2),
             &control,
             Some(&budget),
             Instant::now() + Duration::from_millis(100),
+            &mut |_| Ok(()),
         ))
         .unwrap_err();
         assert_eq!(error.code, "records.metadata_limit", "fragment {fragment}");
@@ -708,12 +717,13 @@ fn marker_bytes_inside_stored_payload_do_not_publish_a_flush() {
         let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
         let mut input = source(gzip.clone(), fragment);
         input.pending_tail = true;
-        let error = run(read_bounded(
+        let error = run(collect_admitted(
             input,
-            7,
+            ReadLimit::Complete(7),
             &control,
             Some(&budget),
             Instant::now() + Duration::from_millis(30),
+            &mut |_| Ok(()),
         ))
         .unwrap_err();
         assert_eq!(
@@ -731,12 +741,13 @@ fn exact_window_limit_precedes_bad_footer_even_when_prefetched() {
     for fragment in [1, 2, 7, 8192] {
         let control = OperationControl::default();
         let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
-        let error = run(read_bounded(
+        let error = run(collect_admitted(
             source(gzip.clone(), fragment),
-            32767,
+            ReadLimit::Complete(32767),
             &control,
             Some(&budget),
             control.deadline(),
+            &mut |_| Ok(()),
         ))
         .unwrap_err();
         assert_eq!(error.code, "records.metadata_limit", "fragment {fragment}");
@@ -745,7 +756,7 @@ fn exact_window_limit_precedes_bad_footer_even_when_prefetched() {
 }
 
 #[test]
-fn public_boundary_matrix_matches_source_derived_go_expectations() {
+fn public_boundary_matrix_matches_source_derived_reference_expectations() {
     // Lossless storage only: verify the exact original Go-vector bytes before
     // parsing. Use the existing flate2 backend, not the raw decoder under test.
     fn load(encoded: &str, expected_sha256: &str, expected_bytes: usize) -> Vec<Fixture> {
@@ -780,12 +791,13 @@ fn public_boundary_matrix_matches_source_derived_go_expectations() {
     for fixture in cases {
         let control = OperationControl::default();
         let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
-        let result = run(read_bounded(
+        let result = run(collect_admitted(
             source(fixture.input, fixture.fragment),
-            fixture.maximum,
+            ReadLimit::Complete(fixture.maximum),
             &control,
             Some(&budget),
             control.deadline(),
+            &mut |_| Ok(()),
         ));
         assert_eq!(
             budget.snapshot().unwrap().network_bytes as usize,
@@ -812,12 +824,13 @@ fn valid_matches_cross_dictionary_wrap_after_partial_flush() {
     for fragment in [1, 2, 7, 8192] {
         let control = OperationControl::default();
         let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
-        let result = run(read_bounded(
+        let result = run(collect_admitted(
             source(encoded.clone(), fragment),
-            plain.len(),
+            ReadLimit::Complete(plain.len()),
             &control,
             Some(&budget),
             control.deadline(),
+            &mut |_| Ok(()),
         ))
         .unwrap();
         assert_eq!(result, plain, "fragment {fragment}");

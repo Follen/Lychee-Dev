@@ -7,7 +7,7 @@ use super::{
 };
 use crate::resource::{Budget, Cost};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError,
+    Outcome, Result,
     evidence::BlobRef,
     selection, workspace,
     workspace::{
@@ -124,22 +124,7 @@ pub(crate) fn reference(key: &str, raw: &[u8], budget: &Budget) -> Result<Derive
     })
 }
 
-pub(crate) fn prune(inv: &Invocation) -> Result<Outcome> {
-    if inv.command != "cache prune" || !inv.flag_bool("--data-derived") {
-        return Err(ToolkitError::arguments(
-            "Data retirement requires cache prune --data-derived",
-        ));
-    }
-    if inv.flag_bool("--uncommitted") {
-        return Err(ToolkitError::arguments(
-            "--data-derived does not include --uncommitted staging",
-        ));
-    }
-    let options = DerivedRetirementOptions {
-        target_bytes: inv.usize_flag("--target-bytes", 0, 0, usize::MAX)? as u64,
-        max_objects: inv.usize_flag("--max-objects", 0, 0, 100000)?,
-        dry_run: inv.flag_bool("--dry-run"),
-    };
+pub(crate) fn prune(inv: &crate::request::DataContext, options: DerivedRetirementOptions) -> Result<Outcome> {
     workspace::open_controlled(&inv.home, &inv.control)?;
     let budget = Budget::query_controlled(inv.control.deadline(), inv.control.clone());
     let resources =
@@ -171,7 +156,7 @@ pub(crate) fn prune(inv: &Invocation) -> Result<Outcome> {
             Err(error)
         }
         (Err(error), cleanup) => {
-            lycheedev_core::metadata::historical_write::finish_historical(Err(error), cleanup)
+            lycheedev_core::metadata::owned_write::finish_owned(Err(error), cleanup)
         }
     }
 }

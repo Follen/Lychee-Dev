@@ -31,7 +31,7 @@ mod tests {
         )
     }
     #[test]
-    fn fixed_go_simple_folds_match_unicode_special_orbits_without_normalizing() {
+    fn simple_folds_match_unicode_special_orbits_without_normalizing() {
         for (a, b) in [
             ("C:\\WOW.EXE", "c:\\wow.exe"),
             ("K", "K"),
@@ -61,7 +61,7 @@ mod tests {
         }
     }
     #[test]
-    fn invalid_utf16_matches_go_rune_error_and_generated_table_is_canonical() {
+    fn invalid_utf16_matches_rune_error_and_generated_table_is_canonical() {
         assert!(equal_fold_utf16(&[0xd800], &[0xfffd]));
         assert!(!equal_fold_utf16(&[0xd800, 0xd800], &[0xfffd]));
         assert!(

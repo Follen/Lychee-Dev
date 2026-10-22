@@ -8,36 +8,28 @@ use super::{
     session::{Options, Session},
 };
 use crate::{
-    local_query::{File, FileBytes},
+    query_source::{File, FileBytes},
     resource::{Budget, Cost},
 };
-use lycheedev_core::{Invocation, Result, selection::DataPin, workspace::data_resources::Policy};
+use crate::request::DataContext;
+use lycheedev_core::{Result, selection::DataPin, workspace::data_resources::Policy};
 use std::sync::Arc;
 
 fn resolve_pin(
-    invocation: &Invocation,
+    invocation: &DataContext,
     budget: &Arc<Budget>,
 ) -> Result<lycheedev_core::selection::PinnedSet> {
-    lycheedev_core::selection::resolve_pin_request_controlled_with_check(
-        lycheedev_core::selection::PinSelectionRequest {
-            home: &invocation.home,
-            cwd: &invocation.cwd,
-            snapshot: invocation.flag("--snapshot"),
-            project: invocation.flag("--project"),
-        },
-        &invocation.control,
-        || budget.check(),
-    )
+    invocation.resolve_pinned_with_check(|| budget.check())
 }
 
 /// No file-read method exists until this owner has acquired real workspace slots.
 pub(crate) struct OpenedScope<'a> {
     workspace: OpenWorkspace<'a>,
-    invocation: &'a Invocation,
+    invocation: &'a DataContext,
     budget: &'a Arc<Budget>,
 }
 impl<'a> OpenedScope<'a> {
-    pub fn open(invocation: &'a Invocation, budget: &'a Arc<Budget>) -> Result<Self> {
+    pub fn open(invocation: &'a DataContext, budget: &'a Arc<Budget>) -> Result<Self> {
         let workspace =
             OpenWorkspace::open_metadata(&invocation.home, &invocation.control, Some(budget))?;
         Ok(Self {
@@ -95,7 +87,7 @@ impl<'a> OpenedScope<'a> {
 
 pub(crate) struct Scope<'a> {
     admitted: AdmittedWorkspace<'a>,
-    invocation: &'a Invocation,
+    invocation: &'a DataContext,
     budget: &'a Arc<Budget>,
 }
 impl<'a> Scope<'a> {
@@ -121,7 +113,7 @@ impl<'a> Scope<'a> {
         self.check()?;
         fragments::data_identity(pin).map(|_| ())
     }
-    pub fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()> {
+    pub fn check_consumer(&self, invocation: &DataContext, budget: &Arc<Budget>) -> Result<()> {
         self.check()?;
         if !std::ptr::eq(self.invocation, invocation) || !Arc::ptr_eq(self.budget, budget) {
             return Err(crate::fault(
@@ -243,7 +235,7 @@ pub(crate) trait FileScope {
     fn verify_source(&self) -> Result<()> {
         self.check()
     }
-    fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()>;
+    fn check_consumer(&self, invocation: &DataContext, budget: &Arc<Budget>) -> Result<()>;
     fn check_pin(&self, pin: &DataPin) -> Result<()>;
     fn resolve_pin(&self) -> Result<lycheedev_core::selection::PinnedSet>;
     fn read_batches(
@@ -286,7 +278,7 @@ impl FileScope for Scope<'_> {
     fn check(&self) -> Result<()> {
         Scope::check(self)
     }
-    fn check_consumer(&self, i: &Invocation, b: &Arc<Budget>) -> Result<()> {
+    fn check_consumer(&self, i: &DataContext, b: &Arc<Budget>) -> Result<()> {
         Scope::check_consumer(self, i, b)
     }
     fn check_pin(&self, p: &DataPin) -> Result<()> {
@@ -315,7 +307,7 @@ impl FileScope for Scope<'_> {
 pub(crate) struct SessionScope<'a, 'scope> {
     session: Option<Session<'a, 'scope>>,
     admitted: Option<&'a mut AdmittedWorkspace<'scope>>,
-    invocation: &'scope Invocation,
+    invocation: &'scope DataContext,
     budget: &'scope Arc<Budget>,
     pin: &'a DataPin,
 }
@@ -418,7 +410,7 @@ impl FileScope for SessionScope<'_, '_> {
             },
         }
     }
-    fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()> {
+    fn check_consumer(&self, invocation: &DataContext, budget: &Arc<Budget>) -> Result<()> {
         self.check()?;
         if !std::ptr::eq(self.invocation, invocation) || !Arc::ptr_eq(self.budget, budget) {
             return Err(crate::fault(
@@ -499,25 +491,18 @@ impl FileScope for SessionScope<'_, '_> {
     }
 }
 
-fn file_options(invocation: &Invocation) -> Result<Options> {
+fn file_options(invocation: &DataContext) -> Result<Options> {
     invocation.control.check()?;
-    let variant = invocation.flag("--content-variant").unwrap_or("");
-    if !["", "standard", "low-violence"].contains(&variant) {
-        return Err(crate::fault("records.file_query", 4, "records.file_query"));
-    }
     // Fixed Go validates this physical-source conflict only when a file is
     // read. Definition-only queries do not prepare CDN or require keys.
-    if invocation
-        .flag("--installation")
-        .is_some_and(|path| !path.is_empty())
-    {
+    if invocation.source.installation.as_ref().is_some_and(|path| !path.as_os_str().is_empty()) {
         return Err(super::limit());
     }
     Ok(Options {
-        offline: invocation.flag_bool("--offline"),
-        key_file: invocation.flag("--key-file").map(str::to_owned),
-        variant: variant.to_owned(),
+        offline: invocation.source.offline,
+        key_file: invocation.source.key_file.clone(),
+        variant: invocation.source.content_variant.as_str().to_owned(),
         metadata_bytes: 512 << 20,
-        content_bytes: invocation.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?,
+        content_bytes: invocation.source.max_file_bytes,
     })
 }

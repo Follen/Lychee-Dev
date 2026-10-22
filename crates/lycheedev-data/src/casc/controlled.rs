@@ -5,7 +5,7 @@ use super::*;
 #[derive(Clone, Copy)]
 pub(super) struct Scope<'a> {
     pub limits: Limits,
-    pub cancel: Option<&'a AtomicBool>,
+    pub cancel: Option<&'a TrackedCancellation>,
     pub control: Option<&'a OperationControl>,
     pub budget: Option<&'a Budget>,
 }

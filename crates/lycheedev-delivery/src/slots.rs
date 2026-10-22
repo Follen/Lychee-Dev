@@ -1,5 +1,4 @@
-//! Managed slot installation metadata follows the fixed Go 3.2.1 contract.
-//! Old metadata is readable only for maintenance; it never authorizes business input.
+//! Managed 500-slot installation, publication inventory and version upgrades.
 use lycheedev_core::{Result, ToolkitError, control::OperationControl, storage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,17 +12,11 @@ pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
 pub const INTERFACES: &str = "120105, 120100, 50504, 38002, 16001, 11509, 20506";
 pub const SCHEMA: &str = "lycheedev.slots.v3";
 pub const MARKER: &str = ".lycheedev-slots.json";
-const PREVIOUS: &str = "lycheedev.slots.v2";
-const LEGACY: &str = "lycheedev.slots.v1";
 const MIGRATION: &str = "lycheedev.slots.migration.v4";
-const PREVIOUS_MIGRATION: &str = "lycheedev.slots.migration.v3";
 const MANIFEST_LIMIT: usize = 256 << 10;
 const STATIC_LIMIT: usize = 16 << 10;
 const PAYLOAD_LIMIT: usize = 2 << 20;
 const INERT: &[u8] = b"LycheeDevSlotEnvelope = nil\n";
-const PREVIOUS_RETAIL_INTERFACES: &str = "120100, 50504, 38002, 16001, 11509, 20506";
-const PREVIOUS_INTERFACES: &str = "120100, 50504, 38002, 16001";
-const PREVIOUS_MAILBOX_INTERFACES: &str = "120100, 50504, 38002, 16001, 11509";
 
 fn is_false(value: &bool) -> bool {
     !value
@@ -248,25 +241,19 @@ impl SlotPool {
         if self.version.is_empty() {
             return false;
         }
-        let count = self.files.len();
-        let source_count = |schema: &str| match schema {
-            SCHEMA => count == COUNT as usize || count == 200,
-            PREVIOUS => count == 200,
-            LEGACY => count == 64,
-            _ => false,
-        };
-        match self.schema.as_str() {
-            SCHEMA => source_count(SCHEMA) && self.source_schema.is_empty(),
-            PREVIOUS | LEGACY => {
-                source_count(&self.schema) && self.state == "ready" && self.source_schema.is_empty()
+        self.files.len() == COUNT as usize
+            && match self.schema.as_str() {
+                SCHEMA => {
+                    matches!(self.state.as_str(), "ready" | "installing")
+                        && self.source_schema.is_empty()
+                }
+                MIGRATION => {
+                    self.state == "upgrading"
+                        && !self.pending_version.is_empty()
+                        && self.source_schema == SCHEMA
+                }
+                _ => false,
             }
-            MIGRATION | PREVIOUS_MIGRATION => {
-                self.state == "upgrading"
-                    && !self.pending_version.is_empty()
-                    && source_count(&self.source_schema)
-            }
-            _ => false,
-        }
     }
 }
 fn invalid(message: impl Into<String>) -> ToolkitError {
@@ -292,58 +279,9 @@ pub fn files(index: u16, version: &str) -> [(String, Vec<u8>); 3] {
         ("Payload.lua".into(), b"LycheeDevSlotEnvelope = nil\n".to_vec()),
     ]
 }
-pub(crate) fn static_files(index: u16, version: &str, schema: &str) -> [(String, Vec<u8>); 2] {
-    let [mut toc, loader, _] = files(index, version);
-    if schema == LEGACY || schema == PREVIOUS {
-        let transport = if schema == LEGACY {
-            "memory-slot-v1"
-        } else {
-            "memory-slot-v2"
-        };
-        toc.1 = String::from_utf8(toc.1)
-            .expect("generated ASCII slot TOC")
-            .replace(INTERFACES, PREVIOUS_INTERFACES)
-            .replace(TRANSPORT, transport)
-            .into_bytes();
-    }
+pub(crate) fn static_files(index: u16, version: &str) -> [(String, Vec<u8>); 2] {
+    let [toc, loader, _] = files(index, version);
     [toc, loader]
-}
-pub(crate) fn static_matches(name: &str, actual: &[u8], want: &[u8]) -> bool {
-    if actual == want {
-        return true;
-    }
-    if !name.ends_with(".toc") {
-        return false;
-    }
-    let Ok(want) = std::str::from_utf8(want) else {
-        return false;
-    };
-    for interfaces in [
-        INTERFACES,
-        PREVIOUS_RETAIL_INTERFACES,
-        PREVIOUS_MAILBOX_INTERFACES,
-        PREVIOUS_INTERFACES,
-    ] {
-        let toc = want.replacen(
-            &format!("## Interface: {INTERFACES}\n"),
-            &format!("## Interface: {interfaces}\n"),
-            1,
-        );
-        if actual == toc.as_bytes() {
-            return true;
-        }
-        for retired in ["memory-slot-v3", "lycheedev-mailbox-v1"] {
-            let old = toc.replacen(
-                &format!("## X-Lychee-Transport: {TRANSPORT}\n"),
-                &format!("## X-Lychee-Transport: {retired}\n"),
-                1,
-            );
-            if actual == old.as_bytes() {
-                return true;
-            }
-        }
-    }
-    false
 }
 pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     read_bounded_controlled(path, limit, &OperationControl::default())
@@ -413,6 +351,7 @@ fn exact_members(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(test)]
 pub(crate) fn read_pool(parent: &Path) -> Result<SlotPool> {
     read_pool_controlled(parent, &OperationControl::default())
 }
@@ -462,12 +401,8 @@ pub(crate) fn inspect_pool(
         let target = directory(parent, (index + 1) as u16);
         plain_directory(parent, &target)?;
         exact_members(&target)?;
-        for (name, want) in static_files((index + 1) as u16, version, &pool.schema) {
-            if !static_matches(
-                &name,
-                &read_bounded_controlled(&target.join(&name), STATIC_LIMIT, control)?,
-                &want,
-            ) {
+        for (name, want) in static_files((index + 1) as u16, version) {
+            if read_bounded_controlled(&target.join(&name), STATIC_LIMIT, control)? != want {
                 return Err(invalid("slot static file changed"));
             }
         }
@@ -496,7 +431,6 @@ struct Replacement {
     bytes: Vec<u8>,
 }
 struct UpgradePlan {
-    directories: Vec<PathBuf>,
     writes: Vec<Replacement>,
 }
 fn upgrade_plan(
@@ -505,51 +439,26 @@ fn upgrade_plan(
     version: &str,
     control: &OperationControl,
 ) -> Result<UpgradePlan> {
-    if pool.state != "upgrading" || pool.pending_version != version {
-        return Err(conflict("slot migration intent targets another version"));
+    if pool.schema != MIGRATION
+        || pool.state != "upgrading"
+        || pool.pending_version != version
+        || pool.source_schema != SCHEMA
+        || pool.files.len() != COUNT as usize
+    {
+        return Err(conflict(
+            "slot upgrade intent targets another inventory or version",
+        ));
     }
     check_idle(pool)?;
-    let mut plan = UpgradePlan {
-        directories: vec![],
-        writes: vec![],
-    };
+    let mut plan = UpgradePlan { writes: vec![] };
     for index in 1..=COUNT {
         control.check()?;
         let target = directory(parent, index);
-        let existing = usize::from(index) <= pool.files.len();
-        let missing = absent(&target)?;
-        if missing && existing {
-            return Err(invalid("existing migration slot is missing"));
-        }
-        if missing {
-            plan.directories.push(target.clone());
-        } else {
-            plain_directory(parent, &target)?;
-        }
-        let desired = files(index, version);
-        let previous = static_files(index, &pool.version, &pool.source_schema);
-        let legacy_target = static_files(index, version, &pool.source_schema);
-        if !missing {
-            let entries = fs::read_dir(&target)?
-                .take(4)
-                .collect::<std::io::Result<Vec<_>>>()?;
-            if entries.len() > 3
-                || existing && entries.len() != 3
-                || entries.iter().any(|entry| {
-                    !desired
-                        .iter()
-                        .any(|(name, _)| entry.file_name() == name.as_str())
-                })
-            {
-                return Err(invalid("migration slot contains unexpected files"));
-            }
-        }
-        for (name, want) in desired {
+        plain_directory(parent, &target)?;
+        exact_members(&target)?;
+        let previous = static_files(index, &pool.version);
+        for (name, want) in files(index, version) {
             let path = target.join(&name);
-            if absent(&path)? && !existing {
-                plan.writes.push(Replacement { path, bytes: want });
-                continue;
-            }
             let payload = name == "Payload.lua";
             let actual = read_bounded_controlled(
                 &path,
@@ -559,17 +468,13 @@ fn upgrade_plan(
             if actual == want {
                 continue;
             }
-            let allowed = if !existing {
-                false
-            } else if payload {
+            let owned = if payload {
                 storage::sha256(&actual) == pool.files[usize::from(index) - 1].payload_hash
             } else {
-                let old = previous.iter().find(|(key, _)| key == &name).unwrap();
-                let legacy = legacy_target.iter().find(|(key, _)| key == &name).unwrap();
-                static_matches(&name, &actual, &old.1) || static_matches(&name, &actual, &legacy.1)
+                actual == previous.iter().find(|(key, _)| key == &name).unwrap().1
             };
-            if !allowed {
-                return Err(invalid("migration found unowned or changed slot bytes"));
+            if !owned {
+                return Err(invalid("upgrade found unowned or changed slot bytes"));
             }
             plan.writes.push(Replacement { path, bytes: want });
         }
@@ -601,7 +506,7 @@ pub fn preflight_controlled(
         pool.schema != SCHEMA || pool.version != version || pool.files.len() != COUNT as usize;
     if !needs_upgrade {
         for index in 1..=COUNT {
-            for (name, expected) in static_files(index, version, SCHEMA) {
+            for (name, expected) in static_files(index, version) {
                 control.check()?;
                 if read_bounded_controlled(
                     &directory(parent, index).join(name),
@@ -671,16 +576,13 @@ pub fn install_controlled(
         let target = directory(parent, index as u16);
         fs::create_dir_all(&target)?;
         plain_directory(parent, &target)?;
-        for (name, want) in static_files(index as u16, &pool.version, &pool.schema) {
+        for (name, want) in static_files(index as u16, &pool.version) {
             let path = target.join(&name);
             if absent(&path)? && pool.state == "installing" {
                 storage::slot_atomic_write_controlled(&path, &want, control)?;
             } else {
                 let actual = read_bounded_controlled(&path, STATIC_LIMIT, control)?;
                 if actual != want {
-                    if pool.state == "ready" && static_matches(&name, &actual, &want) {
-                        return upgrade(parent, pool, version, control);
-                    }
                     return Err(invalid("modified slot static file"));
                 }
             }
@@ -730,18 +632,9 @@ fn upgrade(
     if pool.state != "upgrading" || pool.pending_version != version {
         return Err(conflict("slot migration intent targets another version"));
     }
-    if pool.schema == PREVIOUS_MIGRATION {
-        pool.schema = MIGRATION.into();
-        save_pool(parent, &pool, control)?;
-    }
     let plan = upgrade_plan(parent, &pool, version, control)?;
     // Every byte is admitted before the first replacement, including resumed
     // mixed-static and partially created extension directories.
-    for directory in plan.directories {
-        control.check()?;
-        fs::create_dir(&directory)?;
-        plain_directory(parent, &directory)?;
-    }
     for write in plan.writes {
         control.check()?;
         storage::slot_atomic_write_controlled(&write.path, &write.bytes, control)?;
@@ -786,19 +679,4 @@ pub(crate) fn inspect_typed(
     }
     inspect_pool(parent, &pool, version, control)?;
     Ok(pool)
-}
-/// The historical byte-only API cannot establish the formal consumer/runtime/
-/// nonce/envelope publication contract. Keep it fail-closed until that typed
-/// business API and its caller are migrated; never feed arbitrary bytes to v1.
-pub fn publish(
-    _identity: &crate::installation::VerifiedInstallation,
-    _index: u16,
-    _expected_sha256: Option<&str>,
-    _bytes: &[u8],
-) -> Result<()> {
-    Err(ToolkitError::new(
-        "live.mailbox_v1_migration_incomplete",
-        "typed mailbox protocol v1 publication is not connected",
-        3,
-    ))
 }

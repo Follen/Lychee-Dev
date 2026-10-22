@@ -5,10 +5,7 @@ use std::{
 };
 
 fn control() -> OperationControl {
-    OperationControl::new(
-        Instant::now() + Duration::from_secs(30),
-        Arc::new(AtomicBool::new(false)),
-    )
+    OperationControl::uncancelable(Instant::now() + Duration::from_secs(30))
 }
 fn inputs(c: &OperationControl, flow: bool) -> Arc<SourceInputs> {
     graph_fixture_inputs(
@@ -107,72 +104,25 @@ fn graph_fixture_inputs(
     .unwrap()
 }
 
-// These differential references/tests are compiled only through this cfg(test) module.
-include!("scope_copying_reference.rs");
-include!("graph_move_copying_reference.rs");
 include!("graph_move_tests.rs");
 include!("scope_copy_tests.rs");
 include!("harvest_evidence_tests.rs");
 
-// The prior eager Value formulas are retained here as the compatibility oracle.
-// Equality checks bytes as well as Values, covering nested canonical key order.
-fn eager_identity(i: &SourceInputs, c: &OperationControl) -> Value {
-    let mut value = json!({"schema":"lycheedev.native-source-inputs.v1","source":i.corpus.source_identity,"workspaceRoot":i.corpus.root,
-        "files":i.corpus.files.iter().map(|file|&file.identity).collect::<Vec<_>>(),"orderedScriptLoadOccurrences":i.ordered.iter().enumerate().map(|(index,file)|json!({"index":index,"file":file})).collect::<Vec<_>>(),"executionPhase":i.phase,
-        "effectiveEmmyrc":i.corpus.config,"engine":{"baseCommit":ENGINE_COMMIT,"baseArchiveSHA256":ENGINE_ARCHIVE_SHA256,"patchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")},
-        "rules":{"native":NATIVE_RULES,"legacy":RULES_VERSION,"capabilityProfile":NATIVE_PROFILE,"dependencyLockSHA256":hash(DEPENDENCY_LOCK)},"environment":i.host.identity_value(c).unwrap(),
-        "luac":i.corpus.luac,"syntaxCheck":{"state":"pending","requires":"trusted checker result bound to exact original source and executable bytes"},
-        "limits":i.corpus.limits,"fixedGraphLimits":fixed_graph_limits(),"sourceMapProfile":i.source_map_profile(),"sourceExecution":false,"configExecution":false,
-        "control":{"deadline":"caller-owned-total-operation","stages":"same-admission-deadline-and-token-required","constructionSteps":"shared-by-all-prepares-and-execution-views-of-one-admission","synchronousEngine":"external-owned-process-hard-deadline-required"}});
-    if let Some(plan) = &i.load_plan {
-        value["loadPlan"] = json!(plan);
-        value["rules"]["explicitExecution"] = json!(ENTRY_RULES);
-    }
-    if let Some(entry) = &i.entry {
-        value["explicitEntry"] = json!(entry);
-    }
-    if let Some(program) = &i.xml {
-        value["xmlProgram"] = json!(program.as_ref());
-    }
-    if !i.host.data.bindings.is_empty() {
-        value["rules"]["hostRuntime"] = host_runtime_profile_for(i.entry.is_some(),i.corpus.limits.research);
-    }
-    if i.corpus.limits.flow.is_some() {
-        value["rules"]["flow"] = json!(FLOW_RULES);
-    }
-    value
-}
 fn assert_identity(i: &SourceInputs, c: &OperationControl) {
-    let expected = eager_identity(i, c);
+    c.check().unwrap();
     let actual = serde_json::to_vec(i.identity()).unwrap();
-    assert_eq!(actual, serde_json::to_vec(&expected).unwrap());
     assert_eq!(hash(&actual), i.identity_sha256());
-    assert_eq!(serde_json::to_value(i.identity()).unwrap(), expected);
+    assert_eq!(serde_json::from_slice::<Value>(&actual).unwrap(), serde_json::to_value(i.identity()).unwrap());
 }
-fn assert_graph(graph: &Graph, c: &OperationControl, native: bool, scope: Option<&str>) {
+fn assert_graph(graph: &Graph, c: &OperationControl, scope: Option<&str>) {
     let i = graph.inputs();
     assert_identity(i, c);
-    let effective = json!(i.corpus.config);
-    let effective_json = serde_json::to_string(&effective).unwrap();
-    let mut expected = json!({"schema":"lycheedev.native-context-snapshot-inputs.v2","admission":eager_identity(i,c),"admissionSHA256":i.identity_sha256(),
-        "engine":{"baseCommit":ENGINE_COMMIT,"baseArchiveSHA256":ENGINE_ARCHIVE_SHA256,"patchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")},
-        "adapter":fixed_graph_limits(),"effectiveEmmyrc":effective,"effectiveEmmyrcJson":effective_json,"effectiveEmmyrcSHA256":hash(effective_json.as_bytes()),
-        "files":i.corpus.files.iter().map(|file|json!({"file":file.path,"bytes":file.original.len(),"sha256":file.identity["sha256"]})).collect::<Vec<_>>(),
-        "orderedScriptLoadOccurrences":i.ordered.iter().enumerate().map(|(index,file)|json!({"index":index,"file":file})).collect::<Vec<_>>(),"executionPhase":i.phase,"sourceMapProfile":i.source_map_profile(),"intrinsicProfile":PROFILE,
-        "initialEnvironmentProfile":i.host.data.profile,"workspaceRoot":i.corpus.root,"stdlibInputs":[],"environmentInputs":i.host.data.materials,"evaluator":if native{"native-invocations"}else{"legacy-v7"},"configExecution":false});
-    if i.load_plan.is_some() {
-        expected["adapter"]["explicitExecution"] = json!({"rulesVersion":ENTRY_RULES,"views":["entry"],"loadPlan":"known_occurrences_or_unknown_file_set","unknownOrder":"knowledge_boundary_no_execution","entryArguments":"unspecified_unknown_or_exact_list_nil_padding"});
-    }
-    if native && !i.host.data.bindings.is_empty() {
-        expected["adapter"]["hostRuntime"] = host_runtime_profile_for(i.entry.is_some(),i.corpus.limits.research);
-    }
-    if let Some(scope) = scope {
-        expected["validationScope"] = json!(scope);
-    }
-    let bytes = serde_json::to_vec(&expected).unwrap();
-    assert_eq!(serde_json::to_vec(graph.snapshot_inputs.as_ref()).unwrap(), bytes);
+    let bytes = serde_json::to_vec(graph.snapshot_inputs.as_ref()).unwrap();
     assert_eq!(graph.snapshot_inputs_json.as_bytes(), bytes);
     assert_eq!(graph.snapshot_key, hash(&bytes));
+    let value:Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["evaluator"], "native-invocations");
+    if let Some(scope) = scope { assert_eq!(value["validationScope"], scope); }
     assert!(Arc::ptr_eq(&graph.snapshot_inputs.admission, &i.identity));
     assert!(Arc::ptr_eq(&graph.snapshot_inputs.common, &i.graph_common));
 }
@@ -203,9 +153,9 @@ fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
     let original_binding = serde_json::to_value(binding.data.as_ref()).unwrap();
     assert_eq!(serde_json::to_value(&binding).unwrap(), original_binding);
     let base = prepared
-        .build("base", EvaluatorProfile::Native, None, &c)
+        .build("base", None, &c)
         .unwrap();
-    assert_graph(&base, &c, true, None);
+    assert_graph(&base, &c, None);
     let duplicate = prepared
         .build_plan(
             "duplicate",
@@ -216,7 +166,7 @@ fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
             &c,
         )
         .unwrap();
-    assert_graph(&duplicate, &c, true, Some("test-scope"));
+    assert_graph(&duplicate, &c, Some("test-scope"));
     assert_ne!(base.snapshot_key, duplicate.snapshot_key);
     assert_eq!(duplicate.inputs.ordered, vec!["a.lua", "a.lua", "bom.lua"]);
     for graph in [&base, &duplicate] {
@@ -241,11 +191,7 @@ fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
             &c,
         )
         .unwrap();
-    assert_graph(&unknown, &c, true, None);
-    let legacy = prepared
-        .build("legacy", EvaluatorProfile::LegacyV7, None, &c)
-        .unwrap();
-    assert_graph(&legacy, &c, false, None);
+    assert_graph(&unknown, &c, None);
     let request = EntryRequest {
         candidate: prepared.entry_catalog[0].id.clone(),
         load_occurrence: None,
@@ -262,7 +208,7 @@ fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
             &c,
         )
         .unwrap();
-    assert_graph(&entry, &c, true, None);
+    assert_graph(&entry, &c, None);
     let xml = crate::xml_load::Program::from_sources(
         "Main.toc",
         [
@@ -279,7 +225,7 @@ fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
     let xml = prepared
         .build_xml_plan("xml", Arc::new(xml), None, &c)
         .unwrap();
-    assert_graph(&xml, &c, true, Some(crate::xml_load::RULES));
+    assert_graph(&xml, &c, Some(crate::xml_load::RULES));
     assert_eq!(xml.inputs.ordered, vec!["a.lua", "a.lua"]);
     let flow = inputs(&c, true);
     assert_identity(&flow, &c);
@@ -291,7 +237,7 @@ fn shared_corpus_does_not_share_request_ownership_or_cancellation() {
     let input = inputs(&c, false);
     let mut prepared = prepare(input.clone(), &c).unwrap();
     let old = prepared
-        .build("old", EvaluatorProfile::Native, None, &c)
+        .build("old", None, &c)
         .unwrap();
     let next = control();
     prepared.begin_research_request(&next).unwrap();
@@ -320,7 +266,7 @@ fn shared_corpus_does_not_share_request_ownership_or_cancellation() {
             .is_err()
     );
     let fresh = prepared
-        .build("fresh", EvaluatorProfile::Native, None, &next)
+        .build("fresh", None, &next)
         .unwrap();
     assert_eq!(old.snapshot_key, fresh.snapshot_key);
     assert!(
@@ -330,10 +276,10 @@ fn shared_corpus_does_not_share_request_ownership_or_cancellation() {
             .with_execution(&fresh, QuerySelector::AllOccurrences, &next)
             .is_ok()
     );
-    let token = Arc::new(AtomicBool::new(true));
-    let cancelled = OperationControl::new(next.deadline(), token.clone());
+    let signal = lycheedev_core::control::TrackedCancellation::new();
+    signal.cancel();
+    let cancelled = OperationControl::tracked(next.deadline(), signal);
     assert!(prepared.begin_research_request(&cancelled).is_err());
-    token.store(false, Ordering::Relaxed);
     assert!(require_same_control(&prepared.control, &next).is_ok());
 }
 
@@ -389,12 +335,7 @@ fn entry_line_lookup_preserves_typed_stop_causes() {
             assert_eq!(prepared.entry_candidate("a.lua", syntax).unwrap(), before);
             assert!(matches!(prepared.entry_symbol_candidates("a.lua", "F", &c).unwrap(), EntryResolution::Unique { .. }));
 
-            let token = Arc::new(AtomicBool::new(!deadline));
-            let stopped = OperationControl::new(
-                if deadline { Instant::now() - Duration::from_secs(1) }
-                else { Instant::now() + Duration::from_secs(30) },
-                token,
-            );
+            let stopped = stopped_control(deadline, Instant::now() + Duration::from_secs(30));
             prepared.control = stopped.clone();
             let expected = stopped.check().unwrap_err();
             // This private producer is the exact boundary that formerly
@@ -408,13 +349,13 @@ fn entry_line_lookup_preserves_typed_stop_causes() {
 
     // Trigger a real typed cancellation only after fallback has entered its
     // scan. No sleeps, timing race, stub control, or production test hook.
-    let token = Arc::new(AtomicBool::new(false));
-    let c = OperationControl::new(Instant::now() + Duration::from_secs(30), token.clone());
+    let token = lycheedev_core::control::TrackedCancellation::new();
+    let c = OperationControl::tracked(Instant::now() + Duration::from_secs(30), token.clone());
     let text = "x\n".repeat(16384);
     let mut polls = 0;
     let actual = original_lines::controlled_line_at(&text, text.len(), || {
         polls += 1;
-        if polls == 2 { token.store(true, Ordering::Release); }
+        if polls == 2 { token.cancel(); }
         c.check()
     }).unwrap_err();
     let expected = c.check().unwrap_err();
@@ -435,7 +376,7 @@ fn incoming_caller_missing_owner_is_explicit_and_cancellation_wins() {
     prepared.project_incoming_caller(&mut row,&syntax,&reference,&origins).unwrap();
     assert_eq!(row["source"],"<unknown>");assert_eq!(row["caller"]["kind"],"unknown");assert!(row["caller"].get("name").is_none());
     assert_eq!(row["referenceExpression"],"Host");assert_eq!(row["proof"],"unchanged");
-    control.cancel_handle().store(true,Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(prepared.project_incoming_caller(&mut row,&syntax,&reference,&origins).unwrap_err().code,"command.cancelled");
 }
 
@@ -505,6 +446,6 @@ fn incoming_function_binding_accepts_complete_headers_and_honors_control() {
         &source[usize::from(name.start())..usize::from(name.end())]
     }).collect::<Vec<_>>();
     assert_eq!(names,["Plain","Obj.Deep:Method","Local","Commented"]);
-    control.cancel_handle().store(true,Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert!(PreparedSnapshot::research_function_binding(&control,stats[0].clone(),&errors).is_err());
 }

@@ -4,7 +4,8 @@ use lycheedev_core::{ToolkitError, control::OperationControl};
 mod http;
 #[cfg(test)]
 mod tests;
-use lycheedev_core::{Invocation, Result, evidence, storage};
+use crate::request::DataContext;
+use lycheedev_core::{Result, evidence, storage};
 use serde::{
     Deserialize, Serialize,
     de::{self, MapAccess, Visitor},
@@ -167,16 +168,16 @@ pub struct Context {
     budget: Option<std::sync::Arc<crate::resource::Budget>>,
 }
 impl Context {
-    pub fn prepare(inv: &Invocation, deadline: Instant) -> Result<Self> {
-        Self::prepare_budgeted(inv, deadline, None)
+    pub fn prepare(ctx: &DataContext, deadline: Instant) -> Result<Self> {
+        Self::prepare_budgeted(ctx, deadline, None)
     }
     pub fn prepare_budgeted(
-        inv: &Invocation,
+        ctx: &DataContext,
         deadline: Instant,
         budget: Option<std::sync::Arc<crate::resource::Budget>>,
     ) -> Result<Self> {
-        Self::prepare_scoped(&inv.home, inv.flag("--key-file"), inv.flag_bool("--offline"),
-            &inv.control, deadline, budget)
+        Self::prepare_scoped(&ctx.home, ctx.source.key_file.as_deref(), ctx.source.offline,
+            &ctx.control, deadline, budget)
     }
     pub(crate) fn prepare_scoped(
         home: &Path,

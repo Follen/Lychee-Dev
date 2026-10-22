@@ -489,7 +489,7 @@ mod tests{
         assert!(Arc::ptr_eq(&first.originals["Frame.xml"],&second.originals["Frame.xml"]));
         let mut mismatch=BTreeMap::from([("Frame.xml".into(),Arc::<str>::from("changed"))]);
         assert_eq!(Program::from_indexed_sources_with_originals("Main.toc",&sources,&paths,Some(&source),&control,&catalog,Some(&mut mismatch)).unwrap_err().code,"source.native_invalid_input");
-        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(Program::from_indexed_sources_with_originals("Main.toc",&sources,&paths,Some(&source),&control,&catalog,Some(&mut shared)).unwrap_err().code,"command.cancelled");
     }
     fn assert_child_walk_equivalent(sources:&BTreeMap<&str,&[u8]>,manifest:&str,steps:usize){

@@ -18,15 +18,16 @@ import {splitIndexEvidence, verifyParts, PART_BYTES, INDEX_BYTES} from '../../to
 import {assertEnvelope, assertCorpus, corpusDigest} from '../rust-source-full-corpus/assertions.mjs';
 import {fixturePin} from '../rust-source-native-acceptance/assertions.mjs';
 import {elapsed, semantic} from './contract.mjs';
-import {assertSeedCold, auditCorpus, cloneSeed, inventory, derivedIdentity, proveWarmReuse, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
+import {assertSeedCold, auditCorpus, cloneSeed, inventory, derivedIdentity, proveWarmReuse, verifyFixedGoPackage, verifySeedMetadata} from './inputs.mjs';
 import {RUNNER_FILES as HISTORICAL_RUNNER_FILES, sourcePhaseEnvironment, validateConditions} from './source-candidates.mjs';
 import {verifyPackProfile} from './source-pack-resume.mjs';
 import {readFactDelta, readRustFact, rustFactPath, comparedRustIndex} from './read-fact-delta.mjs';
 import {captureGoCustody, openGoCustody, goFactRelative} from './source-pack-custody.mjs';
 
 // These fixed candidate observations retain their original Go producer identity.
+// The historical Go 3.2.3 reference is an external fixed package, not a
+// repository-internal build or source checkout.
 export const HISTORICAL_GO_BASELINE = Object.freeze({commit: '3766f9cacb52e93a803a626187e2a1d54a445468', version: '3.2.3'});
-const GO_COMMIT = HISTORICAL_GO_BASELINE.commit;
 export const CANDIDATE_COMMIT = '00d215a937513609e482c1ef65f3b43f0288beee';
 export const CANDIDATE_IDENTITY = Object.freeze({artifactSHA256: '02ebe1eb57d552d1c8ebf6c86697fdbc77d6eba4ee847edd33c4d7d19b6253ad', binarySHA256: '3169c2187b966b40ed3622fe14cfb81527e8dd3a52a6d99a888e8ab482c1b1fb', sourceTreeSHA256: '06a5a0e39c46c786d946b8c429c90c0eb4e9e1291028375e329fc9457776b4e3'});
 export const BASE_COMMIT = '31c7f7b9cc79e56c986b365c06a6afbcf3c9177b';
@@ -44,7 +45,7 @@ export const CASES = Object.freeze([
 export const RUNNER_FILES = Object.freeze([...new Set([...HISTORICAL_RUNNER_FILES,
   'tools/rust-source-pack-diagnostics.mjs', 'tools/rust-source-pack-evidence.mjs',
   'tests/rust-performance-paired/source-pack-scenarios.mjs', 'tests/rust-performance-paired/source-pack-resume.mjs', 'tests/rust-performance-paired/source-pack-custody.mjs',
-  'tests/rust-source-native-acceptance/assertions.mjs', 'tests/rust-skill-usage/assertions.mjs',
+  'tests/rust-source-native-acceptance/assertions.mjs', 'tests/rust-source-native-acceptance/native-contract.mjs',
 ])]);
 export const runnerIdentity = root => Object.fromEntries(RUNNER_FILES.map(file => [file, hashFile(join(root, file))]));
 export const orderFor = index => index === 1 ? ['rust', 'go'] : ['go', 'rust'];
@@ -53,13 +54,13 @@ const digest = value => assert.match(value, /^[0-9a-f]{64}$/);
 export function validateRequest(value) {
   exact(value, ['schema', 'ownerRoot', 'candidate', 'go']);
   assert.equal(value.schema, 'lycheedev.source-pack-scenarios-config.v1');
-  for (const path of [value.ownerRoot, value.candidate?.sourceRoot, value.candidate?.artifactRoot, value.candidate?.artifact, value.go?.sourceRoot, value.go?.packageRoot, value.go?.luaLSArchive]) assert(typeof path === 'string' && isAbsolute(path), 'absolute input paths required');
+  for (const path of [value.ownerRoot, value.candidate?.sourceRoot, value.candidate?.artifactRoot, value.candidate?.artifact, value.go?.referenceRoot]) assert(typeof path === 'string' && isAbsolute(path), 'absolute input paths required');
   exact(value.candidate, ['sourceRoot', 'artifactRoot', 'artifact', 'commit', 'artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']);
   candidateIdentity(value.candidate);
-  exact(value.go, ['sourceRoot', 'packageRoot', 'luaLSArchive', 'packageSHA256']); digest(value.go.packageSHA256);
+  exact(value.go, ['referenceRoot', 'packageSHA256']); digest(value.go.packageSHA256);
   const result = structuredClone(value);
   result.ownerRoot = realpathSync(value.ownerRoot);
-  for (const side of ['candidate', 'go']) for (const key of side === 'candidate' ? ['sourceRoot', 'artifactRoot'] : ['sourceRoot', 'packageRoot']) result[side][key] = realpathSync(value[side][key]);
+  for (const side of ['candidate', 'go']) for (const key of side === 'candidate' ? ['sourceRoot', 'artifactRoot'] : ['referenceRoot']) result[side][key] = realpathSync(value[side][key]);
   result.candidate.artifact = contained(result.candidate.artifactRoot, value.candidate.artifact);
   return result;
 }
@@ -667,7 +668,7 @@ export function claimSeven(root, reference, owner, retained) {
 }
 
 export async function runController(config, overrides = {}) {
-  const svc = {metadataPageSize, mutationFootprint, footprint, authenticateRetainedGo, claimSeven, authenticateRemaining, claimRemaining, assertCorpus, authenticateRetainedCold, claimColdBorrow, captureColdFactFiles, beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
+  const svc = {metadataPageSize, mutationFootprint, footprint, authenticateRetainedGo, claimSeven, authenticateRemaining, claimRemaining, assertCorpus, authenticateRetainedCold, claimColdBorrow, captureColdFactFiles, beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyFixedGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
   const {request, runnerRoot, inputs, conditions, scratch, evidence: out} = config;
   const layout = config.layout ?? 'v11-pack2'; assert(['v11-pack2', 'v13-postcard', 'v13-postcard-index18'].includes(layout), 'explicit supported controller layout required');
   if (layout !== 'v11-pack2') {
@@ -715,10 +716,12 @@ export async function runController(config, overrides = {}) {
     const candidate = svc.verifyCandidateRecord(request.candidate);
     svc.verifyAdditionalIdentity?.(request);
     if (!overrides.verifyCandidateRecord) {
-      for (const [root, commit] of [[request.candidate.sourceRoot, request.candidate.commit], [request.go.sourceRoot, GO_COMMIT]]) verifyCleanCheckout(root, commit, (args, cwd) => git(args, undefined, {}, cwd));
+      // Only the current Rust candidate checkout is verified here. The Go
+      // reference is an opaque external package authenticated by bytes below.
+      verifyCleanCheckout(request.candidate.sourceRoot, request.candidate.commit, (args, cwd) => git(args, undefined, {}, cwd));
     }
-    const go = svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive, HISTORICAL_GO_BASELINE); assert.equal(go.packageSHA256, request.go.packageSHA256);
-    return {rust: {binary: candidate.sourceBinary, cwd: request.candidate.sourceRoot}, go: {binary: go.binary, cwd: request.go.sourceRoot}};
+    const go = svc.verifyFixedGoPackage(request.go.referenceRoot, HISTORICAL_GO_BASELINE); assert.equal(go.packageSHA256, request.go.packageSHA256);
+    return {rust: {binary: candidate.sourceBinary, cwd: request.candidate.sourceRoot}, go: {binary: go.binary, cwd: request.go.referenceRoot, reference: {schema: 'lycheedev.external-go-reference.v1', commit: go.commit, version: go.version, referenceRoot: request.go.referenceRoot, packageSHA256: go.packageSHA256, binarySHA256: go.binarySHA256, manifestSHA256: go.manifestSHA256}}};
   }
   function prepareSeeds(homes, binaries, evidence) {
     const pins = {}, rows = {};
@@ -773,7 +776,7 @@ export async function runController(config, overrides = {}) {
   save();
   try {
     const binaries = identities();
-    if (!overrides.prepareSeeds) report.goMetadata = verifyGoMetadata(prepare('go', ['version', '-m', binaries.go.binary], 'Go323 binary metadata').toString(), HISTORICAL_GO_BASELINE);
+    if (!overrides.prepareSeeds) report.goReference = binaries.go.reference;
     report.machine.powerBefore = prepare('powercfg.exe', ['/getactivescheme'], 'power-before').toString();
     let homes, prepared, cold, coldEvidence;
     if (config.resumeRemaining || config.resumeGo) {

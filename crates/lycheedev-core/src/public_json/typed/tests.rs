@@ -120,7 +120,7 @@ fn typed_float_width_does_not_coerce_raw_or_unknown_number_tokens() {
     );
 }
 #[test]
-fn typed_float32_go_thresholds_and_negative_zero() {
+fn typed_float32_reference_thresholds_and_negative_zero() {
     for (value, text) in [
         (0f32, "0"),
         (-0f32, "-0"),
@@ -136,7 +136,7 @@ fn typed_float32_go_thresholds_and_negative_zero() {
     }
 }
 #[test]
-fn typed_float64_go_thresholds_and_negative_zero() {
+fn typed_float64_reference_thresholds_and_negative_zero() {
     for (value, text) in [
         (0f64, "0"),
         (-0f64, "-0"),
@@ -166,15 +166,15 @@ fn raw_arrays_objects_and_multiple_reports_share_formatter_state() {
     );
 }
 #[test]
-fn raw_depth_uses_go_limit_not_value_recursion_limit() {
+fn raw_depth_uses_wire_limit_not_value_recursion_limit() {
     let deep = format!("{}0{}", "[".repeat(GO_MAX_DEPTH), "]".repeat(GO_MAX_DEPTH));
     assert_eq!(render(raw(&deep), false), format!("{deep}\n"));
     let deeper = format!("[{deep}]");
     let mut out = b"previous\n".to_vec();
     assert!(write_serializable_line(&mut out, raw(&deeper)).is_err());
     assert_eq!(out, b"previous\n");
-    // Compact checks RawMessage independently, whereas Go's final pretty
-    // appendIndent also counts the enclosing typed object/array depth.
+    // Compact checks RawMessage independently, whereas the fixed reference
+    // final pretty appendIndent also counts the enclosing typed object/array depth.
     let nested = Envelope {
         schema: "s",
         result: raw(&deep),
@@ -574,7 +574,7 @@ fn raw_byte_scope_resets_on_serializer_error_and_unwind() {
     assert!(!state.get());
 }
 #[test]
-fn raw_bytes_depth_matches_go_compact_and_pretty_context_limits() {
+fn raw_bytes_depth_matches_retained_compact_and_pretty_context_limits() {
     let bytes = [
         vec![b'['; GO_MAX_DEPTH],
         b"\"\xff\"".to_vec(),

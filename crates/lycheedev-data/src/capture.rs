@@ -1,5 +1,5 @@
 //! JSON evidence serialization against the producer's existing ledger.
-//! Go escaping is shared by catalog bodies and ordered SQL request identities.
+//! Catalog bodies and Agent evidence share bounded JSON string escaping.
 use crate::{
     fault,
     resource::{Budget, Cost, RetainedReservation},
@@ -9,10 +9,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::{self, Write};
 
-/// Match encoding/json.Marshal's HTML and JavaScript string escaping without
+/// Escape HTML and JavaScript string delimiters without
 /// allocating a replaced copy of the complete JSON document.
-pub(crate) struct GoCaptureFormatter;
-impl serde_json::ser::Formatter for GoCaptureFormatter {
+pub(crate) struct EvidenceFormatter;
+impl serde_json::ser::Formatter for EvidenceFormatter {
     fn write_string_fragment<W: ?Sized + Write>(
         &mut self,
         writer: &mut W,
@@ -82,13 +82,15 @@ struct Buffer<'a> {
 }
 impl Buffer<'_> {
     fn append(&mut self, bytes: &[u8]) -> Result<()> {
-        self.budget.check()?;
-        let end = self
+        let Some(end) = self
             .bytes
             .len()
             .checked_add(bytes.len())
             .filter(|end| *end <= self.maximum)
-            .ok_or_else(self.limit)?;
+        else {
+            self.budget.check()?;
+            return Err((self.limit)());
+        };
         self.budget
             .charge(Cost::work(bytes.len().saturating_add(1)))?;
         if end > self.bytes.capacity() {
@@ -271,10 +273,7 @@ pub(crate) fn json_sha256(
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::{
-        sync::{Arc, atomic::AtomicBool},
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
     fn budget(limits: Cost) -> Budget {
         Budget::new(limits, Instant::now() + Duration::from_secs(30), None)
     }
@@ -293,6 +292,10 @@ mod tests {
         );
         let count = budget(Cost::defaults());
         assert_eq!(json_size(&value, &count).unwrap(), expected.len());
+        assert_eq!(
+            ledger.snapshot().unwrap().decode_work,
+            count.snapshot().unwrap().decode_work
+        );
         assert_eq!(count.snapshot().unwrap().retained_bytes, 0);
         assert_eq!(
             json_sha256(&value, &count, serde_json::ser::CompactFormatter).unwrap(),
@@ -322,10 +325,12 @@ mod tests {
             "records.query_resource_budget"
         );
         assert_eq!(tight.snapshot().unwrap().retained_bytes, 0);
+        let token = lycheedev_core::control::TrackedCancellation::new();
+        token.cancel();
         let cancelled = Budget::new(
             Cost::defaults(),
             Instant::now() + Duration::from_secs(30),
-            Some(Arc::new(AtomicBool::new(true))),
+            Some(token),
         );
         assert_eq!(
             json_bytes(&escaped, &cancelled, 16000, limit)
@@ -334,35 +339,31 @@ mod tests {
             7
         );
         assert_eq!(json_size(&escaped, &cancelled).unwrap_err().exit_code, 7);
+        assert_eq!(
+            json_bytes(&escaped, &cancelled, 0, limit)
+                .unwrap_err()
+                .exit_code,
+            7,
+            "cancellation still precedes the body limit"
+        );
+        let no_work = budget(Cost {
+            decode_work: 0,
+            ..Cost::defaults()
+        });
+        assert_eq!(
+            json_bytes(&escaped, &no_work, 0, limit).unwrap_err().code,
+            "test.body_limit",
+            "the body limit still precedes work admission"
+        );
     }
 }
 
 // Retained recovery IDs are Rust-only publication bookkeeping, not Go usage.
 // Admission must succeed before the caller commits the corresponding capture.
-pub(crate) fn admit_committed_identity(budget: &Budget) -> Result<()> {
-    budget.safety_only().charge(Cost::retained(512))
-}
-
 // A successful commit remains an observable fact after any later failure.
-pub(crate) fn query_committed_error(
-    mut error: lycheedev_core::ToolkitError,
-    committed: &[String],
-    output_published: bool,
-) -> lycheedev_core::ToolkitError {
-    if !committed.is_empty() {
-        let primary = error.clone();
-        error.details = serde_json::json!({"schema":"lycheedev.query-committed-error.v1", "primary":primary,
-            "completedCaptures":committed, "outputPublished":output_published});
-        error
-            .message
-            .push_str("\nquery captures already committed: ");
-        error.message.push_str(&committed.join(", "));
-    }
-    error
-}
-
 #[cfg(test)]
-pub(crate) mod committed_tests;
+#[path = "../tests/support/catalog_fixture.rs"]
+pub(crate) mod fixture;
 
 #[cfg(test)]
 mod session_body_tests {

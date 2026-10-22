@@ -7,7 +7,6 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
-    io::Read,
     path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
@@ -38,9 +37,7 @@ impl Runtime {
         &self.manifest
     }
     pub fn verified(root: &Path, manifest: Manifest) -> Result<Self> {
-        let runtime = Self::admit(root, manifest)?;
-        runtime.verify()?;
-        Ok(runtime)
+        Self::verified_with_ordered_control(root, manifest, &Default::default())
     }
     pub fn verified_with_ordered_control(
         root: &Path,
@@ -75,116 +72,23 @@ impl Runtime {
             manifest,
         })
     }
-    pub fn verify(&self) -> Result<()> {
-        self.lock_verified().map(|_| ())
-    }
-    pub fn verify_with_control(
-        &self,
-        control: &lycheedev_core::control::OperationControl,
-    ) -> Result<()> {
-        control.check()?;
-        let _held = self.lock_verified()?;
-        control.check()
-    }
-    fn lock_verified(&self) -> Result<Vec<fs::File>> {
-        let mut held = vec![];
-        for (name, expected, limit) in [
-            (&self.manifest.executable, &self.manifest.sha256, 16 << 20),
-            (
-                &self.manifest.license,
-                &self.manifest.license_sha256,
-                1 << 20,
-            ),
-        ] {
-            let path = storage::safe_relative(&self.root, name)?;
-            storage::guard_path(&self.root, &path)?;
-            let mut data = vec![];
-            let mut options = fs::OpenOptions::new();
-            options.read(true);
-            #[cfg(windows)]
-            {
-                use std::os::windows::fs::OpenOptionsExt;
-                options.share_mode(1);
-            }
-            let mut file = options.open(path)?;
-            (&mut file).take(limit + 1).read_to_end(&mut data)?;
-            if data.len() as u64 > limit
-                || storage::sha256(&data) != *expected
-                || (name == &self.manifest.executable && data.len() as u64 != self.manifest.bytes)
-            {
-                return Err(ToolkitError::new(
-                    "luac.unavailable",
-                    "Bundled luac content changed",
-                    3,
-                ));
-            }
-            held.push(file);
-        }
-        Ok(held)
+    pub fn verify(&self) -> Result<()> { self.verify_with_control(&Default::default()) }
+    pub fn verify_with_control(&self, control: &lycheedev_core::control::OperationControl) -> Result<()> {
+        let held = self.lock_verified_ordered(control)?;
+        finish_runtime(held, Ok(()), control)
     }
     pub fn check(&self, staging: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<Value> {
-        self.check_controlled(staging, files, None, None, None)
+        self.check_with_control(staging, files, &Default::default())
     }
-    pub fn check_with_cancel(
-        &self,
-        staging: &Path,
-        files: &BTreeMap<String, Vec<u8>>,
-        cancel: &std::sync::atomic::AtomicBool,
-    ) -> Result<Value> {
-        self.check_controlled(staging, files, Some(cancel), None, None)
-    }
-    pub fn check_with_control(
-        &self,
-        staging: &Path,
-        files: &BTreeMap<String, Vec<u8>>,
-        control: &lycheedev_core::control::OperationControl,
-    ) -> Result<Value> {
-        control.check()?;
-        self.check_controlled(
-            staging,
-            files,
-            Some(control.token()),
-            Some(control.deadline()),
-            None,
-        )
-    }
-    /// Formal Live preparation keeps the original ordered cancellation lineage.
-    /// Unlike the historical Source entry above, no writable token is exported.
-    pub fn check_with_ordered_control(
-        &self,
-        staging: &Path,
-        files: &BTreeMap<String, Vec<u8>>,
-        control: &lycheedev_core::control::OperationControl,
-    ) -> Result<Value> {
+    pub fn check_with_control(&self, staging: &Path, files: &BTreeMap<String, Vec<u8>>, control: &lycheedev_core::control::OperationControl) -> Result<Value> {
         control.ordered_child(control.deadline())?;
         control.check()?;
-        self.check_controlled(
-            staging,
-            files,
-            None,
-            Some(control.deadline()),
-            Some(control),
-        )
-    }
-    fn check_controlled(
-        &self,
-        staging: &Path,
-        files: &BTreeMap<String, Vec<u8>>,
-        cancel: Option<&std::sync::atomic::AtomicBool>,
-        caller_deadline: Option<Instant>,
-        ordered: Option<&lycheedev_core::control::OperationControl>,
-    ) -> Result<Value> {
         // Keep Windows deny-write/delete handles alive through every child
         // launch and reap; verification cannot authorize a substituted exe.
-        let held_runtime = match ordered {
-            Some(control) => self.lock_verified_ordered(control)?,
-            None => self.lock_verified()?,
-        };
+        let held_runtime = self.lock_verified_ordered(control)?;
         let mut frozen = None;
         let result = (|| {
-            if let Some(control) = ordered {
-                control.check()?;
-            }
+            control.check()?;
             if files.len() > 2048 {
                 return Err(ToolkitError::new(
                     "luac.input_budget",
@@ -194,16 +98,13 @@ impl Runtime {
             }
             let mut total = 0;
             for (name, data) in files {
-                if let Some(control) = ordered {
-                    control.check()?;
-                }
+                control.check()?;
                 total += data.len();
                 if !git::source_path(name)
                     || data.len() > 32 << 20
                     || total > 32 << 20
                     || data.contains(&0)
                     || data.starts_with(b"\x1bLua")
-                    || std::str::from_utf8(data).is_err()
                 {
                     return Err(ToolkitError::new(
                         "luac.input_budget",
@@ -221,8 +122,7 @@ impl Runtime {
             fs::create_dir(&root)?;
             frozen = Some(Frozen(root, true));
             let frozen = frozen.as_mut().expect("owned scratch was created");
-            let deadline = caller_deadline
-                .unwrap_or_else(|| Instant::now() + Duration::from_secs(90))
+            let deadline = control.deadline()
                 .min(Instant::now() + Duration::from_secs(90));
             let mut diagnostics = vec![];
             let mut checked = 0;
@@ -240,31 +140,10 @@ impl Runtime {
                         3,
                     ));
                 }
-                let out = match ordered {
-                    Some(control) => {
-                        control.check()?;
-                        run_with_frozen(frozen, || {
-                            process::run_with_operation_control(
-                                cmd,
-                                32768,
-                                remaining.min(Duration::from_secs(10)),
-                                Some(data.clone()),
-                                control,
-                            )
-                        })
-                    }
-                    None => run_with_frozen(frozen, || {
-                        process::run_controlled(
-                            cmd,
-                            32768,
-                            remaining.min(Duration::from_secs(10)),
-                            Some(data.clone()),
-                            cancel,
-                        )
-                    }),
-                }
+                control.check()?;
+                let out = run_with_frozen(frozen, || process::run_with_operation_control(cmd, 32768, remaining.min(Duration::from_secs(10)), Some(data.clone()), control))
                 .map_err(|mut e| {
-                    e.code = e.code.replace("luals.", "luac.");
+                    e.code = e.code.replace("source.process_", "luac.");
                     e
                 })?;
                 checked += 1;
@@ -316,19 +195,8 @@ impl Runtime {
                 json!({"state":"checked","version":"5.1.5","compilerSHA256":self.manifest.sha256,"checkedLua":checked,"passed":diagnostics.is_empty(),"diagnostics":diagnostics,"execution":"syntax-only -p","complete":true}),
             )
         })();
-        match ordered {
-            Some(control) => {
-                let result = match frozen {
-                    Some(frozen) => frozen.finish(result),
-                    None => result,
-                };
-                finish_runtime(held_runtime, result, control)
-            }
-            None => match frozen {
-                Some(frozen) => frozen.finish_legacy(result),
-                None => result,
-            },
-        }
+        let result = match frozen { Some(frozen) => frozen.finish(result), None => result };
+        finish_runtime(held_runtime, result, control)
     }
     fn lock_verified_ordered(
         &self,
@@ -380,7 +248,7 @@ fn finish_runtime<T>(
     }
     result
 }
-/// Both runner entries share the same scratch ownership boundary. Only a
+/// The compiler runner retains the owned scratch boundary. Only a
 /// successful output satisfies the runner's terminal-completion contract.
 /// Errors remain conservative even when their diagnostic metadata describes
 /// completed cleanup; this caller does not independently verify that evidence.
@@ -396,19 +264,6 @@ fn run_with_frozen(
 }
 struct Frozen(PathBuf, bool);
 impl Frozen {
-    fn finish_legacy<T>(self, result: Result<T>) -> Result<T> {
-        if self.1 {
-            // Preserve legacy best-effort cleanup and its original result for
-            // pre-run failures and successfully retired compiler invocations.
-            // Drop removes only this invocation's freshly allocated directory.
-            result
-        } else {
-            // An entered runner failed without returning its success proof.
-            // Surface the retention marker so parent-directory owners also
-            // know that this scratch cannot safely be removed.
-            self.finish(result)
-        }
-    }
     fn finish<T>(mut self, result: Result<T>) -> Result<T> {
         let allowed = self.1;
         self.1 = false;

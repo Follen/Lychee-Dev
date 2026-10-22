@@ -1,7 +1,6 @@
 use super::*;
 use crate::control::{StopCause, TrackedCancellation};
 use std::{
-    collections::BTreeMap,
     io::Read,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
@@ -24,24 +23,21 @@ impl Fixture {
         workspace::initialize(&home).unwrap();
         Self { root, home }
     }
-    fn inv(&self, command: &str, id: Option<&str>) -> Invocation {
-        Invocation {
-            command: command.into(),
-            positional: id.map(str::to_owned),
+    fn context(&self) -> crate::request::RequestContext {
+        crate::request::RequestContext {
             cwd: self.root.clone(),
             home: self.home.clone(),
-            flags: BTreeMap::new(),
             control: OperationControl::tracked(
                 Instant::now() + Duration::from_secs(30),
                 TrackedCancellation::new(),
             ),
         }
     }
-    fn bundle(&self, ids: &[&str]) -> Invocation {
-        let mut inv = self.inv("evidence bundle", None);
-        inv.flags.insert("--ids".into(), ids.join(","));
-        inv.flags.insert("--output".into(), "bundle.zip".into());
-        inv
+    fn bundle(&self, ids: &[&str], output: PathBuf) -> crate::evidence::EvidenceRequest {
+        crate::evidence::EvidenceRequest::Bundle {
+            ids: ids.iter().map(|id| (*id).to_owned()).collect(),
+            output,
+        }
     }
     fn capture(&self, bytes: &[u8], locator: &str) -> Value {
         commit_capture_bounded(
@@ -59,8 +55,8 @@ impl Fixture {
         .unwrap()
     }
     fn raw(&self, key: &str, bytes: &[u8], generation: i64) {
-        Metadata::with_historical_write(&self.home, &OperationControl::default(), |writer| {
-            writer.commit(&[HistoricalMutation {
+        Metadata::with_owned_write(&self.home, &OperationControl::default(), |writer| {
+            writer.commit(&[OwnedMutation {
                 key,
                 expected_generation: generation,
                 bytes,
@@ -73,51 +69,70 @@ impl Fixture {
     }
 }
 #[test]
-fn default_keep_is_idempotent_and_returns_typed_historical_retention() {
+fn default_keep_is_idempotent_and_rejects_untyped_existing_retention() {
     let f = Fixture::new();
     let capture = f.capture(b"body", "keep");
     let id = capture["id"].as_str().unwrap();
-    let inv = f.inv("evidence keep", Some(id));
-    let first = super::super::dispatch(&inv).unwrap().data;
+    let context = f.context();
+    let request = crate::evidence::EvidenceRequest::Keep { id: id.to_owned() };
+    let first = super::super::dispatch(&context, request.clone()).unwrap().data;
     assert_eq!(first["capture"], capture);
     assert_eq!(first["created"], true);
-    let next = super::super::dispatch(&inv).unwrap().data;
+    let next = super::super::dispatch(&context, request.clone()).unwrap().data;
     assert_eq!(next["created"], false);
     assert_eq!(next["retention"], first["retention"]);
+    let key = format!("evidence/keep/{id}");
     let raw = format!(
-        r#"{{"SCHEMA":"lycheedev.evidence-retention.v1","captureId":"wrong","captureId":"{id}","captureId":null,"blob":{{"sha256":"{}"}},"blob":{{"bytes":4}},"keptAt":null,"ignored":42}}"#,
-        capture["blob"]["sha256"].as_str().unwrap()
+        r#"{{"SCHEMA":"lycheedev.evidence-retention.v1","captureId":"{id}","blob":{},"keptAt":"2026-10-15T00:00:00Z"}}"#,
+        capture["blob"]
     );
-    f.raw(&format!("evidence/keep/{id}"), raw.as_bytes(), 1);
-    let next = super::super::dispatch(&inv).unwrap().data;
-    assert_eq!(next["retention"]["keptAt"], "0001-01-01T00:00:00Z");
-    assert!(next["retention"].get("ignored").is_none());
-    assert_eq!(next["retention"]["blob"], capture["blob"]);
-    assert_eq!(inv.control.stop_cause().unwrap(), None);
-    inv.control.ordered_child(inv.control.deadline()).unwrap();
+    f.raw(&key, raw.as_bytes(), 1);
+    let error = super::super::dispatch(&context, request.clone()).unwrap_err();
+    assert_eq!(error.code, "input.invalid");
+    Metadata::with_owned_write(&f.home, &OperationControl::default(), |writer| {
+        assert_eq!(writer.document(&key)?.bytes, raw.as_bytes());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(context.control.stop_cause().unwrap(), None);
+    context.control.ordered_child(context.control.deadline()).unwrap();
     f.cleanup();
 }
 #[test]
-fn keep_rejects_raw_escaped_time_and_mismatched_blob_without_replacing_existing_record() {
-    for invalid in [
-        r#""2026-10-15T00:00:00\u005a""#,
-        r#""2026-10-15 00:00:00Z""#,
+fn keep_rejects_invalid_typed_retention_without_replacing_existing_record() {
+    for (label, keep) in [
+        (
+            "bad-time",
+            r#"{"schema":"lycheedev.evidence-retention.v1","captureId":"","blob":{"sha256":"","bytes":0},"keptAt":"not-a-time"}"#
+                .to_string(),
+        ),
+        (
+            "mismatched-blob",
+            r#"{"schema":"lycheedev.evidence-retention.v1","captureId":"","blob":{"sha256":"","bytes":0},"keptAt":"2026-10-15T00:00:00Z"}"#
+                .to_string(),
+        ),
     ] {
         let f = Fixture::new();
-        let capture = f.capture(b"body", "bad");
+        let capture = f.capture(b"body", label);
         let id = capture["id"].as_str().unwrap();
         let key = format!("evidence/keep/{id}");
-        let raw = format!(
-            r#"{{"schema":"lycheedev.evidence-retention.v1","captureId":"{id}","blob":{},"keptAt":{invalid}}}"#,
-            capture["blob"]
-        );
+        let raw = if label == "bad-time" {
+            keep.replace(r#""captureId":"""#, &format!(r#""captureId":"{id}""#))
+                .replace(
+                    r#""blob":{"sha256":"","bytes":0}"#,
+                    &format!(r#""blob":{}"#, capture["blob"]),
+                )
+        } else {
+            keep.replace(r#""captureId":"""#, &format!(r#""captureId":"{id}""#))
+        };
         f.raw(&key, raw.as_bytes(), 0);
-        let error = super::super::dispatch(&f.inv("evidence keep", Some(id))).unwrap_err();
+        let error = super::super::dispatch(&f.context(), crate::evidence::EvidenceRequest::Keep { id: id.to_owned() }).unwrap_err();
         assert_eq!(
             (error.code.as_str(), error.exit_code),
-            ("evidence.invalid_retention", 4)
+            ("evidence.invalid_retention", 4),
+            "{label}"
         );
-        Metadata::with_historical_write(&f.home, &OperationControl::default(), |writer| {
+        Metadata::with_owned_write(&f.home, &OperationControl::default(), |writer| {
             assert_eq!(writer.document(&key)?.bytes, raw.as_bytes());
             Ok(())
         })
@@ -129,15 +144,15 @@ fn keep_rejects_raw_escaped_time_and_mismatched_blob_without_replacing_existing_
 fn held_write_owner_does_not_reacquire_the_same_lease_and_preserves_tombstone_generation() {
     let f = Fixture::new();
     let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(3));
-    Metadata::with_historical_write(&f.home, &control, |writer| {
+    Metadata::with_owned_write(&f.home, &control, |writer| {
         writer.with_write_lease(|writer| {
-            writer.commit(&[HistoricalMutation {
+            writer.commit(&[OwnedMutation {
                 key: "fixture",
                 expected_generation: 0,
                 bytes: b"null",
             }])?;
             writer.delete(&[("fixture".into(), 1)])?;
-            writer.commit(&[HistoricalMutation {
+            writer.commit(&[OwnedMutation {
                 key: "fixture",
                 expected_generation: 0,
                 bytes: b"true",
@@ -162,16 +177,20 @@ fn keep_cancel_precedes_metadata_creation_and_active_write_contention_uses_origi
     assert!(!f.home.join("state/toolkit.sqlite").exists());
     let capture = f.capture(b"body", "wait");
     let id = capture["id"].as_str().unwrap();
-    let guard = crate::metadata::historical_write::historical_lease(
+    let guard = crate::metadata::owned_write::owned_lease(
         &f.home,
         "metadata-write",
         &OperationControl::default(),
     )
     .unwrap();
-    let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(200));
-    assert_eq!(
-        keep(&f.home, id, &control).unwrap_err().code,
-        "command.deadline"
+    let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(1500));
+    let started = Instant::now();
+    let error = keep(&f.home, id, &control).unwrap_err();
+    assert_eq!(error.code, "command.deadline");
+    assert!(
+        started.elapsed() >= Duration::from_millis(1000),
+        "contended keep returned before the original deadline: {:?}",
+        started.elapsed()
     );
     guard.close().unwrap();
     assert_eq!(
@@ -187,7 +206,7 @@ fn default_bundle_preserves_selection_order_deduplicates_objects_and_writes_mani
     let b = f.capture(b"body", "second");
     let aid = a["id"].as_str().unwrap();
     let bid = b["id"].as_str().unwrap();
-    let result = super::super::dispatch(&f.bundle(&[bid, aid])).unwrap().data;
+    let result = super::super::dispatch(&f.context(), f.bundle(&[bid, aid], f.root.join("bundle.zip"))).unwrap().data;
     assert_eq!(result["bytes"], 4);
     assert_eq!(result["captures"], json!([b, a]));
     assert_eq!(result["complete"], true);
@@ -220,20 +239,16 @@ fn default_bundle_preserves_selection_order_deduplicates_objects_and_writes_mani
 fn bundle_selection_existing_output_and_workspace_output_fail_before_source_reads() {
     let f = Fixture::new();
     let id = format!("CAP-{}", "a".repeat(64));
-    let error = super::super::dispatch(&f.bundle(&[&id, &id])).unwrap_err();
+    let error = super::super::dispatch(&f.context(), f.bundle(&[&id, &id], f.root.join("bundle.zip"))).unwrap_err();
     assert_eq!(error.message, "evidence.bundle_selection");
     assert!(!f.home.join("state/toolkit.sqlite").exists());
     fs::write(f.root.join("bundle.zip"), b"winner").unwrap();
-    let error = super::super::dispatch(&f.bundle(&[&id])).unwrap_err();
+    let error = super::super::dispatch(&f.context(), f.bundle(&[&id], f.root.join("bundle.zip"))).unwrap_err();
     assert_eq!(error.message, "evidence.bundle_output");
     assert_eq!(fs::read(f.root.join("bundle.zip")).unwrap(), b"winner");
-    let mut inv = f.bundle(&[&id]);
-    inv.flags.insert(
-        "--output".into(),
-        f.home.join("inside.zip").to_string_lossy().into(),
-    );
+    let request = f.bundle(&[&id], f.home.join("inside.zip"));
     assert_eq!(
-        super::super::dispatch(&inv).unwrap_err().message,
+        super::super::dispatch(&f.context(), request).unwrap_err().message,
         "evidence.bundle_output"
     );
     assert!(!f.home.join("inside.zip").exists());
@@ -269,7 +284,7 @@ fn bundle_corrupt_later_payload_never_publishes_partial_zip_and_releases_all_own
             std::ffi::OsString::from("home"),
         ]
     );
-    let error = super::super::dispatch(&f.bundle(&[aid, bid])).unwrap_err();
+    let error = super::super::dispatch(&f.context(), f.bundle(&[aid, bid], f.root.join("bundle.zip"))).unwrap_err();
     assert!(!f.root.join("bundle.zip").exists(), "{error:?}");
     assert_eq!(entries(), before, "{error:?}");
     f.cleanup();
@@ -281,7 +296,7 @@ fn bundle_publication_facts_wrap_all_late_close_causes_without_changing_primary_
         let first = ToolkitError::new("command.cancelled", "stopped", 7);
         let cleanup = ToolkitError::new("vault.io", "close failed", 5);
         let error = bundle::annotate_publication::<()>(
-            finish_historical(Err(first), Err(cleanup)),
+            finish_owned(Err(first), Err(cleanup)),
             state,
             Path::new("output.zip"),
             "stage",
@@ -306,7 +321,7 @@ fn bundle_publication_facts_wrap_all_late_close_causes_without_changing_primary_
         );
     }
 }
-fn historical(f: &Fixture, bytes: i64, locator: &str) -> String {
+fn historical(f: &Fixture, bytes: u64, locator: &str) -> String {
     let reference = CaptureRef {
         schema: "lycheedev.capture.v1".into(),
         id: String::new(),
@@ -340,46 +355,18 @@ fn historical(f: &Fixture, bytes: i64, locator: &str) -> String {
     id
 }
 #[test]
-fn keep_preserves_signed_historical_blob_identity_without_reading_payload() {
-    let f = Fixture::new();
-    let id = historical(&f, -1, "historical");
-    let result = super::super::dispatch(&f.inv("evidence keep", Some(&id)))
-        .unwrap()
-        .data;
-    assert_eq!(result["capture"]["blob"]["bytes"], -1);
-    assert_eq!(result["retention"]["blob"]["bytes"], -1);
-    let key = format!("evidence/keep/{id}");
-    let mut changed = result["retention"].clone();
-    changed["blob"]["bytes"] = json!(0);
-    f.raw(&key, &serde_json::to_vec(&changed).unwrap(), 1);
-    assert_eq!(
-        super::super::dispatch(&f.inv("evidence keep", Some(&id)))
-            .unwrap_err()
-            .code,
-        "evidence.invalid_retention"
-    );
-    f.cleanup();
-}
-#[test]
 fn bundle_per_object_limit_precedes_missing_blob_and_duplicate_digest_is_revalidated() {
     let f = Fixture::new();
     let oversized = historical(&f, (32 << 20) + 1, "large");
-    let error = super::super::dispatch(&f.bundle(&[&oversized])).unwrap_err();
+    let error = super::super::dispatch(&f.context(), f.bundle(&[&oversized], f.root.join("bundle.zip"))).unwrap_err();
     assert_eq!(error.message, "evidence.bundle_limit");
     assert!(!f.root.join("bundle.zip").exists());
     let valid = f.capture(b"body", "valid");
     let invalid = historical(&f, 3, "same-digest-wrong-length");
     let error =
-        super::super::dispatch(&f.bundle(&[valid["id"].as_str().unwrap(), &invalid])).unwrap_err();
+        super::super::dispatch(&f.context(), f.bundle(&[valid["id"].as_str().unwrap(), &invalid], f.root.join("bundle.zip"))).unwrap_err();
     assert_eq!(error.code, "vault.blob_integrity");
     assert!(!f.root.join("bundle.zip").exists());
-    let negative = historical(&f, -1, "negative");
-    assert_eq!(
-        super::super::dispatch(&f.bundle(&[&negative]))
-            .unwrap_err()
-            .code,
-        "vault.blob_integrity"
-    );
     f.cleanup();
 }
 

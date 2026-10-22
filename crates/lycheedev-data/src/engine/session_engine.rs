@@ -8,10 +8,11 @@ use super::{
     source_demand::{self as source, PreparedSnapshot, SourceUse},
 };
 use crate::fault;
-use arrow_array::{Array,RecordBatch};
+use arrow_array::Array;
 use super::{pull_provider::PullTableProvider, output_batches::OutputBatches};
 use futures_util::StreamExt;
-use lycheedev_core::{Invocation, Result, control::OperationControl};
+use crate::request::DataContext;
+use lycheedev_core::{Result, control::OperationControl};
 use std::sync::Arc;
 
 struct Cached {
@@ -19,14 +20,14 @@ struct Cached {
     lifetime: Arc<RequestLifetime>,
 }
 pub struct Engine {
-    invocation: Invocation,
+    context: DataContext,
     limits: EngineLimits,
     memory: SessionMemory,
     cache: Vec<Cached>,
     pinned: Option<(String, Option<lycheedev_core::selection::DataPin>)>,
 }
 impl Engine {
-    pub fn new(invocation: Invocation, limits: EngineLimits) -> Result<Self> {
+    pub fn new(context: DataContext, limits: EngineLimits) -> Result<Self> {
         if limits.query_work == 0
             || limits.operator_bytes == 0
             || limits.operator_bytes > 128 << 20
@@ -37,7 +38,7 @@ impl Engine {
             return Err(bound());
         }
         Ok(Self {
-            invocation,
+            context,
             limits,
             memory: SessionMemory::new(limits.session_retained_bytes)?,
             cache: Vec::new(),
@@ -79,10 +80,10 @@ impl Engine {
                 return Ok((cached.snapshot.clone(), cached.lifetime.clone(), false));
             }
         }
-        let mut invocation = self.invocation.clone();
-        invocation.control = control.clone();
+        let mut context = self.context.clone();
+        context.control = control.clone();
         let prepared = source::prepare_selected(
-            &invocation,
+            &context,
             request,
             whole_source_consumed,
             lifetime.budget.clone(),
@@ -98,9 +99,7 @@ impl Engine {
                 ));
             }
         } else {
-            self.invocation
-                .flags
-                .insert("--snapshot".into(), prepared.pin().id.clone());
+            self.context.source.snapshot = Some(prepared.pin().id.clone());
             self.pinned = Some((prepared.pin().id.clone(), prepared.pin().data.clone()));
         }
         Ok((prepared, lifetime.clone(), true))
@@ -151,9 +150,9 @@ impl Engine {
     pub async fn catalog(&mut self, control: OperationControl) -> Result<DatasetCatalog> {
         let lifetime = self.admit_request(&control)?;
         let _execution = super::lifetime::RequestExecution(lifetime.clone());
-        let mut invocation = self.invocation.clone();
-        invocation.control = control;
-        let (mut catalog, pin) = super::catalog::read(&invocation, &lifetime.budget)?;
+        let mut context = self.context.clone();
+        context.control = control;
+        let (mut catalog, pin) = super::source_io::run(|| super::catalog::read(&context, &lifetime.budget))?;
         if let Some((id, data)) = &self.pinned {
             if id != &pin.id || data != &pin.data {
                 return Err(fault(
@@ -163,9 +162,7 @@ impl Engine {
                 ));
             }
         } else {
-            self.invocation
-                .flags
-                .insert("--snapshot".into(), pin.id.clone());
+            self.context.source.snapshot = Some(pin.id.clone());
             self.pinned = Some((pin.id, pin.spec.data));
         }
         catalog._lifetime = Some(lifetime.clone());
@@ -202,7 +199,9 @@ impl Engine {
         }
         let lifetime = self.memory.begin(self.limits.query_work, control.clone())?;
         let _execution = super::lifetime::RequestExecution(lifetime.clone());
-        super::evidence::capture(&self.invocation, result, lifetime, control)
+        let mut context = self.context.clone();
+        context.control = control.clone();
+        super::evidence::capture(&context, result, lifetime)
     }
 }
 fn bound() -> lycheedev_core::ToolkitError {
@@ -218,6 +217,22 @@ fn consumes_all_source_rows(plan:&QueryPlan)->bool {
     loop {match node { QueryPlan::Scan{..}=>return true,QueryPlan::Project{input,..}|QueryPlan::Sort{input,..}=>node=input,
         _=>return false }}
 }
+fn source_batch_rows(plan: &QueryPlan) -> usize {
+    let mut node = plan;
+    loop {
+        node = match node {
+            QueryPlan::Scan { .. } => return 1024,
+            QueryPlan::Project { input, columns }
+                if columns.iter().all(|column| matches!(column.expression, Expression::Column { .. })) => input,
+            QueryPlan::Sort { input, keys }
+                if keys.iter().all(|key| matches!(key.expression, Expression::Column { .. })) => input,
+            // Limits, predicates and computed expressions retain the original
+            // one-row demand/error boundary. Plain full-source columns and
+            // ordering can share a bounded importer batch.
+            _ => return 1,
+        };
+    }
+}
 impl Engine {
     pub async fn execute(&mut self,request:QueryRequest,control:OperationControl)->Result<ResultOwner>{
         self.execute_mode(request,None,control).await
@@ -231,7 +246,8 @@ impl Engine {
         let lifetime=self.admit_request(&control)?;
         let _execution=super::lifetime::RequestExecution(lifetime.clone());
         let allowance=lifetime.budget.remaining_retained_bytes()?;
-        let (context,owner)=provider::runtime::context(lifetime.budget.clone(),self.limits.operator_bytes,1).map_err(error)?;
+        let batch_rows=source_batch_rows(query_plan);
+        let (context,owner)=provider::runtime::context(lifetime.budget.clone(),self.limits.operator_bytes,batch_rows).map_err(error)?;
         let requirements=plan::requirements(query_plan,&owner).map_err(error)?;
         let whole=explanation.is_none_or(|(_,analyze)|analyze) && consumes_all_source_rows(query_plan);
         // Output admission precedes optional eager source representations.
@@ -249,7 +265,7 @@ impl Engine {
             owner.retain(crate::capture::json_size(snapshot.provenance(),&lifetime.budget)?.checked_mul(8).and_then(|n|n.checked_add(8192)).ok_or_else(bound)?).map_err(error)?;
             source_provenance.push(snapshot.current_provenance(!new,&lifetime.budget)?);
             let selected=if snapshot.public_equals_physical(){requirement.ids.as_deref()}else{None};
-            let mut provider=PullTableProvider::new(snapshot.demand(lifetime.budget.clone())?,owner.clone(),selected,None,None,whole||selected.is_some()).map_err(error)?;
+            let mut provider=PullTableProvider::new(snapshot.demand(lifetime.budget.clone())?,owner.clone(),selected,None,None,whole||selected.is_some(),batch_rows).map_err(error)?;
             if let Some(ids)=requirement.ids.as_deref() && !snapshot.public_equals_physical(){
                 provider=provider.track_public_lookup(ids).map_err(error)?;
             }
@@ -377,7 +393,7 @@ impl Engine {
         let source_use=match &ids {Some(ids)=>SourceUse::PhysicalIds(ids.clone()),None=>SourceUse::Scan{filter:filter.clone(),cap}};
         let(snapshot,retained,new)=self.source(&table,false,&source_use,&lifetime,&control).await?;
         let(context,owner)=provider::runtime::context(lifetime.budget.clone(),self.limits.operator_bytes,1).map_err(error)?;
-        let provider=Arc::new(PullTableProvider::new(snapshot.demand(lifetime.budget.clone())?,owner.clone(),ids.as_deref(),filter.as_ref().map(|(f,id)|(f.as_str(),*id)),Some(cap),true).map_err(error)?);
+        let provider=Arc::new(PullTableProvider::new(snapshot.demand(lifetime.budget.clone())?,owner.clone(),ids.as_deref(),filter.as_ref().map(|(f,id)|(f.as_str(),*id)),Some(cap),true,1).map_err(error)?);
         let frame=context.read_table(provider.clone()).map_err(error)?;
         let schema=snapshot.schema();
         let request=match &ids{Some(ids)=>serde_json::json!({"kind":"domain_lookup","table":table,"ids":ids}),None=>serde_json::json!({"kind":"domain_scan","table":table,"filter":filter,"limit":limit.ok_or_else(bound)?})};
@@ -430,10 +446,10 @@ impl Engine {
     pub async fn semantics(&mut self,table:TableRequest,control:OperationControl)->Result<super::OwnedSemantics>{
         let lifetime=self.admit_request(&control)?;
         let _execution=super::lifetime::RequestExecution(lifetime.clone());
-        let mut invocation=self.invocation.clone();invocation.control=control;
-        let(result,pin)=super::semantics::read(&invocation,table,lifetime.clone(),self.limits.result_bytes)?;
+        let mut context=self.context.clone();context.control=control;
+        let(result,pin)=super::source_io::run(|| super::semantics::read(&context,table,lifetime.clone(),self.limits.result_bytes))?;
         if let Some((id,data))=&self.pinned {if id!=&pin.id||data!=&pin.data{return Err(fault("records.source_identity",3,"Semantic metadata differs from the session pin"));}}
-        else {self.invocation.flags.insert("--snapshot".into(),pin.id.clone());self.pinned=Some((pin.id,pin.spec.data));}
+        else {self.context.source.snapshot=Some(pin.id.clone());self.pinned=Some((pin.id,pin.spec.data));}
         lifetime.settle()?;Ok(result)
     }
 }
@@ -469,7 +485,9 @@ impl Engine {
         let lifetime = self.memory.begin(self.limits.query_work, control.clone())?;
         let _execution = super::lifetime::RequestExecution(lifetime.clone());
         result.validate_request(request, &lifetime.budget)?;
-        super::evidence::capture_domain(&self.invocation, result, request, lifetime, control)
+        let mut context = self.context.clone();
+        context.control = control.clone();
+        super::evidence::capture_domain(&context, result, request, lifetime)
     }
 }
 

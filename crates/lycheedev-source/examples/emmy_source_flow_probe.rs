@@ -62,13 +62,13 @@ fn execute(spec:&Value,control:&OperationControl)->Result<bool>{
 
 fn main(){
     let started=Instant::now();
-    let control=OperationControl::new(started+Duration::from_millis(2000),Arc::new(AtomicBool::new(false)));
+    let control=OperationControl::uncancelable(started+Duration::from_millis(2000));
     let result=(||{
         let args=std::env::args().skip(1).collect::<Vec<_>>();
         if args.len()!=2||args[0]!="--spec"{return Err("usage: emmy_source_flow_probe --spec <case-spec.json>".into())}
         let bytes=std::fs::read(&args[1]).map_err(|error|error.to_string())?;
         let spec:Value=serde_json::from_slice(&bytes).map_err(|error|error.to_string())?;
-        emit(json!({"event":"build_identity","compiledPatchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")}),&control)?;
+        emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}),&control)?;
         execute(&spec,&control)
     })();
     // execute's graph, analysis and inputs have dropped before measuring this point.

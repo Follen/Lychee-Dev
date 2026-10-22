@@ -68,8 +68,13 @@ impl<'a> MetadataQuota<'a> {
         }
         let main = self.length("cache-v1.sqlite")?.unwrap_or(0);
         let journal = self.length("cache-v1.sqlite-journal")?.unwrap_or(0);
-        self.owner.report.existing =
-            inventory(&self.owner.home, &self.owner.paths, &self.owner.control)?;
+        self.owner.report.existing = inventory_recovering(
+            &self.owner.home,
+            &self.owner.paths,
+            &self.owner.control,
+            None,
+            &self.owner.directories,
+        )?;
         let existing = self.owner.report.existing.total()?;
         let sidecars = sum([main, journal])?;
         let other = existing
@@ -121,8 +126,8 @@ impl<'a> MetadataQuota<'a> {
         // Attempt inventory on errors too; a stopped inventory preserves its
         // exact stop and all files remain counted by the next admission.
         let verified = self.owner.verify_usage().map(|_| ());
-        let result = crate::metadata::historical_write::finish_historical(result, verified);
-        self.owner.finish(result)
+        let result = crate::metadata::owned_write::finish_owned(result, verified);
+        self.owner.finish_verified(result)
     }
 }
 

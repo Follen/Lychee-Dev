@@ -5,8 +5,8 @@ use crate::{
     update::{self, UpdateTarget},
 };
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError,
-    control::OperationControl,
+    Outcome, Result, ToolkitError, request::RequestContext,
+    control::{OperationControl, TrackedCancellation},
     process,
     storage::{self, ExclusiveLock},
 };
@@ -16,7 +16,6 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 #[derive(Serialize, Deserialize)]
@@ -75,11 +74,7 @@ fn read(path: &Path, max: u64) -> Result<Value> {
 }
 // Release channels are explicitly version-bound; historical fixtures stay on next.
 pub(crate) fn release_channel(version: &str) -> &'static str {
-    if version == "3.5.0" {
-        "beta"
-    } else {
-        "next"
-    }
+    if version == "3.5.0" { "beta" } else { "next" }
 }
 pub fn binding(root: &Path, version: &str) -> Result<()> {
     let manifest = read(&root.join("release.json"), 1 << 20)?;
@@ -98,15 +93,13 @@ pub fn binding(root: &Path, version: &str) -> Result<()> {
     }
     Ok(())
 }
-fn npm_entry(node: &Path) -> Result<PathBuf> {
+fn npm_entry(node: &Path, search_paths: &[PathBuf]) -> Result<PathBuf> {
     let mut directories = vec![
         node.parent()
             .ok_or_else(|| fault("update.npm_missing", "Node parent missing", 3))?
             .to_path_buf(),
     ];
-    if let Some(path) = std::env::var_os("PATH") {
-        directories.extend(std::env::split_paths(&path));
-    }
+    directories.extend_from_slice(search_paths);
     for directory in directories {
         let path = directory.join("node_modules/npm/bin/npm-cli.js");
         if path.is_file() {
@@ -201,11 +194,11 @@ fn verify_tarball(path: &Path, integrity: &str) -> Result<()> {
 fn save(path: &Path, record: &Handoff) -> Result<()> {
     storage::atomic_json(path, record)
 }
-fn canonical_home(inv: &Invocation) -> Result<PathBuf> {
-    let raw = if inv.home.is_absolute() {
-        inv.home.clone()
+fn canonical_home(ctx: &RequestContext) -> Result<PathBuf> {
+    let raw = if ctx.home.is_absolute() {
+        ctx.home.clone()
     } else {
-        inv.cwd.join(&inv.home)
+        ctx.cwd.join(&ctx.home)
     };
     let mut normalized = PathBuf::new();
     for component in raw.components() {
@@ -300,10 +293,12 @@ fn archive_completed(directory: &Path, journal: &Path, record: &Handoff) -> Resu
     Ok(())
 }
 pub fn prepare(
-    inv: &Invocation,
+    ctx: &RequestContext,
+    presentation: &str,
     installed: &Path,
     node: &Path,
     nonce: &str,
+    npm_search_paths: &[PathBuf],
     targets: Vec<UpdateTarget>,
 ) -> Result<Outcome> {
     if !lycheedev_core::selection::valid_digest(nonce, 64) {
@@ -314,7 +309,7 @@ pub fn prepare(
         ));
     }
     let installed = ordinary(installed.canonicalize()?);
-    let workspace = canonical_home(inv)?;
+    let workspace = canonical_home(ctx)?;
     let prefix = installed
         .parent()
         .and_then(Path::parent)
@@ -370,7 +365,7 @@ pub fn prepare(
             archive_completed(&directory, &journal, &record)?;
         }
     }
-    let npm = npm_entry(node)?;
+    let npm = npm_entry(node, npm_search_paths)?;
     let mut record = if journal.exists() {
         let record: Handoff = storage::read_json(&journal)?;
         if record.schema != "lycheedev.npm-update.rust.v1"
@@ -400,7 +395,7 @@ pub fn prepare(
                     .to_str()
                     .ok_or_else(|| fault("update.invalid_path", "prefix path is not UTF-8", 4))?,
             ],
-            &inv.control,
+            &ctx.control,
         )?;
         let mut packages: Vec<Packed> = serde_json::from_slice(&bytes)?;
         if packages.len() != 1 {
@@ -436,9 +431,9 @@ pub fn prepare(
             phase: "packed".into(),
             nonce: nonce.into(),
             helper_sha256: String::new(),
-            format: inv.flag("--format").unwrap_or("text").into(),
+            format: presentation.into(),
             deadline_unix_millis: millis()?
-                .saturating_add(inv.control.remaining()?.as_millis() as u64),
+                .saturating_add(ctx.control.remaining()?.as_millis() as u64),
             result: None,
             failure: None,
         };
@@ -468,7 +463,7 @@ pub fn prepare(
                 "--package-lock=false",
                 record.tarball.to_str().unwrap(),
             ],
-            &inv.control,
+            &ctx.control,
         )?;
     }
     let staged_package = read(&record.staged.join("package.json"), 1 << 20)?;
@@ -506,7 +501,7 @@ pub fn prepare(
                 "--plan".into(),
                 "--format=json".into(),
             ],
-            &inv.control,
+            &ctx.control,
         )?;
         record.phase = "handoff".into();
     }
@@ -629,13 +624,13 @@ pub fn apply_handoff(path: &Path, nonce: &str, control: &OperationControl) -> Re
     save(&journal, &record)?;
     Ok(result)
 }
-pub fn helper_control(path: &Path, cancel: Arc<AtomicBool>) -> Result<OperationControl> {
+pub fn helper_control(path: &Path, cancel: TrackedCancellation) -> Result<OperationControl> {
     let record: Handoff = storage::read_json(path)?;
     let remaining = record
         .deadline_unix_millis
         .saturating_sub(millis()?)
         .min(600000);
-    Ok(OperationControl::new(
+    Ok(OperationControl::tracked(
         Instant::now() + Duration::from_millis(remaining),
         cancel,
     ))
@@ -693,9 +688,11 @@ mod tests {
         }
     }
     #[test]
-    fn channel_binding_refuses_go_latest_or_unbound_version_before_mutation() {
+    fn channel_binding_refuses_unbound_or_latest_version_before_mutation() {
         let temp = fixture();
         let channel = json!({"schema":"lycheedev.npm-channel.v1","version":"3.1.2","distTag":"next","preserveLatest":"2.5.1"});
+        // Negative evidence: a historical Go runtime record is not a current
+        // runtime and must be refused before any update mutation.
         storage::atomic_json(
             &temp.0.join("release.json"),
             &json!({"runtime":"go","npmChannel":channel}),
@@ -784,16 +781,13 @@ mod tests {
     #[test]
     fn workspace_and_helper_deadline_do_not_depend_on_new_cwd_or_restart_the_budget() {
         let temp = fixture();
-        let inv = Invocation {
+        let ctx = RequestContext {
             home: "relative/../workspace".into(),
             cwd: temp.0.clone(),
-            command: "update".into(),
-            positional: None,
-            flags: Default::default(),
             control: Default::default(),
         };
         assert_eq!(
-            canonical_home(&inv).unwrap(),
+            canonical_home(&ctx).unwrap(),
             ordinary(temp.0.canonicalize().unwrap()).join("workspace")
         );
         let mut record = record(&temp.0, "3.1.2");

@@ -479,21 +479,6 @@ fn after_metadata_open_exact_pin_validation_precedes_catalog_access() {
 }
 
 #[test]
-fn saved_range_go_fields_merge_in_order_and_reject_float_lengths() {
-    let f = Fixture::new();
-    let key = "a".repeat(32);
-    let mut reader = f.prepare(false);
-    let blob = f.store().publish_blob(b"body", 4).unwrap();
-    let raw=serde_json::value::RawValue::from_string(format!(r#"{{"objectBytes":9,"ObjectBytes":10,"OBJECTBYTES":null,"blob":{{"sha256":"{}"}},"BLOB":{{"bytes":4}},"extra":null}}"#,blob.sha256)).unwrap();
-    f.store()
-        .put(&cache_key("tpr/old", &key), &raw, None)
-        .unwrap();
-    assert_eq!(reader.range(&key, request()).unwrap().bytes(), b"body");
-    assert_eq!(reader.requests, 0);
-    assert!(serde_json::from_str::<SavedRange>(r#"{"objectBytes":1.0}"#).is_err());
-}
-
-#[test]
 fn availability_primary_with_cleanup_failure_cannot_authorize_retry() {
     let mut error = fault("records.remote_http", 5, "body failed");
     assert!(retryable(&error));

@@ -9,7 +9,7 @@ import {defaults} from '../../tools/rust-disk.mjs';
 import {splitIndexEvidence, PART_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
 import {captureGoCustody, openGoCustody} from './source-pack-custody.mjs';
 import {comparePostcardFacts, validatePostcardRequest} from './source-pack-scenarios-postcard.mjs';
-import {verifyOwnerEvidence} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
+import {verifyOwnerEvidence} from './owned-proof.mjs';
 import {POSTCARD_OWNER_RECEIPT_BYTES, POSTCARD_LAYOUT, EXPORT_TEST, EXPORT_ARGS, EXPORT_BUILD_ARGS, LIMITS, postcardFactKey, postcardFactPath, postcardIndexIdentity, verifyPostcardFrame, verifyPostcardExporter, preparePostcardExport, verifyPreparedPostcard, runPostcardExport, capturePostcardExport, verifyPostcardCustody, postcardExportSummary} from './read-fact-delta-postcard.mjs';
 import {POSTCARD_PREPARATION_POLICY} from './read-fact-delta-postcard.mjs';
 import {prepareFreshPostcardExporter} from './source-pack-scenarios-postcard-fresh.mjs';
@@ -21,9 +21,9 @@ test('frozen Rust empty Postcard golden authenticates framing; no Node schema de
   for (const offset of [0, 8, 12, 44, 76]) { const bad = Buffer.from(raw); bad[offset] ^= 1; assert.throws(() => verifyPostcardFrame(bad, input)); }
   assert.throws(() => verifyPostcardFrame(Buffer.concat([raw, Buffer.from([0])]), input));
 });
-test('explicit v13 identity matches the current Rust key, pack domain and v18 index', () => {
+test('explicit v13 identity matches the current Rust key, pack domain and v19 index', () => {
   const source = fs.readFileSync(new URL('../../crates/lycheedev-source/src/index.rs', import.meta.url), 'utf8');
-  assert.match(source, /rust-index-v18\\0assets-v2-go323-metadata\\0facts-pack-v2-path-radix512\\0facts-layout-v13-postcard-1\.1\.3/);
+  assert.match(source, /rust-index-v19\\0assets-v2-go323-metadata\\0facts-pack-v2-path-radix512\\0facts-layout-v13-postcard-1\.1\.3/);
   const key = /fn facts_cache_key[\s\S]*?"([^"\n]+)"/.exec(source)?.[1], doc = {path: 'A.lua', sha256: sha256('source')};
   assert.equal(sha256(key.replaceAll('\\0', '\0').replace('{path}', doc.path).replace('{sha256}', doc.sha256)), postcardFactKey(doc));
   const pack = fs.readFileSync(new URL('../../crates/lycheedev-source/src/index/facts_cache.rs', import.meta.url), 'utf8'); assert.match(pack, /facts-pack-v2-path-radix512\\0facts-layout-v13-postcard-1\.1\.3/);
@@ -131,12 +131,12 @@ test('Postcard compiler and build owner receipts use the explicit 16 MiB ceiling
   for (const receipt of [f.build.artifact.toolchain.receipt, f.build.artifact.buildEvidence]) {
     fs.appendFileSync(receipt, ' '.repeat(2 << 20));
     assert(fs.statSync(receipt).size > 2 << 20);
-    assert.throws(() => verifyOwnerEvidence(f.root, receipt), /formal-lua.invalid_file/);
+    assert.throws(() => verifyOwnerEvidence(f.root, receipt), /owned-proof.invalid_file/);
   }
   f.build.artifact.toolchain.receiptSHA256 = hashFile(f.build.artifact.toolchain.receipt);
   putJSON(f.build.expected.artifact, f.build.artifact); f.build.expected.artifactSHA256 = hashFile(f.build.expected.artifact);
   assert.equal(verifyPostcardExporter(f.root, f.build.expected, f.build.candidate).buildReceiptSHA256, hashFile(f.build.artifact.buildEvidence));
   fs.truncateSync(f.build.artifact.buildEvidence, POSTCARD_OWNER_RECEIPT_BYTES + 1);
-  assert.throws(() => verifyPostcardExporter(f.root, f.build.expected, f.build.candidate), /formal-lua.invalid_file/);
+  assert.throws(() => verifyPostcardExporter(f.root, f.build.expected, f.build.candidate), /owned-proof.invalid_file/);
   for (const receiptMaximumBytes of [0, -1, NaN, Infinity, 0.5, POSTCARD_OWNER_RECEIPT_BYTES + 1]) assert.throws(() => verifyOwnerEvidence(f.root, f.build.artifact.toolchain.receipt, undefined, {receiptMaximumBytes}), /owner_receipt_budget/);
 }));

@@ -1,8 +1,9 @@
-//! Offline command/output fixtures pinned to Go 3.2.0. Native process/input
-//! acceptance is separate; these tests never select or drive a real game.
+//! Offline command/output fixtures pinned to the external fixed reference.
+//! Native process/input acceptance is separate; these tests never select or
+//! drive a real game.
 use super::*;
 use lycheedev_core::control::{StopCause, TrackedCancellation};
-use lycheedev_live::go_mailbox_v1::{Identity, connection::RawReport, recovery::Continuation};
+use lycheedev_live::mailbox::{Identity, connection::RawReport, recovery::Continuation};
 use std::{
     cell::RefCell,
     fs,
@@ -129,7 +130,13 @@ fn assert_clap_error(error: &ToolkitError, kind: &str, token: &str) {
     assert_eq!(error.exit_code, 2);
     assert_eq!(error.details["parser"], "clap");
     assert_eq!(error.details["kind"], kind);
-    assert!(error.details["diagnostic"].as_str().unwrap().contains(token), "{error:?}");
+    assert!(
+        error.details["diagnostic"]
+            .as_str()
+            .unwrap()
+            .contains(token),
+        "{error:?}"
+    );
 }
 fn run(inv: &Invocation, fake: Fake) -> Response {
     // Exactly the production main boundary, followed by its injectable formal
@@ -140,7 +147,7 @@ fn run(inv: &Invocation, fake: Fake) -> Response {
 fn project_result() -> ProjectResult {
     ProjectResult {
         continuation:Continuation {kind:"continue".into(),session:"CON-original".into(),request_id:"request-1".into(),goal:"execute".into(),progress_version:3,remaining_budget_ms:Some(42),blocker:None},
-        process_end:String::new(),runtime_end:None,input:None,waiting:String::new(),session:"CON-original".into(),operation:"OP-original".into(),operation_state:"result_verified".into(),scans:String::new(),
+        process_end:String::new(),runtime_end:None,input:None,waiting:String::new(),session:"CON-original".into(),operation:"LMO-original".into(),operation_state:"result_verified".into(),scans:String::new(),
         identity:Identity::default(),bound:true,closed:false,stage:"result_verified".into(),complete:false,report_state:"verified".into(),cleanup:"pending".into(),cleanup_method:String::new(),
         report:Some(RawReport(br#"{ "ok":false, "same":1, "same":2, "big":9007199254740993123456789, "minus":-0, "scale":1.2300e+04, "html":"<>&" }"#.to_vec())),
         journal:"fixture/con.jsonl".into(),reload:None,report_origin:None,
@@ -198,16 +205,16 @@ fn main_routes_con_aliases_to_formal_service_and_never_old_home() {
     }
 }
 #[test]
-fn route_and_argument_priority_matches_frozen_go() {
+fn route_and_argument_priority_matches_reference_fixtures() {
     let f = Fixture::new();
     let cases = [
         (
             vec!["live", "execute", "--request", "x"],
-            "Native execution requires --session CON-...; historical OP/BTP execution is retired",
+            "Native execution requires --session CON-...",
         ),
         (
             vec!["live", "bugs", "--session", "OP-old"],
-            "Native execution requires --session CON-...; historical OP/BTP execution is retired",
+            "Native execution requires --session CON-...",
         ),
         (
             vec![
@@ -240,19 +247,13 @@ fn route_and_argument_priority_matches_frozen_go() {
                 "--session",
                 "CON-original",
                 "--count",
-                "101",
-                "--request",
-                "x",
+                "100",
             ],
             "live bugs requires --request and --count <1-100>",
         ),
         (
             vec!["live", "reload", "fallback", "--request", "x"],
             "native activation requires --installation --pid --request; resume a pending CON id without new input",
-        ),
-        (
-            vec!["live", "cancel", "CON-original"],
-            "CON connections support execute, bugs, status, session, resume, reload and disconnect; cleanup is automatic",
         ),
     ];
     for (words, message) in cases {
@@ -280,14 +281,24 @@ fn parser_live_typed_options_keep_admitted_value_order_and_exact_errors() {
             vec!["live", "connect", "--wait-seconds", "0", "--pid", "0"],
             "--wait-seconds must be between 1 and 600",
         ),
-        (vec!["live", "bugs", "--count", "2001"], "invalid --count"),
+        (vec!["live", "bugs", "--count", "0"], "invalid --count"),
+        (vec!["live", "bugs", "--count", "101"], "invalid --count"),
     ] {
         let e = crate::parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap_err();
         assert_eq!(e.message, message);
     }
-    let error = crate::parse(&["live", "execute", "--policy", "retry"].map(str::to_owned)).unwrap_err();
+    for count in ["1", "100"] {
+        assert!(crate::parse(&["live", "bugs", "--count", count].map(str::to_owned)).is_ok());
+    }
+    let error =
+        crate::parse(&["live", "execute", "--policy", "retry"].map(str::to_owned)).unwrap_err();
     assert_clap_error(&error, "InvalidValue", "--policy");
-    assert!(error.details["diagnostic"].as_str().unwrap().contains("retry"));
+    assert!(
+        error.details["diagnostic"]
+            .as_str()
+            .unwrap()
+            .contains("retry")
+    );
 }
 #[test]
 fn connect_and_activation_preserve_explicit_target() {
@@ -346,7 +357,7 @@ fn connect_and_activation_preserve_explicit_target() {
     );
 }
 #[test]
-fn bugs_uses_exact_fixed_go_source_budget_and_observation_policy() {
+fn bugs_uses_exact_reference_source_budget_and_observation_policy() {
     let f = Fixture::new();
     let calls = Rc::new(RefCell::new(vec![]));
     let inv = invocation(
@@ -409,23 +420,14 @@ fn execute_reuses_exact_stored_probe_revision_without_reput() {
     let bytes = b"return 7\n";
     let path = f.0.join("probe.lua");
     fs::write(&path, bytes).unwrap();
-    let mut put = invocation(
-        &[
-            "live",
-            "probe",
-            "put",
-            "--name",
-            "reusable",
-            "--file",
-            path.to_str().unwrap(),
-        ],
+    let put = invocation(
+        &["live", "probe", "put", "--name", "reusable", "--file", "probe.lua"],
         &f.0,
     );
     lycheedev_core::workspace::initialize(&put.home).unwrap();
-    lycheedev_live::probes::dispatch(&put).unwrap();
-    put.command = "live probe show".into();
-    put.positional = Some("reusable".into());
-    let before = lycheedev_live::probes::show(&put, "reusable").unwrap().data;
+    crate::dispatch(&put).unwrap();
+    let registry = crate::live_aux::context(&put);
+    let before = lycheedev_live::probes::show(&registry, "reusable").unwrap().data;
     let inv = invocation(
         &[
             "live",
@@ -455,7 +457,7 @@ fn execute_reuses_exact_stored_probe_revision_without_reput() {
     );
     assert_eq!(
         before,
-        lycheedev_live::probes::show(&put, "reusable").unwrap().data
+        lycheedev_live::probes::show(&registry, "reusable").unwrap().data
     );
 }
 #[test]
@@ -521,7 +523,7 @@ fn trace_flush_precedes_cancel_and_pending_with_original_result() {
     let cause = AdmissionError::Joined(vec![
         ChannelError::Pending { causes: vec![] }.into(),
         ChannelError::Cancelled.into(),
-        ChannelError::Contract(lycheedev_live::go_mailbox_v1::ContractError(
+        ChannelError::Contract(lycheedev_live::mailbox::ContractError(
             "live.channel_trace_flush",
         ))
         .into(),
@@ -674,8 +676,8 @@ fn default_cli_advertises_only_the_connected_formal_routes() {
     assert!(!implemented.iter().any(|d| d.path == "live report"));
     for route in ["live cancel", "live abandon"] {
         assert!(
-            implemented.iter().any(|d| d.path == route),
-            "historical disk-only retirement must have a real registered adapter"
+            !implemented.iter().any(|d| d.path == route),
+            "retired operation route must not be registered"
         );
     }
 }
@@ -684,7 +686,7 @@ fn default_cli_advertises_only_the_connected_formal_routes() {
 /// a private synthetic client tree, then the default NativeService answers it.
 /// The impossible PID and nonexistent executable can never select a real game.
 fn seed_completed_history(root: &Path) -> (String, PathBuf) {
-    use lycheedev_live::go_mailbox_v1::{
+    use lycheedev_live::mailbox::{
         SCHEMA,
         admission::{ClientRecord, ConnectionBook, ConnectionTarget, WindowRecord},
         driver::TokenSource,
@@ -756,7 +758,7 @@ fn seed_completed_history(root: &Path) -> (String, PathBuf) {
     op.result_bytes =
         ResultBytes(br#"{ "ok":false,"large":9007199254740993,"x":1,"x":2 }"#.to_vec());
     op.report_bytes = op.result_bytes.0.len() as u32;
-    op.report_checksum = lycheedev_live::go_mailbox_v1::checksum(&op.result_bytes.0);
+    op.report_checksum = lycheedev_live::mailbox::checksum(&op.result_bytes.0);
     record.state.operation = Some(op);
     save_state(
         &mut journal,
@@ -882,7 +884,7 @@ fn wait_child_cannot_extend_original_deadline_or_lose_ancestor_cancel() {
     );
 }
 #[test]
-fn deadline_without_pending_wrapper_uses_go_live_deadline_classification() {
+fn deadline_without_pending_wrapper_uses_reference_live_deadline_classification() {
     let response = connection_response(
         Path::new("fixture"),
         ServiceOutcome::Failed(ChannelError::DeadlineExceeded.into()),
@@ -895,32 +897,6 @@ fn deadline_without_pending_wrapper_uses_go_live_deadline_classification() {
     let value: Value = serde_json::from_str(&rendered(&response, "json")).unwrap();
     assert_eq!(value["error"]["stage"], "dispatch");
     assert_eq!(value["error"]["retryable"], true);
-}
-#[test]
-fn no_cache_compatibility_does_not_change_formal_resume_action() {
-    let f = Fixture::new();
-    let calls = Rc::new(RefCell::new(vec![]));
-    for words in [
-        vec!["live", "connect", "--session", "CON-original"],
-        vec!["live", "connect", "--no-cache", "--session", "CON-original"],
-    ] {
-        let inv = invocation(&words, &f.0);
-        run(&inv, fake(&f.0, calls.clone()));
-    }
-    assert_eq!(
-        *calls.borrow(),
-        [
-            Call::Resume("CON-original".into()),
-            Call::Resume("CON-original".into())
-        ]
-    );
-    for words in [
-        vec!["--no-cache", "live", "connect", "--session", "CON-original"],
-        vec!["live", "status", "CON-original", "--no-cache"],
-        vec!["live", "connect", "--no-cache=false"],
-    ] {
-        assert!(crate::parse(&words.iter().map(|s| s.to_string()).collect::<Vec<_>>()).is_err());
-    }
 }
 #[test]
 fn file_admission_failures_keep_empty_context_and_do_not_invoke_backend() {
@@ -955,41 +931,53 @@ fn live_parser_structural_errors_precede_admitted_value_checks() {
     for (words, kind, token) in [
         (
             vec!["live", "execute", "--budget-seconds", "0", "--pid", "0"],
-            "UnknownArgument", "--pid",
+            "UnknownArgument",
+            "--pid",
         ),
         (
             vec!["live", "connect", "--pid", "0", "--pid", "1"],
-            "ArgumentConflict", "--pid",
+            "ArgumentConflict",
+            "--pid",
         ),
         (
             vec!["live", "connect", "--pid", "1", "--pid", "0"],
-            "ArgumentConflict", "--pid",
+            "ArgumentConflict",
+            "--pid",
         ),
         (
             vec!["live", "execute", "--budget-seconds", "1", "--pid", "0"],
-            "UnknownArgument", "--pid",
+            "UnknownArgument",
+            "--pid",
         ),
         (
             vec!["live", "execute", "--budget-seconds", "0", "--unknown"],
-            "UnknownArgument", "--unknown",
+            "UnknownArgument",
+            "--unknown",
         ),
     ] {
         let error =
             crate::parse(&words.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap_err();
         assert_clap_error(&error, kind, token);
     }
-    let error = crate::parse(&["live", "connect", "--wait-seconds", "0", "--pid", "+1"].map(str::to_owned)).unwrap_err();
+    let error =
+        crate::parse(&["live", "connect", "--wait-seconds", "0", "--pid", "+1"].map(str::to_owned))
+            .unwrap_err();
     assert_eq!(error.message, "--wait-seconds must be between 1 and 600");
 }
 #[test]
-fn pid_uses_go_parse_uint_lexical_boundary() {
+fn pid_uses_reference_uint_lexical_boundary() {
     for pid in ["+1", "0", "4294967296", "1_0", "１"] {
         let error =
             crate::parse(&["live", "connect", "--pid", pid].map(str::to_owned)).unwrap_err();
         assert_eq!(error.message, "invalid --pid", "{pid}");
     }
     // An inline negative is a value; a separate negative is a clap option token.
-    assert_eq!(crate::parse(&["live", "connect", "--pid=-1"].map(str::to_owned)).unwrap_err().message, "invalid --pid");
+    assert_eq!(
+        crate::parse(&["live", "connect", "--pid=-1"].map(str::to_owned))
+            .unwrap_err()
+            .message,
+        "invalid --pid"
+    );
     let error = crate::parse(&["live", "connect", "--pid", "-1"].map(str::to_owned)).unwrap_err();
     assert_clap_error(&error, "UnknownArgument", "-1");
     for pid in ["1", "0001", "4294967295"] {
@@ -1183,7 +1171,7 @@ fn probe_read_close_and_control_failure_preserves_original_typed_causes() {
 }
 
 #[test]
-fn legacy_resume_is_retired_before_workspace_or_native_factory() {
+fn non_connection_recovery_is_rejected_before_workspace_or_native_factory() {
     let f = Fixture::new();
     for id in ["OP-unknown", "BTP-unknown", "SESSION-old", "unknown"] {
         let inv = invocation(&["live", "resume", id], &f.0);
@@ -1192,201 +1180,10 @@ fn legacy_resume_is_retired_before_workspace_or_native_factory() {
         let error = response.error.unwrap();
         assert_eq!(error.exit_code, 2);
         assert_eq!(error.code, "command.invalid_arguments");
-        assert_eq!(
-            error.message,
-            "legacy OP/BTP execution is retired; use live status or live abandon; Native recovery requires CON"
-        );
+        assert_eq!(error.message, "Live recovery requires a CON connection ID");
         assert!(response.result.is_none());
         assert!(response.operation_id.is_empty());
         assert!(!inv.home.exists());
-    }
-}
-
-#[test]
-fn legacy_bootstrap_status_reads_workspace_without_native_factory() {
-    let f = Fixture::new();
-    let inv = invocation(&["live", "status", "BTP-old"], &f.0);
-    lycheedev_core::workspace::initialize(&inv.home).unwrap();
-    let mut metadata = lycheedev_core::metadata::Metadata::open(&inv.home, true).unwrap();
-    metadata
-        .create(
-            "bootstrap/attempt/BTP-old",
-            &json!({
-                "schema":"lycheedev.bootstrap-receiver.v1", "id":"BTP-old", "phase":"unknown",
-                "receiver":{"phase":"commit_queued", "attempt":1}
-            }),
-        )
-        .unwrap();
-    drop(metadata);
-    let response =
-        dispatch_with::<Fake>(&inv, |_| panic!("historical status opened native services"));
-    assert_eq!(response.exit_code(), 0);
-    assert_eq!(response.operation_id, "BTP-old");
-    assert!(!response.context.contains_key("transport"));
-    let mut bytes = vec![];
-    render(&mut bytes, "json", &response).unwrap();
-    let envelope: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(envelope["result"]["phase"], "unknown");
-    assert_eq!(envelope["result"]["receiver"]["phase"], "commit_queued");
-    assert!(!f.0.join(".lycheedev").exists());
-}
-#[test]
-fn legacy_bootstrap_status_missing_keeps_id_and_no_result() {
-    let f = Fixture::new();
-    let inv = invocation(&["live", "status", "BTP-missing"], &f.0);
-    lycheedev_core::workspace::initialize(&inv.home).unwrap();
-    let response =
-        dispatch_with::<Fake>(&inv, |_| panic!("historical status opened native services"));
-    assert_eq!(response.operation_id, "BTP-missing");
-    assert!(response.result.is_none());
-    let error = response.error.unwrap();
-    assert_eq!(error.code, "vault.record_missing");
-    assert_eq!(error.message, "vault.record_missing");
-    assert_eq!(error.exit_code, 2);
-}
-
-#[test]
-fn legacy_bootstrap_unmarshalable_time_fails_only_at_render_without_partial_frame() {
-    let f = Fixture::new();
-    let inv = invocation(&["live", "status", "BTP-old"], &f.0);
-    lycheedev_core::workspace::initialize(&inv.home).unwrap();
-    let mut metadata = lycheedev_core::metadata::Metadata::open(&inv.home, true).unwrap();
-    metadata
-        .create(
-            "bootstrap/attempt/BTP-old",
-            &json!({
-                "schema":"lycheedev.bootstrap-receiver.v1", "id":"BTP-old",
-                "createdAt":"2026-10-15T02:00:00+24:00"
-            }),
-        )
-        .unwrap();
-    drop(metadata);
-    let response =
-        dispatch_with::<Fake>(&inv, |_| panic!("historical read opened native services"));
-    assert_eq!(response.exit_code(), 0);
-    for format in ["json", "jsonl", "text"] {
-        let mut bytes = vec![];
-        let error = render(&mut bytes, format, &response).unwrap_err();
-        assert_eq!(
-            error.message,
-            "json: error calling MarshalJSON for type time.Time: Time.MarshalJSON: timezone hour outside of range [0,23]"
-        );
-        if format == "jsonl" {
-            let begin: Value = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(begin["type"], "begin");
-        } else {
-            assert!(bytes.is_empty());
-        }
-    }
-}
-
-#[path = "formal_live_history_tests.rs"]
-mod history;
-
-#[path = "formal_live_retire_tests.rs"]
-mod retirement;
-
-// The pre-enum CLI adapter is kept only as a test oracle. The production
-// service cannot construct its old (None, None) state or bypass enum matching.
-fn legacy_connection_response(
-    project: &Path,
-    result: Option<ProjectResult>,
-    error: Option<AdmissionError>,
-) -> Response {
-    let mut response = Response::default();
-    response.context.insert(
-        "project".into(),
-        json!(lycheedev_core::client::display_path(project)),
-    );
-    response
-        .context
-        .insert("transport".into(), json!(TRANSPORT));
-    if let Some(result) = result.filter(|r| !r.session.is_empty()) {
-        response.operation_id = result.session.clone();
-        response
-            .context
-            .insert("session".into(), json!(result.session));
-        response.context.insert("stage".into(), json!(result.stage));
-        if !result.operation.is_empty() {
-            response
-                .context
-                .insert("operation".into(), json!(result.operation));
-        }
-        response.result = Some(LiveResult::Connection(result));
-    }
-    response.error = error.as_ref().map(public_error);
-    merge_context(&mut response);
-    response
-}
-
-fn assert_legacy_outcome_wire(outcome: ServiceOutcome) {
-    let (result, error) = match &outcome {
-        ServiceOutcome::Completed(result) => (Some(result.clone()), None),
-        ServiceOutcome::Failed(error) => (None, Some(error.clone())),
-        ServiceOutcome::ReportedWithFailure { result, error } => {
-            (Some(result.clone()), Some(error.clone()))
-        }
-    };
-    let expected = legacy_connection_response(Path::new("fixture"), result, error);
-    let actual = connection_response(Path::new("fixture"), outcome);
-    assert_eq!(actual.exit_code(), expected.exit_code());
-    for format in ["json", "jsonl", "text"] {
-        assert_eq!(
-            rendered(&actual, format),
-            rendered(&expected, format),
-            "{format}"
-        );
-    }
-}
-
-#[test]
-fn service_outcome_variants_preserve_exact_legacy_wire_and_exit() {
-    assert_legacy_outcome_wire(ServiceOutcome::Completed(project_result()));
-    assert_legacy_outcome_wire(ServiceOutcome::Failed(
-        ChannelError::DeadlineExceeded.into(),
-    ));
-    assert_legacy_outcome_wire(ServiceOutcome::ReportedWithFailure {
-        result: project_result(),
-        error: ChannelError::Pending { causes: vec![] }.into(),
-    });
-}
-
-#[test]
-fn service_outcome_wire_preserves_primary_and_cleanup_error_priority() {
-    for primary in [
-        ChannelError::Cancelled,
-        ChannelError::Pending { causes: vec![] },
-        ChannelError::DeadlineExceeded,
-    ] {
-        let error = AdmissionError::Joined(vec![
-            primary.into(),
-            ChannelError::Contract(lycheedev_live::go_mailbox_v1::ContractError(
-                "live.channel_trace_flush",
-            ))
-            .into(),
-        ]);
-        assert_legacy_outcome_wire(ServiceOutcome::ReportedWithFailure {
-            result: project_result(),
-            error: error.clone(),
-        });
-        assert_legacy_outcome_wire(ServiceOutcome::Failed(error));
-    }
-}
-
-#[test]
-fn service_outcome_empty_session_stays_filtered_for_success_and_failure() {
-    for failed in [false, true] {
-        let mut result = project_result();
-        result.session.clear();
-        let outcome = if failed {
-            ServiceOutcome::ReportedWithFailure {
-                result,
-                error: ChannelError::Cancelled.into(),
-            }
-        } else {
-            ServiceOutcome::Completed(result)
-        };
-        assert_legacy_outcome_wire(outcome);
     }
 }
 
@@ -1484,5 +1281,89 @@ fn doctor_empty_session_projection_does_not_replace_previous_connection() {
             panic!("doctor report lost");
         };
         assert_eq!(report.connection.unwrap().session, "CON-original");
+    }
+}
+
+#[test]
+fn service_outcome_variants_retain_report_and_error_independently() {
+    for (outcome, has_report, exit) in [
+        (ServiceOutcome::Completed(project_result()), true, 0),
+        (
+            ServiceOutcome::Failed(ChannelError::DeadlineExceeded.into()),
+            false,
+            6,
+        ),
+        (
+            ServiceOutcome::ReportedWithFailure {
+                result: project_result(),
+                error: ChannelError::Pending { causes: vec![] }.into(),
+            },
+            true,
+            6,
+        ),
+    ] {
+        let response = connection_response(Path::new("fixture"), outcome);
+        assert_eq!(response.exit_code(), exit);
+        assert_eq!(response.result.is_some(), has_report);
+        assert_eq!(
+            response.operation_id,
+            if has_report { "CON-original" } else { "" }
+        );
+        let value: Value = serde_json::from_str(&rendered(&response, "json")).unwrap();
+        assert_eq!(value["context"]["transport"], TRANSPORT);
+        assert_eq!(value["result"].is_null(), !has_report);
+        assert_eq!(value["error"].is_null(), exit == 0);
+    }
+}
+
+#[test]
+fn service_outcome_retains_report_and_cleanup_cause_without_dropping_primary() {
+    for primary in [
+        ChannelError::Cancelled,
+        ChannelError::Pending { causes: vec![] },
+        ChannelError::DeadlineExceeded,
+    ] {
+        let response = connection_response(
+            Path::new("fixture"),
+            ServiceOutcome::ReportedWithFailure {
+                result: project_result(),
+                error: AdmissionError::Joined(vec![
+                    primary.into(),
+                    ChannelError::Contract(lycheedev_live::mailbox::ContractError(
+                        "live.channel_trace_flush",
+                    ))
+                    .into(),
+                ]),
+            },
+        );
+        // A cleanup/trace failure keeps its own public classification, as the
+        // fixed current channel mapping specifies; the verified report and the
+        // joined primary cause are still retained, never rewritten as lost.
+        assert_eq!(response.exit_code(), 5);
+        assert!(response.result.is_some());
+        let message = response.error.unwrap().message;
+        assert!(message.contains("live.channel_trace_flush"));
+        assert!(!message.is_empty());
+    }
+}
+
+#[test]
+fn service_outcome_does_not_publish_an_empty_connection() {
+    for failed in [false, true] {
+        let mut result = project_result();
+        result.session.clear();
+        let outcome = if failed {
+            ServiceOutcome::ReportedWithFailure {
+                result,
+                error: ChannelError::Cancelled.into(),
+            }
+        } else {
+            ServiceOutcome::Completed(result)
+        };
+        let response = connection_response(Path::new("fixture"), outcome);
+        assert!(response.result.is_none());
+        assert!(response.operation_id.is_empty());
+        assert!(!response.context.contains_key("session"));
+        assert_eq!(response.exit_code(), if failed { 7 } else { 0 });
     }
 }

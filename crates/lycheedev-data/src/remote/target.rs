@@ -246,12 +246,8 @@ fn resolve_with(
             product_code: product.into(),
             region: request.region.clone(),
             observed_at: observed_at.clone(),
-            versions: store
-                .publish_blob(&versions, catalog::MAX_BYTES)?
-                .try_into()?,
-            distribution: store
-                .publish_blob(&distribution, catalog::MAX_BYTES)?
-                .try_into()?,
+            versions: store.publish_blob(&versions, catalog::MAX_BYTES)?,
+            distribution: store.publish_blob(&distribution, catalog::MAX_BYTES)?,
         };
         store.remember(&observation, generation)?;
         observation

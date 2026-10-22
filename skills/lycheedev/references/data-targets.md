@@ -6,11 +6,13 @@ prepare a whole archive or refresh a matching pin for a narrow lookup.
 
 `target list` lists saved names, not supported products. `target available` lists
 advertised releases; inspect per-product errors and truncation even on success.
-Use requested/contextual region and locale, not conversation language. Use
-`forever-asia-beta` or `forever-cn-beta` for their separate publication endpoints;
-legacy `forever` retains the Asia endpoint remotely and is ambiguous locally when
-both clients exist. Do not substitute launcher keys for product names. Equal
-builds do not make these products' configurations interchangeable.
+Use requested/contextual region and locale, not conversation language. `--product`
+accepts only the canonical products `retail`, `classic`, `classic-era`, `titan`,
+`forever-asia-beta`, `forever-cn-beta` and `anniversary`. Use the two Forever betas
+for their separate publication endpoints; `forever` is only the family name and a
+possible fixed Source-pin product, not a merged Data target. Do not substitute
+launcher keys for product names. Equal builds or configs do not make these
+products interchangeable.
 
 Use the CLI resolver for a selected local installation, named target or remote
 product; discover exact syntax through help. A local product selector constrains

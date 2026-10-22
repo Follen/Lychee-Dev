@@ -4,6 +4,8 @@
 pub struct SourceIdentityEvidence {
     common: Arc<serde_json::Map<String, Value>>,
     execution: serde_json::Map<String, Value>,
+    environment: Option<Arc<HostEnvironmentData>>,
+    environment_value: std::sync::OnceLock<Value>,
     xml: Option<Arc<crate::xml_load::Program>>,
     // Compatibility only: research hashing/serialization borrows the typed
     // program; a caller explicitly indexing xmlProgram may request a Value.
@@ -14,6 +16,8 @@ impl Clone for SourceIdentityEvidence {
         Self {
             common: Arc::clone(&self.common),
             execution: self.execution.clone(),
+            environment: self.environment.clone(),
+            environment_value: std::sync::OnceLock::new(),
             xml: self.xml.clone(),
             xml_value: std::sync::OnceLock::new(),
         }
@@ -24,6 +28,8 @@ impl SourceIdentityEvidence {
         Self {
             common: Arc::new(serde_json::Map::new()),
             execution: serde_json::Map::new(),
+            environment: None,
+            environment_value: std::sync::OnceLock::new(),
             xml: None,
             xml_value: std::sync::OnceLock::new(),
         }
@@ -32,6 +38,12 @@ impl SourceIdentityEvidence {
 impl std::ops::Index<&str> for SourceIdentityEvidence {
     type Output = Value;
     fn index(&self, key: &str) -> &Value {
+        if key == "environment" && let Some(environment) = &self.environment {
+            return self.environment_value.get_or_init(|| {
+                serde_json::to_value(CanonicalHostEnvironment(environment))
+                    .expect("validated immutable host evidence")
+            });
+        }
         if key == "xmlProgram" && let Some(program) = &self.xml {
             return self.xml_value.get_or_init(|| json!(program.as_ref()));
         }
@@ -54,13 +66,18 @@ impl Serialize for SourceIdentityEvidence {
             .map(|(key, value)| (key.as_str(), value))
             .collect::<BTreeMap<_, _>>();
         let mut keys = fields.keys().copied().collect::<Vec<_>>();
+        if self.environment.is_some() && !fields.contains_key("environment") {
+            keys.push("environment");
+        }
         if self.xml.is_some() {
             if !fields.contains_key("xmlProgram") { keys.push("xmlProgram"); }
-            keys.sort_unstable();
         }
+        keys.sort_unstable();
         let mut map = serializer.serialize_map(Some(keys.len()))?;
         for key in keys {
-            if key == "xmlProgram" && let Some(program) = &self.xml {
+            if key == "environment" && let Some(environment) = &self.environment {
+                map.serialize_entry(key, &CanonicalHostEnvironment(environment))?;
+            } else if key == "xmlProgram" && let Some(program) = &self.xml {
                 map.serialize_entry(key, &CanonicalXmlProgram(program))?;
             } else {
                 map.serialize_entry(key, fields[key])?;

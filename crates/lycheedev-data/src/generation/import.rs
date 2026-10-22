@@ -87,6 +87,11 @@ pub(crate) struct ImportedBatchAllocation {
     _schema_owner: Arc<ImportedSchema>,
     _allocation: OwnedRetainedReservation,
 }
+impl ImportedBatchAllocation {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self._allocation.bytes()
+    }
+}
 pub(crate) struct ImportedSchema {
     schema: SchemaRef,
     _allocation: OwnedRetainedReservation,
@@ -420,25 +425,6 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             pending: None,
             stopped: false,
         })
-    }
-    pub(crate) fn select_ids(mut self, ids: &'table [u32]) -> Result<Self> {
-        if self.next != 0
-            || self.batch_ordinal != 0
-            || ids.windows(2).any(|pair| pair[0] >= pair[1])
-        {
-            return Err(shape());
-        }
-        self.selected_ids = Some(std::borrow::Cow::Borrowed(ids));
-        Ok(self)
-    }
-    /// Conservative bound reserved before constructing each batch, including
-    /// Arrow builder growth overlap. A qualification snapshot can reject its
-    /// aggregate bound before asking the importer to allocate another batch.
-    pub(crate) fn batch_reservation_bytes(&self) -> usize {
-        self.batch_reservation
-    }
-    pub(crate) fn schema_owner(&self) -> Arc<ImportedSchema> {
-        self.schema.clone()
     }
     pub(crate) fn schema(&self) -> &SchemaRef {
         &self.schema.schema

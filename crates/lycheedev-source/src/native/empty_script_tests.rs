@@ -3,7 +3,7 @@ use super::*;
 use std::{sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 
 fn admitted(files:&[(&str,&str)],ordered:&[&str])->Arc<SourceInputs> {
-    let control=OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(false)));
+    let control=OperationControl::uncancelable(Instant::now()+Duration::from_secs(30));
     let host=TrustedHostEnvironment::from_host_material("empty-script-test".into(),false,vec![],vec![],&control).unwrap();
     SourceInputs::admit(SourceInputSpec{
         files:files.iter().map(|(path,text)|SourceFileInput{
@@ -57,8 +57,8 @@ fn pinned_empty_trivia_and_empty_statement_shapes_remain_distinct() {
 #[test]
 fn empty_known_loads_keep_occurrences_views_activations_and_explicit_entry() {
     let prepared=fixture(&[("zero.lua",""),("code.lua","function F(x) return x end\n"),("bom.lua","\u{feff}")],&["zero.lua","code.lua","zero.lua","bom.lua"]);
-    for profile in [EvaluatorProfile::Native,EvaluatorProfile::LegacyV7] {
-        let graph=prepared.build("empty-known",profile,None,&prepared.control).unwrap();
+    {
+        let graph=prepared.build("empty-known",None,&prepared.control).unwrap();
         assert_eq!(graph.script_load_occurrences,["0:zero.lua","1:code.lua","2:zero.lua","3:bom.lua"]);
         assert_eq!(graph.functions.len(),1);assert_eq!(graph.functions[0].load_occurrence,1);
         assert!(graph.writes.iter().all(|write|write.site.file=="code.lua"));
@@ -75,7 +75,7 @@ fn empty_known_loads_keep_occurrences_views_activations_and_explicit_entry() {
                 assert!(native.control.context_observations.contains_key(&activation.context));
             }
             assert!(native.control.occurrences.iter().all(|row|row.site.file=="code.lua"));
-        }else{assert!(matches!(profile,EvaluatorProfile::LegacyV7));}
+        }else{panic!("native invocation facts missing");}
     }
     let candidate=prepared.entry_catalog(&prepared.control).unwrap().into_iter().next().unwrap();
     let graph=prepared.build_plan("empty-before-entry","after_load",LoadPlan::Known(prepared.inputs.ordered.clone()),
@@ -130,52 +130,13 @@ fn malformed_and_missing_sources_keep_their_original_first_errors() {
 }
 
 fn builder(prepared:&PreparedSnapshot)->Builder {
-    let seed=prepared.build_execution("empty-block-reference","after_load",&[],EvaluatorProfile::Native,None,&prepared.control).unwrap();
-    Builder{inputs:seed.inputs.clone(),control:prepared.control.clone(),native_profile:true,graph:seed.facts.clone(),
+    let seed=prepared.build_execution("empty-block-reference","after_load",&[],None,&prepared.control).unwrap();
+    Builder{inputs:seed.inputs.clone(),control:prepared.control.clone(),graph:seed.facts.clone(),
         harvest:harvest(&prepared.analysis,&["input.lua"],&prepared.inputs,&prepared.control).unwrap(),
         cells:BTreeMap::new(),objects:vec![],bodies:vec![],heap_observation:0,object_versions:vec![],object_view_ids:BTreeMap::new(),object_slots:0,field_write_observations:BTreeMap::new(),observation_failure:None,native:NativeInvocationState::default(),xml_objects:BTreeMap::new()}
 }
 
 fn context()->Context {Context{file:"input.lua".into(),occurrence:0,name:"load:0:input.lua".into(),deferred:false,parameters:BTreeMap::new(),conditional_branch:None}}
-
-// Frozen pre-empty native_block + native_activate + block terminal tail. The
-// real statement executor is unchanged and is shared deliberately; these are
-// the exact view/activation/quota/terminal boundaries changed by this fix.
-fn previous_block(builder:&mut Builder,block:LuaBlock,ctx:&Context,depth:usize)->Result<()> {
-    builder.native_register_view(ctx);builder.budget()?;if depth>64{return Err("native block depth budget exceeded".into())}
-    let scope=builder.inputs.site(&ctx.file,block.get_range());
-    builder.budget()?;if builder.native.facts.control.activations.len()>=CONTROL_NODE_LIMIT{return Err("native scope activation budget exceeded".into())}
-    let id=builder.native.facts.control.activations.len();let child=builder.native_child_context(ctx,format!("{}:activation:{id}",ctx.name),ctx.conditional_branch);
-    let mut declarations=Vec::new();
-    for stat in block.get_stats(){builder.budget()?;match stat{
-        LuaStat::LocalStat(stat)=>for local in stat.get_local_name_list(){if let Some(name)=local.get_name_token(){declarations.push(builder.inputs.site(&ctx.file,name.get_range()));}},
-        LuaStat::LocalFuncStat(stat)=>if let Some(name)=stat.get_local_name().and_then(|name|name.get_name_token()){declarations.push(builder.inputs.site(&ctx.file,name.get_range()));},_=>{},
-    }}
-    for declaration in &declarations{builder.native.contexts.entry(child.name.clone()).or_default().activations.insert(declaration.id(),id);}
-    let cells=declarations.iter().map(|site|(site.id(),builder.native_local_key(&site.id(),&child))).collect();
-    builder.native.facts.control.activations.push(NativeScopeActivation{id,scope,context:child.name.clone(),cells});
-    let paths=builder.native_stats(block.get_stats().collect(),&child,depth)?;
-    if builder.native.facts.control.terminals.len()+paths.len()>CONTROL_TERMINAL_LIMIT{return Err("native terminal path budget exceeded".into())}
-    let terminals=paths.iter().map(|path|builder.native_terminal(path)).collect::<Vec<_>>();builder.native.facts.control.terminals.extend(terminals);Ok(())
-}
-
-#[test]
-fn nonempty_blocks_keep_exact_previous_facts_and_control_charges() {
-    for text in [" \t\n-- comment\n",";","local value=1\n","local value=1\nif value then value=2 end\n"] {
-        let prepared=fixture(&[("input.lua",text)],&[]);
-        let mut actual=builder(&prepared);let mut previous=builder(&prepared);
-        let block=chunk(&prepared,"input.lua").get_block().unwrap();
-        let before=prepared.inputs.shared_steps.load(Ordering::Relaxed);
-        actual.block(block.clone(),&context()).unwrap();
-        let middle=prepared.inputs.shared_steps.load(Ordering::Relaxed);
-        previous_block(&mut previous,block,&context(),0).unwrap();
-        let after=prepared.inputs.shared_steps.load(Ordering::Relaxed);
-        assert_eq!(middle-before,after-middle,"{text:?}");
-        actual.flow_publish_contexts();previous.flow_publish_contexts();
-        assert_eq!(serde_json::to_vec(&actual.native.facts).unwrap(),serde_json::to_vec(&previous.native.facts).unwrap(),"{text:?}");
-        assert_eq!(serde_json::to_vec(&actual.graph).unwrap(),serde_json::to_vec(&previous.graph).unwrap(),"{text:?}");
-    }
-}
 
 #[test]
 fn empty_native_body_matches_zero_statement_control_charge_and_budget_errors() {
@@ -187,7 +148,7 @@ fn empty_native_body_matches_zero_statement_control_charge_and_budget_errors() {
             let fill=prepared.inputs.corpus.limits.construction_steps-used-remaining;
             prepared.inputs.charge(fill).unwrap();
             let before=prepared.inputs.shared_steps.load(Ordering::Relaxed);
-            let result=if text.is_empty(){builder.load_file("input.lua",0)}else{previous_block(&mut builder,chunk(&prepared,"input.lua").get_block().unwrap(),&context(),0)};
+            let result=if text.is_empty(){builder.load_file("input.lua",0)}else{builder.block(chunk(&prepared,"input.lua").get_block().unwrap(),&context())};
             let spent=prepared.inputs.shared_steps.load(Ordering::Relaxed)-before;
             assert_eq!(spent,remaining);
             assert_eq!(builder.native.facts.control.activations.len(),usize::from(remaining==2));
@@ -213,11 +174,11 @@ fn empty_native_body_matches_zero_statement_control_charge_and_budget_errors() {
 fn empty_public_loads_preserve_cancellation_and_deadline_first_error() {
     for expired in [false,true] {
         let mut prepared=fixture(&[("empty.lua","")],&["empty.lua"]);
-        let stopped=OperationControl::new(if expired{Instant::now()-Duration::from_secs(1)}else{prepared.control.deadline()},Arc::new(AtomicBool::new(!expired)));
+        let stopped=stopped_control(expired,prepared.control.deadline());
         prepared.control=stopped.clone();
         let expected=serde_json::to_value(stopped.check().unwrap_err()).unwrap();
         let before=prepared.inputs.shared_steps.load(Ordering::Relaxed);
-        let error=prepared.build("empty-stopped",EvaluatorProfile::Native,None,&stopped).err().unwrap();
+        let error=prepared.build("empty-stopped",None,&stopped).err().unwrap();
         assert_eq!(serde_json::to_value(error).unwrap(),expected);
         let error=prepared.build_plan("empty-stopped","after_load",LoadPlan::Known(vec!["empty.lua".into(),"missing.lua".into()]),None,None,&stopped).err().unwrap();
         assert_eq!(serde_json::to_value(error).unwrap(),expected);

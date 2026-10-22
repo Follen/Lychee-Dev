@@ -24,7 +24,6 @@ pub struct SourceFile {
 pub struct Provenance {
     pub kind: String,
     pub files: Vec<SourceFile>,
-    #[serde(serialize_with = "wire::serialize_time")]
     pub fetched_at: String,
     pub entry_count: usize,
     pub rejected: usize,
@@ -66,7 +65,6 @@ impl Fetcher for PublicFetcher {
 mod http;
 #[cfg(test)]
 mod tests;
-mod wire;
 
 fn load(
     home: &Path,
@@ -81,7 +79,11 @@ fn load(
         control,
         || Ok(()),
     )?;
-    let document = wire::decode(&raw.bytes, control)?;
+    let document: Document = serde_json::from_slice(&raw.bytes)
+        .map_err(|_| format("invalid cached listfile document"))?;
+    chrono::DateTime::parse_from_rfc3339(&document.provenance.fetched_at)
+        .map_err(|_| format("invalid cached listfile timestamp"))?;
+    control.check()?;
     if document.schema != SCHEMA || document.provenance.kind != kind {
         return Err(fault("records.listfile_format", 4));
     }
@@ -102,12 +104,12 @@ fn load(
         if file.url != expected {
             return Err(unavailable("cached origin differs from requested source"));
         }
-        if total >= limits.bytes || file.blob.bytes > (limits.bytes - total) as i64 {
+        if total >= limits.bytes || file.blob.bytes > (limits.bytes - total) as u64 {
             return Err(fault("records.listfile_limit", 3));
         }
         let blob = serde_json::to_value(&file.blob)?;
         let bytes = evidence::read_blob_bounded(home, &blob, limits.bytes - total, control)?;
-        if file.bytes != bytes.len() as i64 || file.sha256 != file.blob.sha256 {
+        if file.bytes != bytes.len() as u64 || file.sha256 != file.blob.sha256 {
             return Err(format(format!(
                 "cached payload {} failed digest check",
                 file.component
@@ -116,18 +118,18 @@ fn load(
         total += bytes.len();
         payloads.insert(file.component.clone(), bytes);
     }
-    if total as i64 != document.provenance.total_bytes {
+    if total as u64 != document.provenance.total_bytes {
         return Err(format("cached payload sizes changed"));
     }
     let index = listfile::parse(kind, &payloads, limits, control)?;
-    if index.entries.len() as i64 != document.provenance.entry_count
-        || index.rejected as i64 != document.provenance.rejected
+    if index.entries.len() != document.provenance.entry_count
+        || index.rejected != document.provenance.rejected
     {
         return Err(format("cached entry counts changed"));
     }
     Ok(Prepared {
         index,
-        provenance: document.provenance.into_public()?,
+        provenance: document.provenance,
     })
 }
 fn wrapped_cache(kind: &str, error: ToolkitError) -> ToolkitError {
@@ -204,7 +206,7 @@ fn finish_stop<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
             return result;
         }
     }
-    lycheedev_core::metadata::historical_write::finish_historical(result, cleanup)
+    lycheedev_core::metadata::owned_write::finish_owned(result, cleanup)
 }
 fn prepare_owned(
     home: &Path,

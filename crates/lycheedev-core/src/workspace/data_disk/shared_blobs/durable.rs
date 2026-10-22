@@ -49,6 +49,7 @@ impl Declaration {
         bytes[8] = match self.kind {
             ManagedStageKind::Spool => 1,
             ManagedStageKind::Shard => 2,
+            ManagedStageKind::ExternalExport => return Err(integrity()),
         };
         bytes[9] = self.slot;
         bytes[16..24].copy_from_slice(&self.expected.to_le_bytes());
@@ -89,6 +90,7 @@ impl Declaration {
                 .parent()
                 .expect("shard")
                 .to_owned()),
+            ManagedStageKind::ExternalExport => Err(integrity()),
         }
     }
 }
@@ -109,6 +111,43 @@ fn record_directory<'a>(owner: &'a DerivedReservation<'_>) -> &'a Directory {
         .iter()
         .find(|d| d.path() == owner.paths.shared_blobs())
         .expect("held shared records")
+}
+/// A fresh name-only snapshot under the caller's held quota/directory owner.
+/// Names select canonical opens; neither enumeration nor casing authenticates a
+/// declaration. Keep slot order independent of filesystem enumeration order.
+pub(in crate::workspace::data_disk) fn existing_record_slots(
+    directory: &Directory,
+    kind: ManagedStageKind,
+    checks: &Checks<'_>,
+) -> Result<impl Iterator<Item = u8>> {
+    checks.check()?;
+    let names = (0..MANAGED_STAGE_SLOTS)
+        .map(|slot| ManagedStageDeclaration::record_name(kind, slot))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let mut present = 0u64;
+    for (index, entry) in fs::read_dir(directory.path())?.enumerate() {
+        checks.check()?;
+        if index >= MAX_ENTRIES {
+            return Err(integrity());
+        }
+        let name = entry?.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.len() != names[0].len() {
+            continue;
+        }
+        // Relative native opens use OBJ_CASE_INSENSITIVE. Generate the finite
+        // names once, including when this directory mostly contains CAS records.
+        if let Some(slot) = names
+            .iter()
+            .position(|canonical| name.eq_ignore_ascii_case(canonical))
+        {
+            present |= 1u64 << slot;
+        }
+    }
+    checks.check()?;
+    Ok((0..MANAGED_STAGE_SLOTS).filter(move |slot| present & (1u64 << *slot) != 0))
 }
 fn read_declaration_strict(
     directory: &Directory,
@@ -148,7 +187,7 @@ pub(in crate::workspace::data_disk) fn spool_reservations(
 ) -> Result<BTreeMap<String, u64>> {
     with_inventory_directory(&paths.shared_blobs(), held, checks, |directory| {
         let mut result = BTreeMap::new();
-        for slot in 0..MANAGED_STAGE_SLOTS {
+        for slot in existing_record_slots(directory, ManagedStageKind::Spool, checks)? {
             // A torn record is bounded metadata, not a valid reservation or
             // payload authorization. It is retained and cannot be overwritten.
             match read_declaration(directory, ManagedStageKind::Spool, slot, checks) {
@@ -189,7 +228,11 @@ impl StageSlot {
         hex::decode_to_slice(&reference.sha256, &mut digest).map_err(|_| integrity())?;
         // Reuse the same durable declaration and empty/recoverable slot rather
         // than requiring extra record/body headroom after every crash.
-        for slot in 0..MANAGED_STAGE_SLOTS {
+        for slot in existing_record_slots(
+            record_directory(owner),
+            ManagedStageKind::Shard,
+            &owner.control,
+        )? {
             let Some(record) = read_declaration(
                 record_directory(owner),
                 ManagedStageKind::Shard,
@@ -260,14 +303,20 @@ impl StageSlot {
                 // occupant is not adopted even though its declaration is absent.
                 let parent = record.payload_parent(&owner.home, &owner.paths)?;
                 if parent.try_exists()? {
-                    let dir = Directory::open_controlled(&parent, &mut Controlled(&owner.control))?;
-                    let exists = dir
-                        .optional_metadata_controlled(
-                            OsStr::new(&record.payload_name()?),
-                            &mut Controlled(&owner.control),
-                        )
-                        .map(|v| v.is_some());
-                    if join(exists, close_directory(dir), &owner.control)? {
+                    let exists = with_inventory_directory(
+                        &parent,
+                        &owner.directories,
+                        &owner.control,
+                        |directory| {
+                            directory
+                                .optional_metadata_controlled(
+                                    OsStr::new(&record.payload_name()?),
+                                    &mut Controlled(&owner.control),
+                                )
+                                .map(|value| value.is_some())
+                        },
+                    )?;
+                    if exists {
                         return Ok(None);
                     }
                 }
@@ -474,7 +523,11 @@ pub(super) fn recover_memory(
     bytes: &[u8],
 ) -> Result<bool> {
     let mut recovered = false;
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(
+        record_directory(owner),
+        ManagedStageKind::Shard,
+        &owner.control,
+    )? {
         let Some(record) = read_declaration(
             record_directory(owner),
             ManagedStageKind::Shard,
@@ -522,7 +575,11 @@ pub(super) fn finish_memory_recovery(
     reference: &BlobRef,
     bytes: &[u8],
 ) -> Result<()> {
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(
+        record_directory(owner),
+        ManagedStageKind::Shard,
+        &owner.control,
+    )? {
         let Some(record) = read_declaration(
             record_directory(owner),
             ManagedStageKind::Shard,
@@ -555,7 +612,11 @@ pub(super) fn has_shard(
     source: &SourceIdentity,
     reference: &BlobRef,
 ) -> Result<bool> {
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(
+        record_directory(owner),
+        ManagedStageKind::Shard,
+        &owner.control,
+    )? {
         if let Some(record) = read_declaration(
             record_directory(owner),
             ManagedStageKind::Shard,
@@ -581,7 +642,11 @@ pub(crate) fn recover_shards(
     spool: &mut lycheedev_windows::filesystem::destination::PrivateSpool<'_>,
     except: Option<&ManagedStageName>,
 ) -> Result<()> {
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(
+        record_directory(owner),
+        ManagedStageKind::Shard,
+        &owner.control,
+    )? {
         let Some(record) = read_declaration(
             record_directory(owner),
             ManagedStageKind::Shard,
@@ -627,7 +692,11 @@ pub(super) fn finish_shards(
     source: &SourceIdentity,
     reference: &BlobRef,
 ) -> Result<()> {
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(
+        record_directory(owner),
+        ManagedStageKind::Shard,
+        &owner.control,
+    )? {
         let Some(record) = read_declaration(
             record_directory(owner),
             ManagedStageKind::Shard,
@@ -702,69 +771,70 @@ pub(super) fn recover_spool_once(
     let mut candidate: Option<CleanupCandidate> = None;
     let mut ancestors = Vec::new();
     let prepared = (|| {
-        for (kind, slot) in [ManagedStageKind::Spool, ManagedStageKind::Shard]
-            .into_iter()
-            .flat_map(|kind| (0..MANAGED_STAGE_SLOTS).map(move |slot| (kind, slot)))
-        {
-            let record =
-                match read_declaration(record_directory(&owner), kind, slot, &owner.control) {
-                    Ok(Some(record)) => record,
-                    Ok(None) => continue,
-                    Err(error)
-                        if error.code == "vault.data_shared_blob_integrity"
-                            && error.details.is_null() =>
-                    {
+        'kinds: for kind in [ManagedStageKind::Spool, ManagedStageKind::Shard] {
+            for slot in existing_record_slots(record_directory(&owner), kind, &owner.control)? {
+                let record =
+                    match read_declaration(record_directory(&owner), kind, slot, &owner.control) {
+                        Ok(Some(record)) => record,
+                        Ok(None) => continue,
+                        Err(error)
+                            if error.code == "vault.data_shared_blob_integrity"
+                                && error.details.is_null() =>
+                        {
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    };
+                if record.source != *source || record.expected != expected {
+                    continue;
+                }
+                let lease = match slot_lock(&owner, record.kind, slot) {
+                    Ok(lease) => lease,
+                    Err(error) if error.code == "workspace.busy" && error.details.is_null() => {
                         continue;
                     }
                     Err(error) => return Err(error),
                 };
-            if record.source != *source || record.expected != expected {
-                continue;
-            }
-            let lease = match slot_lock(&owner, record.kind, slot) {
-                Ok(lease) => lease,
-                Err(error) if error.code == "workspace.busy" && error.details.is_null() => continue,
-                Err(error) => return Err(error),
-            };
-            slot_lease = Some(lease);
-            let path = record.payload_parent(&owner.home, &owner.paths)?;
-            let mut current = PathBuf::new();
-            for component in path.components() {
-                current.push(component.as_os_str());
-                if matches!(component, std::path::Component::Prefix(_)) {
-                    continue;
+                slot_lease = Some(lease);
+                let path = record.payload_parent(&owner.home, &owner.paths)?;
+                let mut current = PathBuf::new();
+                for component in path.components() {
+                    current.push(component.as_os_str());
+                    if matches!(component, std::path::Component::Prefix(_)) {
+                        continue;
+                    }
+                    if !current.try_exists()? {
+                        break;
+                    }
+                    ancestors.push(storage::hold_cleanup_ancestor(&current, control)?);
                 }
-                if !current.try_exists()? {
-                    break;
+                if path.try_exists()? {
+                    parent = Some(Directory::open_controlled(&path, &mut Controlled(&checks))?);
+                    let directory = parent.as_ref().expect("pinned payload parent");
+                    let name = record.payload_name()?;
+                    if directory
+                        .optional_metadata_controlled(OsStr::new(&name), &mut Controlled(&checks))?
+                        .is_some()
+                    {
+                        candidate = Some(
+                            directory
+                                .open_cleanup_candidate_owner_controlled(
+                                    OsStr::new(&name),
+                                    &mut Controlled(&checks),
+                                )?
+                                .ok_or_else(|| {
+                                    ToolkitError::new(
+                                        "workspace.busy",
+                                        "Declared payload is still held",
+                                        6,
+                                    )
+                                })?,
+                        );
+                    }
                 }
-                ancestors.push(storage::hold_cleanup_ancestor(&current, control)?);
+                selected = Some(record);
+                break 'kinds;
             }
-            if path.try_exists()? {
-                parent = Some(Directory::open_controlled(&path, &mut Controlled(&checks))?);
-                let directory = parent.as_ref().expect("pinned payload parent");
-                let name = record.payload_name()?;
-                if directory
-                    .optional_metadata_controlled(OsStr::new(&name), &mut Controlled(&checks))?
-                    .is_some()
-                {
-                    candidate = Some(
-                        directory
-                            .open_cleanup_candidate_owner_controlled(
-                                OsStr::new(&name),
-                                &mut Controlled(&checks),
-                            )?
-                            .ok_or_else(|| {
-                                ToolkitError::new(
-                                    "workspace.busy",
-                                    "Declared payload is still held",
-                                    6,
-                                )
-                            })?,
-                    );
-                }
-            }
-            selected = Some(record);
-            break;
         }
         Ok(())
     })();
@@ -869,7 +939,7 @@ pub(super) fn recover_spool_once(
 /// does not. Count additional declared stages without double-counting that one.
 pub(super) fn shard_reservations(directory: &Directory, checks: &Checks<'_>) -> Result<u64> {
     let mut by_digest = BTreeMap::<String, (u64, u64)>::new();
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(directory, ManagedStageKind::Shard, checks)? {
         let record = match read_declaration(directory, ManagedStageKind::Shard, slot, checks) {
             Ok(Some(record)) => record,
             Ok(None) => continue,
@@ -919,7 +989,7 @@ pub(super) fn has_any_shard(
     reference: &BlobRef,
     checks: &Checks<'_>,
 ) -> Result<bool> {
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(directory, ManagedStageKind::Shard, checks)? {
         if let Some(record) = read_declaration(directory, ManagedStageKind::Shard, slot, checks)? {
             if record.expected == reference.bytes && hex::encode(record.digest) == reference.sha256
             {
@@ -986,7 +1056,7 @@ fn withdraw_recovered_attribution(
         return Err(integrity());
     }
     let mut others = false;
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(directory, ManagedStageKind::Shard, &owner.control)? {
         if slot == record.slot {
             continue;
         }
@@ -1024,7 +1094,11 @@ pub(super) fn require_shards_absent(
     source: &SourceIdentity,
     reference: &BlobRef,
 ) -> Result<()> {
-    for slot in 0..MANAGED_STAGE_SLOTS {
+    for slot in existing_record_slots(
+        record_directory(owner),
+        ManagedStageKind::Shard,
+        &owner.control,
+    )? {
         let Some(record) = read_declaration(
             record_directory(owner),
             ManagedStageKind::Shard,

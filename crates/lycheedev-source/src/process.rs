@@ -29,66 +29,31 @@ enum Event {
     Input(std::io::Result<()>),
 }
 #[derive(Clone, Copy)]
-enum ProcessControl<'a> {
-    Legacy(Option<&'a AtomicBool>),
-    Complete(&'a OperationControl),
-}
+struct ProcessControl<'a>(&'a OperationControl);
 fn cancelled() -> ToolkitError {
     ToolkitError::new("process.cancelled", "External process cancelled", 7)
 }
 fn deadline_exceeded() -> ToolkitError {
     ToolkitError::new(
-        "luals.check_failed",
+        "source.process_check_failed",
         "External process execution deadline exceeded",
         5,
     )
 }
 impl ProcessControl<'_> {
     fn check(self) -> Result<()> {
-        match self {
-            Self::Legacy(cancel) => {
-                if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
-                    Err(cancelled())
-                } else {
-                    Ok(())
-                }
-            }
-            Self::Complete(control) => control.check().map_err(|error| match error.code.as_str() {
-                "command.cancelled" => cancelled(),
-                "command.deadline" => deadline_exceeded(),
-                _ => error,
-            }),
-        }
+        self.0.check().map_err(|error| match error.code.as_str() {
+            "command.cancelled" => cancelled(), "command.deadline" => deadline_exceeded(), _ => error,
+        })
     }
-    fn deadline(self, requested: Instant) -> Instant {
-        match self {
-            Self::Legacy(_) => requested,
-            Self::Complete(control) => requested.min(control.deadline()),
-        }
-    }
-    fn check_complete(self) -> Result<()> {
-        match self {
-            Self::Legacy(_) => Ok(()),
-            Self::Complete(_) => self.check(),
-        }
-    }
-    fn expired(self) -> ToolkitError {
-        // Only the complete-control entry resolves cancellation that arrived
-        // between its first check and the deadline clock read. The raw entry
-        // retains its historical single-check boundary.
-        if matches!(self, Self::Complete(_))
-            && let Err(error) = self.check()
-        {
-            return error;
-        }
-        deadline_exceeded()
-    }
+    fn deadline(self, requested: Instant) -> Instant { requested.min(self.0.deadline()) }
+    fn expired(self) -> ToolkitError { self.check().err().unwrap_or_else(deadline_exceeded) }
 }
 fn complete_process_control(
     control: ProcessControl<'_>,
     cleanup: impl FnOnce() -> serde_json::Value,
 ) -> Result<()> {
-    control.check_complete().map_err(|mut error| {
+    control.check().map_err(|mut error| {
         error.details = cleanup();
         error
     })
@@ -104,21 +69,8 @@ pub fn run_with_input(
     timeout: Duration,
     input: Option<Vec<u8>>,
 ) -> Result<Output> {
-    run_controlled(cmd, cap, timeout, input, None)
+    run_with_operation_control(cmd, cap, timeout, input, &OperationControl::default())
 }
-pub fn run_controlled(
-    cmd: Command,
-    cap: usize,
-    timeout: Duration,
-    input: Option<Vec<u8>>,
-    cancel: Option<&AtomicBool>,
-) -> Result<Output> {
-    run_with_limits(cmd, cap, cap, timeout, input, cancel)
-}
-/// Preserve the caller's complete cancellation ancestry and event ordering
-/// while waiting on the same owned job and bounded pipe/termination protocol.
-/// No writable cancellation token escapes this entry. A legacy caller retains
-/// its legacy ordering; it is never upgraded into timestamped evidence.
 pub fn run_with_operation_control(
     cmd: Command,
     cap: usize,
@@ -144,22 +96,13 @@ pub(crate) fn run_with_operation_control_observed(
         cap,
         timeout,
         input,
-        ProcessControl::Complete(&scope),
+        ProcessControl(&scope),
         observation,
     )
 }
 fn process_scope(control: &OperationControl, deadline: Instant) -> Result<OperationControl> {
     control.check()?;
-    match control.ordered_child(deadline) {
-        Ok(scope) => Ok(scope),
-        Err(error) if error.code == "control.cancellation_order_unavailable" => {
-            // Existing Source consumers may already have exported a raw token.
-            // Preserve their ancestry and cancellation-first legacy behavior,
-            // but never manufacture an event timestamp for that raw signal.
-            Ok(control.child(deadline, Arc::new(AtomicBool::new(false))))
-        }
-        Err(error) => Err(error),
-    }
+    control.ordered_child(deadline)
 }
 pub(crate) fn run_with_limits(
     cmd: Command,
@@ -167,7 +110,7 @@ pub(crate) fn run_with_limits(
     stderr_cap: usize,
     timeout: Duration,
     input: Option<Vec<u8>>,
-    cancel: Option<&AtomicBool>,
+    control: &OperationControl,
 ) -> Result<Output> {
     run_with_limits_inner(
         cmd,
@@ -175,7 +118,7 @@ pub(crate) fn run_with_limits(
         stderr_cap,
         timeout,
         input,
-        ProcessControl::Legacy(cancel),
+        ProcessControl(&process_scope(control, Instant::now() + timeout)?),
         None,
     )
 }
@@ -196,7 +139,7 @@ fn run_with_limits_inner(
     }
     // A complete scope can already be expired (notably timeout=0). Do not
     // spawn before checking that narrowed scope; legacy admission is unchanged.
-    control.check_complete()?;
+    control.check()?;
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -206,7 +149,7 @@ fn run_with_limits_inner(
             Stdio::null()
         })
         .spawn()
-        .map_err(|e| ToolkitError::new("luals.unavailable", e.to_string(), 3))?;
+        .map_err(|e| ToolkitError::new("source.process_unavailable", e.to_string(), 3))?;
     let (wake, rx) = mpsc::channel();
     let mut workers = WorkerSet::default();
     let mut state = ProcessState::default();
@@ -225,7 +168,7 @@ fn run_with_limits_inner(
                 Instant::now() + lifetime::CLEANUP_GRACE,
             );
             return Err(
-                ToolkitError::new("luals.unavailable", error, 3).with_details(cleanup.details())
+                ToolkitError::new("source.process_unavailable", error, 3).with_details(cleanup.details())
             );
         }
     };
@@ -276,13 +219,13 @@ fn run_with_limits_inner(
         // With pending readers, defer stdin failure until their cap/IO results
         // are known: those errors preceded stdin validation in the old loop.
         // Stops observed here use the same error grace as stops in the loop.
-        control.check_complete()?;
+        control.check()?;
         if workers.complete()
             && state.status == Some(0)
             && let Some(error) = state.input_error.take()
         {
             return Err(ToolkitError::new(
-                "luals.check_failed",
+                "source.process_check_failed",
                 format!("Process stdin failed: {error}"),
                 5,
             ));
@@ -334,7 +277,7 @@ fn finish_retired_result(
         if let Some(error) = &cleanup.completion_error {
             return Err(error.clone());
         }
-        control.check_complete()?;
+        control.check()?;
         if let Some(error) = &cleanup.first_worker_error {
             return Err(error.clone());
         }
@@ -342,7 +285,7 @@ fn finish_retired_result(
             && let Some(error) = state.input_error.take()
         {
             return Err(ToolkitError::new(
-                "luals.check_failed",
+                "source.process_check_failed",
                 format!("Process stdin failed: {error}"),
                 5,
             ));
@@ -365,7 +308,7 @@ fn finish_result(
     complete_process_control(control, || cleanup.details())?;
     if !cleanup.complete() || !cleanup.errors.is_empty() {
         return Err(ToolkitError::new(
-            "luals.check_failed",
+            "source.process_check_failed",
             "External process retirement is unconfirmed",
             5,
         )
@@ -512,21 +455,21 @@ mod tests {
         assert_eq!(timed.details["outputReadersComplete"], true);
         assert_eq!(timed.details["jobEmpty"], true);
         let over = run(helper("output"), 1024, Duration::from_secs(10)).unwrap_err();
-        assert_eq!(over.code, "luals.input_budget");
+        assert_eq!(over.code, "source.process_input_budget");
         assert_eq!(over.details["reaped"], true);
         assert_eq!(over.details["ownedJobTerminal"], true);
-        let cancel = std::sync::Arc::new(AtomicBool::new(false));
-        let signal = cancel.clone();
+        let control = OperationControl::default();
+        let signal = control.tracked_cancel_handle().unwrap();
         let thread = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
-            signal.store(true, Ordering::Release);
+            signal.cancel();
         });
-        let aborted = run_controlled(
+        let aborted = run_with_operation_control(
             helper("block"),
             1024,
             Duration::from_secs(10),
             Some(vec![b'x'; 4 << 20]),
-            Some(&cancel),
+            &control,
         )
         .unwrap_err();
         thread.join().unwrap();
@@ -538,13 +481,13 @@ mod tests {
     }
 
     #[test]
-    fn complete_control_maps_first_stop_without_raw_escape_or_legacy_drift() {
+    fn complete_control_maps_first_stop_preserves_first_stop() {
         use lycheedev_core::control::{StopCause, TrackedCancellation};
         let signal = TrackedCancellation::new();
         let expired = OperationControl::tracked(Instant::now(), signal.clone());
         signal.cancel();
-        let error = ProcessControl::Complete(&expired).check().unwrap_err();
-        assert_eq!(error.code, "luals.check_failed");
+        let error = ProcessControl(&expired).check().unwrap_err();
+        assert_eq!(error.code, "source.process_check_failed");
         assert_eq!(error.exit_code, 5);
         assert_eq!(
             error.message,
@@ -558,7 +501,7 @@ mod tests {
         let parent = OperationControl::default();
         let child = parent.ordered_child(parent.deadline()).unwrap();
         let local = child.tracked_cancel_handle().unwrap();
-        let complete = ProcessControl::Complete(&child);
+        let complete = ProcessControl(&child);
         complete.check().unwrap();
         assert_eq!(
             complete.deadline(parent.deadline() + Duration::from_secs(1)),
@@ -571,17 +514,11 @@ mod tests {
         assert_eq!(child.stop_cause().unwrap(), Some(StopCause::Cancelled));
         assert_eq!(parent.stop_cause().unwrap(), Some(StopCause::Cancelled));
 
-        let raw = AtomicBool::new(false);
-        let legacy = ProcessControl::Legacy(Some(&raw));
-        legacy.check().unwrap();
-        raw.store(true, Ordering::Release);
-        // The old clock-read boundary does not add a second raw-token check.
-        assert_eq!(legacy.expired().code, "luals.check_failed");
-        assert_eq!(legacy.check().unwrap_err().code, "process.cancelled");
+
     }
 
     #[test]
-    fn process_scope_bounds_its_timeout_and_keeps_raw_ancestry_unordered() {
+    fn process_scope_bounds_its_timeout_and_keeps_cancellation_ancestry() {
         use lycheedev_core::control::StopCause;
         let parent = OperationControl::default();
         let requested = Instant::now();
@@ -594,27 +531,11 @@ mod tests {
         );
         assert_eq!(parent.stop_cause().unwrap(), Some(StopCause::Cancelled));
         assert_eq!(
-            ProcessControl::Complete(&scope).check().unwrap_err().code,
-            "luals.check_failed"
+            ProcessControl(&scope).check().unwrap_err().code,
+            "source.process_check_failed"
         );
 
-        let raw = Arc::new(AtomicBool::new(false));
-        let parent = OperationControl::new(Instant::now() + Duration::from_secs(5), raw.clone());
-        let scope = process_scope(&parent, parent.deadline() + Duration::from_secs(1)).unwrap();
-        assert_eq!(scope.deadline(), parent.deadline());
-        assert_eq!(
-            scope.stop_cause().unwrap_err().code,
-            "control.cancellation_order_unavailable"
-        );
-        raw.store(true, Ordering::Release);
-        assert_eq!(
-            ProcessControl::Complete(&scope).check().unwrap_err().code,
-            "process.cancelled"
-        );
-        assert_eq!(
-            parent.stop_cause().unwrap_err().code,
-            "control.cancellation_order_unavailable"
-        );
+
     }
 
     #[test]
@@ -634,13 +555,13 @@ mod tests {
     }
 
     #[test]
-    fn complete_control_zero_timeout_precedes_missing_program_but_legacy_does_not() {
+    fn complete_control_zero_timeout_precedes_missing_program_without_spawning() {
         let missing = std::env::current_exe().unwrap().join("not-a-directory.exe");
         let parent = OperationControl::default();
         let error =
             run_with_operation_control(Command::new(&missing), 1024, Duration::ZERO, None, &parent)
                 .unwrap_err();
-        assert_eq!(error.code, "luals.check_failed");
+        assert_eq!(error.code, "source.process_check_failed");
         assert_eq!(
             error.message,
             "External process execution deadline exceeded"
@@ -648,15 +569,7 @@ mod tests {
         assert_eq!(error.exit_code, 5);
         assert!(error.details.is_null(), "no process was spawned or reaped");
         parent.check().unwrap();
-        let error = run_controlled(
-            Command::new(&missing),
-            1024,
-            Duration::ZERO,
-            None,
-            Some(&AtomicBool::new(true)),
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "luals.unavailable");
+
     }
 
     #[test]
@@ -665,7 +578,7 @@ mod tests {
         use std::cell::Cell;
         let parent = OperationControl::default();
         let scope = process_scope(&parent, parent.deadline()).unwrap();
-        let control = ProcessControl::Complete(&scope);
+        let control = ProcessControl(&scope);
         control.check().unwrap();
         let (tx, rx) = mpsc::channel();
         tx.send(Event::Input(Ok(()))).unwrap();
@@ -685,10 +598,7 @@ mod tests {
         assert_eq!(error.details, evidence);
         assert_eq!(cleanup_calls.get(), 1);
         assert_eq!(scope.stop_cause().unwrap(), Some(StopCause::Cancelled));
-        complete_process_control(ProcessControl::Legacy(Some(&AtomicBool::new(true))), || {
-            panic!("legacy completion must not introduce cancellation or cleanup")
-        })
-        .unwrap();
+
     }
 
     #[test]
@@ -703,9 +613,9 @@ mod tests {
             }
             let evidence = serde_json::json!({"reaped":true,"retainedCompletionEvidence":42});
             let error =
-                complete_process_control(ProcessControl::Complete(&scope), || evidence.clone())
+                complete_process_control(ProcessControl(&scope), || evidence.clone())
                     .unwrap_err();
-            assert_eq!(error.code, "luals.check_failed");
+            assert_eq!(error.code, "source.process_check_failed");
             assert_eq!(error.exit_code, 5);
             assert_eq!(error.details, evidence);
             assert_eq!(

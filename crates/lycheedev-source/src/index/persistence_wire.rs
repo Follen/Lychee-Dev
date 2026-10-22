@@ -6,21 +6,22 @@ use super::{
     AssetRecord, Document, Index, SourceSummary, Symbol,
     cache_projection::{CollectionLength, Counted},
     facts_cache::Locator,
-    model::{DiagnosticSample, Samples},
+    model::{DiagnosticSample, EncodingWarning, Samples},
     symbol_projection::{BuiltSymbols, SymbolsWire},
 };
 use lycheedev_core::{
     Result, ToolkitError, control::OperationControl, evidence::BlobRef, selection::valid_digest,
 };
-use postcard::de_flavors::Flavor as _;
 use serde::{
     Deserialize, Serialize,
     de::{DeserializeSeed, Error, SeqAccess, Visitor},
-    ser::{SerializeSeq, SerializeTuple},
+    ser::SerializeTuple,
 };
+#[cfg(test)]
+use serde::ser::SerializeSeq;
 use std::{cell::RefCell, collections::BTreeSet, fmt, marker::PhantomData};
 
-pub(crate) const SCHEMA: &str = "lycheedev.source-index.rust.v7";
+pub(crate) const SCHEMA: &str = "lycheedev.source-index.rust.v8";
 const MAGIC: &[u8; 8] = b"LYCIDX01";
 const META_MAGIC: &[u8; 8] = b"LYCIMD01";
 const HEADER: usize = 44;
@@ -414,8 +415,10 @@ fn own_summary<E: Error>(
         relationships,
         assets,
         diagnostics,
+        warnings,
         complete,
         diagnostic_sample,
+        warning_sample,
         io: _,
     } = row;
     let sample = if let Some(sample) = diagnostic_sample {
@@ -429,6 +432,26 @@ fn own_summary<E: Error>(
             owned.push(DiagnosticSample {
                 path: ctx.text(path)?,
                 line,
+                message: ctx.text(message)?,
+            });
+        }
+        Some(owned)
+    } else {
+        None
+    };
+    let warning_sample = if let Some(sample) = warning_sample {
+        let mut owned = Samples::default();
+        for EncodingWarning {
+            path,
+            line,
+            byte_offset,
+            message,
+        } in sample.into_rows()
+        {
+            owned.push(EncodingWarning {
+                path: ctx.text(path)?,
+                line,
+                byte_offset,
                 message: ctx.text(message)?,
             });
         }
@@ -450,8 +473,10 @@ fn own_summary<E: Error>(
         relationships,
         assets,
         diagnostics,
+        warnings,
         complete,
         diagnostic_sample: sample,
+        warning_sample,
         io: serde_json::Value::Null,
     })
 }
@@ -461,6 +486,7 @@ fn validate_summary<T: AsRef<str>>(
     control: &OperationControl,
 ) -> Result<()> {
     let sample = summary.diagnostic_sample.as_ref().map_or(0, Samples::len);
+    let warning_sample = summary.warning_sample.as_ref().map_or(0, Samples::len);
     if super::fingerprint_fields_checked(
         summary.repository.as_ref(),
         summary.product.as_ref(),
@@ -475,15 +501,31 @@ fn validate_summary<T: AsRef<str>>(
         || summary.ast_files > summary.documents
         || summary.declarations > SYMBOLS
         || summary.relationships > SYMBOLS
+        // Encoding warnings are display observations; they never make the index
+        // incomplete and are not syntax diagnostics.
+        || summary.warnings > summary.documents
         || summary.complete != (summary.skipped_documents == 0 && summary.diagnostics == 0)
         || sample != summary.diagnostics.min(20)
         || summary.diagnostic_sample.is_some() != (summary.diagnostics != 0)
+        || warning_sample != summary.warnings.min(20)
+        || summary.warning_sample.is_some() != (summary.warnings != 0)
     {
         return Err(invalid("Invalid cached Source summary identity or counts"));
     }
     if let Some(sample) = &summary.diagnostic_sample {
         for row in sample.iter() {
             valid_path(row.path.as_ref())?;
+        }
+    }
+    if let Some(sample) = &summary.warning_sample {
+        for row in sample.iter() {
+            valid_path(row.path.as_ref())?;
+            if row.line == 0
+                || row.line > 1_000_000
+                || row.byte_offset > crate::git::MAX_SOURCE_BYTES
+            {
+                return Err(invalid("Invalid cached Source encoding warning location"));
+            }
         }
     }
     Ok(())
@@ -613,7 +655,8 @@ impl<'de, D: Collection<Document>, A: Collection<AssetRecord>, S: Collection<Sym
 }
 
 // Delegate all framing/varints/UTF-8 to Postcard. This flavor only checks the
-// caller's control between fields and every 4096 individually consumed bytes.
+// caller's control before nonempty fields and every 4096 individually consumed
+// bytes. Empty slices do no work; the enclosing row still checks before/after.
 struct Input<'a> {
     inner: postcard::de_flavors::Slice<'a>,
     control: &'a OperationControl,
@@ -642,7 +685,9 @@ impl<'de> postcard::de_flavors::Flavor<'de> for Input<'de> {
         self.inner.size_hint()
     }
     fn try_take_n(&mut self, count: usize) -> postcard::Result<&'de [u8]> {
-        self.check()?;
+        if count != 0 {
+            self.check()?;
+        }
         self.inner.try_take_n(count)
     }
     fn finalize(self) -> postcard::Result<Self::Remainder> {

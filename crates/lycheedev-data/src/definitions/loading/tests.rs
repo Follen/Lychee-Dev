@@ -5,10 +5,7 @@ use std::{
     io::Write,
     net::{TcpListener, TcpStream},
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     thread,
 };
 
@@ -75,6 +72,63 @@ fn reply(raw: Vec<u8>) -> (String, thread::JoinHandle<()>) {
         let _ = stream.write_all(&raw);
     })
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn engine_source_io_fetches_cold_definitions_and_ranges() {
+    let home = home();
+    let ledger = budget();
+    let control = OperationControl::default();
+    let raw = b"COLUMNS\nint ID\n".to_vec();
+    let (url, server) = reply(raw.clone());
+    let (range_url, range_server) = serve(|mut stream, request| {
+        assert!(request.to_ascii_lowercase().contains("range: bytes=2-5\r\n"));
+        stream.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 2-5/8\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata").unwrap();
+    });
+    let result = crate::engine::source_io::run(|| {
+        let (blob, fetched) = load(&home, &url, false, ledger.deadline,
+            Some(&ledger), Some(&control), |_| Ok(()))?;
+        let range = transport::fetch_range(&range_url,
+            transport::RangeRequest { offset: 2, length: 4, total: 8 },
+            &control, Some(&ledger))?;
+        Ok((blob, fetched, range))
+    });
+    let joined = server.join();
+    let range_joined = range_server.join();
+    let (blob, fetched, range) = result.unwrap();
+    joined.unwrap();
+    range_joined.unwrap();
+    assert_eq!(fetched, raw);
+    assert_eq!(range.bytes, b"data");
+    assert_eq!(range.object_bytes, 8);
+    assert_eq!(ledger.snapshot().unwrap().network_requests, 2);
+    let cached = crate::engine::source_io::run(|| load(&home, &url, true,
+        ledger.deadline, Some(&ledger), Some(&control), |_| Ok(()))).unwrap();
+    assert_eq!(cached, (blob, raw));
+    assert_eq!(ledger.snapshot().unwrap().network_requests, 2);
+    std::fs::remove_dir_all(home).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn engine_source_io_joins_cancelled_definition_work_before_returning() {
+    let home = home();
+    let ledger = budget();
+    let token = TrackedCancellation::new();
+    let control = OperationControl::tracked(ledger.deadline, token.clone());
+    let (url, server) = serve(move |_stream, _| token.cancel());
+    let finished = std::sync::atomic::AtomicBool::new(false);
+    let error = crate::engine::source_io::run(|| {
+        let result = load(&home, &url, false, ledger.deadline,
+            Some(&ledger), Some(&control), |_| Ok(()));
+        finished.store(true, Ordering::SeqCst);
+        result
+    }).unwrap_err();
+    let joined = server.join();
+    assert_eq!(error.code, "command.cancelled");
+    joined.unwrap();
+    assert!(finished.load(Ordering::SeqCst));
+    assert_absent(&home, &url);
+    std::fs::remove_dir_all(home).unwrap();
+}
 fn cached(home: &Path, url: &str, raw: &[u8]) -> Value {
     let blob = evidence::publish_blob(home, raw, MAXIMUM).unwrap();
     DataCacheMetadata::put_controlled_with_check(
@@ -127,7 +181,8 @@ fn pre_cancelled_invocation_has_no_workspace_side_effects() {
 #[test]
 fn independent_budget_stop_keeps_live_invocation_and_has_no_side_effects() {
     let missing = home().join("absent");
-    let cancel = Arc::new(AtomicBool::new(true));
+    let cancel = TrackedCancellation::new();
+    cancel.cancel();
     let ledger = Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(10),
@@ -153,14 +208,14 @@ fn independent_budget_stop_keeps_live_invocation_and_has_no_side_effects() {
 #[test]
 fn independent_budget_stops_pending_http_headers() {
     let home = home();
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel = TrackedCancellation::new();
     let ledger = Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(10),
         Some(cancel.clone()),
     );
     let control = OperationControl::default();
-    let (url, server) = serve(move |_stream, _| cancel.store(true, Ordering::Release));
+    let (url, server) = serve(move |_stream, _| cancel.cancel());
     let error = load(
         &home,
         &url,
@@ -205,7 +260,7 @@ fn invocation_stops_pending_http_headers_with_unrelated_data_budget() {
 #[test]
 fn consumed_body_bytes_survive_later_independent_cancellation() {
     let home = home();
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel = TrackedCancellation::new();
     let ledger = Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(10),
@@ -229,7 +284,7 @@ fn consumed_body_bytes_survive_later_independent_cancellation() {
             );
             thread::sleep(Duration::from_millis(2));
         }
-        cancel.store(true, Ordering::Release);
+        cancel.cancel();
     });
     let error = load(
         &home,
@@ -288,7 +343,7 @@ fn cold_budget_failure_does_not_publish_or_refund_observed_work() {
 #[test]
 fn validated_bytes_are_not_published_after_independent_stop() {
     let home = home();
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel = TrackedCancellation::new();
     let ledger = Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(10),
@@ -304,7 +359,7 @@ fn validated_bytes_are_not_published_after_independent_stop() {
         Some(&ledger),
         Some(&control),
         |_| {
-            cancel.store(true, Ordering::Release);
+            cancel.cancel();
             Ok(())
         },
     )
@@ -382,60 +437,6 @@ fn corrupt_cache_is_rehashed_without_authorizing_network_replacement() {
     assert_eq!(error.code, "vault.blob_integrity");
     assert_eq!(ledger.snapshot().unwrap().network_requests, 0);
     assert_eq!(ledger.logical_snapshot().unwrap().metadata_bytes, 16);
-}
-#[test]
-fn go_cached_object_merges_casefolded_fields_and_validates_size_without_a_budget() {
-    let home = home();
-    let url = "https://example.invalid/definition";
-    let blob = evidence::publish_blob(&home, b"//x\n", MAXIMUM).unwrap();
-    let document = format!(
-        r#"{{"URL":"{url}","URL":null,"BLOB":{{"SHA256":"{}"}},"blob":{{"bytes":4}},"ignored":true}}"#,
-        blob["sha256"].as_str().unwrap()
-    );
-    let object: CachedObject = serde_json::from_str(&document).unwrap();
-    assert_eq!(object.url, url);
-    assert_eq!(object.blob.bytes, 4);
-    let key = format!("definition/{}", storage::sha256(url.as_bytes()));
-    DataCacheMetadata::put_controlled_with_check(
-        &home,
-        &key,
-        &json!({"URL":url,"BLOB":{"SHA256":blob["sha256"],"BYTES":4},"ignored":true}),
-        None,
-        &OperationControl::default(),
-        || Ok(()),
-    )
-    .unwrap();
-    let result = load(
-        &home,
-        url,
-        true,
-        Instant::now() + Duration::from_secs(5),
-        None,
-        None,
-        |_| Ok(()),
-    )
-    .unwrap();
-    assert_eq!(result.1, b"//x\n");
-    DataCacheMetadata::put_controlled_with_check(
-        &home,
-        &key,
-        &json!({"url":url,"blob":{"sha256":blob["sha256"],"bytes":-1}}),
-        Some(1),
-        &OperationControl::default(),
-        || Ok(()),
-    )
-    .unwrap();
-    let error = load(
-        &home,
-        url,
-        true,
-        Instant::now() + Duration::from_secs(5),
-        None,
-        None,
-        |_| Ok(()),
-    )
-    .unwrap_err();
-    assert_eq!(error.code, "records.metadata_limit");
 }
 #[test]
 fn redirect_is_terminal_and_automatic_gzip_charges_delivered_definition_bytes() {
@@ -521,7 +522,8 @@ fn redirect_is_terminal_and_automatic_gzip_charges_delivered_definition_bytes() 
 #[test]
 fn parse_failure_cleanup_and_stop_remain_typed_and_are_not_retry_permission() {
     let control = OperationControl::default();
-    let cancel = Arc::new(AtomicBool::new(true));
+    let cancel = TrackedCancellation::new();
+    cancel.cancel();
     let ledger = Budget::new(Cost::defaults(), control.deadline(), Some(cancel));
     let error = finish::<()>(
         Err(fault("vault.generation_conflict", 4, "conflict")),
@@ -696,14 +698,10 @@ fn malformed_cached_object_keeps_parse_primary_and_actual_invocation_stop() {
     let mut checks = 0;
     let parsed = decode_cached_object(br#"{"url":17}"#, &control, Some(&ledger), || {
         checks += 1;
-        // Check 1 follows the bounded JSON grammar pass; check 2 follows
-        // normalization, immediately before typed object deserialization.
-        if checks == 2 {
-            token.cancel();
-            Ok(())
-        } else {
-            control.check()
-        }
+        // The current typed decoder performs one admitted pre-parse check, then
+        // fails on the malformed document before any post-parse observation.
+        token.cancel();
+        Ok(())
     });
     let error = finish(
         parsed.map(|_| ()),
@@ -713,7 +711,7 @@ fn malformed_cached_object_keeps_parse_primary_and_actual_invocation_stop() {
         &control,
     )
     .unwrap_err();
-    assert_eq!(checks, 2);
+    assert_eq!(checks, 1);
     assert_eq!(error.code, "records.definition_identity");
     assert_eq!(
         error.details["primary"]["code"],
@@ -725,13 +723,12 @@ fn malformed_cached_object_keeps_parse_primary_and_actual_invocation_stop() {
 }
 
 #[test]
-fn malformed_cached_json_keeps_syntax_primary_and_actual_invocation_stop() {
+fn cancelled_before_cached_json_decode_keeps_single_stop_and_no_parse() {
     let ledger = budget();
     let token = TrackedCancellation::new();
     let control = OperationControl::tracked(ledger.deadline, token.clone());
-    // Model a cancellation that arrives after the caller's admitted pre-check,
-    // while the bounded grammar pass is already running. Its completed syntax
-    // failure must survive the next control observation and checked finish.
+    // A stop observed at decode admission wins before the malformed document is
+    // parsed; no syntax attempt is made and no secondary cause is invented.
     token.cancel();
     let mut checks = 0;
     let parsed = decode_cached_object(b"{invalid json", &control, Some(&ledger), || {
@@ -748,14 +745,10 @@ fn malformed_cached_json_keeps_syntax_primary_and_actual_invocation_stop() {
     .unwrap_err();
     assert_eq!(
         checks, 0,
-        "a completed syntax failure must precede post-parse checks"
+        "decode admission observes the stop before any supplemental check"
     );
-    assert_eq!(error.code, "records.definition_identity");
-    assert_eq!(
-        error.details["primary"]["code"],
-        "records.definition_identity"
-    );
-    assert_eq!(error.details["control"]["code"], "command.cancelled");
+    assert_eq!(error.code, "command.cancelled");
+    assert!(error.details.is_null());
     assert_eq!(ledger.snapshot().unwrap(), Cost::default());
     assert!(ledger.check().is_ok());
 }

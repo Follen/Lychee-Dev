@@ -5,7 +5,7 @@ use std::{
     path::Path,
     time::{Duration, SystemTime},
 };
-pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<RemoteResult> {
+pub(super) fn query(ctx: &DataContext, path: &Path, q: Query, budget: &Budget) -> Result<RemoteResult> {
     if !q.search.is_empty() || q.from.is_some() || q.to.is_some() {
         return Err(error(
             "filter_unsupported",
@@ -32,8 +32,7 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
     } else {
         Some(Cursor::decode(&q.cursor, &q, "raidbots")?)
     };
-    let path = Path::new(inv.required("--raidbots")?);
-    check_scope(inv, budget)?;
+    check_scope(ctx, budget)?;
     let mut captured_at = String::new();
     // The same controlled directory/file owner supplies the mtime admission and
     // stable bounded body. Its checked close completes before publishing a pin.
@@ -41,7 +40,7 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
         path,
         512 << 20,
         budget,
-        &inv.control,
+        &ctx.control,
         |before| {
             let modified = before.modified()?;
             captured_at = storage::timestamp(DateTime::<Utc>::from(modified));
@@ -65,11 +64,11 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
     for block in raw.chunks(65536) {
-        check_scope(inv, budget)?;
+        check_scope(ctx, budget)?;
         hash.update(block);
     }
     let digest = crate::casc::hex(&hash.finalize());
-    check_scope(inv, budget)?;
+    check_scope(ctx, budget)?;
     let mut filter = super::super::CacheFilter {
         build: q.build_number()?,
         table_hash: q.table_hash,
@@ -96,11 +95,11 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
         );
     }
     let page = super::super::inspect_budgeted_with_check(&raw, filter, Some(budget), || {
-        inv.control.check()
+        ctx.control.check()
     })?;
     let page = if let Some(definition) = &q.definition {
         super::super::decode_page_with_check(&raw, page, definition, budget, || {
-            inv.control.check()
+            ctx.control.check()
         })?
     } else {
         page
@@ -151,6 +150,6 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
     let mut result = RemoteResult::new("raidbots", q, records, coverage, next)?;
     // Record-window completion and Raidbots server coverage are different fields.
     result.complete = page.complete;
-    check_scope(inv, budget)?;
+    check_scope(ctx, budget)?;
     Ok(result)
 }

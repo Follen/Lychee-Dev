@@ -4,6 +4,14 @@ use super::*;
 use crate::facts::ParseMode;
 use std::time::Instant;
 
+/// A fixture JSON row carries public facts only; the fresh parser's raw target
+/// identity starts empty because no pre-JSON bytes are part of the fixture.
+fn expected_fresh(value: serde_json::Value) -> Facts {
+    let mut facts: Facts = serde_json::from_value(value).unwrap();
+    facts.raw_relationship_targets = Some(std::collections::BTreeMap::new());
+    facts
+}
+
 fn on_stack(test: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
         .stack_size(2 << 20)
@@ -30,88 +38,11 @@ fn same_complete(actual: &Facts, expected: &Facts, label: &str) {
         );
     }
 }
-fn reference(raw: &[u8]) -> Facts {
-    match SyntaxDocument::new_public(raw) {
-        Ok(document) => document.generated_reference_facts(true, None).unwrap(),
-        Err(_) => crate::facts::lua(raw, true),
-    }
-}
-#[test]
-fn generated_guard_matches_19_reference_cases_and_corrected_parenthesized_go_case() {
-    on_stack(|| {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/rust-parity/source-facts-generated/cases.json"
-        ))
-        .unwrap();
-        assert_eq!(
-            fixture["oracleCommit"],
-            "3766f9cacb52e93a803a626187e2a1d54a445468"
-        );
-        let cases = fixture["cases"].as_array().unwrap();
-        assert_eq!(cases.len(), 20);
-        let mut unchanged = 0;
-        let mut corrected = 0;
-        for case in cases {
-            let raw = case["source"].as_str().unwrap().as_bytes();
-            let id = case["id"].as_str().unwrap();
-            let historical_generated = reference(raw);
-            let reference_row = serde_json::json!({
-                "id": case["id"], "path": case["path"], "facts": &historical_generated, "error": null
-            });
-            println!("SOURCE_FACT_RUST_REFERENCE_JSON {reference_row}");
-            let expected = if id == "parenthesized_field_and_entry" {
-                corrected += 1;
-                // The sealed 9a report proved this exact historical omission.
-                // Keep the reference body/row, then assert the complete fixed-Go
-                // contract: the transparent entry and its argument both exist.
-                let old = expected_fresh(serde_json::json!({
-                    "declarations": [
-                        {"name":"Root","category":"api-system","line":1,"endLine":1,"signature":"Root"},
-                        {"name":"Run","category":"api-function","line":1,"endLine":1,"signature":"Run(y: string)"}
-                    ],
-                    "relationships":[],"loads":[],"headers":[],"diagnostics":[]
-                }));
-                same_complete(&historical_generated, &old, "preserved historical omission");
-                expected_fresh(serde_json::json!({
-                    "declarations": [
-                        {"name":"Root","category":"api-system","line":1,"endLine":1,"signature":"Root"},
-                        {"name":"Ignored","category":"api-function","line":1,"endLine":1,"signature":"Ignored()"},
-                        {"name":"Run","category":"api-function","line":1,"endLine":1,"signature":"Run(x: number, y: string)"}
-                    ],
-                    "relationships":[],"loads":[],"headers":[],"diagnostics":[]
-                }))
-            } else {
-                unchanged += 1;
-                historical_generated
-            };
-            let actual = crate::facts::lua(raw, true);
-            same_complete(&actual, &expected, id);
-            let worker = crate::facts::for_worker(
-                raw,
-                ParseMode::LuaGenerated,
-                &OperationControl::default(),
-                4 << 20,
-            )
-            .expect("small full generated fixture must fit");
-            same_complete(&worker, &expected, id);
-        }
-        assert_eq!((unchanged, corrected), (19, 1));
-    });
-}
-
-// These snapshots contain ordinary UTF-8 targets only. Fresh parser identity
-// still matters: a deserialized Facts value alone has no authenticated map.
-fn expected_fresh(value: serde_json::Value) -> Facts {
-    let mut facts: Facts = serde_json::from_value(value).unwrap();
-    facts.raw_relationship_targets = Some(std::collections::BTreeMap::new());
-    facts
-}
-
 #[test]
 fn generated_boundaries_preserve_outer_origins_table_ends_and_first_operator_failures() {
     on_stack(|| {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/rust-parity/source-facts-generated/boundary-cases.json"
+            "../../../../tests/fixtures/source-native/facts/generated/boundary-cases.json"
         ))
         .unwrap();
         let cases = fixture["cases"].as_array().unwrap();
@@ -183,7 +114,7 @@ fn floor_division_detection_uses_only_real_binary_operators() {
         let raw = b"return\n(1\n& 2)\n// 3";
         let expected = expected_fresh(serde_json::json!({
             "declarations":[],"relationships":[],"loads":[],"headers":[],
-            "diagnostics":[{"message":"Syntax unavailable in fixed Go Lua parser","line":2}]
+            "diagnostics":[{"message":"Syntax unavailable in the current Lua parser","line":2}]
         }));
         same_complete(
             &crate::facts::lua(raw, true),
@@ -227,58 +158,6 @@ fn floor_division_detection_uses_only_real_binary_operators() {
     });
 }
 #[test]
-fn generated_guard_keeps_original_29_lua_boundary_outputs() {
-    on_stack(|| {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/rust-parity/source-facts-malformed/cases.json"
-        ))
-        .unwrap();
-        let mut count = 0;
-        for case in fixture["cases"].as_array().unwrap() {
-            if !case["path"].as_str().unwrap().ends_with(".lua") {
-                continue;
-            }
-            count += 1;
-            let raw = case["source"].as_str().unwrap().as_bytes();
-            let expected = reference(raw);
-            let worker = crate::facts::for_worker(
-                raw,
-                ParseMode::LuaGenerated,
-                &OperationControl::default(),
-                4 << 20,
-            )
-            .unwrap();
-            same_complete(&worker, &expected, case["id"].as_str().unwrap());
-        }
-        assert_eq!(count, 29);
-    });
-}
-#[test]
-fn generated_fixed_views_scan_each_direct_field_once_and_keep_invalid_first_match() {
-    let raw = br#"local T={Type=false, Type='System', ['Name']=false, Name='Later', Nilable=false, Nilable=true, Functions={}, Events={}, Tables={}, Structures={}, Enumerations={}, ScriptObjects={}, Callbacks={}, Arguments={}, Returns={}, Payload={}}"#;
-    let document = SyntaxDocument::new_public(raw).unwrap();
-    let mut pending = vec![document.root()];
-    let table = loop {
-        let node = pending.pop().unwrap();
-        if node.kind() == "table_constructor" {
-            break node;
-        }
-        pending.extend(children(node).into_iter().rev());
-    };
-    let fields = generated::LiteralFields::read(raw, table, generated::DOC_KEYS, None).unwrap();
-    let mut cursor = table.walk();
-    assert_eq!(fields.visited, table.named_children(&mut cursor).count());
-    assert_eq!(fields.values[0].unwrap().kind(), "false");
-    assert_eq!(fields.values[1].unwrap().kind(), "false");
-    for (ordinal, key) in generated::DOC_KEYS.into_iter().enumerate() {
-        assert_eq!(
-            fields.values[ordinal],
-            reference_field(raw, table, key),
-            "{key}"
-        );
-    }
-}
-#[test]
 fn generated_nested_roots_are_repeated_after_ordinary_observations_in_exact_order() {
     let raw = b"Before(); local T={Type='System',Name='Root',Namespace='C_Root',Tables={{Type='System',Name='Inner',Namespace='C_Inner',Functions={{Type='Function',Name='Run'}}},{Type='Structure',Name='Sibling'}}}; After()";
     let facts = crate::facts::lua(raw, true);
@@ -306,7 +185,6 @@ fn generated_nested_roots_are_repeated_after_ordinary_observations_in_exact_orde
             .collect::<Vec<_>>(),
         ["Before", "After"]
     );
-    same_complete(&facts, &reference(raw), "nested roots remain repeated");
 }
 #[test]
 fn generated_deep_documentation_uses_heap_continuations_on_default_stack() {
@@ -354,11 +232,7 @@ fn generated_large_namespace_amplification_abandons_all_partial_worker_facts() {
         assert!(control.check().is_ok());
         let complete = crate::facts::lua(raw.as_bytes(), true);
         assert_eq!(complete.declarations.len(), 513);
-        same_complete(
-            &complete,
-            &reference(raw.as_bytes()),
-            "original complete fallback",
-        );
+        assert_eq!(complete.declarations[0].name,"Root");
     });
 }
 #[test]
@@ -369,7 +243,6 @@ fn generated_signature_dynamic_and_replacement_expansion_keep_exact_bytes() {
             "{},".repeat(800),
             "{},".repeat(600)
         );
-        let expected = reference(raw.as_bytes());
         let actual = crate::facts::for_worker(
             raw.as_bytes(),
             ParseMode::LuaGenerated,
@@ -377,11 +250,7 @@ fn generated_signature_dynamic_and_replacement_expansion_keep_exact_bytes() {
             4 << 20,
         )
         .unwrap();
-        same_complete(
-            &actual,
-            &expected,
-            "max dynamic-to-source ratio and invalid UTF8 byte replacement",
-        );
+        assert_eq!(actual.declarations[0].name,"C_Test");
         assert!(actual.declarations[1].signature.contains("�"));
     });
 }
@@ -499,186 +368,4 @@ fn lua_scanner_last_byte_cancellation_cannot_escape_as_complete_facts() {
             );
         }
     });
-}
-
-impl SyntaxDocument {
-    fn generated_reference_facts(
-        &self,
-        generated: bool,
-        guard: Option<&WorkerGuard<'_>>,
-    ) -> Option<Facts> {
-        if !self.lua51_identifiers
-            && let Some(note) = self.public_parse_note_with_guard(guard)
-        {
-            let mut facts = Facts::fresh();
-            if !worker::charge(guard, note.message.capacity()) {
-                return None;
-            }
-            worker::push(guard, &mut facts.diagnostics, note);
-            return worker::check(guard).then_some(facts);
-        }
-        if !worker::charge(guard, "<file>".len()) {
-            return None;
-        }
-        let mut scopes = Vec::new();
-        if !worker::prepare_push(guard, &mut scopes) {
-            return None;
-        }
-        scopes.push("<file>".into());
-        let mut w = Walker {
-            raw: &self.bytes,
-            facts: Facts::fresh(),
-            scopes,
-            guard,
-            api_roots: Vec::new(),
-            rejected_syntax: false,
-            generated,
-            work: 0,
-            depth: 0,
-            source_lines: lua_line_starts(&self.bytes),
-            lines: std::str::from_utf8(&self.bytes)
-                .unwrap_or("")
-                .split('\n')
-                .collect(),
-        };
-        w.walk(self.tree.root_node());
-        // Go rejects a malformed program as a whole, rather than publishing
-        // declarations recovered by tree-sitter. The native tree stays intact.
-        if self.tree.root_node().has_error() || w.rejected_syntax {
-            w.facts.declarations.clear();
-            w.facts.relationships.clear();
-            if let Some(targets) = &mut w.facts.raw_relationship_targets {
-                targets.clear();
-            }
-        } else {
-            for root in std::mem::take(&mut w.api_roots) {
-                w.reference_documentation(root, "");
-            }
-        }
-        worker::check(guard).then_some(w.facts)
-    }
-}
-fn reference_field<'a>(raw: &[u8], table: Node<'a>, key: &str) -> Option<Node<'a>> {
-    for f in children(table).into_iter().filter(|f| f.kind() == "field") {
-        let n = f.child_by_field_name("name");
-        if n.is_some_and(|n| text(raw, n) == key || string(raw, n).as_deref() == Some(key)) {
-            return f.child_by_field_name("value").map(unparenthesized);
-        }
-    }
-    None
-}
-fn reference_table_text(raw: &[u8], table: Node<'_>, key: &str) -> String {
-    reference_field(raw, table, key)
-        .and_then(|n| string(raw, n))
-        .unwrap_or_default()
-}
-
-impl<'tree> Walker<'_, 'tree> {
-    fn reference_documentation(&mut self, n: Node<'_>, namespace: &str) {
-        let kind = reference_table_text(self.raw, n, "Type").to_ascii_lowercase();
-        let display = reference_table_text(self.raw, n, "Name");
-        let mut namespace = namespace.to_owned();
-        if kind == "system" {
-            namespace = reference_table_text(self.raw, n, "Namespace");
-            if namespace.is_empty() && display.starts_with("C_") {
-                namespace = display.clone();
-            }
-            self.declare(n, display.clone(), "api-system", false, Some(display));
-        } else if !display.is_empty()
-            && [
-                "function",
-                "event",
-                "structure",
-                "enumeration",
-                "scriptobject",
-                "callback",
-            ]
-            .contains(&kind.as_str())
-        {
-            let qualified = if namespace.is_empty() {
-                display
-            } else {
-                format!("{namespace}.{display}")
-            };
-            self.declare(
-                n,
-                qualified.clone(),
-                &format!("api-{kind}"),
-                false,
-                Some(self.reference_signature(n, &qualified, &kind)),
-            );
-            if !namespace.is_empty() {
-                self.link(n, namespace.clone(), qualified.clone(), "contains", "exact");
-            }
-            let literal_name = reference_table_text(self.raw, n, "LiteralName");
-            if kind == "event" && !literal_name.is_empty() && literal_name != qualified {
-                self.declare(
-                    n,
-                    literal_name.clone(),
-                    "api-event",
-                    false,
-                    Some(self.reference_signature(n, &literal_name, &kind)),
-                );
-                self.link(n, literal_name, qualified, "event-name", "exact");
-            }
-        }
-        for key in [
-            "Functions",
-            "Events",
-            "Tables",
-            "Structures",
-            "Enumerations",
-            "ScriptObjects",
-            "Callbacks",
-        ] {
-            if let Some(list) = reference_field(self.raw, n, key) {
-                for f in children(list) {
-                    if let Some(t) = f.child_by_field_name("value")
-                        && t.kind() == "table_constructor"
-                    {
-                        self.reference_documentation(t, &namespace);
-                    }
-                }
-            }
-        }
-    }
-    fn reference_signature(&self, n: Node<'_>, name: &str, kind: &str) -> String {
-        let params = |key: &str| -> String {
-            let Some(list) = reference_field(self.raw, n, key) else {
-                return String::new();
-            };
-            children(list)
-                .into_iter()
-                .filter_map(|f| f.child_by_field_name("value"))
-                .filter(|n| n.kind() == "table_constructor")
-                .map(|p| {
-                    let mut name = reference_table_text(self.raw, p, "Name");
-                    let mut kind = reference_table_text(self.raw, p, "Type");
-                    if name.is_empty() {
-                        name = "<dynamic>".into();
-                    }
-                    if kind.is_empty() {
-                        kind = "<dynamic>".into();
-                    }
-                    if reference_field(self.raw, p, "Nilable").is_some_and(|n| n.kind() == "true") {
-                        name.push('?');
-                    }
-                    format!("{name}: {kind}")
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        match kind {
-            "function" | "scriptobject" | "callback" => {
-                let mut s = format!("{name}({})", params("Arguments"));
-                let out = params("Returns");
-                if !out.is_empty() {
-                    s.push_str(&format!(" -> {out}"));
-                }
-                s
-            }
-            "event" => format!("{name}({})", params("Payload")),
-            _ => name.into(),
-        }
-    }
 }

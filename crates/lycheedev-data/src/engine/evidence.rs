@@ -1,10 +1,12 @@
 //! Explicit complete-result evidence task. Query handles alone are not CAPs.
 use super::{lifetime::RequestLifetime, result::ResultOwner};
+use crate::request::DataContext;
 use crate::{
     capture, fault,
+    phase_profile::Phase,
     resource::{Budget, OwnedRetainedReservation},
 };
-use lycheedev_core::{Invocation, Result, ToolkitError, control::OperationControl, evidence};
+use lycheedev_core::{Result, ToolkitError, evidence};
 use serde::{
     Serialize, Serializer,
     ser::{Error as _, SerializeSeq, SerializeStruct},
@@ -24,7 +26,7 @@ pub struct OwnedCapture {
 }
 impl OwnedCapture {
     /// Transport retains committed identity if serialization/flush fails later.
-    pub(crate) fn committed_error(&self, error: ToolkitError) -> ToolkitError {
+    pub fn committed_error(&self, error: ToolkitError) -> ToolkitError {
         committed_error(error, &self.value)
     }
 }
@@ -57,17 +59,17 @@ struct Rows<'a> {
 impl Serialize for Rows<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.result.rows))?;
+        let mut values = Vec::new();
         for batch in &self.result.batches {
             for row in 0..batch.num_rows() {
-                let values = (|| {
-                    self.budget.check()?;
+                (|| {
                     self.budget.charge(crate::resource::Cost::work(
                         batch.num_columns().saturating_add(1),
                     ))?;
                     let mut remaining = MAXIMUM;
                     let bytes = batch.num_columns().checked_mul(64).ok_or_else(limit)?;
                     remaining = remaining.checked_sub(bytes).ok_or_else(limit)?;
-                    let mut values = Vec::with_capacity(batch.num_columns());
+                    values.reserve(batch.num_columns());
                     for column in batch.columns() {
                         self.budget.check()?;
                         values.push(super::result::value(
@@ -77,13 +79,14 @@ impl Serialize for Rows<'_> {
                             0,
                         )?);
                     }
-                    Ok::<_, ToolkitError>(values)
+                    Ok::<_, ToolkitError>(())
                 })()
                 .map_err(|error| {
                     *self.error.borrow_mut() = Some(error);
                     S::Error::custom("Complete result serialization stopped")
                 })?;
                 sequence.serialize_element(&values)?;
+                values.clear();
             }
         }
         sequence.end()
@@ -115,10 +118,9 @@ impl Serialize for Body<'_> {
 }
 
 pub(super) fn capture(
-    invocation: &Invocation,
+    invocation: &DataContext,
     result: &ResultOwner,
     lifetime: Arc<RequestLifetime>,
-    control: OperationControl,
 ) -> Result<OwnedCapture> {
     let error = RefCell::new(None);
     let body = Body {
@@ -142,7 +144,6 @@ pub(super) fn capture(
         MAXIMUM,
         &error,
         lifetime.clone(),
-        control,
     )
 }
 #[derive(Serialize)]
@@ -153,13 +154,12 @@ struct DomainBody<'a> {
     complete: bool,
 }
 pub(super) fn capture_domain(
-    invocation: &Invocation,
+    invocation: &DataContext,
     result: &super::domain::DomainResult,
     request: &super::api::DomainRequest,
     lifetime: Arc<RequestLifetime>,
-    control: OperationControl,
 ) -> Result<OwnedCapture> {
-    control.check()?;
+    invocation.control.check()?;
     let complete = result.complete()?;
     let truncated = result.truncated()?;
     let count = result.sources().iter().try_fold(0usize, |n, source| {
@@ -195,7 +195,6 @@ pub(super) fn capture_domain(
         0,
         &error,
         lifetime.clone(),
-        control,
     );
     drop(references);
     drop(reference_allocation);
@@ -215,7 +214,7 @@ fn committed_error(mut error: ToolkitError, value: &Value) -> ToolkitError {
     error
 }
 fn commit_body(
-    invocation: &Invocation,
+    invocation: &DataContext,
     body: &impl Serialize,
     request: &impl Serialize,
     references: &[&str],
@@ -225,31 +224,36 @@ fn commit_body(
     scratch_bytes: usize,
     error: &RefCell<Option<ToolkitError>>,
     lifetime: Arc<RequestLifetime>,
-    control: OperationControl,
 ) -> Result<OwnedCapture> {
-    control.check()?;
+    invocation.control.check()?;
     let budget = &lifetime.budget;
     let scratch = budget.reserve_retained(scratch_bytes)?;
     let receipt = budget.reserve_retained(32 << 20)?.into_owned(budget)?;
-    let (raw, allocation) = capture::json_bytes_owned(body, budget, MAXIMUM, limit)
-        .map_err(|failure| error.borrow_mut().take().unwrap_or(failure))?;
+    let (raw, allocation) = {
+        let _serialize = budget.phase(Phase::SqlSerialize);
+        capture::json_bytes_owned(body, budget, MAXIMUM, limit)
+            .map_err(|failure| error.borrow_mut().take().unwrap_or(failure))?
+    };
     drop(scratch);
     let request_digest = capture::json_sha256(request, budget, serde_json::ser::CompactFormatter)?;
-    let committed = evidence::commit_capture_budgeted_with_dependencies(
-        &invocation.home,
-        evidence::CaptureInput {
-            bytes: &raw,
-            maximum_bytes: MAXIMUM,
-            media_type: "application/json",
-            provenance: serde_json::json!({"kind":kind, "locator":format!("typed:sha256:{request_digest}"),
-                "snapshot":invocation.flags.get("--snapshot")}),
-            complete,
-            truncated,
-        },
-        references,
-        &control,
-        budget.as_ref(),
-    );
+    let committed = {
+        let _publish = budget.phase(Phase::SqlCapture);
+        evidence::commit_capture_budgeted_with_dependencies(
+            &invocation.home,
+            evidence::CaptureInput {
+                bytes: &raw,
+                maximum_bytes: MAXIMUM,
+                media_type: "application/json",
+                provenance: serde_json::json!({"kind":kind, "locator":format!("typed:sha256:{request_digest}"),
+                "snapshot":invocation.source.snapshot.as_deref()}),
+                complete,
+                truncated,
+            },
+            references,
+            &invocation.control,
+            budget.as_ref(),
+        )
+    };
     drop(raw);
     drop(allocation);
     let value = committed?;

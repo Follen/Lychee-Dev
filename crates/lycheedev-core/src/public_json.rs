@@ -379,7 +379,7 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
     #[test]
-    fn typed_binary64_matches_go_digits_thresholds_and_negative_zero() {
+    fn typed_binary64_matches_reference_digits_thresholds_and_negative_zero() {
         for (number, expected) in [
             (0.0, "0"),
             (1.0, "1"),

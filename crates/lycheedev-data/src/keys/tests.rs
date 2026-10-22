@@ -1,6 +1,6 @@
 use super::*;
 use crate::resource::{Budget, Cost};
-use std::{cell::Cell, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
+use std::{cell::Cell, sync::{Arc, atomic::Ordering}, time::Duration};
 struct Fixture(PathBuf);
 impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
 fn context(offline: bool, limits: Cost) -> (Fixture, Context, Arc<Budget>) {
@@ -9,10 +9,11 @@ fn context(offline: bool, limits: Cost) -> (Fixture, Context, Arc<Budget>) {
     lycheedev_core::workspace::initialize(&home).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let budget = Arc::new(Budget::new(limits, deadline, None));
-    let inv = Invocation { command: "records file".into(), positional: None,
-        flags: BTreeMap::from([("--offline".into(), offline.to_string())]),
-        home: home.clone(), cwd: home.clone(), control: OperationControl::uncancelable(deadline) };
-    let ctx = Context::prepare_budgeted(&inv, deadline, Some(budget.clone())).unwrap();
+    let request = crate::request::DataContext {
+        home: home.clone(), cwd: home.clone(), control: OperationControl::uncancelable(deadline),
+        source: crate::request::SourceOptions { offline, ..Default::default() },
+    };
+    let ctx = Context::prepare_budgeted(&request, deadline, Some(budget.clone())).unwrap();
     (Fixture(home), ctx, budget)
 }
 struct Failed(Cell<usize>);
@@ -23,7 +24,7 @@ impl http::Fetcher for Failed {
     }
 }
 #[test]
-fn public_offline_failure_is_memoized_with_exact_go_reservation() {
+fn public_offline_failure_is_memoized_with_exact_retained_reservation() {
     let (_home, mut ctx, budget) = context(true, Cost::defaults());
     let fetcher = Failed(Cell::new(0));
     for _ in 0..2 { assert_eq!(ctx.ensure_public_with(&fetcher).unwrap_err().code, "container.key_unavailable"); }
@@ -72,8 +73,10 @@ fn independent_budget_stop_and_original_invocation_stop_prevent_materialization(
     for independent in [false, true] {
         let (_home, mut ctx, _) = context(false, Cost::defaults());
         if independent {
+            let cancelled = lycheedev_core::control::TrackedCancellation::new();
+            cancelled.cancel();
             ctx.budget = Some(Arc::new(Budget::new(Cost::defaults(), ctx.deadline,
-                Some(Arc::new(AtomicBool::new(true))))));
+                Some(cancelled))));
         } else { ctx.control.tracked_cancel_handle().unwrap().cancel(); }
         let fetcher = Failed(Cell::new(0));
         let code = ctx.ensure_public_with(&fetcher).unwrap_err().code;

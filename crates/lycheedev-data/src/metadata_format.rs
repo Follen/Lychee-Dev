@@ -7,13 +7,12 @@ use crate::{
     casc::{self, Limits},
     fault,
 };
-use lycheedev_core::Result;
+use lycheedev_core::{Result, control::TrackedCancellation};
 use md5::{Digest, Md5};
 use serde::Serialize;
 use std::{
     borrow::Cow,
     collections::BTreeSet,
-    sync::atomic::{AtomicBool, Ordering},
     time::Instant,
 };
 fn invalid() -> lycheedev_core::ToolkitError {
@@ -26,8 +25,8 @@ fn invalid() -> lycheedev_core::ToolkitError {
 fn exceeded() -> lycheedev_core::ToolkitError {
     fault("records.metadata_limit", 3, "Metadata budget exceeded")
 }
-fn check(limits: Limits, cancel: Option<&AtomicBool>) -> Result<()> {
-    if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
+fn check(limits: Limits, cancel: Option<&TrackedCancellation>) -> Result<()> {
+    if cancel.is_some_and(|c| c.is_cancelled()) {
         return Err(fault("operation.cancelled", 7, "Metadata query cancelled"));
     }
     if Instant::now() >= limits.deadline {
@@ -76,14 +75,14 @@ impl<'a> Encoding<'a> {
     pub fn open(
         content: &'a dyn ByteSource,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
     ) -> Result<Self> {
         Self::open_with_check(content, limits, cancel, || Ok(()))
     }
     pub(crate) fn open_with_check(
         content: &'a dyn ByteSource,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
         mut supplemental: impl FnMut() -> Result<()>,
     ) -> Result<Self> {
         supplemental()?;
@@ -120,7 +119,7 @@ impl<'a> Encoding<'a> {
         &self,
         key: &str,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
     ) -> Result<EncodedRecord> {
         self.find_encoding_with_check(key, limits, cancel, || Ok(()))
     }
@@ -128,7 +127,7 @@ impl<'a> Encoding<'a> {
         &self,
         key: &str,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
         mut supplemental: impl FnMut() -> Result<()>,
     ) -> Result<EncodedRecord> {
         supplemental()?;
@@ -152,7 +151,7 @@ impl<'a> Encoding<'a> {
         &self,
         key: &str,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
     ) -> Result<EncodingRecord> {
         self.find_with_check(key, limits, cancel, || Ok(()))
     }
@@ -160,7 +159,7 @@ impl<'a> Encoding<'a> {
         &self,
         key: &str,
         limits: Limits,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&TrackedCancellation>,
         mut supplemental: impl FnMut() -> Result<()>,
     ) -> Result<EncodingRecord> {
         find_content(
@@ -210,7 +209,7 @@ pub fn lookup_root(
     content: &Content,
     ids: &[u32],
     limits: RootLimits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
 ) -> Result<Vec<RootRecord>> {
     lookup_root_with_check(content, ids, limits, cancel, || Ok(()))
 }
@@ -218,7 +217,7 @@ pub(crate) fn lookup_root_with_check(
     content: &Content,
     ids: &[u32],
     limits: RootLimits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     mut supplemental: impl FnMut() -> Result<()>,
 ) -> Result<Vec<RootRecord>> {
     scan_root(content, ids, limits, cancel, supplemental, None, None)
@@ -227,7 +226,7 @@ fn scan_root(
     content: &Content,
     ids: &[u32],
     limits: RootLimits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     mut supplemental: impl FnMut() -> Result<()>,
     mut collect: Option<&mut Vec<root_index::Group>>,
     budget: Option<&std::sync::Arc<crate::resource::Budget>>,
@@ -460,7 +459,7 @@ fn find_content<T: AsRef<[u8]>>(
     pages_start: usize,
     key: &str,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     mut supplemental: impl FnMut() -> Result<()>,
     mut read: impl FnMut(usize, usize, &[u8]) -> Result<T>,
 ) -> Result<EncodingRecord> {
@@ -558,7 +557,7 @@ fn find_physical<T: AsRef<[u8]>>(
     pages_start: usize,
     key: &str,
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     mut supplemental: impl FnMut() -> Result<()>,
     mut read: impl FnMut(usize, usize, &[u8]) -> Result<T>,
 ) -> Result<EncodedRecord> {
@@ -652,7 +651,7 @@ fn find_physical<T: AsRef<[u8]>>(
 fn validate_content_directory(
     directory: &[u8],
     limits: Limits,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
     mut supplemental: impl FnMut() -> Result<()>,
 ) -> Result<()> {
     let mut previous: Option<&[u8]> = None;

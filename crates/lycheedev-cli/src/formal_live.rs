@@ -1,8 +1,8 @@
-//! Fixed Go 3.2.0 public CON command adapter. The default executable enters this
-//! module, never the superseded v4 host. Results remain typed through rendering.
+//! Public CON command adapter. Results remain typed through rendering.
 #![forbid(unsafe_code)]
-use lycheedev_core::{Invocation, Result, ToolkitError, VERSION, control::OperationControl};
-use lycheedev_live::go_mailbox_v1::{
+use crate::Invocation;
+use lycheedev_core::{Result, ToolkitError, VERSION, control::OperationControl};
+use lycheedev_live::mailbox::{
     admission::{AdmissionError, TargetFilter},
     connection::{
         ConnectionService, ExecuteRequest, NativeEnvironment, ProjectResult, ServiceOutcome,
@@ -36,9 +36,6 @@ pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
 pub enum LiveResult {
     Connection(ProjectResult),
     Doctor(DoctorResult),
-    Bootstrap(lycheedev_live::history::BootstrapAttempt),
-    HistoricalOperation(lycheedev_live::history::HistoricalOutcome),
-    HistoricalSession(lycheedev_live::history::HistoricalConnection),
 }
 #[derive(Debug, Default)]
 pub struct Response {
@@ -90,7 +87,7 @@ pub fn validate_option(key: &str, value: &str) -> Result<()> {
         {
             Some("invalid --pid")
         }
-        "--count" if integer().is_none_or(|n| !(1..=2000).contains(&n)) => Some("invalid --count"),
+        "--count" if integer().is_none_or(|n| !(1..=100).contains(&n)) => Some("invalid --count"),
         "--policy" if !matches!(value, "opaque" | "observation") => {
             Some("--policy must be observation or opaque")
         }
@@ -161,7 +158,7 @@ impl Services for NativeService {
         inv: &Invocation,
         control: &OperationControl,
     ) -> ServiceOutcome {
-        use lycheedev_live::go_mailbox_v1::connection::{
+        use lycheedev_live::mailbox::connection::{
             doctor_delivery::ManagedDoctorDelivery, doctor_repair::DoctorFixOptions,
         };
         let mut delivery = match ManagedDoctorDelivery::new(VERSION, validation::CliAddonValidator)
@@ -264,64 +261,12 @@ pub fn dispatch(inv: &Invocation) -> Response {
 
 fn route_admission(inv: &Invocation) -> Result<()> {
     let session = flag(inv, "--session");
-    // Fixed Go entry.go rejects retired recovery before opening the workspace.
-    // Unknown outcomes are inspect/abandon-only; never construct native services.
-    if inv.command == "live resume" && !inv.positional.as_deref().unwrap_or("").starts_with("CON-")
-    {
-        if inv.positional.as_deref().unwrap_or("").is_empty() {
-            return Err(ToolkitError::arguments(
-                "missing selection file or record ID; use describe",
-            ));
-        }
-        return Err(ToolkitError::arguments(
-            "legacy OP/BTP execution is retired; use live status or live abandon; Native recovery requires CON",
-        ));
-    }
-
-    if matches!(
-        inv.command.as_str(),
-        "live execute" | "live reload" | "live bugs"
-    ) && !session.starts_with("CON-")
-    {
-        return Err(ToolkitError::arguments(
-            "Native execution requires --session CON-...; historical OP/BTP execution is retired",
-        ));
-    }
-    if session.starts_with("CON-") || inv.positional.as_deref().unwrap_or("").starts_with("CON-") {
-        if !matches!(
-            inv.command.as_str(),
-            "live connect"
-                | "live disconnect"
-                | "live execute"
-                | "live status"
-                | "live session"
-                | "live resume"
-                | "live reload"
-                | "live bugs"
-                | "live doctor"
-        ) {
-            return Err(ToolkitError::arguments(
-                "CON connections support execute, bugs, status, session, resume, reload and disconnect; cleanup is automatic",
-            ));
-        }
-    }
-    if matches!(
-        inv.command.as_str(),
-        "live status" | "live session" | "live cancel" | "live abandon"
-    ) && inv.positional.as_deref().unwrap_or("").is_empty()
-    {
-        return Err(ToolkitError::arguments(
-            "missing selection file or record ID; use describe",
-        ));
-    }
     if !matches!(
         inv.command.as_str(),
         "live connect"
             | "live disconnect"
             | "live execute"
             | "live status"
-            | "live cancel"
-            | "live abandon"
             | "live session"
             | "live resume"
             | "live reload"
@@ -329,13 +274,24 @@ fn route_admission(inv: &Invocation) -> Result<()> {
             | "live bugs"
             | "live doctor"
     ) {
-        return Err(ToolkitError::new(
-            "live.migration_incomplete",
-            format!(
-                "formal Live adapter for {} is not integrated; no input was sent",
-                inv.command
-            ),
-            3,
+        return Err(ToolkitError::arguments("unknown Live command"));
+    }
+    if matches!(
+        inv.command.as_str(),
+        "live status" | "live session" | "live resume"
+    ) && !inv.positional.as_deref().unwrap_or("").starts_with("CON-")
+    {
+        return Err(ToolkitError::arguments(
+            "Live recovery requires a CON connection ID",
+        ));
+    }
+    if matches!(
+        inv.command.as_str(),
+        "live execute" | "live reload" | "live bugs"
+    ) && !session.starts_with("CON-")
+    {
+        return Err(ToolkitError::arguments(
+            "Native execution requires --session CON-...",
         ));
     }
     Ok(())
@@ -348,42 +304,9 @@ pub fn dispatch_with<S: Services>(
     if let Err(e) = route_admission(inv) {
         return Response::failure(e);
     }
-    if matches!(inv.command.as_str(), "live cancel" | "live abandon") {
-        let id = inv
-            .positional
-            .as_deref()
-            .expect("admitted historical positional");
-        let mut response = Response {
-            operation_id: id.into(),
-            ..Response::default()
-        };
-        if inv.command == "live abandon" && id.starts_with("BTP-") {
-            let retired = lycheedev_live::history::abandon_bootstrap(&inv.home, id, &inv.control);
-            response.result = Some(LiveResult::Bootstrap(retired.attempt));
-            response.error = retired.error.map(|error| historical_failure(inv, error));
-        } else {
-            let retired = lycheedev_live::history::retire_operation(
-                &inv.home,
-                id,
-                inv.command == "live cancel",
-                &inv.control,
-            );
-            if !retired.outcome.operation_id.is_empty() {
-                response
-                    .context
-                    .insert("stage".into(), json!(retired.outcome.stage));
-                if retired.outcome.status == "abandoned" {
-                    response.warnings.push("Cleanup abandoned explicitly; available evidence retained; missing report results remain unknown. No game ACK or runtime unload was performed.".into());
-                }
-                response.result = Some(LiveResult::HistoricalOperation(retired.outcome));
-            }
-            response.error = retired.error.map(|error| historical_failure(inv, error));
-        }
-        return response;
-    }
     if inv.command == "live doctor" {
         if let Err(e) =
-            lycheedev_live::go_mailbox_v1::connection::doctor_service::validate_doctor_options(
+            lycheedev_live::mailbox::connection::doctor_service::validate_doctor_options(
                 &target(inv),
                 flag(inv, "--session"),
                 inv.flag_bool("--fix"),
@@ -394,53 +317,6 @@ pub fn dispatch_with<S: Services>(
         {
             return Response::failure(ToolkitError::arguments(channel_message(&e)));
         }
-    }
-    if matches!(inv.command.as_str(), "live status" | "live session")
-        && !inv.positional.as_deref().unwrap_or("").starts_with("CON-")
-    {
-        let id = inv
-            .positional
-            .as_deref()
-            .expect("admitted historical positional");
-        let mut response = Response::default();
-        let result = if inv.command == "live session" {
-            lycheedev_live::history::inspect_session(&inv.home, id, &inv.control)
-                .map(LiveResult::HistoricalSession)
-        } else {
-            response.operation_id = id.into();
-            if id.starts_with("BTP-") {
-                lycheedev_live::history::inspect_bootstrap(&inv.home, id, &inv.control)
-                    .map(LiveResult::Bootstrap)
-            } else {
-                {
-                    let read =
-                        lycheedev_live::history::inspect_operation(&inv.home, id, &inv.control);
-                    response.result = Some(LiveResult::HistoricalOperation(read.outcome));
-                    match read.error {
-                        Some(error) => Err(error),
-                        None => Ok(response.result.take().expect("historical outcome")),
-                    }
-                }
-            }
-        };
-        match result {
-            Ok(value) => {
-                response.result = Some(value);
-                if inv.command == "live session" {
-                    response.context.insert("session".into(), json!(id));
-                    response.warnings.push("Historical session evidence only; live window identity and readiness have not been refreshed.".into());
-                }
-            }
-            Err(error) => {
-                // Fixed Go entry.go:773–776 clears failed status projections.
-                // The library retains partial evidence; the CLI does not emit it.
-                if inv.command == "live status" {
-                    response.result = None;
-                }
-                response.error = Some(historical_failure(inv, error));
-            }
-        }
-        return response;
     }
     let mut services = match factory(&project_path(inv)) {
         Ok(s) => s,
@@ -555,7 +431,7 @@ fn prepare_and_run(
                 read_probe_file(inv, Path::new(file))?
             } else {
                 lycheedev_core::workspace::open(&inv.home)
-                    .and_then(|_| lycheedev_live::probes::code(inv, probe))
+                    .and_then(|_| lycheedev_live::probes::code(&crate::live_aux::context(inv), probe))
                     .map_err(probe_admission_error)?
             };
             // Preserve the file/probe's exact bytes through request identity.
@@ -860,55 +736,3 @@ fn project_doctor_checks(report: DoctorResult) -> Vec<Value> {
 #[cfg(test)]
 #[path = "formal_live_tests.rs"]
 mod tests;
-
-fn historical_failure(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
-    // Go errors.Is searches every errors.Join leaf, in entry.go priority order.
-    // Only the core-owned complete aggregate schema permits traversal.
-    fn has(error: &ToolkitError, wanted: &str, depth: usize) -> bool {
-        if error.code == wanted {
-            return true;
-        }
-        if depth >= 32
-            || error.details.as_object().is_none_or(|o| o.len() != 4)
-            || error.details["schema"] != lycheedev_core::storage::FILE_CLEANUP_SCHEMA
-        {
-            return false;
-        }
-        ["primary", "cleanup", "control"].into_iter().any(|key| {
-            serde_json::from_value::<ToolkitError>(error.details[key].clone())
-                .is_ok_and(|nested| has(&nested, wanted, depth + 1))
-        })
-    }
-    let selected = [
-        ("journal.resource_busy", 3),
-        ("journal.invalid_transition", 3),
-        ("command.cancelled", 7),
-        ("command.deadline", 6),
-        ("live.deadline_pending", 6),
-        ("vault.legacy_detected", 3),
-        ("vault.unsupported_workspace", 4),
-        ("vault.workspace_schema_newer", 4),
-        ("vault.blob_integrity", 4),
-        ("vault.generation_conflict", 3),
-        ("vault.record_missing", 2),
-    ]
-    .into_iter()
-    .find(|(code, _)| has(&error, code, 0));
-    if let Some((code, exit)) = selected {
-        error.code = match code {
-            "vault.workspace_schema_newer" => "vault.unsupported_workspace",
-            "command.deadline" => "live.deadline_pending",
-            other => other,
-        }
-        .into();
-        error.exit_code = exit;
-        // A joined failure keeps its complete message, including the first cause.
-        if code == "vault.record_missing" && error.details.is_null() {
-            error.message = "vault.record_missing".into();
-        }
-    } else {
-        error.code = "command.failed".into();
-        error.exit_code = 5;
-    }
-    super::command_fault(inv, error)
-}

@@ -2,7 +2,6 @@ use super::*;
 use crate::control::{StopCause, TrackedCancellation};
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
@@ -51,19 +50,17 @@ impl Fixture {
         workspace::initialize(&home).unwrap();
         Self { home }
     }
-    fn inv(&self, id: &str) -> Invocation {
-        Invocation {
-            command: "evidence remove".into(),
-            positional: Some(id.into()),
+    fn context(&self) -> crate::request::RequestContext {
+        crate::request::RequestContext {
             cwd: self.home.clone(),
             home: self.home.clone(),
-            flags: BTreeMap::new(),
             control: OperationControl::tracked(
                 Instant::now() + Duration::from_secs(30),
                 TrackedCancellation::new(),
             ),
         }
     }
+    fn control(&self) -> OperationControl { self.context().control }
     fn capture(&self, body: &[u8], locator: &str) -> Value {
         commit_capture_bounded(
             &self.home,
@@ -80,8 +77,8 @@ impl Fixture {
         .unwrap()
     }
     fn raw(&self, key: &str, body: &[u8]) {
-        Metadata::with_historical_write(&self.home, &OperationControl::default(), |writer| {
-            writer.commit(&[crate::metadata::historical_write::HistoricalMutation {
+        Metadata::with_owned_write(&self.home, &OperationControl::default(), |writer| {
+            writer.commit(&[crate::metadata::owned_write::OwnedMutation {
                 key,
                 expected_generation: 0,
                 bytes: body,
@@ -97,119 +94,81 @@ fn id(capture: &Value) -> &str {
     capture["id"].as_str().unwrap()
 }
 #[test]
-fn default_remove_accepts_future_retention_schema_but_keep_still_rejects_it() {
+fn untyped_retention_document_is_rejected_by_keep_and_remove_without_removing_evidence() {
     let f = Fixture::new();
-    let capture = f.capture(b"body", "future");
+    let capture = f.capture(b"body", "untyped-retention");
     let id = id(&capture);
     f.raw(
         &format!("evidence/keep/{id}"),
         format!(
-            r#"{{"schema":"future","captureId":"{id}","blob":{},"keptAt":null}}"#,
+            r#"{{"schema":"future","captureId":"{id}","blob":{},"keptAt":"2026-10-15T00:00:00Z"}}"#,
             capture["blob"]
         )
         .as_bytes(),
     );
-    let mut keep = f.inv(id);
-    keep.command = "evidence keep".into();
+    let context = f.context();
     assert_eq!(
-        super::super::dispatch(&keep).unwrap_err().code,
+        super::super::dispatch(&context, crate::evidence::EvidenceRequest::Keep { id: id.to_owned() }).unwrap_err().code,
         "evidence.invalid_retention"
     );
-    let inv = f.inv(id);
-    let receipt = super::super::dispatch(&inv).unwrap().data;
     assert_eq!(
-        receipt,
-        json!({"captureId":id,"manifestRemoved":true,"retentionRemoved":true,"blobRemoved":true,"blobShared":false,"blobMissing":false})
+        run(&f.home, id, &f.control()).unwrap_err().code,
+        "evidence.invalid_retention"
     );
-    assert_eq!(super::super::dispatch(&inv).unwrap().data, receipt);
-    assert_eq!(inv.control.stop_cause().unwrap(), None);
-    inv.control.ordered_child(inv.control.deadline()).unwrap();
+    assert!(read_capture(&f.home, id).is_ok());
+    assert!(
+        Metadata::read_raw_controlled(
+            &f.home,
+            &format!("evidence/keep/{id}"),
+            &f.control()
+        )
+        .is_ok()
+    );
     f.cleanup();
 }
 #[test]
-fn removal_retention_validates_capture_and_signed_blob_not_ignored_schema_or_marshal_time() {
-    for mismatch in ["capture", "digest", "length"] {
+fn typed_removal_retention_validates_capture_blob_identity_and_timestamp() {
+    for mismatch in ["capture", "digest", "length", "time"] {
         let f = Fixture::new();
         let capture = f.capture(b"body", mismatch);
         let id = id(&capture);
-        let mut keep = json!({"schema":"future","captureId":id,"blob":capture["blob"]});
+        let mut keep = json!({
+            "schema":"lycheedev.evidence-retention.v1",
+            "captureId":id,
+            "blob":capture["blob"],
+            "keptAt":"2026-10-15T00:00:00Z"
+        });
         match mismatch {
             "capture" => keep["captureId"] = json!("other"),
             "digest" => keep["blob"]["sha256"] = json!("0".repeat(64)),
-            _ => keep["blob"]["bytes"] = json!(-1),
+            "length" => keep["blob"]["bytes"] = json!(5),
+            _ => keep["keptAt"] = json!("2026-10-15T00:00:00+24:00"),
         }
         f.raw(
             &format!("evidence/keep/{id}"),
             &serde_json::to_vec(&keep).unwrap(),
         );
         assert_eq!(
-            run(&f.home, id, &f.inv(id).control).unwrap_err().code,
+            run(&f.home, id, &f.control()).unwrap_err().code,
             "evidence.invalid_retention"
         );
         assert!(read_capture(&f.home, id).is_ok());
         f.cleanup();
     }
+}
+#[test]
+fn sharing_only_uses_other_typed_capture_blobs() {
     let f = Fixture::new();
-    let capture = f.capture(b"body", "time");
-    let id = id(&capture);
-    // Fixed Go time parser accepts +24:00, but Time.MarshalJSON rejects it.
-    // Remove does not marshal this unused field; keep does.
-    f.raw(
-        &format!("evidence/keep/{id}"),
-        format!(
-            r#"{{"captureId":"{id}","blob":{},"keptAt":"2026-10-15T00:00:00+24:00"}}"#,
-            capture["blob"]
-        )
-        .as_bytes(),
-    );
-    assert!(run(&f.home, id, &f.inv(id).control).is_ok());
+    let capture = f.capture(b"body", "sharing");
+    let target_id = id(&capture);
+    let other = f.capture(b"body", "other-sharing");
+    assert_ne!(id(&other), target_id);
+    let receipt = run(&f.home, target_id, &f.control()).unwrap();
+    assert_eq!(receipt["blobShared"], true);
+    assert_eq!(receipt["blobRemoved"], false);
+    let path = blob_path(&f.home, capture["blob"]["sha256"].as_str().unwrap()).unwrap();
+    assert!(path.exists());
     f.cleanup();
-}
-#[test]
-fn raw_literal_reference_matches_keys_but_does_not_normalize_escaped_values() {
-    for literal in [false, true] {
-        let f = Fixture::new();
-        let capture = f.capture(b"body", "reference");
-        let id = id(&capture);
-        let raw = if literal {
-            format!(r#"{{"capture:{id}":0}}"#)
-        } else {
-            format!(r#"{{"id":"\u0043{}"}}"#, &id[1..])
-        };
-        f.raw("operation/reference", raw.as_bytes());
-        let result = run(&f.home, id, &f.inv(id).control);
-        if literal {
-            assert_eq!(result.unwrap_err().code, "evidence.capture_referenced");
-            assert!(read_capture(&f.home, id).is_ok());
-        } else {
-            assert_eq!(result.unwrap()["blobRemoved"], true);
-        }
-        f.cleanup();
-    }
-}
-#[test]
-fn sharing_only_uses_other_typed_capture_blobs_and_preserves_duplicate_object_merge() {
-    for typed in [false, true] {
-        let f = Fixture::new();
-        let capture = f.capture(b"body", "sharing");
-        let id = id(&capture);
-        let key = if typed {
-            "capture/unvalidated-historical"
-        } else {
-            "operation/blob-shaped"
-        };
-        let raw = format!(
-            r#"{{"blob":{{"sha256":"{}"}},"BLOB":{{"bytes":4}},"mediaType":"text/plain"}}"#,
-            capture["blob"]["sha256"].as_str().unwrap()
-        );
-        f.raw(key, raw.as_bytes());
-        let receipt = run(&f.home, id, &f.inv(id).control).unwrap();
-        assert_eq!(receipt["blobShared"], typed);
-        assert_eq!(receipt["blobRemoved"], !typed);
-        let path = blob_path(&f.home, capture["blob"]["sha256"].as_str().unwrap()).unwrap();
-        assert_eq!(path.exists(), typed);
-        f.cleanup();
-    }
 }
 #[test]
 fn absent_original_file_or_shard_is_missing_after_checked_native_lookup() {
@@ -222,7 +181,7 @@ fn absent_original_file_or_shard_is_missing_after_checked_native_lookup() {
         if shard {
             fs::remove_dir(path.parent().unwrap()).unwrap();
         }
-        let receipt = run(&f.home, id, &f.inv(id).control).unwrap();
+        let receipt = run(&f.home, id, &f.control()).unwrap();
         assert_eq!(receipt["blobMissing"], true);
         assert_eq!(receipt["blobRemoved"], false);
         f.cleanup();
@@ -240,16 +199,16 @@ fn delete_sharing_denial_preserves_pending_receipt_and_resume_is_idempotent() {
         .share_mode(1)
         .open(&path)
         .unwrap();
-    let error = run(&f.home, id, &f.inv(id).control).unwrap_err();
+    let error = run(&f.home, id, &f.control()).unwrap_err();
     assert_eq!(error.exit_code, 5);
     assert_eq!(error.details["result"]["manifestRemoved"], true);
     assert_eq!(error.details["resumeCaptureId"], id);
     assert!(read_capture(&f.home, id).is_err());
     assert!(path.exists());
     storage::close_file(external).unwrap();
-    let result = run(&f.home, id, &f.inv(id).control).unwrap();
+    let result = run(&f.home, id, &f.control()).unwrap();
     assert_eq!(result["blobRemoved"], true);
-    assert_eq!(run(&f.home, id, &f.inv(id).control).unwrap(), result);
+    assert_eq!(run(&f.home, id, &f.control()).unwrap(), result);
     f.cleanup();
 }
 #[test]
@@ -257,7 +216,7 @@ fn successful_disposition_followed_by_injected_cleanup_failure_keeps_deleted_fac
     let f = Fixture::new();
     let capture = f.capture(b"body", "late-close");
     let id = id(&capture);
-    let control = f.inv(id).control;
+    let control = f.control();
     let error = with_after_close(
         || {
             Err(ToolkitError::new(
@@ -312,7 +271,7 @@ fn stop_after_real_delete_and_cleanup_failure_preserves_both_causes_without_repl
     assert!(raw.contains("fixture.close"));
     assert_eq!(control.stop_cause().unwrap(), Some(StopCause::Cancelled));
     assert_eq!(
-        run(&f.home, id, &f.inv(id).control).unwrap()["blobRemoved"],
+        run(&f.home, id, &f.control()).unwrap()["blobRemoved"],
         true
     );
     f.cleanup();
@@ -329,7 +288,7 @@ fn references_after_first_thousand_rows_are_not_hidden_by_an_early_page() {
         "zzz/reference",
         serde_json::to_string(id).unwrap().as_bytes(),
     );
-    let error = run(&f.home, id, &f.inv(id).control).unwrap_err();
+    let error = run(&f.home, id, &f.control()).unwrap_err();
     assert_eq!(error.code, "evidence.capture_referenced");
     assert_eq!(error.details["documentKey"], "zzz/reference");
     assert!(read_capture(&f.home, id).is_ok());
@@ -362,7 +321,7 @@ fn historical_missing_blob_above_production_payload_cap_is_not_a_read_limit() {
         &format!("capture/{}", capture.id),
         &storage::identity_json(&capture).unwrap(),
     );
-    let receipt = run(&f.home, &capture.id, &f.inv(&capture.id).control).unwrap();
+    let receipt = run(&f.home, &capture.id, &f.control()).unwrap();
     assert_eq!(receipt["blobMissing"], true);
     f.cleanup();
 }
@@ -370,7 +329,7 @@ fn historical_missing_blob_above_production_payload_cap_is_not_a_read_limit() {
 #[test]
 fn malformed_absent_selector_uses_manifest_lookup_after_workspace_admission() {
     let f = Fixture::new();
-    let error = run(&f.home, "not-a-capture", &f.inv("not-a-capture").control).unwrap_err();
+    let error = run(&f.home, "not-a-capture", &f.control()).unwrap_err();
     assert_eq!(error.code, "vault.record_missing");
     f.cleanup();
 }

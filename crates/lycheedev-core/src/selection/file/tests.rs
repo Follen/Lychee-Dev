@@ -1,6 +1,5 @@
 use super::*;
 use std::{
-    collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
@@ -69,43 +68,20 @@ fn real_selection_file_publishes_exact_reusable_pin_and_reauthenticates_winner()
     f.cleanup();
 }
 #[test]
-fn file_spec_merges_duplicate_objects_case_fields_and_pointer_null_without_project_rules() {
-    let f = Fixture::new();
-    let raw = format!(
-        r#"{{"source":{{"repository":"wow-ui-source","product":"wrong","parserRevision":"spec-fixture"}},"SOURCE":{{"PRODUCT":"retail","product":null,"requestedRef":"live","exactCommit":"{}"}}}}"#,
-        "a".repeat(40)
-    );
-    assert_eq!(
-        f.run(raw.as_bytes()).unwrap().id,
-        f.run(&spec()).unwrap().id
-    );
-    let reset = format!(
-        r#"{{"source":{{"repository":"discard"}},"source":null,"source":{}}}"#,
-        source()
-    );
-    assert_eq!(
-        f.run(reset.as_bytes()).unwrap().id,
-        f.run(&spec()).unwrap().id
-    );
-    f.cleanup();
-}
-#[test]
-fn spec_unknown_nested_fields_are_rejected_before_trailing_data_and_without_metadata() {
+fn spec_unknown_top_level_fields_are_rejected_before_trailing_data_and_without_metadata() {
     let f = Fixture::new();
     for raw in [
         br#"{"source":{"unknown":true}} {}"#.as_slice(),
         br#"{"unknown":true} malformed"#.as_slice(),
     ] {
         let error = f.run(raw).unwrap_err();
-        assert!(error.message.contains("unknown field"));
+        assert_eq!(error.code, "command.failed");
         assert!(!f.home.join("state/toolkit.sqlite").exists());
     }
     let mut raw = spec();
     raw.extend_from_slice(b" garbage");
-    assert_eq!(
-        f.run(&raw).unwrap_err().message,
-        "selection.trailing_spec_data"
-    );
+    let error = f.run(&raw).unwrap_err();
+    assert!(error.message.contains("trailing"), "{}", error.message);
     assert!(!f.home.join("state/toolkit.sqlite").exists());
     f.cleanup();
 }
@@ -143,87 +119,59 @@ fn input_limit_is_actual_sixty_four_kib_plus_one_probe_not_metadata_length() {
     f.cleanup();
 }
 #[test]
-fn invalid_utf8_in_string_uses_go_replacement_instead_of_project_utf8_rejection() {
-    let f = Fixture::new();
-    let mut raw = spec();
-    let position = raw.windows(4).position(|v| v == b"live").unwrap();
-    raw.splice(position..position + 4, [0xff]);
-    let pin = f.run(&raw).unwrap();
-    assert_eq!(pin.source.as_ref().unwrap().requested_ref, "\u{fffd}");
-    f.cleanup();
-}
-#[test]
-fn first_json_shared_scanner_keeps_full_admission_and_go_ten_thousand_depth() {
-    for raw in [
-        b"{} garbage".as_slice(),
-        b"null true".as_slice(),
-        b"[]{}".as_slice(),
-    ] {
-        assert!(crate::raw_json::first_value_end(raw).is_ok());
-        assert!(!crate::raw_json::is_valid(raw));
-    }
-    for depth in [9999usize, 10000] {
-        let mut raw = br#"{"unknown":"#.to_vec();
-        raw.extend(std::iter::repeat_n(b'[', depth));
-        raw.extend(std::iter::repeat_n(b']', depth));
-        raw.push(b'}');
-        let result = wire::decode(&raw, &OperationControl::default());
-        if depth == 9999 {
-            assert!(result.err().unwrap().message.contains("unknown field"));
-        } else {
-            assert!(
-                result
-                    .err()
-                    .unwrap()
-                    .message
-                    .contains("invalid Go raw JSON")
-            );
-        }
-    }
-}
-#[test]
-fn spec_time_raw_tokens_null_merge_zero_and_custom_error_priority_follow_go() {
+fn typed_spec_timestamp_is_normalized_and_invalid_or_unknown_documents_are_rejected() {
     let control = OperationControl::default();
-    let good =
-        br#"{"changes":{"fetchedAt":"2026-10-15T1:02:03,1200Z"},"CHANGES":{"FETCHEDAT":null}}"#;
-    let decoded = wire::decode(good, &control).unwrap();
+    let changes = |fetched_at: &str, extra: &str| {
+        format!(
+            r#"{{"changes":{{"provider":"fixture","product":"retail","fullBuild":"1.2.3.4","region":"us","scope":"all","fetchedAt":"{fetched_at}","sha256":"{}"}}{extra}}}"#,
+            "f".repeat(64)
+        )
+    };
+    let decoded = wire::decode(
+        changes("2026-10-15T01:02:03.1200+00:00", "").as_bytes(),
+        &control,
+    )
+    .unwrap();
     assert_eq!(
         decoded.spec.changes.unwrap().fetched_at,
         "2026-10-15T01:02:03.12Z"
     );
-    for raw in [
-        br#"{"changes":{"fetchedAt":"2026-10-15T00:00:00\u005a"}}"#.as_slice(),
-        br#"{"unknown":true,"changes":{"bad":true,"fetchedAt":"bad"}}"#.as_slice(),
-    ] {
-        assert_eq!(
-            wire::decode(raw, &control).err().unwrap().message,
-            "invalid Go selection timestamp"
-        );
-    }
-    let decoded = wire::decode(
-        br#"{"changes":{"fetchedAt":"0001-01-01T01:00:00+01:00"}}"#,
+    let error = wire::decode(changes("bad", "").as_bytes(), &control).err().unwrap();
+    assert_eq!(error.message, "invalid selection timestamp");
+    assert_eq!(error.code, "command.failed");
+    let error = wire::decode(
+        changes("2026-10-15T00:00:00+24:00", "").as_bytes(),
         &control,
     )
+    .err()
     .unwrap();
-    assert!(decoded.spec.changes.unwrap().fetched_at.is_empty());
-    let decoded = wire::decode(
-        br#"{"changes":{"fetchedAt":"2026-10-15T00:00:00+24:00"},"changes":null}"#,
-        &control,
-    )
-    .unwrap();
-    assert!(!decoded.time_unmarshal_only);
-    assert!(decoded.spec.changes.is_none());
+    assert_eq!(error.message, "invalid selection timestamp");
+    let error = wire::decode(br#"{"unknown":true,"source":null}"#, &control)
+        .err()
+        .unwrap();
+    assert!(error.message.contains("unknown field"), "{}", error.message);
 }
 #[test]
 fn valid_decoded_spec_opens_metadata_before_pin_validation_and_parent_precedes_bad_build() {
     let f = Fixture::new();
     fs::create_dir_all(f.home.join("state")).unwrap();
     fs::write(f.home.join("state/toolkit.sqlite"), b"not sqlite").unwrap();
-    assert_eq!(f.run(b"null").unwrap_err().code, "vault.metadata");
+    assert_eq!(f.run(b"{}").unwrap_err().code, "vault.metadata");
     f.cleanup();
     let f = Fixture::new();
-    let raw = serde_json::to_vec(&json!({"parent":"PIN-missing","data":{"fullBuild":"+1.2.3.4"}}))
-        .unwrap();
+    let raw = serde_json::to_vec(&json!({
+        "parent":"PIN-missing",
+        "data":{
+            "product":"retail",
+            "region":"us",
+            "fullBuild":"+1.2.3.4",
+            "buildConfig":"b".repeat(32),
+            "cdnConfig":"c".repeat(32),
+            "language":"enUS",
+            "definitionCommit":"d".repeat(40)
+        }
+    }))
+    .unwrap();
     assert_eq!(f.run(&raw).unwrap_err().code, "vault.record_missing");
     f.cleanup();
 }
@@ -303,42 +251,29 @@ fn checked_file_close_failure_keeps_primary_and_original_stop_after_committed_wo
     assert_eq!(error.message, format!("{}\nclose", stopped.message));
 }
 #[test]
-fn default_workspace_file_dispatch_retains_relative_cwd_without_added_snapshot_context() {
+fn typed_workspace_file_resolution_retains_relative_cwd_without_added_snapshot_context() {
     let f = Fixture::new();
     fs::write(&f.path, spec()).unwrap();
-    let inv = Invocation {
-        command: "target resolve".into(),
-        positional: None,
-        flags: BTreeMap::from([("--file".into(), "selection.json".into())]),
+    let ctx = crate::request::RequestContext {
         home: f.home.clone(),
         cwd: f.home.clone(),
         control: f.control.clone(),
     };
-    let out = crate::workspace::dispatch(&inv).unwrap();
+    let out = crate::workspace::resolve_file(&ctx, Path::new("selection.json")).unwrap();
     assert!(out.data["id"].as_str().unwrap().starts_with("PIN-"));
     assert_eq!(out.selection, json!({}));
     assert!(out.provenance.is_empty());
     f.cleanup();
 }
 #[test]
-fn inherited_pin_uses_typed_historical_merge_and_ignores_unknown_fields() {
+fn child_pin_inherits_matching_parent_source_and_rejects_conflict() {
     let f = Fixture::new();
     let parent = f.run(&spec()).unwrap();
-    let raw = format!(
-        r#"{{"schema":"wrong","SCHEMA":"lycheedev.selection.v1","id":"{}","source":{{"repository":"wow-ui-source","product":"retail","requestedRef":"live"}},"source":{{"exactCommit":"{}","parserRevision":"spec-fixture","oldExtension":{{}}}},"unknown":[]}}"#,
-        parent.id,
-        "a".repeat(40)
-    );
-    Metadata::with_historical_write(&f.home, &f.control, |writer| {
-        writer.commit(&[crate::metadata::historical_write::HistoricalMutation {
-            key: &format!("pin/{}", parent.id),
-            expected_generation: 1,
-            bytes: raw.as_bytes(),
-        }])
-    })
-    .unwrap();
+    let inherited = source();
     let child = f
-        .run(&serde_json::to_vec(&json!({"parent":parent.id})).unwrap())
+        .run(
+            &serde_json::to_vec(&json!({"parent":parent.id,"source":inherited})).unwrap(),
+        )
         .unwrap();
     assert_eq!(child.source, parent.source);
     assert_eq!(child.parent, parent.id);
@@ -353,27 +288,21 @@ fn inherited_pin_uses_typed_historical_merge_and_ignores_unknown_fields() {
     f.cleanup();
 }
 #[test]
-fn validation_precedence_and_unmarshal_only_time_precede_publication() {
+fn validation_precedence_and_invalid_timestamp_precede_publication() {
     let f = Fixture::new();
-    let error = f
-        .run(br#"{"source":{},"data":{"fullBuild":"+1.2.3.4"}}"#)
-        .unwrap_err();
-    assert_eq!(error.message, "selection.unresolved_source");
-    let raw=serde_json::to_vec(&json!({"changes":{"provider":"fixture","product":"retail","fullBuild":"1.2.3.4","region":"us","scope":"all","fetchedAt":"2026-10-15T00:00:00+24:00","sha256":"f".repeat(64)}})).unwrap();
-    assert_eq!(
-        f.run(&raw).unwrap_err().message,
-        "Time.MarshalJSON: timezone hour outside of range [0,23]"
+    let error = f.run(br#"{"source":{}}"#).unwrap_err();
+    assert_eq!(error.code, "command.failed");
+    assert!(error.message.contains("missing field"), "{}", error.message);
+    let raw = format!(
+        r#"{{"changes":{{"provider":"fixture","product":"retail","fullBuild":"1.2.3.4","region":"us","scope":"all","fetchedAt":"2026-10-15T00:00:00+24:00","sha256":"{}"}}}}"#,
+        "f".repeat(64)
     );
-    let db = rusqlite::Connection::open(f.home.join("state/toolkit.sqlite")).unwrap();
-    let count: i64 = db
-        .query_row(
-            "SELECT count(*) FROM documents WHERE key LIKE 'pin/%'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 0);
-    db.close().unwrap();
+    assert_eq!(
+        f.run(raw.as_bytes()).unwrap_err().message,
+        "invalid selection timestamp"
+    );
+    // Both rejected specs stop during typed decoding, before metadata is opened.
+    assert!(!f.home.join("state/toolkit.sqlite").exists());
     f.cleanup();
 }
 #[test]
@@ -381,7 +310,7 @@ fn real_metadata_schema_lease_wait_observes_original_deadline_and_releases_input
     let f = Fixture::new();
     fs::write(&f.path, spec()).unwrap();
     let lease =
-        crate::metadata::historical_write::historical_lease(&f.home, "metadata-schema", &f.control)
+        crate::metadata::owned_write::owned_lease(&f.home, "metadata-schema", &f.control)
             .unwrap();
     let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(30));
     let error = resolve_selection_file_controlled(&f.home, &f.path, &control).unwrap_err();

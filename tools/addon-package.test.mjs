@@ -1,6 +1,5 @@
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { authenticate, ORACLE } from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -162,36 +161,12 @@ test('missing Media fails verification', async t => {
 });
 
 
-test('Go 3.2.2 ZIP closure keeps all 55 authenticated addon resources and two npm licenses', () => {
-  assert.equal(ORACLE, '0bec60e4406f5d5dc155ee25cef44f9a710e37e8');
-  const identity = authenticate(repo);
-  const { entries, report, tocs } = collectAddonZipEntries(repo);
-  const expected = identity.addon.map(row => row.path.replace(/^addon\//, 'Lychee Dev/'));
-  assert.equal(expected.length, 55);
-  expected.push('Lychee Dev/LICENSE', 'Lychee Dev/THIRD_PARTY_NOTICES');
-  assert.deepEqual([...entries.keys()].sort(), expected.sort());
-  assert.equal(entries.size, 57);
-  assert.equal(report.length, 57);
-  for (const row of identity.addon) {
-    const bytes = entries.get(row.path.replace(/^addon\//, 'Lychee Dev/'));
-    assert.equal(bytes.length, row.bytes, row.path);
-    assert.equal(createHash('sha256').update(bytes).digest('hex'), row.sha256, row.path);
-  }
-  assert(!tocs[0].parse.loads.includes('Bindings.xml'), 'fixture must exercise implicit loading');
-  assert.deepEqual(entries.get('Lychee Dev/Bindings.xml'), readFileSync(join(repo, 'addon/Bindings.xml')));
-  assert.deepEqual(report.find(row => row.path === 'Lychee Dev/Bindings.xml'), {path: 'Lychee Dev/Bindings.xml', selected: 'load'});
-  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES']) {
-    assert.deepEqual(entries.get('Lychee Dev/' + name), readFileSync(join(repo, 'packages/npm/lycheedev', name)));
-    assert.equal(report.find(row => row.path === 'Lychee Dev/' + name).selected, 'license');
-  }
-});
-
-test('Go 3.2.2 implicit binding declarations are mandatory without adding a TOC load', async t => {
+test('implicit binding declarations are mandatory without adding a TOC load', async t => {
   const { buffer } = await fixtureZip(t, entries => entries.delete('Lychee Dev/Bindings.xml'));
   assertViolation(verifyAddonZip(buffer), /missing bindings: Lychee Dev\/Bindings\.xml/);
 });
 
-test('Go 3.2.2 project license and notices must both exist and be nonempty', async t => {
+test('project license and notices must both exist and be nonempty', async t => {
   for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES']) for (const empty of [false, true]) {
     await t.test(name + (empty ? ' empty' : ' absent'), async t => {
       const { buffer } = await fixtureZip(t, entries => {
@@ -203,23 +178,13 @@ test('Go 3.2.2 project license and notices must both exist and be nonempty', asy
   }
 });
 
-test('Go 3.2.2 ZIP excludes and rejects every unselected legacy addon resource', async t => {
-  // Negative fixtures remain meaningful after these production files retire.
-  const legacy = ['Bridge/Definitions.lua', 'Bridge/FaultRunner.lua', 'Bridge/Identity.lua',
-    'Bridge/InputProtocol.lua', 'Bridge/InputSignal.lua', 'Bridge/Investigation.lua',
-    'Bridge/MatrixSymbol.lua', 'Bridge/NativeAdapter.lua', 'Bridge/NativeInputState.lua',
-    'Bridge/NativeProtocol.lua', 'Bridge/NativeRuntime.lua', 'Bridge/NativeWire.lua',
-    'Bridge/ProbeQueue.lua', 'Bridge/ProbeRunner.lua', 'Bridge/ReceiptView.lua',
-    'Bridge/Receiver.lua', 'Bridge/Reentry.lua', 'Bridge/ReportStore.lua',
-    'Bridge/Session.lua', 'Bridge/StartupBeacon.lua', 'Lychee Dev Rust.toc'];
-  const { entries } = collectAddonZipEntries(repo);
-  for (const path of legacy) {
-    assert(!entries.has('Lychee Dev/' + path), path);
+test('unselected, tool and legacy payload entries are rejected', async t => {
+  const unselected = ['tests/case.lua', 'tools/luals/runtime.json', 'docs/README.md',
+    'node_modules/module.js', 'vendor/crate.js', '.git/config', 'automation.py', 'fixtures/case.json'];
+  for (const path of unselected) {
     await t.test(path, async t => {
       const { buffer } = await fixtureZip(t, files => files.set('Lychee Dev/' + path, Buffer.from('return\n')));
-      const result = verifyAddonZip(buffer);
-      assert.equal(result.ok, false);
-      assert(result.violations.includes('entry not selected as toc/load/media: Lychee Dev/' + path));
+      assertViolation(verifyAddonZip(buffer), /entry not selected as toc\/load\/media|banned entry/);
     });
   }
 });

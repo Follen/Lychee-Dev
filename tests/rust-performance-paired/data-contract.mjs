@@ -17,13 +17,17 @@ export function usage(value) {
   return value;
 }
 export function dataCases(images) {
+  const base = [
+    {id: 'B04-sql-correctness', kind: 'sql', fixture: 'catalog', performance: false, args: ['data', 'sql', '--sql', SQL]},
+    {id: 'B04-blte-17MiB', kind: 'content', fixture: 'content', performance: true, fileDataID: 501, args: ['asset', 'inspect', '--file-id', '501', '--max-bytes', String(CONTENT_BYTES)]},
+  ];
+  if (images === undefined) return base;
   assert.equal(images.schema, 'lycheedev.large-image-paired-fixture.v1');
   assert.deepEqual(images.encodings, ['png', 'webp']); assert.deepEqual(images.channels, ['rgba']);
   assert.equal(images.cases.length, 5);
   const storage = ['palette', 'bgra8', 'bc1', 'bc2', 'bc3'];
   return [
-    {id: 'B04-sql-correctness', kind: 'sql', fixture: 'catalog', performance: false, args: ['data', 'sql', '--sql', SQL]},
-    {id: 'B04-blte-17MiB', kind: 'content', fixture: 'content', performance: true, fileDataID: 501, args: ['asset', 'inspect', '--file-id', '501', '--max-bytes', String(CONTENT_BYTES)]},
+    ...base,
     ...images.cases.flatMap((image, index) => {
       assert.equal(image.fileDataID, 701 + index); assert.equal(image.mipmap, 0);
       assert.equal(image.texture.width, 1031); assert.equal(image.texture.height, 519);

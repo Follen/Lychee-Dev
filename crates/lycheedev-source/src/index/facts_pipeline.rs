@@ -6,7 +6,7 @@ use crate::{
     git,
 };
 use lycheedev_core::{
-    Result, ToolkitError, control::OperationControl, metadata::historical_write::finish_historical,
+    Result, ToolkitError, control::OperationControl, metadata::owned_write::finish_owned,
     selection::SourcePin,
 };
 use std::{
@@ -19,7 +19,7 @@ use std::{
 
 // Queue backpressure is independent of the logical CPU count.
 const MAX_PENDING_SLOTS: usize = 8;
-const MAX_SOURCE_BYTES: usize = 64 << 10;
+const MAX_SOURCE_BYTES: usize = crate::facts::WORKER_SOURCE_BYTES;
 const MAX_FACT_BYTES: usize = 4 << 20;
 // This reservation is for owned parser temporaries, NOT tree-sitter's opaque C
 // allocator. Fixed input/worker bounds limit that extra transient; real process
@@ -383,10 +383,10 @@ pub(super) fn visit_with_cpu_limit_and_retained(
         let mut joined = Ok(());
         for handle in handles {
             if handle.join().is_err() {
-                joined = finish_historical(joined, Err(worker_failed()));
+                joined = finish_owned(joined, Err(worker_failed()));
             }
         }
-        finish_historical(result, joined)
+        finish_owned(result, joined)
     })
 }
 

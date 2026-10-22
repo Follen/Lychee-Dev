@@ -103,15 +103,15 @@ fn missing_body_rebuild_preserves_retained_capture_original_pair_and_exact_peak(
         false,
     )
     .unwrap();
-    let keep_invocation = crate::Invocation {
-        command: "evidence keep".into(),
-        positional: Some(capture["id"].as_str().unwrap().into()),
-        flags: Default::default(),
+    let context = crate::request::RequestContext {
         home: f.0.clone(),
         cwd: f.0.clone(),
         control: OperationControl::default(),
     };
-    evidence::dispatch(&keep_invocation).unwrap();
+    evidence::dispatch(
+        &context,
+        evidence::EvidenceRequest::Keep { id: capture["id"].as_str().unwrap().into() },
+    ).unwrap();
     let key = format!("evidence/keep/{}", capture["id"].as_str().unwrap());
     let kept = crate::metadata::Metadata::read_document_raw_controlled_with_check(
         &f.0,

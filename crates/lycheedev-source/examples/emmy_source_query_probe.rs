@@ -6,16 +6,16 @@ use lycheedev_source::native::*;
 use serde_json::{json,Value};
 type Result<T> = std::result::Result<T,String>;
 const FILES: &[(&str,&str)] = &[
-    ("query-roles.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-roles.lua")),
-    ("query-captures.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-captures.lua")),
-    ("query-load-a.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-load-a.lua")),
-    ("query-load-b.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-load-b.lua")),
-    ("scope.lua",include_str!("../../../tests/rust-source-engine/golden/scope.lua")),
-    ("writes-redeclaration.lua",include_str!("../../../tests/rust-source-engine/golden/writes-redeclaration.lua")),
-    ("lexical-negative.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-lexical-negative.lua")),
-    ("query-loop-scopes.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-loop-scopes.lua")),
-    ("query-vararg-assignment.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-vararg-assignment.lua")),
-    ("query-empty-function.lua",include_str!("../../../tests/rust-source-engine/wow/native/query-empty-function.lua")),
+    ("query-roles.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-roles.lua")),
+    ("query-captures.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-captures.lua")),
+    ("query-load-a.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-load-a.lua")),
+    ("query-load-b.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-load-b.lua")),
+    ("scope.lua",include_str!("../../../tests/fixtures/source-native/golden/scope.lua")),
+    ("writes-redeclaration.lua",include_str!("../../../tests/fixtures/source-native/golden/writes-redeclaration.lua")),
+    ("lexical-negative.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-lexical-negative.lua")),
+    ("query-loop-scopes.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-loop-scopes.lua")),
+    ("query-vararg-assignment.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-vararg-assignment.lua")),
+    ("query-empty-function.lua",include_str!("../../../tests/fixtures/source-native/wow/native/query-empty-function.lua")),
 ];
 fn text(file:&str)->&'static str{FILES.iter().find(|(name,_)|*name==file).expect("fixed source").1}
 fn point(file:&str,marker:&str,token:&str)->Result<Site>{
@@ -24,7 +24,7 @@ fn point(file:&str,marker:&str,token:&str)->Result<Site>{
     let start=at+marker.find(token).ok_or("missing marker token")?;
     Ok(Site{file:file.into(),start:start as u32,end:(start+token.len())as u32})
 }
-fn control()->OperationControl{OperationControl::new(Instant::now()+Duration::from_secs(30),Arc::new(AtomicBool::new(false)))}
+fn control()->OperationControl{OperationControl::uncancelable(Instant::now()+Duration::from_secs(30))}
 fn prepare_case(files:&[&str],ordered:&[&str],c:&OperationControl)->Result<PreparedSnapshot>{
     let mut config=Emmyrc::default();config.runtime.version=EmmyrcLuaVersion::Lua51;
     let spec=SourceInputSpec{files:files.iter().map(|name|{let source=text(name);SourceFileInput{path:(*name).into(),original_utf8:source.into(),content_sha256:hash(source.as_bytes()),analysis_utf8:source.into(),map:SourceMap::Identity}}).collect(),workspace_root:PathBuf::from("C:/lycheedev-source-query-probe"),source_identity:json!({"kind":"fixed-query-facade-source"}),phase:"after_load".into(),ordered_occurrences:ordered.iter().map(|name|(*name).into()).collect(),config,host:TrustedHostEnvironment::from_host_material("closed-query-probe".into(),true,vec![],vec![],c).map_err(|e|e.to_string())?,luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"64cd0d82734a743ccbffe3a2d28727ce8e48c8cf1452dd69066f2c56643425f7".into(),executable_bytes:487424},limits:SourceLimits::default()};
@@ -45,7 +45,7 @@ fn merged_references(rows:&[ReferenceRecord])->Value {
 }
 fn roles_case(out:&mut Output)->Result<()>{
     let c=control();let prepared=prepare_case(&["query-roles.lua"],&["query-roles.lua"],&c)?;
-    let graph=prepared.build("query-roles",EvaluatorProfile::Native,Some("query-facade-roles-v1"),&c).map_err(|e|e.to_string())?;
+    let graph=prepared.build("query-roles",Some("query-facade-roles-v1"),&c).map_err(|e|e.to_string())?;
     let syntax=prepared.source_queries(&c).map_err(|e|e.to_string())?;
     let query=syntax.with_execution(&graph,QuerySelector::LoadOccurrence{occurrence:0},&c).map_err(|e|e.to_string())?;
     let file="query-roles.lua";let original=point(file,"local function Original(v)","Original")?;
@@ -173,7 +173,7 @@ fn loop_scope_case(out:&mut Output)->Result<()>{
 }
 fn captures_case(out:&mut Output)->Result<()>{
     let c=control();let prepared=prepare_case(&["query-captures.lua"],&["query-captures.lua"],&c)?;
-    let graph=prepared.build("query-captures",EvaluatorProfile::Native,None,&c).map_err(|e|e.to_string())?;
+    let graph=prepared.build("query-captures",None,&c).map_err(|e|e.to_string())?;
     let syntax=prepared.source_queries(&c).map_err(|e|e.to_string())?;
     let file="query-captures.lua";let body=point(file,"local function Read() return value end","value")?;
     let ambiguous=syntax.with_execution(&graph,QuerySelector::AllOccurrences,&c).map_err(|e|e.to_string())?.definitions(&body).map_err(|e|e.to_string())?;
@@ -209,7 +209,7 @@ fn loads_case(out:&mut Output)->Result<()>{
         ("repeated_after",vec![files[0],files[1],files[0]],2,true),
     ]{
         let c=control();let prepared=prepare_case(&files,&order,&c)?;
-        let graph=prepared.build(name,EvaluatorProfile::Native,None,&c).map_err(|e|e.to_string())?;
+        let graph=prepared.build(name,None,&c).map_err(|e|e.to_string())?;
         let syntax=prepared.source_queries(&c).map_err(|e|e.to_string())?;
         let result=syntax.with_execution(&graph,QuerySelector::LoadOccurrence{occurrence},&c).map_err(|e|e.to_string())?.definitions(&site).map_err(|e|e.to_string())?;
         out.emit(json!({"event":"definition","case":"loads","query":name,"result":definition_json(&result)?}))?;
@@ -226,7 +226,7 @@ fn loads_case(out:&mut Output)->Result<()>{
 }
 fn paging_case(out:&mut Output)->Result<()>{
     let c=control();let prepared=prepare_case(&["query-roles.lua"],&["query-roles.lua"],&c)?;
-    let graph=prepared.build("query-paging",EvaluatorProfile::Native,None,&c).map_err(|e|e.to_string())?;
+    let graph=prepared.build("query-paging",None,&c).map_err(|e|e.to_string())?;
     let syntax=prepared.source_queries(&c).map_err(|e|e.to_string())?;
     let query=syntax.with_execution(&graph,QuerySelector::LoadOccurrence{occurrence:0},&c).map_err(|e|e.to_string())?;
     let result=query.definitions(&point("query-roles.lua","local functionValueRead = saved","saved")?).map_err(|e|e.to_string())?;
@@ -260,7 +260,7 @@ fn paging_case(out:&mut Output)->Result<()>{
     let exact=context.rows.iter().all(|row|{let(Some(origin),Some(exhibited),Some(snippet))=(row.origin.source(),row.exhibited.as_ref(),row.snippet.as_deref())else{return false};let source=text(&exhibited.file);source.get(exhibited.start as usize..exhibited.end as usize)==Some(snippet)&&exhibited.start>=origin.start&&exhibited.end<=origin.end});
     out.check("query:paging:context_snippets_exact_original_bytes",json!(true),json!(exact&&!context.rows.is_empty()))?;
     out.emit(json!({"event":"paging","pages":pages,"full":full,"joined":joined,"context":context}))?;
-    c.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+    c.tracked_cancel_handle().unwrap().cancel();
     let cancelled=query.definitions(&point("query-roles.lua","local functionValueRead = saved","saved")?).err().map(|e|json!({"code":e.code,"exit":e.exit_code}));
     out.check("query:paging:cancel_during_same_operation",json!({"code":"command.cancelled","exit":7}),json!(cancelled))?;
     Ok(())
@@ -284,7 +284,7 @@ fn syntax_paging_case(out:&mut Output)->Result<()>{
 }
 fn vararg_assignment_case(out:&mut Output)->Result<()>{
     let file="query-vararg-assignment.lua";let c=control();let prepared=prepare_case(&[file],&[file],&c)?;
-    let graph=prepared.build("query-vararg-assignment",EvaluatorProfile::Native,None,&c).map_err(|e|e.to_string())?;
+    let graph=prepared.build("query-vararg-assignment",None,&c).map_err(|e|e.to_string())?;
     let syntax=prepared.source_queries(&c).map_err(|e|e.to_string())?;
     let query=syntax.with_execution(&graph,QuerySelector::LoadOccurrence{occurrence:0},&c).map_err(|e|e.to_string())?;
     for(label,marker,token)in [
@@ -312,7 +312,7 @@ fn vararg_assignment_case(out:&mut Output)->Result<()>{
 }
 fn empty_function_case(out:&mut Output)->Result<()>{
     let file="query-empty-function.lua";let c=control();let prepared=prepare_case(&[file],&[file],&c)?;
-    let graph=prepared.build("query-empty-function",EvaluatorProfile::Native,None,&c).map_err(|e|e.to_string())?;
+    let graph=prepared.build("query-empty-function",None,&c).map_err(|e|e.to_string())?;
     let facts=graph.native_invocations.as_ref().ok_or("empty function native frames")?;
     for(label,marker,call_text)in [("named","one(1)","one(1)"),("anonymous","anonymous()","anonymous()"),("method","\nobject:empty()\n","object:empty()")]{
         let site=point(file,marker,call_text)?;
@@ -344,7 +344,7 @@ fn empty_function_case(out:&mut Output)->Result<()>{
     Ok(())
 }
 fn run(out:&mut Output)->Result<()>{
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}))?;
     for(file,source)in FILES{out.emit(json!({"event":"input_identity","file":file,"bytes":source.len(),"sha256":hash(source.as_bytes())}))?;}
     lexical_case(out)?;loop_scope_case(out)?;roles_case(out)?;captures_case(out)?;loads_case(out)?;paging_case(out)?;syntax_paging_case(out)?;vararg_assignment_case(out)?;empty_function_case(out)
 }

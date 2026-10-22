@@ -37,36 +37,52 @@ enum Phase {
     StageRemoved,
 }
 
-pub(super) fn prune(inv: &Invocation) -> Result<Outcome> {
-    prune_observed(inv, |_| {})
+pub(super) fn prune(
+    context: &crate::request::RequestContext,
+    target_bytes: u64,
+    dry_run: bool,
+    max_objects: usize,
+    include_uncommitted: bool,
+) -> Result<Outcome> {
+    prune_observed(context, target_bytes, dry_run, max_objects, include_uncommitted, |_| {})
 }
 
-fn prune_observed(inv: &Invocation, observe: impl FnMut(Phase)) -> Result<Outcome> {
-    prune_with_leases(inv, observe, |resource| {
-        ExclusiveLock::resource_controlled(&inv.home.join("locks"), resource, &inv.control)
+fn prune_observed(
+    context: &crate::request::RequestContext,
+    target_bytes: u64,
+    dry_run: bool,
+    max_objects: usize,
+    include_uncommitted: bool,
+    observe: impl FnMut(Phase),
+) -> Result<Outcome> {
+    prune_with_leases(context, target_bytes, dry_run, max_objects, include_uncommitted, observe, |resource| {
+        ExclusiveLock::resource_controlled(&context.home.join("locks"), resource, &context.control)
     })
 }
 
 fn prune_with_leases(
-    inv: &Invocation,
+    context: &crate::request::RequestContext,
+    target_bytes: u64,
+    dry_run: bool,
+    bound: usize,
+    include_uncommitted: bool,
     mut observe: impl FnMut(Phase),
     mut acquire: impl FnMut(&str) -> Result<ExclusiveLock>,
 ) -> Result<Outcome> {
     let mut report = Report {
-        target_bytes: inv.usize_flag("--target-bytes", 0, 0, usize::MAX)? as u64,
-        dry_run: inv.flag_bool("--dry-run"),
+        target_bytes,
+        dry_run,
         ..Report::default()
     };
-    let bound = inv.usize_flag("--max-objects", 0, 0, 100000)?;
     let check = &mut |phase| {
         observe(phase);
-        inv.control.check()
+        context.control.check()
     };
     let result = (|| {
-        workspace::open_controlled(&inv.home, &inv.control)?;
-        let (objects, foreign) = objects_checked(&inv.home, || check(Phase::ScanObjects))?;
-        let staging = stages_checked(&inv.home, || check(Phase::ScanStaging))?;
-        let (_, _, marker_foreign) = markers_checked(&inv.home, || check(Phase::ScanMarkers))?;
+        workspace::open_controlled(&context.home, &context.control)?;
+        let (objects, foreign) = objects_checked(&context.home, || check(Phase::ScanObjects))?;
+        let staging = stages_checked(&context.home, || check(Phase::ScanStaging))?;
+        let (_, _, marker_foreign) = markers_checked(&context.home, || check(Phase::ScanMarkers))?;
         let mut object_bytes = sum_bytes(objects.iter().map(|object| object.bytes))?;
         let mut staging_bytes = sum_bytes(staging.iter().map(|(_, bytes, _)| *bytes))?;
         report.before_bytes = sum_bytes([object_bytes, staging_bytes])?;
@@ -94,14 +110,14 @@ fn prune_with_leases(
                 };
                 let result = (|| {
                     check(Phase::ObjectLocked)?;
-                    if retain_checked(&inv.home, &object.digest, || inv.control.check())?
+                    if retain_checked(&context.home, &object.digest, || context.control.check())?
                         .is_some_and(|value| !value["owners"].as_array().unwrap().is_empty())
                     {
                         report.skipped_protected += 1;
                         return Ok(());
                     }
-                    storage::guard_path_with_check(&inv.home, &object.path, || {
-                        inv.control.check()
+                    storage::guard_path_with_check(&context.home, &object.path, || {
+                        context.control.check()
                     })?;
                     check(Phase::ObjectUnlink)?;
                     if !report.dry_run {
@@ -119,7 +135,7 @@ fn prune_with_leases(
             }
             for (path, bytes, name) in &staging {
                 check(Phase::StageLease)?;
-                if !inv.flag_bool("--uncommitted") {
+                if !include_uncommitted {
                     report.skipped_uncommitted += 1;
                     continue;
                 }
@@ -141,7 +157,7 @@ fn prune_with_leases(
                 };
                 let result = (|| {
                     check(Phase::StageLocked)?;
-                    storage::guard_path_with_check(&inv.home, path, || inv.control.check())?;
+                    storage::guard_path_with_check(&context.home, path, || context.control.check())?;
                     check(Phase::StageUnlink)?;
                     if !report.dry_run {
                         remove_if_present(path)?;
@@ -154,13 +170,13 @@ fn prune_with_leases(
                 })();
                 crate::selection::selection_finish(result, lease.close())?;
             }
-            inv.control.check()?;
+            context.control.check()?;
             debug_assert_eq!(report.after_bytes, object_bytes + staging_bytes);
             report.complete = !report.truncated && object_bytes <= report.target_bytes;
             Ok(())
         })();
         crate::selection::selection_finish(result, quota.close())?;
-        inv.control.check()
+        context.control.check()
     })();
     if let Err(mut error) = result {
         report.complete = false;

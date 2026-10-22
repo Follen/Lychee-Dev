@@ -20,6 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 mod evidence;
+mod external_export;
 mod metadata;
 pub(crate) use evidence::EvidenceQuota;
 mod publication;
@@ -32,7 +33,8 @@ mod shared_blobs;
 pub use publication::{DerivedObject, DerivedObjectWriter};
 pub use reading::{
     DerivedObjectReader, DerivedReadCheck, DerivedReadLease, DerivedReadReport,
-    MAX_GENERATION_BYTES, OwnedDerivedObjectReader, OwnedDerivedReadLease, ObjectReader, ReaderCheck,
+    MAX_GENERATION_BYTES, ObjectReader, OwnedDerivedObjectReader, OwnedDerivedReadLease,
+    ReaderCheck,
 };
 pub use shared_blobs::durable::SourceIdentity;
 pub(crate) use shared_blobs::durable::{StageSlot, recover_shards};
@@ -42,7 +44,10 @@ pub use shared_blobs::stream::{
     publish_shared_blob_stream_identified_with_check, publish_shared_blob_stream_with_check,
     rebuild_shared_blob_stream_identified_with_check, rebuild_shared_blob_stream_with_check,
 };
-pub use shared_blobs::{publish_shared_blob_with_check, rebuild_shared_blob_with_check};
+pub use shared_blobs::{
+    publish_shared_blob_pair_with_check, publish_shared_blob_with_check,
+    rebuild_shared_blob_with_check,
+};
 use storage::{Directory, ExclusiveLock, FileControl, FileCost};
 
 const QUOTA_RESOURCE: &str = "data-derived-v1:quota";
@@ -126,6 +131,32 @@ impl AdditionalPeak {
     }
 }
 
+/// Reserve the additional same-directory stage used by an external Data
+/// export. The caller already owns its query admission; keep only the quota
+/// lease through the native stage's checked close, without taking query slots
+/// again. Published user files do not become managed cache occupancy.
+pub fn reserve_export_temporary_with_check<'a>(
+    home: &Path,
+    length: u64,
+    control: &'a OperationControl,
+    check: &'a dyn Fn() -> Result<()>,
+) -> Result<DerivedReservation<'a>> {
+    DerivedReservation::acquire_inner(
+        None,
+        home,
+        super::DEFAULT_DATA_CACHE_MAX_BYTES,
+        AdditionalPeak {
+            export_temporary: length,
+            generations: lycheedev_windows::filesystem::destination::MANAGED_DECLARATION_BYTES
+                as u64,
+            ..AdditionalPeak::default()
+        },
+        control,
+        Some(check),
+        false,
+    )
+}
+
 /// Accounting is logical file length, not filesystem allocation or free space.
 /// Unknown regular files within these roots still charge occupancy; accounting
 /// does not establish reconstructibility, reference ownership or deletion rights.
@@ -140,6 +171,8 @@ pub struct DerivedUsage {
     pub shared_blob_bytes: u64,
     /// Unfinished publication retains its entire body/stage upper bound.
     pub retained_shared_peak_bytes: u64,
+    /// Crash-retained external stage allowances; never user-file deletion rights.
+    pub pending_external_export_bytes: u64,
     pub files: usize,
 }
 impl DerivedUsage {
@@ -151,6 +184,7 @@ impl DerivedUsage {
             self.private_metadata_namespace_bytes,
             self.shared_blob_bytes,
             self.retained_shared_peak_bytes,
+            self.pending_external_export_bytes,
         ])
     }
 }
@@ -172,7 +206,7 @@ impl Default for Coverage {
                 "historical/unregistered Data shared blobs and writers not using shared-blob admission",
                 "historical shared metadata database, sidecars and legacy raw-source references",
                 "legacy Data staging/spill paths outside tmp/data-derived-v1",
-                "export temporaries outside tmp/data-derived-v1/exports",
+                "unregistered external export temporaries without durable declarations",
             ],
             automatic_eviction_enabled: false,
         }
@@ -285,6 +319,17 @@ pub struct DerivedReservation<'a> {
     recovery: Option<crate::evidence::BlobRef>,
 }
 impl<'a> DerivedReservation<'a> {
+    /// Persist this attempt's external stage allowance before invoking its writer.
+    /// The returned bool must attest the native stage's successful discard/checked
+    /// close, independently of the business result or a late cancellation. Unknown
+    /// publication always retains its allowance. This consumes and finishes quota.
+    pub fn with_external_export<T>(
+        self,
+        publish: impl FnOnce() -> (Result<T>, storage::StagedPublication, bool),
+    ) -> Result<T> {
+        let result = external_export::run(&self, publish);
+        self.finish(result)
+    }
     pub(super) fn acquire(
         resources: &'a DataResources,
         home: &Path,
@@ -413,10 +458,17 @@ impl<'a> DerivedReservation<'a> {
             metadata_read_only,
             recovery: recovery.cloned(),
         };
+        let mut shared_home = None;
         let result = (|| {
+            shared_home = Some(Directory::open_shared_controlled(
+                &owner.home,
+                &mut Controlled(control),
+            )?);
+            let home_directory = shared_home.as_ref().expect("held shared workspace");
             // Existing directory-owner lock acquisition anchors the leaf to its
             // held parent. Same invocation/deadline; no new independent timer.
-            let locks = Directory::open_controlled(&home.join("locks"), &mut Controlled(control))?;
+            let locks =
+                home_directory.open_child_controlled("locks".as_ref(), &mut Controlled(control))?;
             owner.directories.push(locks);
             owner.lease = Some(ExclusiveLock::resource_wait_in_directory_checked(
                 owner.directories.last().expect("held locks directory"),
@@ -427,26 +479,48 @@ impl<'a> DerivedReservation<'a> {
             )?);
             #[cfg(test)]
             inventory_tests::quota_acquired();
-            // Keep every managed root's identity through the reservation. Only
-            // these new namespaces are prepared; no migration or reclamation.
-            for root in owner.paths.roots() {
-                owner.directories.push(prepare_root(root, control)?);
+            if metadata_read_only {
+                // This capability inventories private metadata only and cannot
+                // publish. Unrelated payload namespaces need no preparation.
+                owner.directories.push(prepare_root_from_home(
+                    &owner.paths.metadata,
+                    home_directory,
+                    &owner.directories,
+                    control,
+                )?);
+            } else {
+                // Keep every managed root's identity through the writer's
+                // reservation. No migration or reclamation is performed.
+                for root in owner.paths.roots() {
+                    owner.directories.push(prepare_root_from_home(
+                        root,
+                        home_directory,
+                        &owner.directories,
+                        control,
+                    )?);
+                }
+                for child in [
+                    &owner.paths.objects,
+                    &owner.paths.generations,
+                    &owner.paths.staging,
+                    &owner.paths.spill,
+                    &owner.paths.exports,
+                ] {
+                    owner
+                        .directories
+                        .push(prepare_root(child, &owner.directories, control)?);
+                }
+                owner.directories.push(prepare_root(
+                    &owner.paths.shared_blobs(),
+                    &owner.directories,
+                    control,
+                )?);
+                owner.directories.push(prepare_root(
+                    &owner.paths.recency(),
+                    &owner.directories,
+                    control,
+                )?);
             }
-            for child in [
-                &owner.paths.objects,
-                &owner.paths.generations,
-                &owner.paths.staging,
-                &owner.paths.spill,
-                &owner.paths.exports,
-            ] {
-                owner.directories.push(prepare_root(child, control)?);
-            }
-            owner
-                .directories
-                .push(prepare_root(&owner.paths.shared_blobs(), control)?);
-            owner
-                .directories
-                .push(prepare_root(&owner.paths.recency(), control)?);
             // Config may have changed since query admission. A new disk owner
             // always consults the same current strict parser while holding quota.
             owner.report.configured_max_bytes =
@@ -454,7 +528,7 @@ impl<'a> DerivedReservation<'a> {
                     .data_cache_max_bytes;
             owner.report.existing = if metadata_read_only {
                 owner.report.coverage.accounted_scope = "private-metadata-only-zero-growth-read";
-                metadata_inventory(&owner.paths, control)?
+                metadata_inventory(&owner.paths, control, &owner.directories)?
             } else {
                 if let Some(reference) = recovery {
                     shared_blobs::validate_recovery(&owner.home, &owner.paths, reference, control)?;
@@ -475,6 +549,14 @@ impl<'a> DerivedReservation<'a> {
             }
             control.check()
         })();
+        // Children own independent copies of the shared ancestry. Consume this
+        // initialization-only home even when preparation failed, before cleanup
+        // releases the quota and its still-first locks directory.
+        let result = join(
+            result,
+            shared_home.into_iter().flat_map(close_directory),
+            control,
+        );
         match result {
             Ok(()) => Ok(owner),
             Err(error) => {
@@ -494,7 +576,7 @@ impl<'a> DerivedReservation<'a> {
     /// Active bytes replace their reserved allowance: never actual + full peak.
     pub fn verify_usage(&self) -> Result<DerivedUsage> {
         let current = if self.metadata_read_only {
-            metadata_inventory(&self.paths, &self.control)?
+            metadata_inventory(&self.paths, &self.control, &self.directories)?
         } else {
             inventory_recovering(
                 &self.home,
@@ -545,8 +627,13 @@ impl<'a> DerivedReservation<'a> {
     }
     /// Consume once. Cleanup occurs even after operation failure/cancellation;
     /// every close event is preserved, while repeated stop observations dedupe.
-    pub fn finish<T>(mut self, result: Result<T>) -> Result<T> {
+    pub fn finish<T>(self, result: Result<T>) -> Result<T> {
         let result = result.and_then(|value| self.verify_usage().map(|_| value));
+        self.finish_verified(result)
+    }
+    // Metadata owners verify on both success and failure before closing their
+    // last file pin. No writer runs between that inventory and this cleanup.
+    fn finish_verified<T>(mut self, result: Result<T>) -> Result<T> {
         let cleanup = self.cleanup();
         self.with_publications(join(result, cleanup, &self.control))
     }
@@ -570,22 +657,33 @@ impl Drop for DerivedReservation<'_> {
     }
 }
 
-fn prepare_root(root: &Path, control: &Checks<'_>) -> Result<Directory> {
-    let parent = Directory::open_controlled(
-        root.parent().expect("fixed managed parent"),
+fn prepare_root_from_home(
+    root: &Path,
+    home: &Directory,
+    held: &[Directory],
+    control: &Checks<'_>,
+) -> Result<Directory> {
+    control.check()?;
+    let exists = root.try_exists()?;
+    control.check()?;
+    if !exists {
+        // Creation still requires the original temporary strict parent. Never
+        // borrow a shared home/cache parent as creation authority.
+        return prepare_root(root, held, control);
+    }
+    let parent_path = root.parent().expect("fixed managed parent");
+    // These fixed roots are two levels below home. Keep the intermediate
+    // directory shared, as it was on the original full-path ancestor walk.
+    let parent = home.open_shared_child_controlled(
+        parent_path.file_name().expect("fixed workspace child"),
         &mut Controlled(control),
     )?;
     let mut opened = None;
     let result = (|| {
-        parent.verify_controlled(&mut Controlled(control))?;
-        control.check()?;
-        match fs::create_dir(root) {
-            Ok(()) => (),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(error) => return Err(error.into()),
-        }
-        control.check()?;
-        opened = Some(Directory::open_controlled(root, &mut Controlled(control))?);
+        opened = Some(parent.open_child_controlled(
+            root.file_name().expect("fixed managed child"),
+            &mut Controlled(control),
+        )?);
         control.check()
     })();
     let result = join(result, close_directory(parent), control);
@@ -598,7 +696,76 @@ fn prepare_root(root: &Path, control: &Checks<'_>) -> Result<Directory> {
         ),
     }
 }
-fn metadata_inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
+fn prepare_root(root: &Path, held: &[Directory], control: &Checks<'_>) -> Result<Directory> {
+    let parent_path = root.parent().expect("fixed managed parent");
+    let borrowed = held
+        .iter()
+        .find(|directory| directory.path() == parent_path);
+    control.check()?;
+    let exists = root.try_exists()?;
+    control.check()?;
+    if exists {
+        // Existence selects an open, never authenticates the directory. Native
+        // relative/full opens retain the same identity and reparse checks.
+        let directory = match borrowed {
+            Some(parent) => parent.open_child_controlled(
+                root.file_name().expect("fixed managed child"),
+                &mut Controlled(control),
+            )?,
+            None => Directory::open_controlled(root, &mut Controlled(control))?,
+        };
+        return match control.check() {
+            Ok(()) => Ok(directory),
+            Err(error) => join(Err(error), close_directory(directory), control),
+        };
+    }
+    let owned = if borrowed.is_none() {
+        Some(Directory::open_controlled(
+            parent_path,
+            &mut Controlled(control),
+        )?)
+    } else {
+        None
+    };
+    let parent = borrowed.or(owned.as_ref()).expect("held managed parent");
+    let mut opened = None;
+    let result = (|| {
+        parent.verify_controlled(&mut Controlled(control))?;
+        control.check()?;
+        match fs::create_dir(root) {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
+            Err(error) => return Err(error.into()),
+        }
+        control.check()?;
+        opened = Some(if borrowed.is_some() {
+            parent.open_child_controlled(
+                root.file_name().expect("fixed managed child"),
+                &mut Controlled(control),
+            )?
+        } else {
+            // This temporary parent pin denies writes during preparation only.
+            // Retaining its handle would strengthen the ancestor's sharing
+            // policy for the entire reservation, beyond the original contract.
+            Directory::open_controlled(root, &mut Controlled(control))?
+        });
+        control.check()
+    })();
+    let result = join(result, owned.into_iter().flat_map(close_directory), control);
+    match result {
+        Ok(()) => Ok(opened.expect("prepared managed directory")),
+        Err(error) => join(
+            Err(error),
+            opened.into_iter().flat_map(close_directory),
+            control,
+        ),
+    }
+}
+fn metadata_inventory(
+    paths: &DataCachePaths,
+    control: &Checks<'_>,
+    held: &[Directory],
+) -> Result<DerivedUsage> {
     let mut entries = 0;
     let mut files = 0;
     let bytes = scan(
@@ -609,7 +776,7 @@ fn metadata_inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<De
         &mut entries,
         &mut files,
         control,
-        &[],
+        held,
         &mut std::collections::BTreeMap::new(),
     )?;
     Ok(DerivedUsage {
@@ -652,9 +819,11 @@ fn inventory_recovering(
     bytes[2] = sum(std::iter::once(bytes[2]).chain(spools.into_values()))?;
     let (shared_blob_bytes, retained_shared_peak_bytes) =
         shared_blobs::inventory_recovering(home, paths, control, recovery, held)?;
+    let pending_external_export_bytes = external_export::inventory(paths, control, held)?;
     Ok(DerivedUsage {
         shared_blob_bytes,
         retained_shared_peak_bytes,
+        pending_external_export_bytes,
         object_namespace_bytes: bytes[0],
         generation_namespace_bytes: bytes[1],
         temporary_namespace_bytes: bytes[2],

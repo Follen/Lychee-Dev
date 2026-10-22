@@ -7,12 +7,10 @@ import {fileURLToPath} from 'node:url';
 
 const SAFE_CRATES = ['cli', 'core', 'data', 'delivery', 'emmy-adapter', 'binding-contracts', 'live', 'source'];
 const WINDOWS_FIXTURES = new Set([
+  'crates/lycheedev-cli/tests/support/data_agent_cpu.rs',
   'crates/lycheedev-data/tests/assets_business.rs',
   'crates/lycheedev-source/tests/native_quota_peer.rs',
   'crates/lycheedev-live/tests/passive_windows.rs',
-  'crates/lycheedev-live/tests/runtime_windows.rs',
-  'crates/lycheedev-live/tests/sealed_memory.rs',
-  'crates/lycheedev-live/tests/native_e2e.rs',
 ]);
 const GUARD = ['#', '!', '[', 'forbid', '(', 'unsafe_code', ')', ']'];
 const MAX_FILES = 4096, MAX_FILE_BYTES = 1 << 20, MAX_TOTAL_BYTES = 32 << 20;

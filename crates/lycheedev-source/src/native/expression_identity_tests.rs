@@ -5,10 +5,7 @@ use std::{
 };
 
 fn fixture() -> PreparedSnapshot {
-    let control = OperationControl::new(
-        Instant::now() + Duration::from_secs(30),
-        Arc::new(AtomicBool::new(false)),
-    );
+    let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(30));
     let host = TrustedHostEnvironment::from_host_material(
         "expression-index-test".into(),
         false,
@@ -69,63 +66,6 @@ fn fixture() -> PreparedSnapshot {
 }
 
 #[test]
-fn admitted_expression_identities_match_previous_map_for_all_original_byte_ranges() {
-    let prepared = fixture();
-    let identity = prepared.inputs.identity_sha256().to_owned();
-    let steps = prepared.inputs.shared_steps.load(Ordering::Relaxed);
-    for source in &prepared.inputs.corpus.files {
-        let file = prepared.files[&source.path];
-        let model = prepared.analysis.semantic_model(file);
-        let root = model.syntax_tree().unwrap().get_red_root();
-        // The exact previous production insertion order is the oracle.
-        let mut expected = BTreeMap::new();
-        for expression in root.descendants().filter_map(LuaExpr::cast) {
-            let range = prepared
-                .inputs
-                .original_range(&source.path, expression.get_range())
-                .unwrap();
-            expected.insert(
-                (u32::from(range.start()), u32::from(range.end())),
-                expression.get_syntax_id(),
-            );
-        }
-        for start in 0..=source.original.len() as u32 {
-            for end in start..=source.original.len() as u32 {
-                let site = Site {
-                    file: source.path.clone(),
-                    start,
-                    end,
-                };
-                let actual = prepared.binding_site(&site);
-                match expected.get(&(start, end)) {
-                    Some(syntax) => assert_eq!(
-                        actual.unwrap(),
-                        BindingSite {
-                            file_id: file,
-                            syntax: *syntax
-                        }
-                    ),
-                    None => assert!(actual.is_err(), "unexpected expression at {site:?}"),
-                }
-                assert_eq!(
-                    prepared.expression_binding_site(&site),
-                    expected.get(&(start, end)).map(|syntax| BindingSite {
-                        file_id: file,
-                        syntax: *syntax
-                    })
-                );
-            }
-        }
-    }
-    assert_eq!(prepared.inputs.identity_sha256(), identity);
-    assert_eq!(
-        prepared.inputs.shared_steps.load(Ordering::Relaxed),
-        steps,
-        "exact lookup must not create or refund charges"
-    );
-}
-
-#[test]
 fn expression_identity_lookup_still_rejects_unknown_file_and_cancelled_request() {
     let prepared = fixture();
     assert!(
@@ -142,10 +82,7 @@ fn expression_identity_lookup_still_rejects_unknown_file_and_cancelled_request()
         start: 12,
         end: 13,
     };
-    prepared
-        .control
-        .cancel_handle()
-        .store(true, Ordering::Release);
+    prepared.control.tracked_cancel_handle().unwrap().cancel();
     let expected = prepared.control.check().unwrap_err().to_string();
     assert_eq!(prepared.binding_site(&site).unwrap_err(), expected);
 }

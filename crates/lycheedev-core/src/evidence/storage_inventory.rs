@@ -210,13 +210,13 @@ pub(crate) fn report(home: &Path, control: &OperationControl) -> Result<Value> {
             let mut captures = 0u64;
             let mut candidate_captures = 0u64;
             let mut unsupported = BTreeMap::<&str, u64>::new();
-            let mut bodies = BTreeMap::<String, i64>::new();
+            let mut bodies = BTreeMap::<String, u64>::new();
             let mut namespaces = BTreeMap::<&str, u64>::new();
             let mut after = String::new();
             let mut documents = 0usize;
             loop {
                 let (count, last) =
-                    catalog.visit_historical("", &after, control, |key, _, raw| {
+                    catalog.visit_general("", &after, control, |key, _, raw| {
                         documents = documents.checked_add(1).ok_or_else(limit)?;
                         if documents > 100_000 {
                             return Err(limit());
@@ -230,13 +230,10 @@ pub(crate) fn report(home: &Path, control: &OperationControl) -> Result<Value> {
                             return Ok(());
                         };
                         captures += 1;
-                        let (capture, signed_bytes) =
-                            dependencies::decode_historical_capture(raw, id, control)?;
+                        let capture = dependencies::inspect_capture_ref(raw, id, control)?;
                         if candidate(&capture.provenance.kind) {
                             candidate_captures += 1;
-                            let unsupported_reason = if signed_bytes < 0 {
-                                Some("negativeSignedLength")
-                            } else if !valid_digest(&capture.blob.sha256, 64) {
+                            let unsupported_reason = if !valid_digest(&capture.blob.sha256, 64) {
                                 Some("noncanonicalDigest")
                             } else {
                                 None
@@ -247,13 +244,13 @@ pub(crate) fn report(home: &Path, control: &OperationControl) -> Result<Value> {
                             }
                             match bodies.entry(capture.blob.sha256) {
                                 std::collections::btree_map::Entry::Vacant(entry) => {
-                                    entry.insert(signed_bytes);
+                                    entry.insert(capture.blob.bytes);
                                 }
                                 std::collections::btree_map::Entry::Occupied(entry)
-                                    if *entry.get() != signed_bytes =>
+                                    if *entry.get() != capture.blob.bytes =>
                                 {
                                     return Err(ToolkitError::invalid(
-                                        "historical captures disagree on shared body length",
+                                        "captures disagree on shared body length",
                                     ));
                                 }
                                 _ => {}
@@ -270,12 +267,8 @@ pub(crate) fn report(home: &Path, control: &OperationControl) -> Result<Value> {
             let mut missing = 0u64;
             for (digest, bytes) in &bodies {
                 // Original streaming hash/EOF validation, no full materialization.
-                if bounded::verify_historical_blob_optional(home, digest, *bytes, control)? {
-                    verified.add(
-                        u64::try_from(*bytes).map_err(|_| {
-                            ToolkitError::invalid("negative historical body length")
-                        })?,
-                    )?;
+                if bounded::verify_capture_blob_optional(home, digest, *bytes, control)? {
+                    verified.add(*bytes)?;
                 } else {
                     missing += 1;
                 }

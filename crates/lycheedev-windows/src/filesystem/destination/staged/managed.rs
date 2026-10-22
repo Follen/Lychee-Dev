@@ -8,12 +8,15 @@ pub const MANAGED_DECLARATION_BYTES: usize = 128;
 pub enum ManagedStageKind {
     Spool,
     Shard,
+    /// Accounting only: never authorizes a managed payload or recovery.
+    ExternalExport,
 }
 impl ManagedStageKind {
     fn label(self) -> &'static str {
         match self {
             Self::Spool => "spool",
             Self::Shard => "shard",
+            Self::ExternalExport => "external-export",
         }
     }
 }
@@ -26,13 +29,15 @@ pub struct ManagedStageName {
 }
 impl ManagedStageName {
     /// Restore only the finite name described by an authenticated immutable
-    /// declaration. This grants CREATE_NEW, never adoption/deletion. Core must
-    /// hold the matching slot lease and authenticate any retained payload.
+    /// declaration. Payload kinds grant CREATE_NEW, never adoption/deletion;
+    /// ExternalExport grants bookkeeping only. Core must hold the matching slot
+    /// lease and authenticate any retained Spool/Shard payload.
     pub fn from_declaration(bytes: &[u8; MANAGED_DECLARATION_BYTES]) -> io::Result<Self> {
         use sha2::{Digest, Sha256};
         let kind = match bytes[8] {
             1 => ManagedStageKind::Spool,
             2 => ManagedStageKind::Shard,
+            3 => ManagedStageKind::ExternalExport,
             _ => return Err(invalid("invalid declaration kind")),
         };
         if &bytes[..8] != b"LDST0002"
@@ -41,6 +46,7 @@ impl ManagedStageName {
             || bytes[88..96] != [0; 8]
             || u64::from_le_bytes(bytes[16..24].try_into().expect("fixed length")) > (1 << 40)
             || kind == ManagedStageKind::Spool && bytes[56..88] != [0; 32]
+            || kind == ManagedStageKind::ExternalExport && bytes[24..88] != [0; 64]
             || Sha256::digest(&bytes[..96]).as_slice() != &bytes[96..]
         {
             return Err(invalid("invalid managed declaration identity"));
@@ -71,6 +77,11 @@ impl<'a> ManagedStageDeclaration<'a> {
         Ok(format!(".lycheedev-data-{}-{slot:02}.record", kind.label()))
     }
     pub fn payload_name(kind: ManagedStageKind, slot: u8) -> io::Result<String> {
+        if kind == ManagedStageKind::ExternalExport {
+            return Err(invalid(
+                "external export declarations authorize accounting only",
+            ));
+        }
         Self::record_name(kind, slot)?;
         Ok(ManagedStageName { kind, slot }.as_string())
     }
@@ -167,6 +178,9 @@ impl<'a> StagedFile<'a> {
         name: &ManagedStageName,
         control: &mut C,
     ) -> Result<Self, C::Error> {
+        if name.kind == ManagedStageKind::ExternalExport {
+            return Err(invalid("external export declarations authorize accounting only").into());
+        }
         Self::create_exact_managed(parent, name.as_string(), control)
     }
 }

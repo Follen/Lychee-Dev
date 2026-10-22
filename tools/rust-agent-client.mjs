@@ -72,12 +72,14 @@ export function assertSafeContext(value, label = 'context', depth = 0) {
   for (const item of Object.values(value)) assertSafeContext(item, label, depth + 1);
 }
 
-// Only authenticated WDC layout partition key IDs are u64 identity payloads.
+// WDC partition key IDs and CASC entry name hashes are u64 identity payloads.
 // A wide account, request ID, row count or budget remains an invalid context.
 function assertProvenance(value,path=[]) {
- if(path.length>=4 && path.at(-1)==='keyId' && /^(0|[1-9][0-9]*)$/.test(path.at(-2)) && path.at(-3)==='partitions' && (path.at(-4)==='sourceLayout' || (path.at(-4)==='layout' && path.at(-5)==='sourceIdentity'))) {
+ const partitionKey=path.length>=4 && path.at(-1)==='keyId' && /^(0|[1-9][0-9]*)$/.test(path.at(-2)) && path.at(-3)==='partitions' && (path.at(-4)==='sourceLayout' || (path.at(-4)==='layout' && path.at(-5)==='sourceIdentity'));
+ const nameHash=path.length>=3 && path.at(-1)==='nameHash' && path.at(-2)==='entry' && path.at(-3)==='sourceReading';
+ if(partitionKey || nameHash) {
   if(isExactNumber(value)){assert(/^(0|[1-9][0-9]*)$/.test(value.exactNumber));assert(BigInt(value.exactNumber)<=18446744073709551615n);}
-  else assert(Number.isSafeInteger(value)&&value>=0,'agent.layout_key_id');
+  else assert(Number.isSafeInteger(value)&&value>=0,'agent.provenance_u64');
   return;
  }
  if(isExactNumber(value)||(value&&typeof value==='object'&&Object.hasOwn(value,'exactNumber')))throw Error('agent.unsafe_provenance');
@@ -103,8 +105,8 @@ export function decodeAgentFrame(raw, expectedId) {
   assert.equal(Object.hasOwn(frame, frame.ok ? 'error' : 'result'), false);
   if (!frame.ok) assertSafeContext(frame.error, 'error');
   else {
-    // Only row/cell payloads may contain explicit exact-number objects. Safety,
-    // identity and accounting context must never round an unsafe integer.
+    // Row/cell payloads and designated u64 source identities retain exact tokens.
+    // Request identity and accounting context must remain safe integers.
     for (const key of ['provenance', 'offset', 'totalRows', 'complete', 'result', 'capture']) {
       if (Object.hasOwn(frame.result ?? {}, key)) { if(key==='provenance')assertProvenance(frame.result[key]);else {assertSafeContext(frame.result[key], key);if(['offset','totalRows'].includes(key))assert(Number.isSafeInteger(frame.result[key])&&frame.result[key]>=0);if(key==='complete')assert.equal(typeof frame.result[key],'boolean');} }
     }

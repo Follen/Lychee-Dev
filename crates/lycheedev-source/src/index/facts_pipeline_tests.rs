@@ -95,6 +95,8 @@ fn only_bounded_utf8_supported_modes_are_speculative() {
         assert!(!eligible(&file(path, 1), b"\xff"));
         assert!(!eligible(&file(path, MAX_SOURCE_BYTES + 1), b"x"));
         assert!(!eligible(&file(path, 1), &vec![b' '; MAX_SOURCE_BYTES + 1]));
+        let newly_supported = vec![b' '; (64 << 10) + 1];
+        assert!(eligible(&file(path, newly_supported.len()), &newly_supported));
         assert!(eligible(
             &file(path, MAX_SOURCE_BYTES),
             &vec![b' '; MAX_SOURCE_BYTES]
@@ -366,7 +368,8 @@ fn cancelled_or_expired_xml_toc_jobs_abandon_and_preserve_the_original_stop() {
 
 #[test]
 fn all_parser_modes_keep_the_existing_worker_resource_envelope() {
-    assert_eq!(MAX_SOURCE_BYTES, 64 << 10);
+    assert_eq!(MAX_SOURCE_BYTES, 128 << 10);
+    assert_eq!(MAX_SOURCE_BYTES, crate::facts::WORKER_SOURCE_BYTES);
     assert_eq!(MAX_FACT_BYTES, 4 << 20);
     assert_eq!(PARSER_SCRATCH_BYTES, 32 << 20);
     assert_eq!(WORKER_STACK_BYTES, 2 << 20);
@@ -834,7 +837,7 @@ fn early_refill_never_consumes_after_the_first_error_and_all_jobs_finish() {
 #[test]
 fn early_refill_preserves_the_original_typed_cancellation() {
     let control = OperationControl::default();
-    let token = control.cancel_handle();
+    let token = control.tracked_cancel_handle().unwrap();
     let completed = AtomicUsize::new(0);
     with_workers(
         2,
@@ -848,7 +851,7 @@ fn early_refill_preserves_the_original_typed_cancellation() {
             let mut calls = 0;
             let mut consume = |_: &git::TreeFile, _: Vec<u8>, _: Option<PreparedFacts>| {
                 calls += 1;
-                token.store(true, Ordering::Release);
+                token.cancel();
                 control.check()
             };
             p.push(&file("0.lua", 1), vec![b'a'], &mut consume).unwrap();
@@ -1269,7 +1272,7 @@ fn slot_backpressure_never_grows_a_result_queue_past_worker_count() {
 #[test]
 fn an_existing_public_error_is_not_replaced_during_worker_join() {
     let original = Err::<usize, _>(ToolkitError::new("test.original", "publication failed", 5));
-    let result = finish_historical(original, Err(worker_failed())).unwrap_err();
+    let result = finish_owned(original, Err(worker_failed())).unwrap_err();
     assert_eq!(result.code, "test.original");
     assert_eq!(result.exit_code, 5);
 }
@@ -1459,14 +1462,17 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
                 let facts =
                     prepared.map_or_else(|| parse(&f.path, &raw), |prepared| prepared.facts);
                 if serial {
+                    // Non-UTF-8 input stays on the ordered full-parse route. The
+                    // invalid byte here is a real token, so declarations are
+                    // withheld and a syntax problem is reported; it is never
+                    // substituted into a declaration or relationship.
                     assert!(facts.declarations.is_empty());
                     assert!(facts.relationships.is_empty());
-                    assert_eq!(facts.diagnostics.len(), 1);
-                    assert_eq!(facts.diagnostics[0].line, 0);
                     assert!(
-                        facts.diagnostics[0]
-                            .message
-                            .contains("Lua structural input must be UTF-8 source without NUL")
+                        !facts.diagnostics.is_empty()
+                            && facts.diagnostics.iter().all(|note| note.line == 1),
+                        "the non-UTF-8 token stays a located syntax problem: {:?}",
+                        facts.diagnostics
                     );
                 }
                 assert_eq!(

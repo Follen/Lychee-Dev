@@ -1,6 +1,6 @@
 //! DataFusion expression-planner extension over the existing numeric primitives.
 use super::{QueryOwner, external, unsupported, values};
-use crate::relational::engine_compat::{self, Binary};
+use crate::query_value::{self as scalar, Binary};
 use arrow_schema::DataType;
 use datafusion::{
     common::{DFSchema, Result, ScalarValue},
@@ -156,12 +156,12 @@ fn exact_binary(
                     return ScalarValue::try_new_null(&return_kind);
                 }
                 if !numeric_inputs {
-                    return Err(external(engine_compat::type_error()));
+                    return Err(external(scalar::type_error()));
                 }
                 let left = values::read(scalar_at(left, row)?)?;
                 let right = values::read(scalar_at(right, row)?)?;
                 values::write(
-                    engine_compat::evaluate(&left, op, &right).map_err(external)?,
+                    scalar::evaluate(&left, op, &right).map_err(external)?,
                     &return_kind,
                 )
             };
@@ -203,10 +203,18 @@ fn native_equality_conjunction(value: &Expr, schema: &DFSchema) -> Result<bool> 
         Operator::And => Ok(native_equality_conjunction(&expression.left, schema)?
             && native_equality_conjunction(&expression.right, schema)?),
         Operator::Eq
-            if matches!(expression.left.as_ref(), Expr::Column(_) | Expr::OuterReferenceColumn(_, _))
-                && matches!(expression.right.as_ref(), Expr::Column(_) | Expr::OuterReferenceColumn(_, _)) =>
+            if matches!(
+                expression.left.as_ref(),
+                Expr::Column(_) | Expr::OuterReferenceColumn(_, _)
+            ) && matches!(
+                expression.right.as_ref(),
+                Expr::Column(_) | Expr::OuterReferenceColumn(_, _)
+            ) =>
         {
-            let kinds = [expression.left.get_type(schema)?, expression.right.get_type(schema)?];
+            let kinds = [
+                expression.left.get_type(schema)?,
+                expression.right.get_type(schema)?,
+            ];
             Ok(!needs_exact(Binary::Equal, &kinds))
         }
         _ => Ok(false),
@@ -227,7 +235,9 @@ fn boolean_binary(
         && native_equality_conjunction(&right, schema)?
     {
         return Ok(Expr::BinaryExpr(BinaryExpr::new(
-            Box::new(left), operator, Box::new(right),
+            Box::new(left),
+            operator,
+            Box::new(right),
         )));
     }
     let kinds = vec![left.get_type(schema)?, right.get_type(schema)?];

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::{
     fs,
     path::Path,
-    sync::{Arc, atomic::AtomicBool},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -268,16 +268,7 @@ fn bounded(control: &OperationControl) -> Result<OperationControl> {
     let deadline = control
         .deadline()
         .min(Instant::now() + Duration::from_secs(30));
-    match control.ordered_child(deadline) {
-        Ok(child) => Ok(child),
-        Err(error)
-            if error.code == "control.cancellation_order_unavailable"
-                && error.details.is_null() =>
-        {
-            Ok(control.child(deadline, Arc::new(AtomicBool::new(false))))
-        }
-        Err(error) => Err(error),
-    }
+    control.ordered_child(deadline)
 }
 fn immediate(
     scope: &Path,
@@ -419,9 +410,7 @@ mod cleanup_tests {
     #[test]
     fn cleanup_only_preserves_each_equal_close_event_in_reverse_order_without_stop() {
         let control = OperationControl::default();
-        control
-            .cancel_handle()
-            .store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
         let error = ToolkitError::new("test.close", "injected close failure", 5);
         let owner = DataResources {

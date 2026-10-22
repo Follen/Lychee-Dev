@@ -148,10 +148,11 @@ fn owned_sequential_read_preserves_prefix_and_old_block_after_next_block_error()
     assert_eq!(owned.position, BLOCK);
     assert_eq!(budget.snapshot().unwrap().retained_bytes, base);
     let calls = f.backend.calls.lock().unwrap().len();
-    let mut prefix = [0; 4];
-    owned.read_at(&mut prefix, 0).unwrap();
-    assert_eq!(&prefix, b"BLTE");
-    assert_eq!(f.backend.calls.lock().unwrap().len(), calls);
+    {
+        let prefix = owned.read_encoded(0, 4).unwrap();
+        assert_eq!(&*prefix, b"BLTE");
+        assert_eq!(f.backend.calls.lock().unwrap().len(), calls);
+    }
     drop(owned);
     drop(files);
     std::fs::remove_dir_all(&f.home).unwrap();

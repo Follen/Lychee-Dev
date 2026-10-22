@@ -280,7 +280,7 @@ mod tests {
         );
     }
     #[test]
-    fn seven_products_have_the_fixed_go_order_slots_and_schema() {
+    fn seven_products_have_the_fixed_reference_order_slots_and_schema() {
         let expected = [
             ("retail", "wow"),
             ("classic", "wow_classic"),

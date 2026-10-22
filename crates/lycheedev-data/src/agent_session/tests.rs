@@ -68,7 +68,7 @@ fn wire_parses_typed_tasks_and_rejects_unknown_fields_without_sql() {
 #[test]
 fn real_session_reuses_engine_keeps_exact_rows_and_invalidates_released_handles() {
     let fx = fixture();
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let first = response(
         runtime
@@ -150,7 +150,7 @@ fn real_session_reuses_engine_keeps_exact_rows_and_invalidates_released_handles(
 #[test]
 fn pre_admission_cancelled_library_call_does_not_execute_or_poison_engine() {
     let fx = fixture();
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let cancelled = control();
     cancelled.tracked_cancel_handle().unwrap().cancel();
@@ -171,7 +171,7 @@ fn pre_admission_cancelled_library_call_does_not_execute_or_poison_engine() {
 #[test]
 fn fields_and_batch_tasks_use_real_pinned_source() {
     let fx = fixture();
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let table = TableRequest {
         name: "AgentSample".into(),
@@ -229,7 +229,7 @@ fn item_navigation_publishes_separate_guarded_components_without_invented_rows()
             &[vec![Cell::U(7), Cell::Text("Exact item".into())]],
         ),
     ]);
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let value = response(
         runtime
@@ -278,7 +278,7 @@ fn related_task_filters_exact_foreign_ids_and_rejects_missing_field() {
             vec![Cell::U(3), Cell::U(7)],
         ],
     )]);
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let table = TableRequest {
         name: "SpellEffect".into(),
@@ -323,9 +323,8 @@ fn multi_component_capacity_failure_rolls_back_unpublished_handles() {
         fixture::table("Item", 934, &[("ID", "uint")], &[vec![Cell::U(7)]]),
         fixture::table("ItemSparse", 935, &[("ID", "uint")], &[vec![Cell::U(7)]]),
     ]);
-    let mut invocation = fx.invocation("data agent serve", &[]);
-    invocation.flags.insert("--max-objects".into(), "1".into());
-    let mut session = Session::new(invocation).unwrap();
+    let config = crate::request::SessionConfig { max_handles: 1, ..Default::default() };
+    let mut session = Session::new(fx.context(), config).unwrap();
     let runtime = runtime();
     assert!(
         runtime
@@ -366,7 +365,7 @@ fn multi_component_capacity_failure_rolls_back_unpublished_handles() {
 #[test]
 fn catalog_is_pinned_manifest_inventory_not_table_readability() {
     let fx = fixture();
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let catalog = response(
         runtime
@@ -401,7 +400,7 @@ fn second_component_source_failure_preserves_preexisting_handle() {
         &[("ID", "uint")],
         &[vec![Cell::U(7)]],
     )]);
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let first = response(
         runtime
@@ -458,7 +457,7 @@ fn second_component_source_failure_preserves_preexisting_handle() {
 #[test]
 fn explicit_capture_persists_result_without_consuming_handle() {
     let fx = fixture();
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let runtime = runtime();
     let result = response(
         runtime
@@ -519,11 +518,8 @@ fn explicit_capture_persists_result_without_consuming_handle() {
     );
     assert_eq!(capture["complete"], body["complete"]);
     assert_eq!(capture["truncated"], false);
-    let mut verify = fx.invocation("evidence verify", &[]);
-    verify.flags.clear();
-    verify.positional = Some(capture_id.into());
     assert_eq!(
-        lycheedev_core::evidence::dispatch(&verify).unwrap().data["verified"],
+        lycheedev_core::evidence::dispatch(&fx.core_context(), lycheedev_core::evidence::EvidenceRequest::Verify { id: capture_id.into() }).unwrap().data["verified"],
         true
     );
     let page = response(
@@ -542,6 +538,202 @@ fn explicit_capture_persists_result_without_consuming_handle() {
     session.close().unwrap();
 }
 
+fn compound_handle_witness(query: QueryRequest, expected_rows: Value, expected_csv: &str) {
+    use lycheedev_core::evidence;
+    let fx = Fixture::new(&[fixture::table(
+        "Sequence",
+        926,
+        &[("ID", "uint"), ("Exact", "signed64")],
+        &[
+            vec![Cell::U(1), Cell::I64(9_007_199_254_740_993)],
+            vec![Cell::U(2), Cell::I64(-7)],
+            vec![Cell::U(3), Cell::I64(i64::MAX)],
+        ],
+    )]);
+    let mut context = fx.context();
+    let casc_root = fx.client.parent().unwrap();
+    context.source.installation = Some(casc_root.to_owned());
+    let mut session = Session::new(context, Default::default()).unwrap();
+    let runtime = runtime();
+    let submitted = response(
+        runtime
+            .block_on(session.execute(
+                Task::Query {
+                    query: query.clone(),
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    let handle = submitted["result"]["handle"].as_str().unwrap().to_owned();
+    assert_eq!(submitted["result"]["rows"], 3);
+    assert_eq!(submitted["complete"], true);
+    assert_eq!(submitted["provenance"]["engine"], "datafusion");
+    assert_eq!(
+        submitted["provenance"]["sources"].as_array().unwrap().len(),
+        1
+    );
+
+    // ResultOwner explicitly survives Engine::close. Evict the source snapshot
+    // so even a native Arrow cache cannot make a rerun silently succeed, then
+    // invalidate only this owned fixture's external installation catalog.
+    session.engine.close().unwrap();
+    assert_eq!(session.engine.cached_source_count(), 0);
+    std::fs::write(casc_root.join(".build.info"), b"not a build catalog").unwrap();
+    let fresh = runtime
+        .block_on(session.execute(
+            Task::Query {
+                query: query.clone(),
+            },
+            control(),
+        ))
+        .err()
+        .expect("a new execution must fail against the invalidated fixture");
+    assert_eq!(fresh.code, "records.invalid_metadata");
+
+    let first = response(
+        runtime
+            .block_on(session.execute(
+                Task::Page {
+                    handle: handle.clone(),
+                    offset: 0,
+                    limit: 2,
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    let tail = response(
+        runtime
+            .block_on(session.execute(
+                Task::Page {
+                    handle: handle.clone(),
+                    offset: 2,
+                    limit: 2,
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(first["columns"], json!(["ID", "Exact"]));
+    assert_eq!(tail["columns"], first["columns"]);
+    assert_eq!(first["totalRows"], 3);
+    assert_eq!(tail["totalRows"], 3);
+    assert_eq!(first["complete"], true);
+    assert_eq!(tail["complete"], true);
+    let rows = first["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(tail["rows"].as_array().unwrap())
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(Value::Array(rows), expected_rows);
+
+    let csv = response(
+        runtime
+            .block_on(session.execute(
+                Task::Export {
+                    handle: handle.clone(),
+                    offset: 0,
+                    limit: 10,
+                    format: ExportFormat::Csv,
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(csv["text"], expected_csv);
+    assert_eq!(csv["page"]["rows"], expected_rows);
+    assert_eq!(csv["page"]["complete"], true);
+    let capture = response(
+        runtime
+            .block_on(session.execute(
+                Task::Capture {
+                    handle: handle.clone(),
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(capture["complete"], true);
+    assert_eq!(capture["truncated"], false);
+    assert_eq!(
+        evidence::read_capture(&fx.home, capture["id"].as_str().unwrap()).unwrap(),
+        capture
+    );
+    let bytes = evidence::read_blob(&fx.home, &capture["blob"], 16 << 20).unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["schema"], "lycheedev.data-agent-result.v1");
+    assert_eq!(body["columns"], json!(["ID", "Exact"]));
+    assert_eq!(body["rowCount"], 3);
+    assert_eq!(body["rows"], expected_rows);
+    assert_eq!(body["complete"], true);
+    assert_eq!(body["provenance"], submitted["provenance"]);
+    assert_eq!(
+        body["provenance"]["request"],
+        serde_json::to_value(query).unwrap()
+    );
+    let after_capture = response(
+        runtime
+            .block_on(session.execute(
+                Task::Page {
+                    handle,
+                    offset: 0,
+                    limit: 10,
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(after_capture["rows"], expected_rows);
+    session.close().unwrap();
+}
+
+#[test]
+fn union_all_session_handle_preserves_order_duplicates_and_exact_values_without_rerun() {
+    // The three branch bags are [row 1], [row 2], [row 1]. Neither sorting nor
+    // deduplication is part of UnionAll; the wide integer must survive intact.
+    let query = serde_json::from_value(json!({"kind":"plan","plan":{
+        "op":"union_all","inputs":[
+            {"op":"lookup","table":{"name":"Sequence","mode":"static"},"ids":[1]},
+            {"op":"lookup","table":{"name":"Sequence","mode":"static"},"ids":[2]},
+            {"op":"lookup","table":{"name":"Sequence","mode":"static"},"ids":[1]},
+        ]
+    }}))
+    .unwrap();
+    compound_handle_witness(
+        query,
+        json!([
+            [1, 9_007_199_254_740_993u64],
+            [2, -7],
+            [1, 9_007_199_254_740_993u64]
+        ]),
+        "\"ID\",\"Exact\"\r\n\"1\",\"9007199254740993\"\r\n\"2\",\"-7\"\r\n\"1\",\"9007199254740993\"\r\n",
+    );
+}
+
+#[test]
+fn iterate_session_handle_preserves_previous_delta_order_and_exact_values_without_rerun() {
+    // Starting at ID 1, only ID 2 matches ID-1 IN previous delta, then only ID
+    // 3, then no row. Re-reading the accumulated bag would repeat prior rows.
+    let query = serde_json::from_value(json!({"kind":"plan","plan":{
+        "op":"iterate","binding":"r",
+        "seed":{"op":"lookup","table":{"name":"Sequence","mode":"static"},"ids":[1]},
+        "step":{"op":"filter","input":{"op":"scan","table":{"name":"Sequence","mode":"static"}},
+            "predicate":{"kind":"in_query","value":{"kind":"binary","operator":"subtract",
+                "left":{"kind":"column","name":"Sequence.ID"},"right":{"kind":"literal","value":1}},
+                "input":{"op":"project","input":{"op":"delta","binding":"r"},
+                    "columns":[{"name":"ID","expression":{"kind":"column","name":"ID"}}]}}}
+    }}))
+    .unwrap();
+    compound_handle_witness(
+        query,
+        json!([[1, 9_007_199_254_740_993u64], [2, -7], [3, i64::MAX]]),
+        "\"ID\",\"Exact\"\r\n\"1\",\"9007199254740993\"\r\n\"2\",\"-7\"\r\n\"3\",\"9223372036854775807\"\r\n",
+    );
+}
+
 #[test]
 fn local_session_rebuilds_missing_selected_body_without_changing_alias_owner_or_capture() {
     use lycheedev_core::{evidence, metadata::{DataCacheMetadata, Metadata}, storage,
@@ -557,7 +749,7 @@ fn local_session_rebuilds_missing_selected_body_without_changing_alias_owner_or_
         ids: vec![7],
     } } };
     let runtime = runtime();
-    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
     let cold = response(runtime.block_on(session.execute(query(), control())).unwrap());
     assert_eq!(cold["complete"], true);
     let source = cold["provenance"]["sources"][0]["sourceIdentity"]["source"].clone();
@@ -611,7 +803,7 @@ fn local_session_rebuilds_missing_selected_body_without_changing_alias_owner_or_
     // Only the reconstructible canonical selected body is removed, after all
     // cold-session readers are closed. Its alias and Data attribution remain.
     std::fs::remove_file(&body).unwrap();
-    let mut rebuilt_session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut rebuilt_session = Session::new(fx.context(), Default::default()).unwrap();
     let rebuilt = response(runtime.block_on(rebuilt_session.execute(query(), control())).unwrap());
     assert_eq!(rebuilt["complete"], true);
     assert_eq!(rebuilt["provenance"]["sources"][0]["sourceIdentity"]["source"], source);
@@ -631,7 +823,7 @@ fn local_session_rebuilds_missing_selected_body_without_changing_alias_owner_or_
     let mut corrupt = expected;
     corrupt[0] ^= 1;
     std::fs::write(&body, &corrupt).unwrap();
-    let mut corrupt_session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let mut corrupt_session = Session::new(fx.context(), Default::default()).unwrap();
     let error = runtime.block_on(corrupt_session.execute(query(), control())).err().unwrap();
     assert_eq!(error.code, "vault.blob_integrity");
     corrupt_session.close().unwrap();

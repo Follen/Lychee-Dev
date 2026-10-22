@@ -35,12 +35,30 @@ pub struct DiagnosticSample<T = String> {
     pub message: T,
 }
 
+/// An independently reported encoding observation. It never reduces analyzed
+/// documents, AST files or load validity, and it is never a syntax diagnostic.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    deny_unknown_fields,
+    bound(deserialize = "T: Deserialize<'de>")
+)]
+pub struct EncodingWarning<T = String> {
+    pub path: T,
+    #[serde(with = "coordinate")]
+    pub line: usize,
+    /// Zero-based byte offset in the original archived bytes.
+    #[serde(with = "coordinate")]
+    pub byte_offset: usize,
+    pub message: T,
+}
+
 /// A sample has a producer-defined maximum of twenty rows. An inline bounded
 /// container lets the borrowed decoder check an untrusted count before any
 /// collection allocation, including the summary-only path.
 #[derive(Clone, Debug)]
 pub struct Samples<T = String> {
-    rows: [Option<DiagnosticSample<T>>; 20],
+    rows: [Option<T>; 20],
     len: usize,
 }
 impl<T> Default for Samples<T> {
@@ -58,14 +76,10 @@ impl<T> Samples<T> {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
-    #[cfg(test)]
-    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut DiagnosticSample<T>> {
-        self.rows.iter_mut().flatten()
-    }
-    pub fn iter(&self) -> impl Iterator<Item = &DiagnosticSample<T>> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.rows.iter().flatten()
     }
-    pub(super) fn push(&mut self, value: DiagnosticSample<T>) -> bool {
+    pub(super) fn push(&mut self, value: T) -> bool {
         if self.len == self.rows.len() {
             return false;
         }
@@ -73,7 +87,7 @@ impl<T> Samples<T> {
         self.len += 1;
         true
     }
-    pub(super) fn into_rows(self) -> impl Iterator<Item = DiagnosticSample<T>> {
+    pub(super) fn into_rows(self) -> impl Iterator<Item = T> {
         self.rows.into_iter().flatten()
     }
 }
@@ -138,9 +152,15 @@ pub struct SourceSummary<T = String> {
     pub assets: usize,
     #[serde(with = "coordinate")]
     pub diagnostics: usize,
+    /// Files whose original bytes contain invalid UTF-8. These are display
+    /// observations, not syntax diagnostics, and never make the index partial.
+    #[serde(default, with = "coordinate")]
+    pub warnings: usize,
     pub complete: bool,
     #[serde(default)]
-    pub diagnostic_sample: Option<Samples<T>>,
+    pub diagnostic_sample: Option<Samples<DiagnosticSample<T>>>,
+    #[serde(default)]
+    pub warning_sample: Option<Samples<EncodingWarning<T>>>,
     // Public JSON can include this request's observations. Cache serialization
     // and decoding always omit it, so a cache cannot supply fresh I/O claims.
     #[serde(default, deserialize_with = "runtime_io")]
@@ -164,33 +184,40 @@ impl<T: Serialize> Serialize for SourceSummary<T> {
             relationships,
             assets,
             diagnostics,
+            warnings,
             complete,
             diagnostic_sample,
+            warning_sample,
             io,
         } = self;
         if !serializer.is_human_readable() {
-            return (
-                schema,
-                storage,
-                repository,
-                product,
-                commit,
-                parser,
-                *documents as u64,
-                *ast_files as u64,
-                *skipped_documents as u64,
-                *declarations as u64,
-                *relationships as u64,
-                *assets as u64,
-                *diagnostics as u64,
-                complete,
-                diagnostic_sample,
-                (),
-            )
-                .serialize(serializer);
+            use serde::ser::SerializeTuple;
+            let mut tuple = serializer.serialize_tuple(18)?;
+            tuple.serialize_element(schema)?;
+            tuple.serialize_element(storage)?;
+            tuple.serialize_element(repository)?;
+            tuple.serialize_element(product)?;
+            tuple.serialize_element(commit)?;
+            tuple.serialize_element(parser)?;
+            tuple.serialize_element(&(*documents as u64))?;
+            tuple.serialize_element(&(*ast_files as u64))?;
+            tuple.serialize_element(&(*skipped_documents as u64))?;
+            tuple.serialize_element(&(*declarations as u64))?;
+            tuple.serialize_element(&(*relationships as u64))?;
+            tuple.serialize_element(&(*assets as u64))?;
+            tuple.serialize_element(&(*diagnostics as u64))?;
+            tuple.serialize_element(&(*warnings as u64))?;
+            tuple.serialize_element(complete)?;
+            tuple.serialize_element(diagnostic_sample)?;
+            tuple.serialize_element(warning_sample)?;
+            tuple.serialize_element(&())?;
+            return tuple.end();
         }
         let mut map = serializer.serialize_map(Some(
-            14 + usize::from(diagnostic_sample.is_some()) + usize::from(!io.is_null()),
+            14 + usize::from(*warnings != 0)
+                + usize::from(diagnostic_sample.is_some())
+                + usize::from(warning_sample.is_some())
+                + usize::from(!io.is_null()),
         ))?;
         map.serialize_entry("schema", schema)?;
         map.serialize_entry("storage", storage)?;
@@ -206,8 +233,14 @@ impl<T: Serialize> Serialize for SourceSummary<T> {
         map.serialize_entry("assets", assets)?;
         map.serialize_entry("diagnostics", diagnostics)?;
         map.serialize_entry("complete", complete)?;
+        if *warnings != 0 {
+            map.serialize_entry("warnings", warnings)?;
+        }
         if let Some(sample) = diagnostic_sample {
             map.serialize_entry("diagnosticSample", sample)?;
+        }
+        if let Some(sample) = warning_sample {
+            map.serialize_entry("warningSample", sample)?;
         }
         if !io.is_null() {
             map.serialize_entry("io", io)?;
@@ -231,8 +264,10 @@ impl SourceSummary {
             relationships: 0,
             assets: 0,
             diagnostics: 0,
+            warnings: 0,
             complete: true,
             diagnostic_sample: None,
+            warning_sample: None,
             io: Value::Null,
         }
     }
@@ -240,6 +275,12 @@ impl SourceSummary {
         let mut value = json!({"analyzedDocuments":documents,"skippedDocuments":self.skipped_documents,"diagnostics":self.diagnostics,"complete":self.complete,"io":self.io});
         if let Some(sample) = &self.diagnostic_sample {
             value["diagnosticSample"] = json!(sample);
+        }
+        if self.warnings != 0 {
+            value["warnings"] = json!(self.warnings);
+            if let Some(sample) = &self.warning_sample {
+                value["warningSample"] = json!(sample);
+            }
         }
         value
     }

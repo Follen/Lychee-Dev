@@ -10,7 +10,7 @@ import {openGoCustody} from './source-pack-custody.mjs';
 import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {contained} from '../../tools/rust-disk.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
-import {processPassed, processReaped, verifyOwnerEvidence} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
+import {processPassed, processReaped, verifyOwnerEvidence} from './owned-proof.mjs';
 import {splitIndexEvidence, verifyParts, INDEX_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
 
 export const POSTCARD_LAYOUT = 'v13-postcard';

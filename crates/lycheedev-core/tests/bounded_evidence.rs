@@ -1,8 +1,8 @@
 use lycheedev_core::{
-    Invocation,
-    control::OperationControl,
+    control::{OperationControl, TrackedCancellation},
     evidence::{self, CaptureInput},
     metadata::Metadata,
+    request::RequestContext,
     storage, workspace,
 };
 use serde_json::json;
@@ -10,10 +10,7 @@ use std::{
     fs,
     io::{self, Read, Seek, SeekFrom, Write},
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
+    sync::atomic::{AtomicUsize, Ordering},
 };
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 struct Temp(PathBuf);
@@ -83,15 +80,15 @@ fn actual_129mib_capture_requires_explicit_admission_and_verifies_publicly() {
     assert_eq!(capture["blob"]["bytes"], bytes.len());
     let path = evidence::blob_path(&temp.0, capture["blob"]["sha256"].as_str().unwrap()).unwrap();
     assert_eq!(fs::metadata(&path).unwrap().len(), bytes.len() as u64);
-    let invocation = Invocation {
-        command: "evidence verify".into(),
-        positional: Some(capture["id"].as_str().unwrap().into()),
-        flags: Default::default(),
+    let context = RequestContext {
         home: temp.0.clone(),
         cwd: temp.0.clone(),
         control: OperationControl::default(),
     };
-    let outcome = evidence::dispatch(&invocation).unwrap();
+    let outcome = evidence::dispatch(
+        &context,
+        evidence::EvidenceRequest::Verify { id: capture["id"].as_str().unwrap().into() },
+    ).unwrap();
     assert_eq!(outcome.data["verified"], true);
     assert_eq!(outcome.data["capture"], capture);
     assert_eq!(
@@ -122,8 +119,9 @@ fn actual_129mib_capture_requires_explicit_admission_and_verifies_publicly() {
             .code,
         "vault.blob_integrity"
     );
-    let token = Arc::new(AtomicBool::new(true));
-    let cancelled = OperationControl::new(
+    let token = TrackedCancellation::new();
+    token.cancel();
+    let cancelled = OperationControl::tracked(
         std::time::Instant::now() + std::time::Duration::from_secs(30),
         token,
     );
@@ -219,14 +217,14 @@ fn workspace_errors_and_explicit_small_caps_keep_existing_defaults() {
 fn streamed_blob_faults_remove_private_stage_before_any_capture_is_visible() {
     struct Producer {
         bytes: io::Cursor<Vec<u8>>,
-        cancel: Option<Arc<AtomicBool>>,
+        cancel: Option<TrackedCancellation>,
         terminal_error: bool,
     }
     impl Read for Producer {
         fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
             let n = self.bytes.read(buffer)?;
             if let Some(token) = self.cancel.take() {
-                token.store(true, Ordering::Release);
+                token.cancel();
             }
             if n == 0 && self.terminal_error {
                 return Err(io::Error::other(lycheedev_core::ToolkitError::new(
@@ -245,9 +243,10 @@ fn streamed_blob_faults_remove_private_stage_before_any_capture_is_visible() {
             bytes: body.len() as u64,
         };
         let control = OperationControl::default();
+        let cancel = control.tracked_cancel_handle().unwrap();
         let mut producer = Producer {
             bytes: io::Cursor::new(if scenario == "short" { body[..65536].to_vec() } else { body }),
-            cancel: (scenario == "cancel").then(|| control.cancel_handle()),
+            cancel: (scenario == "cancel").then(|| cancel),
             terminal_error: scenario == "terminal",
         };
         let error = evidence::publish_blob_reader_bounded(&temp.0, &mut producer, &reference,

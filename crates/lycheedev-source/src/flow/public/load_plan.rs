@@ -640,9 +640,11 @@ mod tests {
     }
     #[test]
     fn flow_load_original_cancellation_interrupts_non_lua_traversal() {
-        let token = Arc::new(AtomicBool::new(false));
-        let control =
-            OperationControl::new(Instant::now() + Duration::from_secs(60), token.clone());
+        let token = lycheedev_core::control::TrackedCancellation::new();
+        let control = OperationControl::tracked(
+            Instant::now() + Duration::from_secs(60),
+            token.clone(),
+        );
         let facts = dag(30);
         let error = test_collect_with(
             "never.lua",
@@ -652,7 +654,7 @@ mod tests {
             Limits::default(),
             |work| {
                 if work > facts.len() + 100 {
-                    token.store(true, Ordering::Release);
+                    token.cancel();
                 }
             },
         )

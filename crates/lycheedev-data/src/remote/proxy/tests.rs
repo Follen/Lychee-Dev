@@ -132,13 +132,13 @@ fn unicode_lookup_and_simple_lowercase() {
         ".bücher.example",
         "https://a.xn--bcher-kva.example/x"
     ));
-    assert_eq!(go_lower("İΣ"), "iσ");
+    assert_eq!(simple_fold_lower("İΣ"), "iσ");
     assert_eq!(ascii_host("ascii_with_underscore"), "ascii_with_underscore");
     assert_eq!(ascii_host("-bücher.example"), "-bücher.example");
 }
 
 #[test]
-fn proxy_schemes_and_go_remote_socks_dns() {
+fn proxy_schemes_and_remote_socks_dns() {
     for (proxy, scheme, port) in [
         ("proxy.invalid:8123", "http", Some(8123)),
         ("http://user:secret@proxy.invalid:80", "http", None),
@@ -295,7 +295,7 @@ fn raw_selected_proxy_preserves_own_authority_and_credentials() {
 }
 
 #[test]
-fn raw_proxy_route_keeps_go_cgi_and_cross_origin_bypass_order() {
+fn raw_proxy_route_keeps_cgi_and_cross_origin_bypass_order() {
     let mut policy = Policy::new("https://BÜCHER.proxy:00443".into(), ".bypass.test");
     policy.http_proxy = "http://u%FF:p@0x7f000001:0080".into();
     let selected = policy.select_raw("http://first.test/a").unwrap().unwrap();

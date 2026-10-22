@@ -1,14 +1,15 @@
 use super::*;
 use crate::control::{OperationControl, TrackedCancellation};
 use std::{
-    collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
 struct Fixture {
     root: PathBuf,
-    invocation: Invocation,
+    invocation: RequestContext,
+    snapshot: Option<String>,
+    selected_project: Option<String>,
     pin: PinnedSet,
 }
 impl Fixture {
@@ -50,10 +51,7 @@ impl Fixture {
                 .unwrap(),
         )
         .unwrap();
-        let invocation = Invocation {
-            command: "data sql".into(),
-            positional: None,
-            flags: BTreeMap::new(),
+        let invocation = RequestContext {
             home,
             cwd: project.join("nested"),
             control: OperationControl::uncancelable(Instant::now() + Duration::from_secs(30)),
@@ -61,8 +59,14 @@ impl Fixture {
         Self {
             root,
             invocation,
+            snapshot: None,
+            selected_project: None,
             pin,
         }
+    }
+    fn request(&self) -> PinSelectionRequest<'_> {
+        PinSelectionRequest { home: &self.invocation.home, cwd: &self.invocation.cwd,
+            snapshot: self.snapshot.as_deref(), project: self.selected_project.as_deref() }
     }
     fn project(&self) -> PathBuf {
         self.root.join("project")
@@ -74,9 +78,9 @@ impl Fixture {
 #[test]
 fn project_default_imports_and_authenticates_persisted_pin_without_raw_token() {
     let f = Fixture::new();
-    let actual = resolve_pinned_controlled_with_check(&f.invocation, || Ok(())).unwrap();
+    let actual = resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(())).unwrap();
     assert_eq!(actual.id, f.pin.id);
-    let again = resolve_pinned_controlled_with_check(&f.invocation, || Ok(())).unwrap();
+    let again = resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(())).unwrap();
     assert_eq!(again.id, actual.id);
     assert_eq!(
         load_pinned_controlled(&f.invocation.home, &actual.id, &f.invocation.control)
@@ -98,7 +102,7 @@ fn malformed_nearer_project_is_not_skipped_for_valid_parent() {
         br#"{"schema":"lycheedev.project.v1","SCHEMA":"lycheedev.project.v1","product":"retail"}"#,
     )
     .unwrap();
-    let error = resolve_pinned_controlled_with_check(&f.invocation, || Ok(())).unwrap_err();
+    let error = resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(())).unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("selection.project_format", 4)
@@ -108,9 +112,9 @@ fn malformed_nearer_project_is_not_skipped_for_valid_parent() {
 #[test]
 fn explicit_project_is_resolved_relative_to_invocation_cwd() {
     let mut f = Fixture::new();
-    f.invocation.flags.insert("--project".into(), "..".into());
+    f.selected_project = Some("..".into());
     assert_eq!(
-        resolve_pinned_controlled_with_check(&f.invocation, || Ok(()))
+        resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(()))
             .unwrap()
             .id,
         f.pin.id
@@ -124,7 +128,7 @@ fn project_invalid_utf8_oversize_and_nonregular_fail_before_pin_import() {
     for raw in [vec![0xff], vec![b' '; 65537], b"{\"schema\":1}".to_vec()] {
         fs::write(&path, raw).unwrap();
         assert_eq!(
-            resolve_pinned_controlled_with_check(&f.invocation, || Ok(()))
+            resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(()))
                 .unwrap_err()
                 .code,
             "selection.project_format"
@@ -133,7 +137,7 @@ fn project_invalid_utf8_oversize_and_nonregular_fail_before_pin_import() {
     fs::remove_file(&path).unwrap();
     fs::create_dir(&path).unwrap();
     assert_eq!(
-        resolve_pinned_controlled_with_check(&f.invocation, || Ok(()))
+        resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(()))
             .unwrap_err()
             .code,
         "selection.project_format"
@@ -141,12 +145,12 @@ fn project_invalid_utf8_oversize_and_nonregular_fail_before_pin_import() {
     f.cleanup();
 }
 #[test]
-fn project_missing_lock_unlocked_and_wrong_product_conflict_have_go_codes() {
+fn project_missing_lock_unlocked_and_wrong_product_conflict_have_reference_codes() {
     let f = Fixture::new();
     let lock = f.project().join("lycheedev.lock.json");
     fs::remove_file(&lock).unwrap();
     assert_eq!(
-        resolve_pinned_controlled_with_check(&f.invocation, || Ok(()))
+        resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(()))
             .unwrap_err()
             .code,
         "selection.project_unlocked"
@@ -163,7 +167,7 @@ fn project_missing_lock_unlocked_and_wrong_product_conflict_have_go_codes() {
     )
     .unwrap();
     assert_eq!(
-        resolve_pinned_controlled_with_check(&f.invocation, || Ok(()))
+        resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || Ok(()))
             .unwrap_err()
             .code,
         "selection.project_conflict"
@@ -171,58 +175,43 @@ fn project_missing_lock_unlocked_and_wrong_product_conflict_have_go_codes() {
     f.cleanup();
 }
 #[test]
-fn project_json_rejects_nested_duplicate_and_depth_seventeen_with_raw_time() {
+fn project_typed_documents_reject_unknown_fields_and_require_exact_schema() {
+    let f = Fixture::new();
     let control = OperationControl::default();
     let mut scope = Scope {
         control: &control,
         supplemental: || Ok(()),
     };
+    let valid = br#"{"schema":"lycheedev.project.v1","product":"retail"}"#;
+    assert_eq!(wire::project(valid, &mut scope).unwrap(), "retail");
     for raw in [
-        br#"{"selection":{"data":{"product":"retail","PRODUCT":"retail"}}}"#.as_slice(),
-        br#"{"x":1e1000}"#,
+        br#"{"schema":"lycheedev.project.v1","product":"retail","unknown":null}"#.as_slice(),
+        br#"{"schema":"wrong","product":"retail"}"#.as_slice(),
+        br#"{"schema":"lycheedev.project.v1","product":"Retail"}"#.as_slice(),
     ] {
-        assert!(wire::validate(raw, &mut scope).is_err());
+        assert!(
+            wire::project(raw, &mut scope).is_err(),
+            "{}",
+            String::from_utf8_lossy(raw)
+        );
     }
-    let depth16 = format!("{}{}", "[".repeat(17), "]".repeat(17));
-    wire::validate(depth16.as_bytes(), &mut scope).unwrap();
-    let depth17 = format!("{}0{}", "[".repeat(17), "]".repeat(17));
-    assert!(wire::validate(depth17.as_bytes(), &mut scope).is_err());
-    let mut change = ChangePin::default();
-    assert!(
-        wire::changes(
-            r#"{"fetchedAt":"2026-10-14T22:00:00\u005a"}"#,
-            &mut change,
-            &mut scope
-        )
-        .is_err()
-    );
-}
-#[test]
-fn project_typed_null_and_unicode_fold_follow_go_merge_rules() {
-    let control = OperationControl::default();
-    let mut scope = Scope {
-        control: &control,
-        supplemental: || Ok(()),
-    };
-    let raw = r#"{"schema":"wrong","ſchema":"lycheedev.project.v1","product":"retail"}"#;
-    wire::validate(raw.as_bytes(), &mut scope).unwrap();
-    assert_eq!(wire::project(raw.as_bytes(), &mut scope).unwrap(), "retail");
-    assert!(
-        wire::project(
-            br#"{"schema":"lycheedev.project.v1","product":"retail","unknown":null}"#,
-            &mut scope
-        )
-        .is_err()
-    );
-    let mut pin = SourcePin::default();
-    wire::source(
-        r#"{"requestedRef":"\ud800","product":null}"#,
-        &mut pin,
-        &mut scope,
+    let lock = serde_json::to_vec(
+        &json!({"schema":"lycheedev.project-lock.v1","selection":f.pin}),
     )
     .unwrap();
-    assert_eq!(pin.requested_ref, "\u{fffd}");
-    assert_eq!(pin.product, "");
+    assert_eq!(wire::lock(&lock, &mut scope).unwrap().id, f.pin.id);
+    let unknown = serde_json::to_vec(
+        &json!({"schema":"lycheedev.project-lock.v1","selection":f.pin,"unknown":1}),
+    )
+    .unwrap();
+    assert!(wire::lock(&unknown, &mut scope).is_err());
+    assert!(
+        wire::lock(
+            br#"{"schema":"lycheedev.project-lock.v1","selection":null}"#,
+            &mut scope
+        )
+        .is_err()
+    );
 }
 #[test]
 fn project_precancel_preserves_original_scope_and_independent_budget_failure() {
@@ -231,7 +220,7 @@ fn project_precancel_preserves_original_scope_and_independent_budget_failure() {
     let mut inv = f.invocation.clone();
     inv.control = OperationControl::tracked(Instant::now() + Duration::from_secs(30), stop.clone());
     stop.cancel();
-    let error = resolve_pinned_controlled_with_check(&inv, || {
+    let error = resolve_pin_request_controlled_with_check(PinSelectionRequest { home: &inv.home, cwd: &inv.cwd, snapshot: None, project: None }, &inv.control, || {
         Err(ToolkitError::new(
             "records.query_resource_budget",
             "independent deadline",
@@ -259,7 +248,7 @@ fn project_import_checks_independent_budget_inside_real_sqlite_busy_wait() {
     blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
     let deadline = Instant::now() + Duration::from_millis(300);
     let started = Instant::now();
-    let error = resolve_pinned_controlled_with_check(&f.invocation, || {
+    let error = resolve_pin_request_controlled_with_check(f.request(), &f.invocation.control, || {
         if Instant::now() >= deadline {
             Err(ToolkitError::new(
                 "records.query_resource_budget",
@@ -300,13 +289,7 @@ fn project_shared_file_survives_atomic_lock_replacement() {
     spec.source.as_mut().unwrap().exact_commit = "b".repeat(40);
     let replacement =
         pin_selection_controlled(&f.invocation.home, spec, &f.invocation.control).unwrap();
-    let mut lock = f.invocation.clone();
-    lock.command = "project lock".into();
-    lock.flags
-        .insert("--path".into(), path.to_string_lossy().into_owned());
-    lock.flags
-        .insert("--snapshot".into(), replacement.id.clone());
-    dispatch_project(&lock).unwrap();
+    execute_project(&f.invocation, &ProjectRequest::Lock { path: Some(path.clone()), snapshot: replacement.id.clone() }).unwrap();
     let mut bytes = Vec::new();
     old.read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, original);

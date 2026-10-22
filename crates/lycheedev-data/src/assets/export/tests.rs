@@ -1,48 +1,14 @@
 use super::*;
-use std::collections::BTreeMap;
 
-fn invocation() -> Invocation {
-    Invocation {
-        command: "asset export".into(),
-        positional: None,
-        flags: BTreeMap::from([
-            ("--snapshot".into(), "PIN-invalid-but-present".into()),
-            ("--cdn".into(), "true".into()),
-            ("--file-id".into(), "7".into()),
-            ("--output".into(), "unused-output".into()),
-        ]),
-        home: "unopened-asset-workspace".into(),
-        cwd: "unopened-asset-workspace".into(),
-        control: Default::default(),
-    }
-}
 #[test]
-fn default_asset_arguments_reject_missing_snapshot_zero_id_and_source_before_workspace() {
-    for (flag, value) in [("--snapshot", ""), ("--file-id", "0"), ("--cdn", "false")] {
-        let mut inv = invocation();
-        inv.flags.insert(flag.into(), value.into());
-        let error = run(&inv).unwrap_err();
-        assert_eq!(error.exit_code, 2);
-        assert!(error.message.contains("requires --snapshot"), "{error:?}");
-    }
-    let mut inv = invocation();
-    inv.flags.insert("--file-id".into(), "4294967296".into());
-    assert_eq!(run(&inv).unwrap_err().message, "invalid --file-id");
-    inv.flags.insert("--file-id".into(), "7".into());
-    inv.flags.insert("--installation".into(), "source".into());
-    assert!(run(&inv).unwrap_err().message.contains("choose either"));
-}
-#[test]
-fn default_asset_image_options_and_original_stop_precede_destination_open() {
-    let mut inv = invocation();
-    inv.flags.insert("--channels".into(), "r".into());
-    assert_eq!(run(&inv).unwrap_err().code, "records.export_options");
-    inv.control.tracked_cancel_handle().unwrap().cancel();
-    let stopped = inv.control.check().unwrap_err();
-    let actual = run(&inv).unwrap_err();
-    assert_eq!(actual.code, stopped.code);
-    assert_eq!(actual.exit_code, stopped.exit_code);
-    assert_eq!(actual.details, stopped.details);
+fn original_stop_precedes_destination_open() {
+    let ctx = DataContext { home: "unopened-asset-workspace".into(), cwd: "unopened-asset-workspace".into(),
+        control: Default::default(), source: Default::default() };
+    ctx.control.tracked_cancel_handle().unwrap().cancel();
+    let stopped=ctx.control.check().unwrap_err();
+    let request=super::super::request::ExportRequest::raw(7,"unused-output".into());
+    let actual=run(&ctx,&request).unwrap_err();
+    assert_eq!(actual.code,stopped.code); assert_eq!(actual.exit_code,stopped.exit_code); assert_eq!(actual.details,stopped.details);
 }
 #[test]
 fn committed_capture_context_preserves_all_typed_cleanup_and_does_not_replay_work() {
@@ -110,14 +76,8 @@ fn actual_profiled_image_export_covers_consumer_phases_success_and_codec_failure
             item.raw = raw;
             let fx = Fixture::new(&[item]);
             let path = fx.root.join(format!("profile.{encoding}"));
-            let inv = fx.invocation(
-                "asset export",
-                &[
-                    ("--file-id", "201"),
-                    ("--encoding", encoding),
-                    ("--output", path.to_str().unwrap()),
-                ],
-            );
+            let inv = DataContext { home: fx.home.clone(), cwd: fx.root.clone(), control: Default::default(),
+                source: crate::request::SourceOptions { snapshot: Some(fx.pin.clone()), installation: Some(fx.client.clone()), offline: true, ..Default::default() } };
             let (budget, profile) = Budget::controlled(
                 Cost::defaults(),
                 inv.control.deadline(),
@@ -250,9 +210,8 @@ fn request_metadata_final_close_failure_keeps_commits_and_actual_output_publicat
             item.raw = raw;
             let fx = Fixture::new(&[item]);
             let path = fx.root.join(format!("final-close.{encoding}"));
-            let inv = fx.invocation("asset export", &[
-                ("--file-id", "201"), ("--encoding", encoding), ("--output", path.to_str().unwrap()),
-            ]);
+            let inv = DataContext { home: fx.home.clone(), cwd: fx.root.clone(), control: Default::default(),
+                source: crate::request::SourceOptions { snapshot: Some(fx.pin.clone()), installation: Some(fx.client.clone()), offline: true, ..Default::default() } };
             let budget = Arc::new(Budget::controlled(Cost::defaults(), inv.control.deadline(), inv.control.clone()));
             let destination = output::destination_scoped(&inv, &path, false).unwrap();
             let options = Options { encoding, mipmap: 0, channels: "rgba".into(), pixels: 16,

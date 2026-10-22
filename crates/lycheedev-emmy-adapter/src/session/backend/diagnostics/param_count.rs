@@ -4,7 +4,9 @@ use super::super::{
     OwnedQuery, QueryResult, call_access::first_param_is_self, call_unify::Bindings,
 };
 use super::CheckContext;
-use crate::session::{BindingDecision, OwnedValue, SelectedProjectionBackend};
+use crate::session::{
+    BindingDecision, EnvironmentCallable, OwnedValue, SelectedProjectionBackend, SelectedValue,
+};
 use emmylua_code_analysis::{
     AsyncState, DiagnosticCode, FileId, LuaFunctionType, LuaMemberKey, LuaType, LuaTypeDeclId,
     SemanticId, TypeDef, TypeDefKind, VariadicType,
@@ -30,8 +32,22 @@ impl<E> OwnedQuery<'_, '_, E> {
         };
         let root = tree.get_red_root();
         for call in root.descendants().filter_map(LuaCallExpr::cast) {
-            self.count_check_call(context, &call)?;
-            self.binding_finish_call_check(&call, "argument_count_check")?;
+            if let Some(ready) = self.count_check_call(context, &call)?
+                && let BindingDecision::Bound(permit) =
+                    self.session.context().call(self.site(call.get_syntax_id()))
+            {
+                self.record_check(
+                    call.get_syntax_id(),
+                    "argument_count_check",
+                    if ready {
+                        "native_checked"
+                    } else {
+                        "unavailable"
+                    },
+                    permit.proof,
+                    (!ready).then(|| "native_argument_arity_unavailable".into()),
+                )?;
+            }
         }
         for closure in root.descendants().filter_map(LuaClosureExpr::cast) {
             self.count_check_closure(context, &closure)?;
@@ -42,14 +58,25 @@ impl<E> OwnedQuery<'_, '_, E> {
         &mut self,
         context: &mut CheckContext<'_>,
         call: &LuaCallExpr,
-    ) -> QueryResult<(), E> {
+    ) -> QueryResult<Option<bool>, E> {
         if !self.binding_call_allowed(call, "argument_count_check")? {
-            return Ok(());
+            return Ok(None);
         }
         let Some(callee) = call.get_prefix_expr() else {
-            return Ok(());
+            return Ok(Some(false));
         };
         let managed = self.count_manages(callee.get_syntax_id())?;
+        let environment = match self
+            .session
+            .context()
+            .resolve(self.site(callee.get_syntax_id()))
+        {
+            BindingDecision::Bound(bound) => match bound.value {
+                SelectedValue::EnvironmentCallable(callable) => Some(callable),
+                _ => None,
+            },
+            _ => None,
+        };
         let callee_ty = self.type_of_expr(callee.get_syntax_id())?;
         let analysis = self.call_site_analysis(call)?;
         let mut candidates = analysis.candidates;
@@ -113,19 +140,19 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
         }
         if candidates.is_empty() {
-            return Ok(());
+            return Ok(Some(false));
         }
         let args = call
             .get_args_list()
             .map(|list| list.get_args().collect::<Vec<_>>())
             .unwrap_or_default();
-        if args.iter().any(|arg| arg.syntax().text() == "...") {
-            return Ok(());
-        }
         let args_range = self.count_expanded_args(&args)?;
+        // An unresolved trailing call can expand to an unknown number of
+        // arguments. It must not turn an overlapping range into a checked call.
+        let known_arity = args_range.max == Some(args_range.min);
         let colon = analysis.colon_call;
         for candidate in &candidates {
-            let range = self.count_param_range(candidate, colon)?;
+            let range = self.count_param_range(candidate, colon, environment.as_deref())?;
             let LuaType::DocFunction(fun) = candidate.structural_type() else {
                 unreachable!("candidate")
             };
@@ -134,12 +161,12 @@ impl<E> OwnedQuery<'_, '_, E> {
             let min = args_range.min + extra;
             let max = args_range.max.map(|m| m + extra);
             if max.is_none_or(|m| m >= range.min) && range.max.is_none_or(|m| min <= m) {
-                return Ok(());
+                return Ok(Some(known_arity));
             }
         }
         let mut best: Option<(usize, bool, usize, usize, usize)> = None;
         for candidate in &candidates {
-            let range = self.count_param_range(candidate, colon)?;
+            let range = self.count_param_range(candidate, colon, environment.as_deref())?;
             let LuaType::DocFunction(fun) = candidate.structural_type() else {
                 unreachable!("candidate")
             };
@@ -166,7 +193,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
         }
         let Some((_, missing, expected, found, extra)) = best else {
-            return Ok(());
+            return Ok(Some(false));
         };
         if missing {
             if let Some(list) = call.get_args_list() {
@@ -181,7 +208,12 @@ impl<E> OwnedQuery<'_, '_, E> {
                 );
             }
         } else {
-            for arg in args.iter().skip(expected.saturating_sub(extra)) {
+            // A single final call can contribute the excess values. Point at
+            // that original expression rather than losing its diagnostic.
+            let first = expected
+                .saturating_sub(extra)
+                .min(args.len().saturating_sub(1));
+            for arg in args.iter().skip(first) {
                 self.checkpoint()?;
                 context.add_diagnostic(
                     DiagnosticCode::RedundantParameter,
@@ -194,7 +226,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                 );
             }
         }
-        Ok(())
+        Ok(Some(known_arity))
     }
     fn count_manages(&mut self, syntax: LuaSyntaxId) -> QueryResult<bool, E> {
         self.checkpoint()?;
@@ -229,9 +261,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         }
         let expected = self.count_closure_expected(closure)?;
         if expected.is_empty() {
-            return Ok(());
+            return self.count_callback_receipt(closure, false);
         }
-        let mut max = 0;
+        let mut max = Some(0usize);
         for function in &expected {
             self.checkpoint()?;
             let LuaType::DocFunction(fun) = function.structural_type() else {
@@ -243,21 +275,28 @@ impl<E> OwnedQuery<'_, '_, E> {
                     .last()
                     .is_some_and(|(n, t)| n == "..." || matches!(t, Some(LuaType::Variadic(_))))
             {
-                return Ok(());
+                max = None;
+                break;
             }
-            max = max.max(fun.get_params().len());
+            max = max.map(|max| max.max(fun.get_params().len()));
         }
         let Some(list) = closure.get_params_list() else {
-            return Ok(());
+            return self.count_callback_receipt(closure, false);
         };
         let params = list.get_params().collect::<Vec<_>>();
-        if params.len() <= max {
-            return Ok(());
-        }
+        let Some(max) = max.filter(|max| params.len() > *max) else {
+            return self.count_callback_receipt(closure, true);
+        };
         let found = params.len();
+        let owner = count_closure_arg(closure).map(|(call, _)| {
+            let range = call.get_range();
+            serde_json::json!({"bindingCheckOwner": {
+                "start": u32::from(range.start()), "end": u32::from(range.end())
+            }})
+        });
         for param in params.iter().skip(max) {
             self.checkpoint()?;
-            context.add_diagnostic(
+            context.add_diagnostic_with_data(
                 DiagnosticCode::RedundantParameter,
                 param.get_range(),
                 t!(
@@ -265,9 +304,35 @@ impl<E> OwnedQuery<'_, '_, E> {
                     num = max,
                     found_num = found
                 ),
+                owner.clone(),
             );
         }
-        Ok(())
+        self.count_callback_receipt(closure, true)
+    }
+    fn count_callback_receipt(
+        &mut self,
+        closure: &LuaClosureExpr,
+        ready: bool,
+    ) -> QueryResult<(), E> {
+        let Some((call, _)) = count_closure_arg(closure) else {
+            return Ok(());
+        };
+        let BindingDecision::Bound(permit) =
+            self.session.context().call(self.site(call.get_syntax_id()))
+        else {
+            return Ok(());
+        };
+        self.record_check(
+            call.get_syntax_id(),
+            "callback_count_check",
+            if ready {
+                "native_checked"
+            } else {
+                "unavailable"
+            },
+            permit.proof,
+            (!ready).then(|| "native_callback_arity_unavailable".into()),
+        )
     }
     fn count_closure_expected(
         &mut self,
@@ -288,15 +353,19 @@ impl<E> OwnedQuery<'_, '_, E> {
                 let LuaType::DocFunction(fun) = candidate.structural_type() else {
                     unreachable!("function")
                 };
-                let index = match (fun.is_colon_define(), colon) {
-                    (true, false) => index + 1,
-                    (false, true) => {
-                        if index == 0 {
-                            continue;
+                let index = if first_param_is_self(&candidate) {
+                    index + usize::from(colon)
+                } else {
+                    match (fun.is_colon_define(), colon) {
+                        (true, false) => index + 1,
+                        (false, true) => {
+                            if index == 0 {
+                                continue;
+                            }
+                            index - 1
                         }
-                        index - 1
+                        _ => index,
                     }
-                    _ => index,
                 };
                 if let Some(Some(value)) = candidate
                     .function_parameters()
@@ -369,11 +438,12 @@ impl<E> OwnedQuery<'_, '_, E> {
     fn count_expanded_args(&mut self, args: &[LuaExpr]) -> QueryResult<CountRange, E> {
         let base = args.len().saturating_sub(1);
         if let Some(last) = args.last()
-            && let Some(variadic) = self.count_last_variadic(last)?
+            && super::super::return_pack::return_expands(last, true)
         {
+            let range = self.count_last_range(last)?;
             return Ok(CountRange {
-                min: base + variadic.get_min_len().unwrap_or(0),
-                max: variadic.get_max_len().map(|n| base + n),
+                min: base + range.min,
+                max: range.max.map(|n| base + n),
             });
         }
         Ok(CountRange {
@@ -381,24 +451,37 @@ impl<E> OwnedQuery<'_, '_, E> {
             max: Some(args.len()),
         })
     }
-    fn count_last_variadic(&mut self, expr: &LuaExpr) -> QueryResult<Option<VariadicType>, E> {
-        let value = self.type_of_expr(expr.get_syntax_id())?;
-        if let LuaType::Variadic(pack) = value.structural_type() {
-            return Ok(Some(pack.as_ref().clone()));
+    fn count_last_range(&mut self, expr: &LuaExpr) -> QueryResult<CountRange, E> {
+        let open = CountRange { min: 0, max: None };
+        if let LuaExpr::CallExpr(call) = expr
+            && let Some(range) = self.binding_call_return_arity(call)?
+        {
+            return Ok(CountRange {
+                min: range.min,
+                max: range.max,
+            });
         }
-        if !matches!(value.structural_type(), LuaType::Unknown) {
-            return Ok(None);
+        let value = self.type_of_expr(expr.get_syntax_id())?;
+        if !matches!(value.structural_type(), LuaType::Unknown | LuaType::Any) {
+            return Ok(
+                super::super::return_pack::return_arity(value.structural_type())
+                    .map(|range| CountRange {
+                        min: range.min,
+                        max: range.max,
+                    })
+                    .unwrap_or(open),
+            );
         }
         let LuaExpr::CallExpr(call) = expr else {
-            return Ok(None);
+            return Ok(open);
         };
         let Some(callee) = call.get_prefix_expr() else {
-            return Ok(None);
+            return Ok(open);
         };
         if self.count_manages_call(call.get_syntax_id())?
             || self.count_manages(callee.get_syntax_id())?
         {
-            return Ok(Some(VariadicType::Base(LuaType::Unknown)));
+            return Ok(open);
         }
         for function in self.callable_candidates_cached(&callee)? {
             if let LuaType::Variadic(pack) = function
@@ -406,98 +489,23 @@ impl<E> OwnedQuery<'_, '_, E> {
                 .expect("return")
                 .structural_type()
             {
-                return Ok(Some(pack.as_ref().clone()));
+                return Ok(super::super::return_pack::return_arity(&LuaType::Variadic(
+                    pack.clone(),
+                ))
+                .map(|range| CountRange {
+                    min: range.min,
+                    max: range.max,
+                })
+                .unwrap_or(open));
             }
         }
-        if self.count_has_variadic_doc(&callee)? {
-            return Ok(Some(VariadicType::Base(LuaType::Any)));
-        }
-        Ok(None)
-    }
-    fn count_has_variadic_doc(&mut self, callee: &LuaExpr) -> QueryResult<bool, E> {
-        self.checkpoint()?;
-        if self.binding_manages(callee.get_syntax_id())? {
-            return Ok(false);
-        }
-        let source = match callee {
-            LuaExpr::NameExpr(name) => {
-                let Some(text) = name.get_name_text() else {
-                    return Ok(false);
-                };
-                let Some(id) = self
-                    .model
-                    .resolve_name(name.get_position())
-                    .or_else(|| self.model.global_decl(&text))
-                else {
-                    return Ok(false);
-                };
-                if self.owner_initializer_managed(&id)? {
-                    return Ok(false);
-                }
-                let SemanticId::Decl(key) = &id else {
-                    return Ok(false);
-                };
-                self.model
-                    .file_facts_of(key.file_id)
-                    .and_then(|f| f.decl_by_id(&id))
-                    .and_then(|d| d.value_expr_syntax)
-                    .map(|s| (key.file_id, s))
-            }
-            LuaExpr::IndexExpr(index) => {
-                let Some(resolved) = self.resolve_owned_member(index)? else {
-                    return Ok(false);
-                };
-                if resolved.binding_token.is_some() {
-                    return Ok(false);
-                }
-                if let Some(id) = &resolved.member_id
-                    && self.owner_initializer_managed(id)?
-                {
-                    return Ok(false);
-                }
-                match (resolved.file_id, resolved.member_id) {
-                    (Some(file), Some(id)) => self
-                        .model
-                        .file_facts_of(file)
-                        .and_then(|f| f.member_by_id(&id))
-                        .and_then(|m| m.value_syntax)
-                        .map(|s| (file, s)),
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-        let Some((file, syntax)) = source else {
-            return Ok(false);
-        };
-        let Some(docs) = self
-            .model
-            .file_facts_of(file)
-            .and_then(|f| f.signature_by_closure(syntax))
-            .and_then(|s| s.docs.as_ref())
-        else {
-            return Ok(false);
-        };
-        let Some(tree) = self.model.syntax_tree_of(file) else {
-            return Ok(false);
-        };
-        for syntax in &docs.returns {
-            self.checkpoint()?;
-            if matches!(
-                syntax
-                    .to_node_from_root(&tree.get_red_root())
-                    .and_then(LuaDocType::cast),
-                Some(LuaDocType::Variadic(_))
-            ) {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        Ok(open)
     }
     fn count_param_range(
         &mut self,
         function: &OwnedValue,
         colon: bool,
+        environment: Option<&EnvironmentCallable>,
     ) -> QueryResult<CountRange, E> {
         self.checkpoint()?;
         let LuaType::DocFunction(fun) = function.structural_type() else {
@@ -527,8 +535,18 @@ impl<E> OwnedQuery<'_, '_, E> {
                 min += 1;
             }
         }
+        if let Some(environment) = environment {
+            // The authenticated API descriptor knows required slots even when
+            // a parameter's value type could not be projected.
+            min = environment
+                .declaration
+                .parameters
+                .iter()
+                .filter(|slot| !slot.nilable && slot.name != "...")
+                .count()
+                + usize::from(has_self && !colon);
+        }
         let variadic_slot = variadic_index.and_then(|i| params.get(i));
-        let unresolved=variadic_slot.is_some_and(|(_,t)|matches!(t,Some(LuaType::Variadic(v)) if matches!(v.as_ref(),VariadicType::Base(LuaType::Ref(id)|LuaType::Def(id)) if self.model.type_def_of(id).is_none())));
         let length = variadic_slot.and_then(|(_, t)| match t.as_ref()? {
             LuaType::Variadic(v) => match v.as_ref() {
                 VariadicType::Base(LuaType::Tuple(t)) => Some(t.get_types().len()),
@@ -539,7 +557,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         });
         let mut max = if let Some(len) = length {
             Some(params.len() - 1 + len)
-        } else if !unresolved && (fun.is_variadic() || variadic_index.is_some()) {
+        } else if fun.is_variadic() || variadic_index.is_some() {
             None
         } else {
             Some(params.len())

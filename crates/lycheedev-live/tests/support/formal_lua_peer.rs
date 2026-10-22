@@ -1,10 +1,13 @@
 //! Fixture transport: unchanged Lua computes every receipt and business result.
 //! Only readiness/monotonic time and host-input failure injection are simulated.
 #![forbid(unsafe_code)]
+// Support module compiled into several test targets; performance-only entry
+// points are legitimately unused in the narrower formal bridge target.
+#![allow(dead_code)]
 use super::formal_lua_fixture::{self as fixture, BROKEN_CODE, CODE, Inputs, NUMERIC_CODE};
 use lycheedev_core::{control::OperationControl, storage};
 use lycheedev_live::{
-    go_mailbox_v1::{
+    mailbox::{
         Identity, InputBindings, InputDisposition, InputObservation, InputOutcome, MAX_PAYLOAD,
         SCHEMA, Selector, checksum,
         durable_journal::{self, ChannelPaths},
@@ -15,7 +18,7 @@ use lycheedev_live::{
         slot_allocation::slot_payload,
         state::{InputKind, Operation, OperationStage, SlotEnvelope},
     },
-    mailbox::{Record, decode},
+    mailbox::lookup::{Record, decode},
 };
 use lycheedev_windows::{JobGuard, guarded_spawn::spawn_suspended_guarded};
 use serde_json::json;
@@ -59,10 +62,11 @@ impl OwnedPeer {
         inputs.verify();
         let mut command = Command::new(&inputs.lua);
         if fault == "memory" {
-            // Original Go memory parity script, with only authenticated paths
-            // substituted. Keep the same owned pipes/Job/quit lifetime as the
-            // slot peer so this case has its own independent retirement proof.
-            let addon = serde_json::to_string(&fixture::lua_path(&inputs.fixture.join("addon"))?)
+            // Memory-record parity script over the current addon codec, with only
+            // authenticated paths substituted. Keep the same owned pipes/Job/quit
+            // lifetime as the slot peer so this case has its own independent
+            // retirement proof.
+            let addon = serde_json::to_string(&fixture::lua_path(&inputs.addon_root())?)
                 .map_err(|e| e.to_string())?;
             let output =
                 serde_json::to_string(&fixture::lua_path(directory)?).map_err(|e| e.to_string())?;
@@ -72,15 +76,15 @@ impl OwnedPeer {
         } else {
             command
                 .arg(fixture::lua_path(
-                    &inputs.fixture.join("tests/protocol/slot_server.lua"),
+                    &inputs.protocol_file("slot_server.lua"),
                 )?)
-                .arg(fixture::lua_path(&inputs.fixture.join("addon"))?)
+                .arg(fixture::lua_path(&inputs.addon_root())?)
                 .arg(fixture::lua_path(directory)?)
                 .arg(if fault == "reload_bind" { "2" } else { "1" })
                 .arg(fault);
         }
         command
-            .current_dir(inputs.fixture.join("tests/protocol"))
+            .current_dir(inputs.protocol_directory())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -590,7 +594,7 @@ impl Backend for Peer {
                 envelope.code.as_bytes() == fixture::performance_code(bytes).as_bytes()
             })
         {
-            return Err(external("fixture source not in fixed Go test"));
+            return Err(external("fixture source not in fixed formal-Lua case set"));
         }
         if envelope.action != "prepare" && !envelope.code.is_empty() {
             return Err(external("unexpected executable source"));

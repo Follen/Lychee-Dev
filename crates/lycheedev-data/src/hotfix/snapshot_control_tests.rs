@@ -94,7 +94,7 @@ fn snapshot_layout_noop_check_preserves_legacy_result_and_work() {
     );
     let raw = version8();
     assert_eq!(
-        cache_layout(&raw, 69933, Some(&a)).map_err(|e| e.code),
+        cache_layout_with_check(&raw, 69933, Some(&a), || Ok(())).map_err(|e| e.code),
         cache_layout_with_check(&raw, 69933, Some(&b), || Ok(())).map_err(|e| e.code)
     );
     assert_eq!(a.snapshot().unwrap(), b.snapshot().unwrap());

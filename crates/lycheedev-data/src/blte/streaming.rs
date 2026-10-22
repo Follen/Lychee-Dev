@@ -397,7 +397,6 @@ impl Read for Reader<'_> {
 mod tests {
     use super::*;
     use lycheedev_core::control::OperationControl;
-    use std::sync::atomic::Ordering;
 
     #[test]
     fn cancelling_after_first_stream_block_stops_before_more_decoded_output() {
@@ -423,7 +422,7 @@ mod tests {
         let mut buffer = [0; 65536];
         assert_eq!(reader.read(&mut buffer).unwrap(), buffer.len());
         assert!(buffer.iter().all(|byte| *byte == b'x'));
-        control.cancel_handle().store(true, Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         let error = stream_io_error(reader.read(&mut buffer).unwrap_err());
         assert_eq!(error.exit_code, 7);
         assert_eq!(reader.emitted, 65536);

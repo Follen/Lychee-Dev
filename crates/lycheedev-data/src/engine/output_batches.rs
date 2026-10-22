@@ -432,13 +432,14 @@ mod tests {
     };
     use arrow_buffer::{MemoryPool, MemoryReservation};
     use arrow_schema::{Field, Schema};
+    use lycheedev_core::control::TrackedCancellation;
     use std::{
         fmt,
-        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        sync::atomic::{AtomicUsize, Ordering},
         time::{Duration, Instant},
     };
 
-    fn budget(cancel: Option<Arc<AtomicBool>>) -> Arc<Budget> {
+    fn budget(cancel: Option<TrackedCancellation>) -> Arc<Budget> {
         Arc::new(Budget::new(
             Cost::defaults(),
             Instant::now() + Duration::from_secs(60),
@@ -724,26 +725,29 @@ mod tests {
 
     #[test]
     fn cancellation_and_schema_errors_release_pending_guards_on_drop() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let budget = budget(Some(cancelled.clone()));
-        let output = budget.reserve_retained(1 << 20).unwrap();
+        let cancelled = TrackedCancellation::new();
+        let cancelled_budget = budget(Some(cancelled.clone()));
+        let output = cancelled_budget.reserve_retained(1 << 20).unwrap();
         let live = Arc::new(AtomicUsize::new(0));
         let schema = exact_schema();
         let batch = exact_row(schema.clone(), 0);
-        retain_input(&batch, &budget, &live);
+        retain_input(&batch, &cancelled_budget, &live);
         let mut collector = OutputBatches::new(schema.clone(), 1 << 20);
-        collector.push(batch, &budget).unwrap();
-        cancelled.store(true, Ordering::SeqCst);
-        assert!(collector.finish(&budget).is_err());
+        collector.push(batch, &cancelled_budget).unwrap();
+        cancelled.cancel();
+        assert!(collector.finish(&cancelled_budget).is_err());
         assert_eq!(live.load(Ordering::SeqCst), 0);
-        cancelled.store(false, Ordering::SeqCst);
+        let fresh = budget(None);
         let mut collector = OutputBatches::new(schema, 1 << 20);
         assert!(collector
-            .push(RecordBatch::new_empty(Arc::new(Schema::empty())), &budget)
+            .push(RecordBatch::new_empty(Arc::new(Schema::empty())), &fresh)
             .is_err());
-        assert!(collector.finish(&budget).is_err());
+        assert!(collector.finish(&fresh).is_err());
         drop(output);
-        assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
+        assert_eq!(
+            cancelled_budget.snapshot().unwrap().retained_bytes,
+            0
+        );
     }
 
     #[test]

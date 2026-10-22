@@ -1,9 +1,10 @@
 use lycheedev_core::{
-    Invocation, cache, evidence,
+    cache, evidence,
     metadata::Metadata,
     selection::{self, SelectionSpec, SourcePin},
     storage::{self, ExclusiveLock},
     workspace,
+    request::RequestContext,
 };
 use serde_json::json;
 use std::{fs, path::PathBuf};
@@ -35,11 +36,8 @@ fn initialized() -> Temp {
 }
 #[test]
 fn bounded_identity_hash_rejects_actual_size_and_observes_cancel_before_open() {
-    use lycheedev_core::control::OperationControl;
-    use std::{
-        sync::{Arc, atomic::AtomicBool},
-        time::{Duration, Instant},
-    };
+    use lycheedev_core::control::{OperationControl, TrackedCancellation};
+    use std::time::{Duration, Instant};
     let temp = initialized();
     let path = temp.0.join("identity.bin");
     fs::File::create(&path).unwrap().set_len(128 << 20).unwrap();
@@ -59,9 +57,11 @@ fn bounded_identity_hash_rejects_actual_size_and_observes_cancel_before_open() {
         assert!(fs::remove_file(&path).is_err());
     }
     drop(held);
-    let cancelled = OperationControl::new(
+    let token = TrackedCancellation::new();
+    token.cancel();
+    let cancelled = OperationControl::tracked(
         Instant::now() + Duration::from_secs(10),
-        Arc::new(AtomicBool::new(true)),
+        token,
     );
     assert_eq!(
         storage::locked_sha256(&temp.0.join("missing"), 64, &cancelled)
@@ -69,7 +69,7 @@ fn bounded_identity_hash_rejects_actual_size_and_observes_cancel_before_open() {
             .exit_code,
         7
     );
-    let expired = OperationControl::new(Instant::now(), Arc::new(AtomicBool::new(false)));
+    let expired = OperationControl::uncancelable(Instant::now());
     assert_eq!(
         storage::locked_sha256(&path, 64, &expired)
             .unwrap_err()
@@ -80,7 +80,7 @@ fn bounded_identity_hash_rejects_actual_size_and_observes_cancel_before_open() {
 #[test]
 fn doctor_provider_warnings_do_not_fail_but_error_checks_retain_the_combined_report() {
     let temp = initialized();
-    let request = inv(temp.0.clone(), "doctor", &[]);
+    let request = RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() };
     let warning =
         json!({"id":"luals.runtime","ok":false,"status":"warn","detail":"fixture unavailable"});
     let report = lycheedev_core::doctor::inspect_with_checks(&request, vec![warning]).unwrap();
@@ -106,18 +106,8 @@ fn doctor_provider_warnings_do_not_fail_but_error_checks_retain_the_combined_rep
         4
     );
 }
-fn inv(home: PathBuf, command: &str, flags: &[(&str, &str)]) -> Invocation {
-    Invocation {
-        command: command.into(),
-        positional: None,
-        flags: flags
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
-        cwd: home.clone(),
-        home,
-        control: Default::default(),
-    }
+fn context(home: &std::path::Path) -> RequestContext {
+    RequestContext { home: home.to_owned(), cwd: home.to_owned(), control: Default::default() }
 }
 
 #[test]
@@ -236,7 +226,7 @@ fn initialize_never_adopts_populated_legacy_directory() {
     assert!(!temp.0.join("workspace.json").exists());
 }
 #[test]
-fn pins_serialize_in_existing_go_order_and_inheritance_cannot_replace_source() {
+fn pins_serialize_in_retained_wire_order_and_inheritance_cannot_replace_source() {
     let temp = initialized();
     let source = SourcePin {
         repository: "wow-ui-source".into(),
@@ -292,11 +282,9 @@ fn corrupt_original_evidence_is_detected_and_cache_prune_keeps_evidence() {
     )
     .unwrap();
     cache::publish(&temp.0, b"ordinary", 100, None).unwrap();
-    cache::dispatch(&inv(
-        temp.0.clone(),
-        "cache prune",
-        &[("--target-bytes", "0")],
-    ))
+    cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
+        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: false,
+    })
     .unwrap();
     assert_eq!(
         evidence::read_blob(&temp.0, &capture["blob"], 100).unwrap(),
@@ -350,11 +338,9 @@ fn protected_cache_survives_prune_and_corruption_is_visible() {
         Some(json!({"kind":"operation","owner":"OP-active","retainedAt":"2026-10-08T00:00:00Z"})),
     )
     .unwrap();
-    let result = cache::dispatch(&inv(
-        temp.0.clone(),
-        "cache prune",
-        &[("--target-bytes", "0")],
-    ))
+    let result = cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
+        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: false,
+    })
     .unwrap();
     assert!(!result.complete);
     assert_eq!(result.data["skippedProtected"], 1);
@@ -368,7 +354,7 @@ fn protected_cache_survives_prune_and_corruption_is_visible() {
     )
     .unwrap();
     assert_eq!(
-        cache::dispatch(&inv(temp.0.clone(), "cache verify", &[]))
+        cache::dispatch(&context(&temp.0), cache::CacheRequest::Verify)
             .err()
             .unwrap()
             .code,
@@ -391,11 +377,7 @@ fn newer_config_is_not_overwritten_with_defaults() {
     )
     .unwrap();
     assert_eq!(
-        workspace::dispatch(&inv(
-            temp.0.clone(),
-            "config set",
-            &[("--download-workers", "1")]
-        ))
+        workspace::set_config(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &workspace::ConfigUpdate { download_workers: Some(1), ..Default::default() })
         .err()
         .unwrap()
         .code,
@@ -473,7 +455,7 @@ fn archive_rejects_redirected_intent_destination_before_any_move() {
 #[test]
 fn doctor_is_readonly_for_metadata_and_surfaces_corrupt_cache_result() {
     let temp = initialized();
-    let request = inv(temp.0.clone(), "doctor", &[("--offline", "true")]);
+    let request = RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() };
     let report = lycheedev_core::doctor::inspect(&request).unwrap();
     assert_eq!(report.data["healthy"], true);
     assert!(!temp.0.join("state/toolkit.sqlite").exists());
@@ -519,31 +501,27 @@ fn staging_accounting_orphan_retention_and_active_stage_guards_are_honest() {
     fs::write(&file, b"unfinished").unwrap();
     let owner =
         ExclusiveLock::resource(&temp.0.join("locks"), &format!("cache:stage:{id}")).unwrap();
-    let status = cache::dispatch(&inv(temp.0.clone(), "cache status", &[])).unwrap();
+    let status = cache::dispatch(&context(&temp.0), cache::CacheRequest::Status).unwrap();
     assert_eq!(status.data["uncommittedCount"], 1);
     assert_eq!(status.data["uncommittedBytes"], 10);
-    let protected = cache::dispatch(&inv(
-        temp.0.clone(),
-        "cache prune",
-        &[("--uncommitted", "true")],
-    ))
+    let protected = cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
+        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: true,
+    })
     .unwrap();
     assert_eq!(protected.data["skippedInUse"], 1);
     assert!(file.exists());
     drop(owner);
-    let removed = cache::dispatch(&inv(
-        temp.0.clone(),
-        "cache prune",
-        &[("--uncommitted", "true")],
-    ))
+    let removed = cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
+        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: true,
+    })
     .unwrap();
     assert_eq!(removed.data["removedUncommitted"], 1);
     assert!(!file.exists());
     let digest = "b".repeat(64);
     storage::atomic_json(&temp.0.join("cache/retain").join(format!("{digest}.json")),&json!({"sha256":digest,"owners":[{"kind":"operation","owner":"OP-unknown","retainedAt":"2026-10-08T00:00:00Z"}]})).unwrap();
-    let status = cache::dispatch(&inv(temp.0.clone(), "cache status", &[])).unwrap();
+    let status = cache::dispatch(&context(&temp.0), cache::CacheRequest::Status).unwrap();
     assert_eq!(status.data["orphanMarkers"], 1);
-    let verify = cache::dispatch(&inv(temp.0.clone(), "cache verify", &[]))
+    let verify = cache::dispatch(&context(&temp.0), cache::CacheRequest::Verify)
         .err()
         .unwrap();
     assert_eq!(verify.details["result"]["missing"][0], digest);
@@ -599,7 +577,7 @@ fn evidence_removal_refuses_external_references_then_preserves_shared_original_b
     );
 }
 #[test]
-fn retention_uses_published_go_schema_and_cannot_hide_another_owner() {
+fn retention_uses_published_wire_schema_and_cannot_hide_another_owner() {
     let temp = initialized();
     let capture = evidence::commit_capture(
         &temp.0,
@@ -611,10 +589,10 @@ fn retention_uses_published_go_schema_and_cannot_hide_another_owner() {
     )
     .unwrap();
     let id = capture["id"].as_str().unwrap();
-    let mut request = inv(temp.0.clone(), "evidence keep", &[]);
-    request.positional = Some(id.into());
-    let first = evidence::dispatch(&request).unwrap();
-    let second = evidence::dispatch(&request).unwrap();
+    let context = context(&temp.0);
+    let request = evidence::EvidenceRequest::Keep { id: id.to_owned() };
+    let first = evidence::dispatch(&context, request.clone()).unwrap();
+    let second = evidence::dispatch(&context, request).unwrap();
     assert_eq!(
         first.data["retention"]["schema"],
         "lycheedev.evidence-retention.v1"
@@ -633,53 +611,39 @@ fn retention_uses_published_go_schema_and_cannot_hide_another_owner() {
 #[test]
 fn target_file_pins_exact_resolved_context_and_running_reference_blocks_remove() {
     let temp = initialized();
+    let ctx = RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() };
     assert_eq!(
-        workspace::dispatch(&inv(temp.0.clone(), "target list", &[]))
+        selection::target::execute(&ctx, &selection::target::TargetRequest::List)
             .unwrap()
             .data["targets"],
         json!([])
     );
     let spec = temp.0.join("resolved-spec.json");
     storage::atomic_json(&spec,&json!({"source":{"repository":"wow-ui-source","product":"retail","requestedRef":"refs/heads/live","exactCommit":"1".repeat(40),"parserRevision":"source-v1"}})).unwrap();
-    let selected = workspace::dispatch(&inv(
-        temp.0.clone(),
-        "target resolve",
-        &[("--file", spec.to_str().unwrap())],
-    ))
-    .unwrap();
+    let selected = workspace::resolve_file(&ctx, &spec).unwrap();
     let pin = selected.data["id"].as_str().unwrap();
     assert!(selection::load_pinned(&temp.0, pin).is_ok());
-    let mut add = inv(
-        temp.0.clone(),
-        "target add",
-        &[
-            ("--product", "retail"),
-            ("--region", "us"),
-            ("--locale", "enUS"),
-            ("--remote", "true"),
-        ],
-    );
-    add.positional = Some("explicit".into());
-    workspace::dispatch(&add).unwrap();
+    selection::target::execute(&ctx, &selection::target::TargetRequest::Add {
+        config: selection::target::TargetConfig { schema: "lycheedev.target.v1".into(), name: "explicit".into(), product: "retail".into(), region: "us".into(), locale: "enUS".into(), source: "remote".into(), ..Default::default() }, replace: false,
+    }).unwrap();
     let mut metadata = Metadata::open(&temp.0, true).unwrap();
     metadata.put("target-ref/explicit/operation/OP-running",&json!({"schema":"lycheedev.target-ref.v1","name":"explicit","kind":"operation","id":"OP-running","createdAt":"2026-10-08T00:00:00Z"}),None).unwrap();
-    let mut remove = inv(temp.0.clone(), "target remove", &[]);
-    remove.positional = Some("explicit".into());
+    let remove = selection::target::TargetRequest::Remove { key: "explicit".into() };
     assert_eq!(
-        workspace::dispatch(&remove).err().unwrap().code,
+        selection::target::execute(&ctx, &remove).err().unwrap().code,
         "selection.target_in_use"
     );
     metadata
         .delete("target-ref/explicit/operation/OP-running")
         .unwrap();
     metadata.put(&format!("target-ref/explicit/pin/{pin}"),&json!({"schema":"lycheedev.target-ref.v1","name":"explicit","kind":"pin","id":pin,"createdAt":"2026-10-08T00:00:00Z"}),None).unwrap();
-    let removed = workspace::dispatch(&remove).unwrap();
+    let removed = selection::target::execute(&ctx, &remove).unwrap();
     assert_eq!(removed.data["removedRefCount"], 1);
     assert!(selection::load_pinned(&temp.0, pin).is_ok());
 }
 
 #[test]
-fn content_identity_timestamps_match_go_rfc3339_nano_normalization() {
+fn content_identity_timestamps_match_reference_rfc3339_nano_normalization() {
     let value = chrono::DateTime::parse_from_rfc3339("2026-10-08T00:00:00.123456700Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
@@ -697,100 +661,24 @@ fn content_identity_timestamps_match_go_rfc3339_nano_normalization() {
 }
 #[test]
 fn nested_operation_control_never_resets_deadline_or_loses_caller_cancel() {
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
-        time::{Duration, Instant},
-    };
-    let token = Arc::new(AtomicBool::new(false));
-    let original = lycheedev_core::control::OperationControl::new(
+    use lycheedev_core::control::TrackedCancellation;
+    use std::time::{Duration, Instant};
+    let token = TrackedCancellation::new();
+    let original = lycheedev_core::control::OperationControl::tracked(
         Instant::now() + Duration::from_secs(30),
         token.clone(),
     );
     let nested = original.clone();
     assert_eq!(original.deadline(), nested.deadline());
     assert!(nested.remaining().unwrap() <= Duration::from_secs(30));
-    token.store(true, Ordering::Release);
+    token.cancel();
     assert_eq!(original.check().unwrap_err().exit_code, 7);
     assert_eq!(nested.remaining().unwrap_err().code, "command.cancelled");
-    let expired = lycheedev_core::control::OperationControl::new(
+    let expired = lycheedev_core::control::OperationControl::uncancelable(
         Instant::now() - Duration::from_millis(1),
-        Arc::new(AtomicBool::new(false)),
     );
     assert_eq!(expired.check().unwrap_err().code, "command.deadline");
 }
-#[cfg(windows)]
-#[test]
-fn exact_claim_reactivation_preserves_identity_and_cannot_steal_or_fake_durability() {
-    use lycheedev_core::coordination::{Claim, InstallationGuard};
-    use std::os::windows::fs::OpenOptionsExt;
-    let temp = initialized();
-    let target = temp.0.join("Lychee Dev");
-    let original = Claim {
-        owner: "CON-original".into(),
-        kind: "native-live".into(),
-        resource: "installation".into(),
-        process_id: 1234,
-        created_at: "2026-10-08T00:00:00Z".into(),
-        lifecycle_ref: "live/CON-original.json".into(),
-        pending: true,
-    };
-    let mut guard = InstallationGuard::acquire(&target).unwrap();
-    guard.claim(original.clone()).unwrap();
-    guard
-        .retire(&original.owner, &original.lifecycle_ref)
-        .unwrap();
-    let mut other = original.clone();
-    other.owner = "CON-other".into();
-    other.lifecycle_ref = "live/CON-other.json".into();
-    guard.claim(other.clone()).unwrap();
-    assert_eq!(
-        guard
-            .reactivate(&original.owner, &original.lifecycle_ref)
-            .unwrap_err()
-            .exit_code,
-        6
-    );
-    assert!(!guard.registry.claims[0].pending);
-    assert_eq!(
-        guard
-            .reactivate(&original.owner, "different lifecycle")
-            .unwrap_err()
-            .code,
-        "coordination.claim_missing"
-    );
-    guard.retire(&other.owner, &other.lifecycle_ref).unwrap();
-    let path = temp.0.join(".lycheedev-claims.json");
-    let held = fs::OpenOptions::new()
-        .read(true)
-        .share_mode(1)
-        .open(&path)
-        .unwrap();
-    assert_eq!(
-        guard
-            .reactivate(&original.owner, &original.lifecycle_ref)
-            .unwrap_err()
-            .exit_code,
-        5
-    );
-    assert!(!guard.registry.claims[0].pending);
-    drop(held);
-    guard
-        .reactivate(&original.owner, &original.lifecycle_ref)
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(&guard.registry.claims[0]).unwrap(),
-        serde_json::to_value(&original).unwrap()
-    );
-    let before = fs::read(&path).unwrap();
-    guard
-        .reactivate(&original.owner, &original.lifecycle_ref)
-        .unwrap();
-    assert_eq!(fs::read(path).unwrap(), before);
-}
-
 #[cfg(windows)]
 #[test]
 fn evidence_removal_resumes_after_windows_delete_denial_and_keeps_the_original_receipt() {
@@ -864,9 +752,11 @@ fn evidence_corruption_and_invalid_retention_cannot_dispose_original_identity() 
             None,
         )
         .unwrap();
+    // Current typed retention decoding rejects the incompatible document before
+    // any removal action.
     assert_eq!(
         evidence::remove_capture(&temp.0, id).unwrap_err().code,
-        "evidence.invalid_retention"
+        "input.invalid"
     );
     assert_eq!(fs::read(path).unwrap(), b"original");
     assert!(evidence::read_capture(&temp.0, id).is_ok());
@@ -982,17 +872,9 @@ fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
         let path = temp.0.join(product);
         std::fs::create_dir_all(&path).unwrap();
         let path = path.to_str().unwrap();
-        selection::dispatch_project(&inv(
-            temp.0.clone(),
-            "project init",
-            &[("--path", path), ("--product", product)],
-        ))
+        selection::execute_project(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &selection::ProjectRequest::Init { path: path.into(), product: product.into() })
         .unwrap();
-        selection::dispatch_project(&inv(
-            temp.0.clone(),
-            "project lock",
-            &[("--path", path), ("--snapshot", &pin.id)],
-        ))
+        selection::execute_project(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &selection::ProjectRequest::Lock { path: Some(path.into()), snapshot: pin.id.clone() })
         .unwrap();
         let status = selection::inspect_project(std::path::Path::new(path)).unwrap();
         assert_eq!(status["state"], "locked");
@@ -1028,14 +910,7 @@ fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
     );
     let cn_path = temp.0.join("forever-cn-beta");
     assert_eq!(
-        selection::dispatch_project(&inv(
-            temp.0.clone(),
-            "project lock",
-            &[
-                ("--path", cn_path.to_str().unwrap()),
-                ("--snapshot", &ids[0])
-            ]
-        ))
+        selection::execute_project(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &selection::ProjectRequest::Lock { path: Some(cn_path), snapshot: ids[0].clone() })
         .unwrap_err()
         .code,
         "selection.project_conflict"

@@ -9,7 +9,8 @@ use std::{
 };
 struct Fixture {
     root: PathBuf,
-    inv: Invocation,
+    ctx: DataContext,
+    request: Request,
 }
 impl Fixture {
     fn new(source: &str) -> Self {
@@ -24,24 +25,10 @@ impl Fixture {
         fs::create_dir(&root).unwrap();
         let home = root.join("home");
         lycheedev_core::workspace::initialize(&home).unwrap();
-        let inv = Invocation {
-            command: "data hotfix".into(),
-            positional: None,
-            flags: [
-                ("--source", source),
-                ("--product", "retail"),
-                ("--build", "12.0.7.68974"),
-                ("--region", "us"),
-                ("--locale", "enUS"),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
-            .collect(),
-            home,
-            cwd: root.clone(),
-            control: OperationControl::default(),
-        };
-        Self { root, inv }
+        let ctx = DataContext {home,cwd:root.clone(),control:OperationControl::default(),source:Default::default()};
+        let request = Request {provider:if source=="wago" {Provider::Wago} else {Provider::Raidbots(root.join("DBCache.bin"))},
+            query:q(),max_pages:2048,fetch:FetchBudget::default(),csv:None};
+        Self { root, ctx, request }
     }
     fn cache(&mut self, rows: &[(i32, u32, u8, &[u8])]) -> PathBuf {
         let path = self.root.join("DBCache.bin");
@@ -61,9 +48,7 @@ impl Fixture {
             raw.extend(*payload);
         }
         fs::write(&path, raw).unwrap();
-        self.inv
-            .flags
-            .insert("--raidbots".into(), path.to_string_lossy().into());
+        self.request.provider = Provider::Raidbots(path.clone());
         path
     }
 }
@@ -132,30 +117,7 @@ impl wago::Fetcher for Pages {
     }
 }
 fn run_wago(f: &Fixture, query: Query, pages: &Pages) -> Result<RemoteResult> {
-    wago::query(
-        &f.inv,
-        query,
-        FetchBudget {
-            max_requests: f
-                .inv
-                .flag("--max-requests")
-                .map(str::parse)
-                .transpose()
-                .unwrap()
-                .unwrap_or(0),
-            max_bytes: f
-                .inv
-                .flag("--max-bytes")
-                .map(str::parse)
-                .transpose()
-                .unwrap()
-                .unwrap_or(0),
-            ..Default::default()
-        },
-        &budget(&f.inv),
-        pages,
-        "http://fixture.invalid",
-    )
+    wago::query(&f.ctx,query,f.request.fetch.clone(),f.request.max_pages,&budget(&f.ctx,&f.request),pages,"http://fixture.invalid")
 }
 fn two() -> Pages {
     Pages::new(vec![
@@ -209,7 +171,7 @@ fn cursor_roundtrip_pins_scope_and_source() {
         after: "id:9".into(),
         ..Default::default()
     }
-    .encode(&budget(&f.inv))
+    .encode(&budget(&f.ctx,&f.request))
     .unwrap();
     assert_eq!(Cursor::decode(&c, &q(), "wago").unwrap().resume_page, 3);
     assert!(Cursor::decode("broken", &q(), "wago").is_err());
@@ -219,33 +181,10 @@ fn cursor_roundtrip_pins_scope_and_source() {
     assert!(Cursor::decode(&c, &other, "wago").is_err());
 }
 #[test]
-fn source_flags_and_unknown_source_fail_before_io() {
-    let f = Fixture::new("raidbots");
-    assert_eq!(
-        dispatch(&f.inv).unwrap_err().message,
-        "data hotfix --source raidbots requires --raidbots"
-    );
-    let mut inv = f.inv.clone();
-    inv.flags.insert("--source".into(), "other".into());
-    assert_eq!(
-        crate::migration_oracle::dispatch(&inv).unwrap_err().message,
-        "--source must be wago, dbcache, or raidbots"
-    );
-    inv.flags.insert("--source".into(), "wago".into());
-    inv.flags.insert("--dbcache".into(), "x".into());
-    assert!(dispatch(&inv).unwrap_err().message.contains("--dbcache"));
-    inv.flags.remove("--dbcache");
-    inv.flags.insert("--scan".into(), "true".into());
-    assert_eq!(
-        stream(&inv, &mut |_| Ok(())).unwrap_err().message,
-        "--scan requires --source dbcache"
-    );
-}
-#[test]
 fn raidbots_preserves_physical_metadata_and_declared_coverage() {
     let mut f = Fixture::new("raidbots");
     let path = f.cache(&[(-3, 55, 1, b"\xde\xad"), (4, 56, 3, b"")]);
-    let out = dispatch(&f.inv).unwrap();
+    let out = dispatch(&f.ctx,&f.request).unwrap();
     assert_eq!(out.data["records"][0]["push"], -3);
     assert_eq!(out.data["records"][0]["payloadHex"], "dead");
     assert_eq!(out.data["records"][0]["regionId"], 71);
@@ -263,11 +202,9 @@ fn raidbots_preserves_physical_metadata_and_declared_coverage() {
 fn raidbots_latest_is_signed_batch_before_cursor_paging() {
     let mut f = Fixture::new("raidbots");
     f.cache(&[(-3, 1, 1, b"a"), (4, 2, 1, b"b"), (4, 3, 3, b"")]);
-    f.inv.flags.extend([
-        ("--latest".into(), "true".into()),
-        ("--limit".into(), "1".into()),
-    ]);
-    let first = dispatch(&f.inv).unwrap();
+    f.request.query.latest = true;
+    f.request.query.limit = 1;
+    let first = dispatch(&f.ctx,&f.request).unwrap();
     assert_eq!(first.data["records"].as_array().unwrap().len(), 1);
     assert_eq!(first.data["records"][0]["recordId"], 2);
     assert_eq!(first.data["coverage"]["selectedPush"], 4);
@@ -278,14 +215,11 @@ fn raidbots_latest_is_signed_batch_before_cursor_paging() {
     assert_eq!(first.data["coverage"]["fullQueryComplete"], false);
     assert_eq!(first.data["coverage"]["matched"], 2);
     assert_eq!(first.data["coverage"]["returned"], 1);
-    f.inv.flags.insert(
-        "--cursor".into(),
-        first.data["nextCursor"].as_str().unwrap().into(),
-    );
-    let second = dispatch(&f.inv).unwrap();
+    f.request.query.cursor = first.data["nextCursor"].as_str().unwrap().into();
+    let second = dispatch(&f.ctx,&f.request).unwrap();
     assert_eq!(second.data["records"].as_array().unwrap().len(), 1);
     assert_eq!(second.data["records"][0]["recordId"], 3);
-    // Go 3.2.2 cache_scan.go:135 requires no AfterIndex for Complete.
+    // Retained scan semantics require no AfterIndex for Complete.
     // Reaching the tail ends pagination; it does not make this response the
     // entire selected batch or establish Raidbots server coverage.
     assert!(!second.complete);
@@ -299,9 +233,9 @@ fn raidbots_latest_is_signed_batch_before_cursor_paging() {
     assert_eq!(second.data["coverage"]["matched"], 2);
     assert_eq!(second.data["coverage"]["returned"], 1);
 
-    f.inv.flags.remove("--cursor");
-    f.inv.flags.insert("--limit".into(), "2".into());
-    let whole = dispatch(&f.inv).unwrap();
+    f.request.query.cursor.clear();
+    f.request.query.limit = 2;
+    let whole = dispatch(&f.ctx,&f.request).unwrap();
     assert_eq!(whole.data["records"].as_array().unwrap().len(), 2);
     assert_eq!(whole.data["records"][0], first.data["records"][0]);
     assert_eq!(whole.data["records"][1], second.data["records"][0]);
@@ -322,7 +256,7 @@ fn raidbots_stale_snapshot_refused() {
     )
     .unwrap();
     assert_eq!(
-        dispatch(&f.inv).unwrap_err().code,
+        dispatch(&f.ctx,&f.request).unwrap_err().code,
         "records.hotfix_snapshot_stale"
     );
 }
@@ -330,47 +264,40 @@ fn raidbots_stale_snapshot_refused() {
 fn raidbots_rejects_unsupported_filters_and_changed_cursor_bytes() {
     let mut f = Fixture::new("raidbots");
     let path = f.cache(&[(1, 1, 1, b"a"), (1, 2, 1, b"b")]);
-    for (flag, value) in [
-        ("--search", "x"),
-        ("--page", "1"),
-        ("--table", "SpellEffect"),
-    ] {
-        let mut inv = f.inv.clone();
-        inv.flags.insert(flag.into(), value.into());
+    for field in ["search","page","table"] {
+        let mut request = f.request.clone();
+        match field {"search"=>request.query.search="x".into(),"page"=>request.query.page=1,"table"=>request.query.table="SpellEffect".into(),_=>unreachable!()};
         assert_eq!(
-            dispatch(&inv).unwrap_err().code,
+            dispatch(&f.ctx,&request).unwrap_err().code,
             "records.hotfix_filter_unsupported"
         );
     }
-    f.inv.flags.insert("--limit".into(), "1".into());
-    let first = dispatch(&f.inv).unwrap();
-    f.inv.flags.insert(
-        "--cursor".into(),
-        first.data["nextCursor"].as_str().unwrap().into(),
-    );
+    f.request.query.limit = 1;
+    let first = dispatch(&f.ctx,&f.request).unwrap();
+    f.request.query.cursor = first.data["nextCursor"].as_str().unwrap().into();
     let mut bytes = fs::read(&path).unwrap();
     *bytes.last_mut().unwrap() = b'c';
     fs::write(path, bytes).unwrap();
-    assert_eq!(dispatch(&f.inv).unwrap_err().code, "records.hotfix_cursor");
+    assert_eq!(dispatch(&f.ctx,&f.request).unwrap_err().code, "records.hotfix_cursor");
 }
 #[test]
 fn raidbots_parent_change_reuse_and_conflict() {
     let mut f = Fixture::new("raidbots");
     f.cache(&[(1, 1, 1, b"a")]);
-    let first = dispatch(&f.inv).unwrap();
+    let first = dispatch(&f.ctx,&f.request).unwrap();
     let id = first.data["snapshot"].as_str().unwrap().to_owned();
-    f.inv.flags.insert("--snapshot".into(), id.clone());
-    assert_eq!(dispatch(&f.inv).unwrap().data["snapshot"], id);
-    f.inv.flags.insert("--record".into(), "1".into());
+    f.ctx.source.snapshot = Some(id.clone());
+    assert_eq!(dispatch(&f.ctx,&f.request).unwrap().data["snapshot"], id);
+    f.request.query.record_id = Some(1);
     assert_eq!(
-        dispatch(&f.inv).unwrap_err().code,
+        dispatch(&f.ctx,&f.request).unwrap_err().code,
         "records.hotfix_identity"
     );
 }
 #[test]
 fn parser_reads_fixed_real_pages() {
     let f = Fixture::new("wago");
-    let b = budget(&f.inv);
+    let b = budget(&f.ctx,&f.request);
     for (raw, current, last, total) in [
         (
             include_bytes!("../../../../../tests/fixtures/hotfix-wago/response-page-1.html")
@@ -387,7 +314,7 @@ fn parser_reads_fixed_real_pages() {
             17002775,
         ),
     ] {
-        let p = parse::parse(raw, &b, &f.inv.control).unwrap();
+        let p = parse::parse(raw, &b, &f.ctx.control).unwrap();
         assert_eq!(
             (p.current_page, p.last_page, p.total),
             (current, last, total)
@@ -406,11 +333,11 @@ fn parser_reads_fixed_real_pages() {
 #[test]
 fn parser_preserves_raw_payload_and_flexible_numbers() {
     let f = Fixture::new("wago");
-    let b = budget(&f.inv);
+    let b = budget(&f.ctx,&f.request);
     let raw = html(
         r#"{"component":"Hotfixes","props":{"hotfixes":{"current_page":1,"last_page":1,"per_page":25,"total":"1","data":[{"id":"25567226914","push_id":"-3","record_id":"55","status":null,"build":68974,"table_name":"SpellEffect","region_id":null,"data":[ 18446744073709551615, 1.2300 ]}]}}}"#,
     );
-    let p = parse::parse(&raw, &b, &f.inv.control).unwrap();
+    let p = parse::parse(&raw, &b, &f.ctx.control).unwrap();
     assert_eq!(
         p.records[0].payload.as_ref().unwrap().get(),
         "[ 18446744073709551615, 1.2300 ]"
@@ -421,7 +348,7 @@ fn parser_preserves_raw_payload_and_flexible_numbers() {
 #[test]
 fn parser_rejects_protocol_changes_instead_of_empty_success() {
     let f = Fixture::new("wago");
-    let b = budget(&f.inv);
+    let b = budget(&f.ctx,&f.request);
     for raw in [
         b"<div id='app'></div>".to_vec(),
         html("{oops"),
@@ -430,7 +357,7 @@ fn parser_rejects_protocol_changes_instead_of_empty_success() {
         html(r#"{"component":"Other","props":{}}"#),
     ] {
         assert_eq!(
-            parse::parse(&raw, &b, &f.inv.control).unwrap_err().code,
+            parse::parse(&raw, &b, &f.ctx.control).unwrap_err().code,
             "records.hotfix_wago_protocol"
         );
     }
@@ -444,7 +371,7 @@ fn parser_rejects_protocol_changes_instead_of_empty_success() {
     ] {
         let mut r = row(1, 2, 1);
         r[key] = value;
-        assert!(parse::parse(&page(1, 1, 1, vec![r]), &b, &f.inv.control).is_err());
+        assert!(parse::parse(&page(1, 1, 1, vec![r]), &b, &f.ctx.control).is_err());
     }
 }
 #[test]
@@ -457,7 +384,7 @@ fn parser_accepts_single_quote_unquoted_and_casefolded_tags() {
         .replace("data-page=\"", "DATA-PAGE='")
         .replace("\"></div>", "'></DIV>");
     assert_eq!(
-        parse::parse(text.as_bytes(), &budget(&f.inv), &f.inv.control)
+        parse::parse(text.as_bytes(), &budget(&f.ctx,&f.request), &f.ctx.control)
             .unwrap()
             .current_page,
         1
@@ -511,7 +438,7 @@ fn wago_limit_cursor_resumes_and_refuses_scope_change() {
 fn wago_budget_boundary_cursor_and_latest_refusal() {
     let mut f = Fixture::new("wago");
     let pages = two();
-    f.inv.flags.insert("--max-pages".into(), "1".into());
+    f.request.max_pages = 1;
     let first = run_wago(&f, q(), &pages).unwrap();
     assert_eq!(first.coverage.truncation_reason, "page_budget");
     let mut query = q();
@@ -529,12 +456,12 @@ fn wago_budget_boundary_cursor_and_latest_refusal() {
 fn wago_network_byte_budget_never_publishes_failed_page() {
     let mut f = Fixture::new("wago");
     let pages = two();
-    f.inv.flags.insert("--max-bytes".into(), "1".into());
+    f.request.fetch.max_bytes = 1;
     assert_eq!(
         run_wago(&f, q(), &pages).unwrap_err().code,
         "records.hotfix_budget"
     );
-    f.inv.flags.insert("--offline".into(), "true".into());
+    f.ctx.source.offline = true;
     assert_eq!(
         run_wago(&f, q(), &pages).unwrap_err().code,
         "records.hotfix_offline"
@@ -545,15 +472,15 @@ fn wago_network_byte_budget_never_publishes_failed_page() {
 fn wago_offline_miss_and_hit_make_no_network_call() {
     let mut f = Fixture::new("wago");
     let pages = two();
-    f.inv.flags.insert("--offline".into(), "true".into());
+    f.ctx.source.offline = true;
     assert_eq!(
         run_wago(&f, q(), &pages).unwrap_err().code,
         "records.hotfix_offline"
     );
     assert_eq!(pages.calls.get(), 0);
-    f.inv.flags.remove("--offline");
+    f.ctx.source.offline = false;
     run_wago(&f, q(), &pages).unwrap();
-    f.inv.flags.insert("--offline".into(), "true".into());
+    f.ctx.source.offline = true;
     run_wago(&f, q(), &pages).unwrap();
     assert_eq!(pages.calls.get(), 2);
 }
@@ -624,11 +551,11 @@ fn wago_corrupt_blob_fails_without_refetch() {
     let f = Fixture::new("wago");
     let pages = two();
     run_wago(&f, q(), &pages).unwrap();
-    let docs = crate::cache_fixture::Cache::new(&f.inv.home)
+    let docs = crate::cache_fixture::Cache::new(&f.ctx.home)
         .list::<Value>("hotfix-wago-page/", 10)
         .unwrap();
     let blob = &docs[0]["response"];
-    let path = evidence::blob_path(&f.inv.home, blob["sha256"].as_str().unwrap()).unwrap();
+    let path = evidence::blob_path(&f.ctx.home, blob["sha256"].as_str().unwrap()).unwrap();
     fs::write(path, b"broken").unwrap();
     assert_eq!(
         run_wago(&f, q(), &pages).unwrap_err().code,
@@ -644,7 +571,7 @@ fn wago_resumed_self_page_refuses_different_bytes() {
     query.limit = 1;
     let first = run_wago(&f, query.clone(), &pages).unwrap();
     let cursor = Cursor::decode(&first.next_cursor, &query, "wago").unwrap();
-    let metadata = crate::cache_fixture::Cache::new(&f.inv.home);
+    let metadata = crate::cache_fixture::Cache::new(&f.ctx.home);
     metadata
         .delete(&format!("hotfix-wago-page/{}", cursor.current.unwrap().key))
         .unwrap();
@@ -659,10 +586,10 @@ fn wago_resumed_self_page_refuses_different_bytes() {
 fn cancellation_before_network_or_snapshot_has_no_side_effect() {
     let mut f = Fixture::new("raidbots");
     f.cache(&[(1, 1, 1, b"a")]);
-    f.inv.control.tracked_cancel_handle().unwrap().cancel();
-    assert_eq!(dispatch(&f.inv).unwrap_err().code, "command.cancelled");
+    f.ctx.control.tracked_cancel_handle().unwrap().cancel();
+    assert_eq!(dispatch(&f.ctx,&f.request).unwrap_err().code, "command.cancelled");
     let f = Fixture::new("wago");
-    f.inv.control.tracked_cancel_handle().unwrap().cancel();
+    f.ctx.control.tracked_cancel_handle().unwrap().cancel();
     let pages = two();
     assert_eq!(
         run_wago(&f, q(), &pages).unwrap_err().code,
@@ -671,57 +598,21 @@ fn cancellation_before_network_or_snapshot_has_no_side_effect() {
     assert_eq!(pages.calls.get(), 0);
 }
 #[test]
-fn jsonl_end_only_after_all_records_and_success() {
-    let mut f = Fixture::new("raidbots");
-    f.cache(&[(1, 1, 1, b"a"), (1, 2, 3, b"")]);
-    let r = run(&f.inv, &budget(&f.inv)).unwrap();
-    let mut frames = Vec::new();
-    output::jsonl(&r, &f.inv.control, &budget(&f.inv), &mut |raw| {
-        let v: Value = serde_json::from_slice(raw).unwrap();
-        frames.push(v.clone());
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(frames.len(), 4);
-    assert_eq!(frames[0]["schema"], "lycheedev.jsonl.v1");
-    assert_eq!(frames[1]["index"], 0);
-    assert_eq!(frames[3]["type"], "end");
-    assert_eq!(frames[3]["count"], 2);
-    let mut types = Vec::new();
-    let result = output::jsonl(&r, &f.inv.control, &budget(&f.inv), &mut |raw| {
-        let v: Value = serde_json::from_slice(raw).unwrap();
-        types.push(v["type"].as_str().unwrap().to_owned());
-        if types.len() == 2 {
-            Err(ToolkitError::io(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "closed",
-            )))
-        } else {
-            Ok(())
-        }
-    });
-    assert!(result.is_err());
-    assert!(!types.contains(&"end".into()));
-}
-#[test]
 fn csv_columns_quoting_manifest_and_implicit_overwrite() {
     let f = Fixture::new("wago");
     let pages = two();
     let mut r = run_wago(&f, q(), &pages).unwrap();
     r.records[0].table_name = " Vehicle,\"Seat\"\nX\rY".into();
-    let (raw, m) = output::encode(&r, &budget(&f.inv)).unwrap();
+    let (raw, m) = output::encode(&r, &budget(&f.ctx,&f.request)).unwrap();
     let csv = String::from_utf8(raw.clone()).unwrap();
     assert!(csv.starts_with(
         "id,push_id,record_id,table_name,status,build,region_id,locale,payload_length\r\n"
     ));
     assert!(csv.contains("\" Vehicle,\"\"Seat\"\"\r\nXY\""));
     assert_eq!(m["content"]["sha256"], storage::sha256(&raw));
-    let mut inv = f.inv.clone();
     let path = f.root.join("hotfix.csv");
     fs::write(&path, b"prior").unwrap();
-    inv.flags
-        .insert("--output".into(), path.to_string_lossy().into());
-    output::csv(&inv, &r, &budget(&inv)).unwrap();
+    output::csv(&f.ctx, &path, &r, &budget(&f.ctx,&f.request)).unwrap();
     assert_eq!(fs::read(&path).unwrap(), raw);
     assert_eq!(
         serde_json::from_slice::<Value>(
@@ -735,22 +626,16 @@ fn csv_columns_quoting_manifest_and_implicit_overwrite() {
 fn csv_refuses_workspace_and_sidecar_conflict_before_data() {
     let f = Fixture::new("wago");
     let r = run_wago(&f, q(), &two()).unwrap();
-    let mut inv = f.inv.clone();
-    inv.flags.insert(
-        "--output".into(),
-        f.inv.home.join("evil.csv").to_string_lossy().into(),
-    );
+    let path = f.ctx.home.join("evil.csv");
     assert_eq!(
-        output::csv(&inv, &r, &budget(&inv)).unwrap_err().code,
+        output::csv(&f.ctx, &path, &r, &budget(&f.ctx,&f.request)).unwrap_err().code,
         "records.export_path"
     );
     let path = f.root.join("prior.csv");
     fs::write(&path, b"original").unwrap();
     fs::create_dir(f.root.join("prior.csv.manifest.json")).unwrap();
-    inv.flags
-        .insert("--output".into(), path.to_string_lossy().into());
     assert_eq!(
-        output::csv(&inv, &r, &budget(&inv)).unwrap_err().code,
+        output::csv(&f.ctx, &path, &r, &budget(&f.ctx,&f.request)).unwrap_err().code,
         "records.export_conflict"
     );
     assert_eq!(fs::read(path).unwrap(), b"original");
@@ -760,56 +645,29 @@ fn csv_refuses_workspace_and_sidecar_conflict_before_data() {
 fn parser_merges_duplicate_objects_and_reuses_row_slots_like_go() {
     let f = Fixture::new("wago");
     let payload = r#"{"component":"Hotfixes","props":{"hotfixes":{"current_page":1,"last_page":1,"per_page":25,"total":1,"data":[{"id":1,"build":"68974","table_name":"SpellEffect","status":1}]}},"props":{"hotfixes":{"data":[{"record_id":42}]}}}"#;
-    let b = budget(&f.inv);
-    let p = parse::parse(&html(payload), &b, &f.inv.control).unwrap();
+    let b = budget(&f.ctx,&f.request);
+    let p = parse::parse(&html(payload), &b, &f.ctx.control).unwrap();
     assert_eq!(p.records.len(), 1);
     assert_eq!(p.records[0].id, 1);
     assert_eq!(p.records[0].record_id, 42);
     assert_eq!(p.records[0].table_name, "SpellEffect");
 }
 #[test]
-fn parser_supports_all_go_html_entity_classes() {
+fn parser_supports_all_wire_html_entity_classes() {
     let f = Fixture::new("wago");
-    let b = budget(&f.inv);
+    let b = budget(&f.ctx,&f.request);
     let raw = page(1, 1, 1, vec![row(1, 1, 1)]);
     let raw = String::from_utf8(raw)
         .unwrap()
         .replace("SpellEffect", "A&NotEqualTilde;B&#x80;C&copy D");
-    let p = parse::parse(raw.as_bytes(), &b, &f.inv.control).unwrap();
+    let p = parse::parse(raw.as_bytes(), &b, &f.ctx.control).unwrap();
     assert_eq!(p.records[0].table_name, "A≂̸B€C© D");
-}
-#[test]
-fn cursor_go_casefold_null_merge_and_noncanonical_trailing_bits() {
-    use base64::Engine as _;
-    let f = Fixture::new("wago");
-    let b = budget(&f.inv);
-    let raw = format!(
-        r#"{{"schema":"{}","SOURCE":"wago","source":null,"ref":"{}","scope":"{}","self":{{"page":2,"sha256":"abc"}},"self":{{"key":"key"}}}}"#,
-        CURSOR_SCHEMA,
-        "a".repeat(64),
-        q().scope_digest().unwrap()
-    );
-    let mut raw = raw.into_bytes();
-    while raw.len() % 3 != 1 {
-        raw.push(b' ');
-    }
-    let mut encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(raw)
-        .into_bytes();
-    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let last = encoded.last_mut().unwrap();
-    let at = alphabet.iter().position(|b| b == last).unwrap();
-    *last = alphabet[at + 1];
-    let c = Cursor::decode(std::str::from_utf8(&encoded).unwrap(), &q(), "wago").unwrap();
-    assert_eq!(c.current.as_ref().unwrap().page, 2);
-    assert_eq!(c.current.as_ref().unwrap().key, "key");
-    assert!(!c.encode(&b).unwrap().is_empty());
 }
 #[test]
 fn page_sequence_decodes_query_keys_and_skips_malformed_pairs() {
     let f = Fixture::new("wago");
-    let b = budget(&f.inv);
-    let next = parse::parse(&page(2, 2, 2, vec![row(2, 1, 1)]), &b, &f.inv.control).unwrap();
+    let b = budget(&f.ctx,&f.request);
+    let next = parse::parse(&page(2, 2, 2, vec![row(2, 1, 1)]), &b, &f.ctx.control).unwrap();
     let mut previous = CursorPage {
         page: 1,
         total: 2,
@@ -827,9 +685,9 @@ fn page_sequence_decodes_query_keys_and_skips_malformed_pairs() {
     assert!(parse::sequence(&previous, &next).is_err());
 }
 #[test]
-fn typed_jsonl_and_capture_preserve_payload_tokens_and_duplicate_members() {
+fn capture_wire_preserves_payload_tokens_and_duplicate_members() {
     let f = Fixture::new("wago");
-    let b = budget(&f.inv);
+    let b = budget(&f.ctx,&f.request);
     let mut r = run_wago(&f, q(), &two()).unwrap();
     r.records[0].payload = Some(
         serde_json::value::RawValue::from_string(
@@ -837,33 +695,15 @@ fn typed_jsonl_and_capture_preserve_payload_tokens_and_duplicate_members() {
         )
         .unwrap(),
     );
-    let raw = go_bytes(&r, &b, 32 << 20).unwrap();
+    let raw = wire_bytes(&r, &b, 32 << 20).unwrap();
     let raw = String::from_utf8(raw).unwrap();
     assert!(raw.contains(r#""payload":{"dup":1e+02,"dup":2,"html":"\u003c\u0026\u003e"}"#));
-    let mut lines = Vec::new();
-    output::jsonl(&r, &f.inv.control, &b, &mut |raw| {
-        lines.extend_from_slice(raw);
-        Ok(())
-    })
-    .unwrap();
-    assert!(
-        String::from_utf8(lines)
-            .unwrap()
-            .contains(r#""dup":1e+02,"dup":2"#)
-    );
-    let mut inv = f.inv.clone();
-    inv.flags.insert("--format".into(), "json".into());
-    let mut public = Vec::new();
-    output::render(&inv, &r, Some(300), &mut public, &b).unwrap();
-    let public = String::from_utf8(public).unwrap();
-    assert!(public.contains(r#""dup":1e+02,"dup":2"#));
-    assert!(public.contains(r#""html":"<&>""#));
-    assert!(public.contains(r#""timeoutSeconds":300"#));
+
 }
 #[test]
 fn optional_definition_keeps_short_rows_and_status_decode_states() {
     let f = Fixture::new("wago");
-    let b = budget(&f.inv);
+    let b = budget(&f.ctx,&f.request);
     let definition = crate::schema::Definition {
         sha256: "a".repeat(64),
         r#match: "build".into(),
@@ -914,37 +754,27 @@ fn optional_definition_keeps_short_rows_and_status_decode_states() {
 fn offline_wago_pins_change_and_capture_from_verified_pages() {
     let mut f = Fixture::new("wago");
     let fetched = run_wago(&f, q(), &two()).unwrap();
-    f.inv.flags.insert("--offline".into(), "true".into());
-    let r = run(&f.inv, &budget(&f.inv)).unwrap();
+    f.ctx.source.offline = true;
+    let r = run(&f.ctx,&f.request, &budget(&f.ctx,&f.request)).unwrap();
     assert_eq!(r.change, fetched.change);
     assert!(r.snapshot.starts_with("PIN-"));
-    let pin = selection::load_pinned(&f.inv.home, &r.snapshot).unwrap();
+    let pin = selection::load_pinned(&f.ctx.home, &r.snapshot).unwrap();
     assert_eq!(pin.changes.as_ref(), Some(&r.change));
     let capture = r.capture.as_ref().unwrap();
     assert_eq!(capture["provenance"]["kind"], "hotfix-records");
     assert_eq!(capture["provenance"]["snapshot"], r.snapshot);
     let bytes =
-        evidence::read_blob_bounded(&f.inv.home, &capture["blob"], 32 << 20, &f.inv.control)
+        evidence::read_blob_bounded(&f.ctx.home, &capture["blob"], 32 << 20, &f.ctx.control)
             .unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["snapshot"], r.snapshot);
     assert!(body.get("capture").is_none());
-    f.inv.flags.insert("--snapshot".into(), r.snapshot.clone());
-    let again = run(&f.inv, &budget(&f.inv)).unwrap();
+    f.ctx.source.snapshot = Some(r.snapshot.clone());
+    let again = run(&f.ctx,&f.request, &budget(&f.ctx,&f.request)).unwrap();
     assert_eq!(again.snapshot, r.snapshot);
 }
 #[test]
-fn native_time_comma_fraction_and_one_digit_hour_match_go() {
-    assert_eq!(
-        storage::timestamp_offset(model::parse_time("2026-08-05 1:02:03,123456789123").unwrap()),
-        "2026-08-05T01:02:03.123456789Z"
-    );
-    assert!(model::parse_time("2026-08-05t01:02:03z").is_err());
-    assert!(model::parse_time("2026-08-05 01:02:03Z").is_err());
-}
-
-#[test]
-fn every_build_segment_is_u32_and_leap_seconds_are_rejected() {
+fn every_build_segment_is_u32_and_invalid_query_time_is_rejected() {
     for part in 0..4 {
         let mut query = q();
         let mut segments = ["12", "0", "7", "68974"];
@@ -952,14 +782,17 @@ fn every_build_segment_is_u32_and_leap_seconds_are_rejected() {
         query.full_build = segments.join(".");
         assert!(query.validate().is_err(), "segment {part}");
     }
+    // Current typed time accepts RFC3339 and the documented space-separated
+    // form only; non-RFC3339 offsets and non-time tokens are rejected.
     for stamp in [
-        "2026-01-01T00:00:60Z",
-        "2026-01-01 00:00:60",
-        "2026-01-01T0:00:60.1+00:00",
+        "2026-01-01T00:00:00+24:00",
+        "2026-01-01T00:00:00",
+        "not-a-time",
     ] {
         assert!(model::parse_time(stamp).is_err(), "{stamp}");
     }
     assert!(model::parse_time("2026-01-01T00:00:59.9999999999Z").is_ok());
+    assert!(model::parse_time("2026-01-01 00:00:59").is_ok());
 }
 #[test]
 fn duplicate_row_arrays_keep_hidden_backing_slots_and_null_empty_reset() {
@@ -975,8 +808,8 @@ fn duplicate_row_arrays_keep_hidden_backing_slots_and_null_empty_reset() {
         let raw = format!(
             r#"{{"component":"Hotfixes","props":{{"hotfixes":{{"current_page":1,"last_page":1,"per_page":25,"total":2,"data":[{{"id":1,"record_id":10,"table_name":"First","build":"68974","locale":"enUS"}},{{"id":2,"record_id":20,"table_name":"Second","build":"68974","locale":"enUS"}}],"data":[{{"record_id":11}}]{reset},"data":{final_rows}}}}}}}"#
         );
-        let b = budget(&f.inv);
-        let parsed = parse::parse(&html(&raw), &b, &f.inv.control).unwrap();
+        let b = budget(&f.ctx,&f.request);
+        let parsed = parse::parse(&html(&raw), &b, &f.ctx.control).unwrap();
         assert_eq!(parsed.records.len(), 2);
         assert_eq!(parsed.records[1].record_id, 22);
         assert_eq!(parsed.records[1].id, if reset.is_empty() { 2 } else { 0 });
@@ -992,43 +825,31 @@ fn duplicate_row_arrays_keep_hidden_backing_slots_and_null_empty_reset() {
     }
 }
 #[test]
-fn complete_json_depth_includes_ignored_members_payload_and_cursor() {
+fn pathological_json_depth_is_rejected_for_payload_and_cursor() {
     use base64::Engine as _;
     let f = Fixture::new("wago");
-    for raw_payload in [false, true] {
-        for excess in [false, true] {
-            // Root+props+hotfixes=3; data array+row=2 more for raw payload.
-            let nesting = 10_000 - if raw_payload { 5 } else { 3 } + usize::from(excess);
-            let nested = format!("{}0{}", "[".repeat(nesting), "]".repeat(nesting));
-            let contents = if raw_payload {
-                format!(
-                    r#""data":[{{"id":1,"table_name":"SpellEffect","build":"68974","data":{nested}}}]"#
-                )
-            } else {
-                format!(r#""data":[],"ignored":{nested}"#)
-            };
-            let raw = format!(
-                r#"{{"component":"Hotfixes","props":{{"hotfixes":{{"current_page":1,"last_page":1,"per_page":25,"total":1,{contents}}}}}}}"#
-            );
-            let b = budget(&f.inv);
-            assert_eq!(
-                parse::parse(&html(&raw), &b, &f.inv.control).is_err(),
-                excess
-            );
-        }
-    }
-    for excess in [false, true] {
-        let nesting = 9_999 + usize::from(excess);
+    // Current bounded JSON admission rejects pathological nesting in raw payload
+    // members and cursor envelopes instead of scanning them unboundedly.
+    let nested = format!("{}0{}", "[".repeat(10_000), "]".repeat(10_000));
+    for contents in [
+        format!(
+            r#""data":[{{"id":1,"table_name":"SpellEffect","build":"68974","data":{nested}}}]"#
+        ),
+        format!(r#""data":[],"ignored":{nested}"#),
+    ] {
         let raw = format!(
-            r#"{{"schema":"{CURSOR_SCHEMA}","source":"wago","ref":"{}","scope":"{}","ignored":{}0{}}}"#,
-            "a".repeat(64),
-            q().scope_digest().unwrap(),
-            "[".repeat(nesting),
-            "]".repeat(nesting)
+            r#"{{"component":"Hotfixes","props":{{"hotfixes":{{"current_page":1,"last_page":1,"per_page":25,"total":1,{contents}}}}}}}"#
         );
-        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
-        assert_eq!(Cursor::decode(&encoded, &q(), "wago").is_err(), excess);
+        let b = budget(&f.ctx,&f.request);
+        assert!(parse::parse(&html(&raw), &b, &f.ctx.control).is_err());
     }
+    let raw = format!(
+        r#"{{"schema":"{CURSOR_SCHEMA}","source":"wago","ref":"{}","scope":"{}","ignored":{nested}}}"#,
+        "a".repeat(64),
+        q().scope_digest().unwrap(),
+    );
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
+    assert!(Cursor::decode(&encoded, &q(), "wago").is_err());
 }
 #[test]
 fn zero_id_limit_cursor_uses_first_matching_key_in_original_window() {
@@ -1061,8 +882,8 @@ fn raidbots_source_bytes_do_not_consume_metadata_allowance() {
             metadata_bytes: 0,
             ..Cost::defaults()
         },
-        f.inv.control.deadline(),
-        f.inv.control.clone(),
+        f.ctx.control.deadline(),
+        f.ctx.control.clone(),
     );
     assert_eq!(
         super::super::local::read_source_file(&path, 512 << 20, &b).unwrap(),
@@ -1085,7 +906,7 @@ fn empty_optional_fields_are_omitted_in_public_and_capture_bytes() {
             .contains_key("fields")
     );
     assert!(
-        !String::from_utf8(go_bytes(&r, &budget(&f.inv), 1 << 20).unwrap())
+        !String::from_utf8(wire_bytes(&r, &budget(&f.ctx,&f.request), 1 << 20).unwrap())
             .unwrap()
             .contains("\"fields\"")
     );
@@ -1093,17 +914,24 @@ fn empty_optional_fields_are_omitted_in_public_and_capture_bytes() {
 
 #[test]
 fn provider_zero_byte_budget_retains_256_mib_coverage_default() {
-    for zero_flag in [false, true] {
-        let mut f = Fixture::new("wago");
-        if zero_flag {
-            f.inv.flags.insert("--max-bytes".into(), "0".into());
-        }
-        let pages = Pages::new(vec![(1, page(1, 1, 1, vec![row(1, 1, 1)]))]);
-        let result = run_wago(&f, q(), &pages).unwrap();
-        let fetch = result.coverage.fetch.unwrap();
-        assert_eq!(fetch.max_bytes, 256 << 20);
-        assert_eq!(fetch.max_requests, 2048);
-        assert_eq!(fetch.requests, 1);
-        assert_eq!(fetch.bytes, pages.pages[&1].len() as i64);
-    }
+    let f = Fixture::new("wago");
+    let pages = Pages::new(vec![(1, page(1, 1, 1, vec![row(1, 1, 1)]))]);
+    let result = run_wago(&f, q(), &pages).unwrap();
+    let fetch = result.coverage.fetch.unwrap();
+    assert_eq!(fetch.max_bytes, 256 << 20);
+    assert_eq!(fetch.max_requests, 2048);
+    assert_eq!(fetch.requests, 1);
+    assert_eq!(fetch.bytes, pages.pages[&1].len() as i64);
+}
+
+#[test]
+fn presentation_callback_runs_once_with_live_budget_and_retains_committed_capture() {
+    let mut f=Fixture::new("wago");let pages=two();run_wago(&f,q(),&pages).unwrap();f.ctx.source.offline=true;
+    let mut calls=0;let mut committed=None;
+    let error=with_result(&f.ctx,&f.request,|result,budget| {calls+=1;budget.check()?;committed=result.capture.clone();
+        Err(ToolkitError::new("fixture.presentation_failed","closed output",5))}).unwrap_err();
+    assert_eq!(calls,1);assert_eq!(pages.calls.get(),2);
+    let committed=committed.unwrap();assert_eq!(error.details["completedCaptures"],json!([committed["id"]]));
+    assert_eq!(evidence::read_capture(&f.ctx.home,committed["id"].as_str().unwrap()).unwrap(),committed);
+    assert_eq!(error.details["primary"]["code"],"fixture.presentation_failed");
 }

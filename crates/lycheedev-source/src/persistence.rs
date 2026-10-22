@@ -3,7 +3,7 @@
 use lycheedev_core::{
     Result,
     control::OperationControl,
-    metadata::{Metadata, historical_write::finish_historical},
+    metadata::{Metadata, owned_write::finish_owned},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -16,7 +16,7 @@ pub(crate) fn read<T: DeserializeOwned>(
 ) -> Result<T> {
     let store = Metadata::open_controlled(home, false, control)?;
     let result = store.read_controlled(key, control);
-    finish_control(finish_historical(result, store.close()), control.check())
+    finish_control(finish_owned(result, store.close()), control.check())
 }
 
 pub(crate) fn put_manifest(
@@ -58,7 +58,7 @@ fn write(
             lycheedev_core::ToolkitError::invalid("published Source metadata missing")
         })
     })();
-    finish_control(finish_historical(result, store.close()), control.check()).map_err(|mut error| {
+    finish_control(finish_owned(result, store.close()), control.check()).map_err(|mut error| {
         if state != "not_attempted" {
             error.details = json!({"schema":"lycheedev.source-persistence.v1","key":key,"mutation":"put","state":state,"cause":error.clone()});
         }
@@ -78,7 +78,7 @@ pub(crate) fn consume<T: DeserializeOwned, U>(
         None => store.consume_controlled(key, control, validate),
     };
     let consumed = result.is_ok();
-    finish_control(finish_historical(result, store.close()), control.check()).map_err(|mut error| {
+    finish_control(finish_owned(result, store.close()), control.check()).map_err(|mut error| {
         if consumed {
             error.details = json!({"schema":"lycheedev.source-persistence.v1","key":key,"mutation":"consume","state":"committed","cause":error.clone()});
         }
@@ -97,7 +97,7 @@ pub(crate) fn finish_control<T>(result: Result<T>, stopped: Result<()>) -> Resul
     {
         return result;
     }
-    finish_historical(result, stopped)
+    finish_owned(result, stopped)
 }
 
 /// Keep all authenticated source identity handles through their last consumer.

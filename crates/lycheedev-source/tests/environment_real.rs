@@ -1,12 +1,13 @@
+use lycheedev_source::request::{AddonValidationRequest, SelectedSource, SourceContext, SourceRequest};
 use lycheedev_source::{
     environment::{self, Identity, Limits},
-    luals::Runtime,
+    SourceTools, luac,
 };
 use serde_json::json;
 use std::{collections::BTreeMap, fs, path::PathBuf};
 #[test]
-#[ignore = "requires an explicit fixed source home/pin and authenticated LuaLS ZIP"]
-fn fixed_blizzard_catalog_real_luals_semantics() {
+#[ignore = "requires an explicit fixed source home/pin and verified bundled Lua compiler"]
+fn fixed_blizzard_catalog_real_native_semantics() {
     let home = PathBuf::from(
         std::env::var_os("LYCHEEDEV_ENVIRONMENT_HOME").expect("explicit source home"),
     );
@@ -53,34 +54,36 @@ fn fixed_blizzard_catalog_real_luals_semantics() {
         serde_json::to_vec(&json!([{"name":"fixed-blizzard-retail","result":env}])).unwrap(),
     )
     .unwrap();
-    let zip = PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("pinned zip"));
-    let runtime_path = staging.join(format!("runtime-{}", std::process::id()));
-    let runtime = Runtime::unpack_pinned(&zip, &runtime_path).unwrap();
-    let good = BTreeMap::from([(
-        "Good.lua".into(),
-        b"local health = UnitHealth(\"player\", true)\nreturn health\n".to_vec(),
-    )]);
-    let good = runtime
-        .check_with_control(&staging, &good, env.definitions.as_bytes(), &control)
-        .unwrap();
-    assert_eq!(good["passed"], true, "{good}");
-    let bad = BTreeMap::from([(
-        "Bad.lua".into(),
-        b"local health = UnitHealth(\"player\", {})\nreturn health\n".to_vec(),
-    )]);
-    let bad = runtime
-        .check_with_control(&staging, &bad, env.definitions.as_bytes(), &control)
-        .unwrap();
-    assert_eq!(bad["passed"], false, "{bad}");
-    assert!(
-        bad["diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["code"] == "param-type-mismatch")
-    );
-    fs::write(staging.join("report.json"),serde_json::to_vec_pretty(&json!({"sourcePin":source,"catalog":env.manifest,"coverage":env.coverage,"good":good,"bad":bad,"publicSemantic":"not_run"})).unwrap()).unwrap();
-    drop(runtime);
-    assert!(runtime_path.starts_with(&staging));
-    fs::remove_dir_all(runtime_path).unwrap();
+    let compiler_manifest: serde_json::Value = serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
+    let compiler = luac::Runtime::verified(
+        &PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed compiler")),
+        serde_json::from_value(compiler_manifest["runtime"].clone()).unwrap(),
+    ).unwrap();
+    let addon = staging.join(format!("native-addon-{}", std::process::id()));
+    fs::create_dir(&addon).unwrap();
+    fs::write(addon.join("Main.toc"),format!("## Interface: {}\nMain.lua\n",lycheedev_core::selection::source_interface(source).unwrap())).unwrap();
+    let ctx = SourceContext {
+        home: home.clone(),
+        cwd: addon.clone(),
+        control,
+    };
+    let request = SourceRequest::Validate(AddonValidationRequest {
+        selection: SelectedSource::new(pin.clone()).unwrap(),
+        root: addon.clone(),
+        toc: "Main.toc".into(),
+        semantic: true,
+        environment: None,
+        locator: format!("{}/Main.toc", addon.display()),
+    });
+    fs::write(addon.join("Main.lua"), "local health = UnitHealth(\"player\", true)\nreturn health\n").unwrap();
+    let good = lycheedev_source::dispatch_with_tools(&ctx, &request, SourceTools { luac: Some(&compiler) }).unwrap();
+    assert_eq!(good.data["semantic"]["passed"], true);
+    assert_eq!(good.data["semantic"]["engine"], "emmy_native_common_facts");
+    assert!(!good.provenance.is_empty());
+    fs::write(addon.join("Main.lua"), "local health = UnitHealth(\"player\", {})\nreturn health\n").unwrap();
+    let bad = lycheedev_source::dispatch_with_tools(&ctx, &request, SourceTools { luac: Some(&compiler) }).unwrap_err();
+    assert_eq!(bad.exit_code, 4);
+    assert_eq!(bad.details["result"]["semantic"]["passed"], false);
+    assert!(bad.details["result"]["semantic"]["diagnostics"].as_array().unwrap().iter().any(|d|d["code"]=="param-type-mismatch"));
+    fs::write(staging.join("report.json"),serde_json::to_vec_pretty(&json!({"sourcePin":source,"catalog":env.manifest,"coverage":env.coverage,"good":good.data,"bad":bad.details,"publicSemantic":"emmy_native_common_facts"})).unwrap()).unwrap();
 }

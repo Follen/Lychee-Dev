@@ -32,8 +32,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 `;
-const wiring='[dependencies]\n'+['emmylua_code_analysis','emmylua_parser'].map(name=>`${name} = { path = "../../${emmySourcePath}/crates/${name}", version = "=0.30.0", optional = true }`).join('\n');
-const adapterWiring=wiring.replaceAll(', optional = true','');
+// The pinned native engine is the only Source semantic engine: both the Source
+// and the adapter edges are mandatory dependencies without an optional switch.
+const wiring='[dependencies]\n'+['emmylua_code_analysis','emmylua_parser'].map(name=>`${name} = { path = "../../${emmySourcePath}/crates/${name}", version = "=0.30.0" }`).join('\n');
+const adapterWiring=wiring;
 function fixture(){
   const root=mkdtempSync(join(tmpdir(),'lycheedev-emmy-custody-'));
   try{
@@ -100,20 +102,20 @@ test('license closure covers transitive local Emmy crates using verified origina
   assert.equal(records.length,3);for(const record of records){assert.equal(record.licenseFiles[0].text,license);assert.equal(record.correspondingSource.historicalPrivatePatchRecovered,false);assert.equal('baseManifestSHA256' in record.correspondingSource,false);assert.equal(record.correspondingSource.patchedTreeSHA256,inspectEmmy(root).patchedTreeSHA256);}
 }));
 test('active Cargo wiring rejects private paths, commented declarations and missing custody',()=>{
-  verifyEmmyWiring(wiring);
-  for(const text of [wiring.replaceAll(emmySourcePath,'.tmp/rust-source-binding-context-01/upstream'),wiring.replace('emmylua_parser =','# emmylua_parser ='),wiring+'\nemmylua_parser = {}'])assert.throws(()=>verifyEmmyWiring(text),/dependency_wiring/);
+  verifyEmmyWiring(wiring,{optional:false});
+  for(const text of [wiring.replaceAll(emmySourcePath,'.tmp/rust-source-binding-context-01/upstream'),wiring.replace('emmylua_parser =','# emmylua_parser ='),wiring+'\nemmylua_parser = {}'])assert.throws(()=>verifyEmmyWiring(text,{optional:false}),/dependency_wiring/);
   withFixture(({root})=>{rmSync(join(root,emmyRecipePath,'identity.json'));assert.throws(()=>runCargo(root,['build'],{execute(){assert.fail('must not execute');}}),/ENOENT/);});
 });
-test('Source optional and adapter nonoptional engine edges are separately enforced',()=>{
-  verifyEmmyWiring(wiring,{optional:true});
+test('Source and adapter engine edges are both mandatory and enforced',()=>{
+  verifyEmmyWiring(wiring,{optional:false});
   verifyEmmyWiring(adapterWiring,{optional:false});
+  assert.throws(()=>verifyEmmyWiring(wiring),/dependency_wiring/);
   assert.throws(()=>verifyEmmyWiring(adapterWiring),/dependency_wiring/);
-  assert.throws(()=>verifyEmmyWiring(wiring,{optional:false}),/dependency_wiring/);
-  assert.throws(()=>verifyEmmyWiring(adapterWiring,{optional:'false'}),/dependency_wiring/);
-  for(const text of [adapterWiring.replace('=0.30.0','=0.30.1'),adapterWiring.replaceAll(emmySourcePath,'.tmp/unverified'),adapterWiring+'\nemmylua_parser = {}'])
+  assert.throws(()=>verifyEmmyWiring(wiring,{optional:'false'}),/dependency_wiring/);
+  for(const text of [wiring.replace('=0.30.0','=0.30.1'),wiring.replaceAll(emmySourcePath,'.tmp/unverified'),wiring+'\nemmylua_parser = {}'])
     assert.throws(()=>verifyEmmyWiring(text,{optional:false}),/dependency_wiring/);
-  for(const [path,text] of [['crates/lycheedev-source/Cargo.toml',adapterWiring],['crates/lycheedev-emmy-adapter/Cargo.toml',wiring],['crates/lycheedev-emmy-adapter/Cargo.toml',adapterWiring.replace('=0.30.0','=0.30.1')]])
-    withFixture(({root,put})=>{put(path,text);assert.throws(()=>runCargo(root,['check'],{execute(){assert.fail('must not execute');}}),/dependency_wiring/);});
+  for(const path of ['crates/lycheedev-source/Cargo.toml','crates/lycheedev-emmy-adapter/Cargo.toml'])
+    withFixture(({root,put})=>{put(path,wiring.replace('=0.30.0','=0.30.1'));assert.throws(()=>runCargo(root,['check'],{execute(){assert.fail('must not execute');}}),/dependency_wiring/);});
 });
 test('adapter-only custody still verifies the pinned recipe before execution',()=>withFixture(({root})=>{
   rmSync(join(root,'crates/lycheedev-source/Cargo.toml'));

@@ -62,11 +62,6 @@ fn check_scope(
         return;
     }
 
-    #[cfg(test)]
-    scope_metrics::CLONED_LOCAL_ENTRIES.fetch_add(
-        parent_locals.len() as u64,
-        std::sync::atomic::Ordering::Relaxed,
-    );
     let mut current_locals = parent_locals.clone();
     check_decls(
         context,
@@ -152,20 +147,4 @@ fn enclosing_closure_of_param(
         .parent_ancestors()
         .find_map(LuaClosureExpr::cast)
         .map(|closure| closure.get_syntax_id())
-}
-
-/// Test-only counter for the parent-locals copy cost.
-#[cfg(test)]
-pub(crate) mod scope_metrics {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    pub(crate) static CLONED_LOCAL_ENTRIES: AtomicU64 = AtomicU64::new(0);
-
-    pub(crate) fn reset() {
-        CLONED_LOCAL_ENTRIES.store(0, Ordering::Relaxed);
-    }
-
-    pub(crate) fn cloned_local_entries() -> u64 {
-        CLONED_LOCAL_ENTRIES.load(Ordering::Relaxed)
-    }
 }

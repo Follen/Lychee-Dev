@@ -1,4 +1,5 @@
 use super::*;
+use lycheedev_core::control::TrackedCancellation;
 use reqwest::header::HeaderValue;
 use std::{
     io::{Cursor, Read, Write},
@@ -34,12 +35,13 @@ fn read_bounded(
     control: &OperationControl,
     budget: Option<&Budget>,
 ) -> Result<Vec<u8>> {
-    run(super::read_bounded(
+    run(super::collect_admitted(
         ReadyReader(body),
-        maximum,
+        ReadLimit::Complete(maximum),
         control,
         budget,
         request_deadline(control, budget)?,
+        &mut |_| Ok(()),
     ))
 }
 
@@ -254,10 +256,8 @@ fn invalid_requests_and_cancellation_never_attempt_network() {
     ] {
         assert!(fetch_range("https://must-not-contact.example.com", req, &control, None).is_err());
     }
-    let cancelled = OperationControl::new(
-        Instant::now() + Duration::from_secs(5),
-        Arc::new(AtomicBool::new(true)),
-    );
+    let cancelled = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
+    cancelled.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(
         fetch_range("invalid URL", request(), &cancelled, None)
             .unwrap_err()
@@ -381,19 +381,19 @@ fn loopback_fixture_accept_terminates_when_request_fails_before_io() {
 #[test]
 fn body_bytes_returned_with_cancellation_are_charged_and_stop_is_retained() {
     struct CancelRead {
-        token: Arc<AtomicBool>,
+        token: TrackedCancellation,
     }
     impl Read for CancelRead {
         fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
             output[..3].copy_from_slice(b"abc");
-            self.token.store(true, std::sync::atomic::Ordering::Release);
+            self.token.cancel();
             Ok(3)
         }
     }
     for maximum in [2, 3] {
-        let token = Arc::new(AtomicBool::new(false));
+        let token = TrackedCancellation::new();
         let control =
-            OperationControl::new(Instant::now() + Duration::from_secs(10), token.clone());
+            OperationControl::tracked(Instant::now() + Duration::from_secs(10), token.clone());
         let budget = Budget::controlled(
             Cost {
                 network_bytes: maximum,

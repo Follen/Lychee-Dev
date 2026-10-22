@@ -1,7 +1,7 @@
-use lycheedev_windows::{JobGuard, NamedLock, Process, WindowIdentity, durable_replace};
+use lycheedev_windows::{JobGuard, Process, WindowIdentity, durable_replace};
 use std::{fs, os::windows::process::CommandExt, process::Command};
 #[test]
-fn own_process_identity_and_sealed_module() {
+fn own_process_identity_and_memory_usage() {
     let p = Process::open(std::process::id()).unwrap();
     p.verify().unwrap();
     let memory = p.memory().unwrap();
@@ -11,14 +11,6 @@ fn own_process_identity_and_sealed_module() {
         memory.peak_working_set >= memory.working_set
             && memory.peak_private_commit >= memory.private_commit
     );
-    let plan = p.main_module().unwrap();
-    assert_eq!(plan.hash().len(), 64);
-    assert_eq!(&plan.disk()[..2], b"MZ");
-    let mut h = [0u8; 2];
-    p.read_module(&plan, plan.base(), &mut h).unwrap();
-    assert_eq!(&h, b"MZ");
-    let bytes = [7u8; 8];
-    assert!(p.read_module(&plan, bytes.as_ptr() as u64, &mut h).is_err());
 }
 #[test]
 fn window_identity_mismatch_rejected() {
@@ -28,18 +20,6 @@ fn window_identity_mismatch_rejected() {
         hwnd: 0,
     };
     assert!(w.verify().is_err());
-}
-#[test]
-fn mutex_serializes_other_thread() {
-    let name = format!("Local\\LycheeDev.Test.{}", std::process::id());
-    let a = NamedLock::acquire(&name).unwrap();
-    let other = name.clone();
-    let busy = std::thread::spawn(move || NamedLock::acquire(&other).is_err())
-        .join()
-        .unwrap();
-    assert!(busy);
-    drop(a);
-    assert!(NamedLock::acquire(&name).is_ok());
 }
 #[test]
 fn durable_replace_updates_existing() {

@@ -17,7 +17,6 @@ pub(in crate::remote::transport) struct Target {
     pub dial_host: String,
     pub dial_bytes: Vec<u8>,
     pub dial_port: String,
-    pub dial: Option<Uri>,
     pub tls_host: String,
     pub connect_host: String,
     pub connect_target: String,
@@ -62,7 +61,7 @@ impl Target {
         };
         // Go's Windows GetAddrInfoW receives UTF16FromString, which replaces
         // each invalid UTF-8 byte with RuneError. SOCKS retains the raw bytes.
-        let dial_host = go_windows_text(&lookup);
+        let dial_host = windows_lossy_text(&lookup);
         // Direct Go addTLS receives SplitHostPort's host including its zone.
         // The tunneled layer adds brackets separately via connectMethod.tlsHost.
         let tls_host = dial_host.clone();
@@ -125,9 +124,6 @@ impl Target {
                 .parse()
                 .map_err(|_| http("invalid HTTP request target"))?,
         );
-        let dial = format!("{}://{}{path}", parsed.scheme, go_windows_text(&canonical))
-            .parse()
-            .ok();
         Ok(Self {
             wire,
             host_header,
@@ -138,15 +134,14 @@ impl Target {
             dial_host,
             dial_bytes: lookup,
             dial_port: dial_port.to_owned(),
-            dial,
             tls_host,
             connect_host,
-            connect_target: go_windows_text(&canonical),
+            connect_target: windows_lossy_text(&canonical),
             connect_error,
             route: format!(
                 "{}://{}{path}",
                 parsed.scheme,
-                go_windows_text(&raw_authority)
+                windows_lossy_text(&raw_authority)
             ),
         })
     }
@@ -187,7 +182,7 @@ fn remove_zone(value: &str) -> String {
     }
     value.to_owned()
 }
-fn go_windows_text(mut bytes: &[u8]) -> String {
+fn windows_lossy_text(mut bytes: &[u8]) -> String {
     let mut out = String::new();
     loop {
         match std::str::from_utf8(bytes) {

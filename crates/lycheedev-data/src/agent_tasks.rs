@@ -1,6 +1,5 @@
 //! Task templates compile to the one production typed engine. No rows are read
-//! here, and no legacy navigator/executor is called. Raw-record bundles preserve
-//! evidence; they do not claim legacy presentation or recursive closure parity.
+//! here. Raw-record bundles preserve evidence and the domain tasks provide full presentations.
 use crate::{
     engine::{Expression, QueryPlan, SourceMode, TableRequest},
     fault,
@@ -140,7 +139,7 @@ pub fn schema() -> serde_json::Value {
     json!({
         "$schema":"https://json-schema.org/draft/2020-12/schema",
         "title":"Lychee Agent business task request",
-        "description":"BusinessTask object inside the business wire task request field. Templates return named raw-record evidence, not legacy presentation or recursive graph closure. Every component has its own complete/provenance; handle publication is all-or-error. At most two components share the deadline and retained-memory admission; query_work is per component. No implicit row limit.",
+        "description":"BusinessTask object inside the business wire task request field. Templates return named raw-record evidence; navigate tasks provide domain reports. Every component has its own complete/provenance; handle publication is all-or-error. At most two components share the deadline and retained-memory admission; query_work is per component. No implicit row limit.",
         "oneOf":[
             variant("batch_ids",json!({"table":{"$ref":"#/$defs/TableRequest"},"ids":ids}), &["table","ids"]),
             variant("related",json!({"table":{"$ref":"#/$defs/TableRequest"},"field":{"type":"string","minLength":1,"maxLength":256,"description":"Exact column name; runtime additionally limits UTF-8 byte count to 256 and validates the Engine column grammar."},"ids":ids}), &["table","field","ids"]),

@@ -9,6 +9,7 @@ use crate::{
 use lycheedev_core::{
     Result, ToolkitError,
     client::{self, ClientInstallation, MetadataControl, MetadataCost},
+    control::TrackedCancellation,
     installation_selection, storage,
 };
 use md5::{Digest, Md5};
@@ -17,7 +18,6 @@ use std::{
     collections::BTreeMap,
     io::Read,
     path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
 };
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -953,7 +953,7 @@ pub fn open_encoding(
     metadata: &BuildMetadata,
     limits: casc::Limits,
     keys: &BTreeMap<u64, Vec<u8>>,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
 ) -> Result<blte::Content> {
     if metadata.content_bytes > 256 << 20 || metadata.encoding_bytes > limits.encoded_bytes {
         return Err(exceeds());
@@ -984,7 +984,7 @@ pub fn read_content(
     record: &EncodingRecord,
     limits: casc::Limits,
     keys: &BTreeMap<u64, Vec<u8>>,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&TrackedCancellation>,
 ) -> Result<(casc::LocalObject, blte::Content)> {
     let mut unavailable = None;
     for ekey in &record.encoding_keys {

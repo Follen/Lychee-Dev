@@ -122,7 +122,7 @@ fn supplemental_schema_lease_stop_observes_real_contention_and_retains_owner() {
     let invocation = alive();
     let (token, budget) = independent();
     let mut busy = 0;
-    let result = historical_write::historical_lease_observed_with_check(
+    let result = owned_write::owned_lease_observed_with_check(
         &fixture.0,
         "metadata-schema",
         &invocation,
@@ -454,7 +454,7 @@ fn successful_sql_open_transfers_owner_before_supplemental_stop_check() {
             .close()
             .map_err(|(_, error)| ToolkitError::from(error))
     };
-    let error = historical_write::finish_historical(result, closed).unwrap_err();
+    let error = owned_write::finish_owned(result, closed).unwrap_err();
     assert_eq!(error.code, "supplemental.stop");
     assert_eq!(close_calls, 1);
     invocation.check().unwrap();

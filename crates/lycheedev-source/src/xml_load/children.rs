@@ -114,7 +114,7 @@ mod tests {
     fn cancellation_remains_the_original_typed_control_error() {
         let program = parsed("<Ui><Frame/></Ui>");
         let control = OperationControl::default();
-        control.cancel_handle().store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         let expected = control.check().unwrap_err();
         let actual = ChildIndex::build(&program, usize::MAX, &control).err().unwrap();
         assert_eq!(actual.code, expected.code);
@@ -130,7 +130,7 @@ mod tests {
         let admitted = ChildIndex::build(&program, needed, &control).unwrap().unwrap();
         assert_eq!(admitted.retained_bytes(), (2 * program.occurrences.len() + 2) * std::mem::size_of::<usize>());
         assert!(admitted.retained_bytes() < needed);
-        control.cancel_handle().store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(ChildIndex::build(&program, 0, &control).err().unwrap().code, control.check().unwrap_err().code);
     }
 

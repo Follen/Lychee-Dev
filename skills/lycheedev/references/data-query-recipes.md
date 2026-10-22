@@ -3,7 +3,8 @@
 Use the installed `data agent schema` for exact fields and bounds. Send one JSONL
 request at a time or follow its bounded queue rules, with protocol
 `lycheedev.data-agent.v1`, a strictly increasing positive id and task. The enclosing
-worker binds the immutable snapshot and source. No production legacy SQL fallback.
+worker binds the immutable snapshot and source. There is no SQL or string-query
+entry; use the typed plans declared by the schema.
 
 A static ID query is task=query, query kind=plan, plan op=lookup, with table
 {name:"SpellMisc",mode:"static"} and ids:[1]. A project can select named typed

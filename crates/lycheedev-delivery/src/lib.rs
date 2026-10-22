@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 //! Managed installation and release verification. Live receives an adapter at the entry point.
-use lycheedev_core::{Invocation, Outcome, Result, ToolkitError};
+use lycheedev_core::{Outcome, Result, ToolkitError, request::RequestContext};
+#[cfg(test)]
+mod acquisition_control_tests;
 pub mod addon_transaction;
 pub mod deploy;
 pub mod formal_repair;
@@ -13,183 +15,105 @@ pub mod slot_publication;
 mod slot_test_diagnostics;
 pub mod slots;
 pub mod update;
-#[cfg(test)]
-mod acquisition_control_tests;
 pub use installation::{VerifiedInstallation, verify_clean};
-pub fn commands() -> &'static [&'static str] {
-    &[
-        "addon status",
-        "skill status",
-        "skill install",
-        "skill remove",
-        "addon install",
-        "addon remove",
-        "update",
-    ]
+#[derive(Clone, Debug)]
+pub enum AddonSelector {
+    Installation(std::path::PathBuf),
+    Path(std::path::PathBuf),
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    match inv.command.as_str() {
-        "update" => update::dispatch(inv),
-        "addon remove" => {
-            let client = selected_client(inv)?;
-            let target = lycheedev_core::client::addon_destination(&client)?;
-            Ok(Outcome::new(removal::addon_controlled(
-                &target,
-                std::path::Path::new(inv.required("--output")?),
-                &inv.control,
-            )?))
+#[derive(Clone, Debug)]
+pub enum InstallMode {
+    Release { root: std::path::PathBuf, archive: Option<std::path::PathBuf> },
+    Resume { archive: std::path::PathBuf },
+}
+impl InstallMode {
+    fn parts(&self) -> (Option<&std::path::Path>, Option<&std::path::Path>, bool) {
+        match self {
+            Self::Release { root, archive } => (Some(root), archive.as_deref(), false),
+            Self::Resume { archive } => (None, Some(archive), true),
         }
-        "addon install" => {
-            let client = selected_client(inv)?;
-            let target = lycheedev_core::client::addon_destination(&client)?;
-            #[cfg(test)]
-            acquisition_control_tests::before_acquire(
-                acquisition_control_tests::AcquirePoint::Install,
-                &inv.control,
-            );
-            let guard = lycheedev_core::coordination::InstallationGuard::acquire_controlled(
-                &target,
-                &inv.control,
-            )?;
-            let result = (|| {
-                guard.require_idle()?;
-                if inv.flag_bool("--resume") && inv.flag("--output").is_none() {
-                    return Err(ToolkitError::arguments("--resume requires --output"));
-                }
-                let result = addon_transaction::apply(
-                    &target,
-                    addon_transaction::Request {
-                        release: inv.flag("--release").map(std::path::Path::new),
-                        archive: inv.flag("--output").map(std::path::Path::new),
-                        version: lycheedev_core::VERSION,
-                        resume: inv.flag_bool("--resume"),
-                        control: &inv.control,
-                    },
-                    &guard,
-                )?;
-                Ok(Outcome::new(result))
-            })();
-            deploy::finish_close(result, guard.close())
-        }
-        "skill install" => {
-            let target = std::path::Path::new(inv.required("--path")?);
-            if target.file_name().is_none_or(|name| name != "lycheedev") {
-                return Err(ToolkitError::new(
-                    "delivery.invalid_installation",
-                    "skill directory must be named lycheedev",
-                    4,
-                ));
-            }
-            if let Some(archive) = inv.flag("--output") {
-                Ok(Outcome::new(deploy::upgrade_controlled(
-                    inv.flag("--release").map(std::path::Path::new),
-                    target,
-                    std::path::Path::new(archive),
-                    "skill",
-                    lycheedev_core::VERSION,
-                    inv.flag_bool("--resume"),
-                    &inv.control,
-                )?))
-            } else {
-                if inv.flag_bool("--resume") {
-                    return Err(ToolkitError::arguments("--resume requires --output"));
-                }
-                Ok(Outcome::new(serde_json::to_value(
-                    deploy::fresh_controlled(
-                        std::path::Path::new(inv.required("--release")?),
-                        target,
-                        "skill",
-                        lycheedev_core::VERSION,
-                        &inv.control,
-                    )?,
-                )?))
-            }
-        }
-        "skill remove" => {
-            let target = std::path::Path::new(inv.required("--path")?);
-            if target.file_name().is_none_or(|name| name != "lycheedev") {
-                return Err(ToolkitError::new(
-                    "delivery.invalid_installation",
-                    "skill directory must be named lycheedev",
-                    4,
-                ));
-            }
-            Ok(Outcome::new(deploy::remove_controlled(
-                target,
-                std::path::Path::new(inv.required("--output")?),
-                "skill",
-                &inv.control,
-            )?))
-        }
-        "addon status" | "skill status" => {
-            if inv.command == "addon status" && inv.flag("--installation").is_some() {
-                if inv.flag("--path").is_some() {
-                    return Err(ToolkitError::arguments(
-                        "addon status requires exactly one selector",
-                    ));
-                }
-                let client = selected_client(inv)?;
-                let target = lycheedev_core::client::addon_destination(&client)?;
-                let installation = installation::inspect(&target, "addon")?;
-                let mut result = serde_json::json!({"client":lycheedev_core::installation_selection::Client::from(&client),"installation":installation});
-                if target
-                    .parent()
-                    .unwrap()
-                    .join(".lycheedev-slots.json")
-                    .exists()
-                {
-                    let version = installation["receipt"]["version"]
-                        .as_str()
-                        .unwrap_or(lycheedev_core::VERSION);
-                    result["slots"] = match slots::inspect(target.parent().unwrap(), version) {
-                        Ok(pool) => {
-                            serde_json::json!({"state":"managed","count":pool["files"].as_array().map(Vec::len).unwrap_or(0),"pending":pool["files"].as_array().map(|files|files.iter().filter(|m|m["pendingHash"].as_str().is_some_and(|hash| !hash.is_empty())).count()).unwrap_or(0)})
-                        }
-                        Err(error) => {
-                            serde_json::json!({"state":"incomplete","count":0,"pending":0,"detail":error.message})
-                        }
-                    };
-                }
-                return Ok(Outcome::new(result));
-            }
-            let component = if inv.command.starts_with("addon") {
-                "addon"
-            } else {
-                "skill"
-            };
-            let target = inv
-                .flag("--path")
-                .map(std::path::PathBuf::from)
-                .or_else(|| {
-                    inv.flag("--installation")
-                        .map(|p| std::path::Path::new(p).join("Interface/AddOns/Lychee Dev"))
-                })
-                .ok_or_else(|| {
-                    ToolkitError::arguments("status requires --path or --installation")
-                })?;
-            Ok(Outcome::new(installation::inspect(&target, component)?))
-        }
-        _ => Err(ToolkitError::new(
-            "delivery.migration_incomplete",
-            "requested delivery handler has not yet been migrated",
-            3,
-        )),
     }
 }
-
-fn selected_client(inv: &Invocation) -> Result<lycheedev_core::client::ClientInstallation> {
-    lycheedev_core::installation_selection::select_with(
-        std::path::Path::new(inv.required("--installation")?),
-        "",
-        &mut lycheedev_core::installation_selection::InvocationMetadata(&inv.control),
-    )
+#[derive(Clone, Debug)]
+pub enum Request {
+    AddonStatus(AddonSelector),
+    SkillStatus { path: std::path::PathBuf },
+    AddonInstall { installation: std::path::PathBuf, mode: InstallMode },
+    AddonRemove { installation: std::path::PathBuf, archive: std::path::PathBuf },
+    SkillInstall { path: std::path::PathBuf, mode: InstallMode },
+    SkillRemove { path: std::path::PathBuf, archive: std::path::PathBuf },
+    Update(update::Request),
+}
+pub fn dispatch(ctx: &RequestContext, request: &Request) -> Result<Outcome> {
+    ctx.control.check()?;
+    match request {
+        Request::Update(request) => update::dispatch(ctx, request),
+        Request::AddonRemove { installation, archive } => {
+            let client = selected_client(ctx, installation)?;
+            let target = lycheedev_core::client::addon_destination(&client)?;
+            Ok(Outcome::new(removal::addon_controlled(&target, archive, &ctx.control)?))
+        }
+        Request::AddonInstall { installation, mode } => {
+            let client = selected_client(ctx, installation)?;
+            let target = lycheedev_core::client::addon_destination(&client)?;
+            #[cfg(test)]
+            acquisition_control_tests::before_acquire(acquisition_control_tests::AcquirePoint::Install, &ctx.control);
+            let guard = lycheedev_core::coordination::InstallationMaintenanceLease::acquire_controlled(&target, &ctx.control)?;
+            let (release, archive, resume) = mode.parts();
+            let result = addon_transaction::apply(&target, addon_transaction::Request {
+                release, archive, version: lycheedev_core::VERSION, resume, control: &ctx.control,
+            }, &guard).map(Outcome::new);
+            deploy::finish_close(result, guard.close())
+        }
+        Request::SkillInstall { path, mode } => {
+            skill_directory(path)?;
+            let (release, archive, resume) = mode.parts();
+            if let Some(archive) = archive {
+                Ok(Outcome::new(deploy::upgrade_controlled(release, path, archive, "skill", lycheedev_core::VERSION, resume, &ctx.control)?))
+            } else {
+                // The admitted Release variant owns a release when no archive
+                // is present; Resume always owns its original archive.
+                Ok(Outcome::new(serde_json::to_value(deploy::fresh_controlled(
+                    release.expect("admitted fresh skill release"), path, "skill", lycheedev_core::VERSION, &ctx.control,
+                )?)?))
+            }
+        }
+        Request::SkillRemove { path, archive } => {
+            skill_directory(path)?;
+            Ok(Outcome::new(deploy::remove_controlled(path, archive, "skill", &ctx.control)?))
+        }
+        Request::AddonStatus(AddonSelector::Installation(installation)) => {
+            let client = selected_client(ctx, installation)?;
+            let target = lycheedev_core::client::addon_destination(&client)?;
+            let installation = installation::inspect(&target, "addon")?;
+            let mut result = serde_json::json!({"client":lycheedev_core::installation_selection::Client::from(&client),"installation":installation});
+            if target.parent().unwrap().join(".lycheedev-slots.json").exists() {
+                let version = installation["receipt"]["version"].as_str().unwrap_or(lycheedev_core::VERSION);
+                result["slots"] = match slots::inspect(target.parent().unwrap(), version) {
+                    Ok(pool) => serde_json::json!({"state":"managed","count":pool["files"].as_array().map(Vec::len).unwrap_or(0),"pending":pool["files"].as_array().map(|files|files.iter().filter(|m|m["pendingHash"].as_str().is_some_and(|hash| !hash.is_empty())).count()).unwrap_or(0)}),
+                    Err(error) => serde_json::json!({"state":"incomplete","count":0,"pending":0,"detail":error.message}),
+                };
+            }
+            Ok(Outcome::new(result))
+        }
+        Request::AddonStatus(AddonSelector::Path(path)) => Ok(Outcome::new(installation::inspect(path, "addon")?)),
+        Request::SkillStatus { path } => Ok(Outcome::new(installation::inspect(path, "skill")?)),
+    }
+}
+fn skill_directory(path: &std::path::Path) -> Result<()> {
+    if path.file_name().is_none_or(|name| name != "lycheedev") {
+        return Err(ToolkitError::new("delivery.invalid_installation", "skill directory must be named lycheedev", 4));
+    }
+    Ok(())
+}
+fn selected_client(ctx: &RequestContext, installation: &std::path::Path) -> Result<lycheedev_core::client::ClientInstallation> {
+    lycheedev_core::installation_selection::select_with(installation, "", &mut lycheedev_core::installation_selection::InvocationMetadata(&ctx.control))
 }
 
 #[cfg(test)]
 mod selection_tests {
     use super::*;
     use std::{
-        collections::BTreeMap,
         fs,
         path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
@@ -221,10 +145,10 @@ mod selection_tests {
             fs::write(client.join("version.txt"), "3.80.2.69874").unwrap();
             fixture
         }
-        fn addon_status(&self, inv: &Invocation, selector: &str) -> serde_json::Value {
+        fn addon_status(&self, ctx: &RequestContext, installation_path: &std::path::Path, selector: &str) -> serde_json::Value {
             // Keep the public dispatch assertion, but first identify which
             // read-only boundary fails if CI reports an uncontextualized OS error.
-            let client = selected_client(inv).unwrap_or_else(|error| {
+            let client = selected_client(ctx, installation_path).unwrap_or_else(|error| {
                 panic!("{selector}: select client under {:?}: {error:?}", self.0)
             });
             let target =
@@ -237,7 +161,7 @@ mod selection_tests {
             let installation = installation::inspect(&target, "addon").unwrap_or_else(|error| {
                 panic!("{selector}: inspect addon at {target:?}: {error:?}")
             });
-            let result = dispatch(inv)
+            let result = dispatch(ctx, &Request::AddonStatus(AddonSelector::Installation(installation_path.to_owned())))
                 .unwrap_or_else(|error| {
                     panic!(
                         "{selector}: dispatch addon status under {:?}: {error:?}",
@@ -251,18 +175,8 @@ mod selection_tests {
             );
             result
         }
-        fn invocation(&self, command: &str) -> Invocation {
-            Invocation {
-                command: command.into(),
-                positional: None,
-                flags: BTreeMap::from([(
-                    "--installation".into(),
-                    self.0.to_string_lossy().into_owned(),
-                )]),
-                home: self.0.join("absent-home"),
-                cwd: self.0.clone(),
-                control: Default::default(),
-            }
+        fn context(&self) -> RequestContext {
+            RequestContext { home: self.0.join("absent-home"), cwd: self.0.clone(), control: Default::default() }
         }
     }
     impl Drop for Fixture {
@@ -271,22 +185,14 @@ mod selection_tests {
         }
     }
     #[test]
-    fn addon_status_selects_root_or_client_with_only_go_public_client_fields() {
+    fn addon_status_selects_root_or_client_with_only_public_client_fields() {
         let fixture = Fixture::new();
-        let mut inv = fixture.invocation("addon status");
-        let root = fixture.addon_status(&inv, "game root");
-        inv.flags.insert(
-            "--installation".into(),
-            fixture
-                .0
-                .join("_classic_titan_")
-                .to_string_lossy()
-                .into_owned(),
-        );
-        let exact = fixture.addon_status(&inv, "exact client");
+        let ctx = fixture.context();
+        let root = fixture.addon_status(&ctx, &fixture.0, "game root");
+        let exact = fixture.addon_status(&ctx, &fixture.0.join("_classic_titan_"), "exact client");
         assert_eq!(root, exact);
         assert_eq!(root["client"]["product"], "titan");
-        // Go selection.ClientInstallation omits catalogProduct for ordinary slots.
+        // The shared client selection omits catalogProduct for ordinary slots.
         let keys = root["client"]
             .as_object()
             .unwrap()
@@ -308,7 +214,7 @@ mod selection_tests {
             .collect()
         );
         assert_eq!(root["installation"]["state"], "absent");
-        assert!(!inv.home.exists());
+        assert!(!ctx.home.exists());
     }
     #[test]
     fn selection_fixtures_with_identical_timestamps_own_independent_roots() {
@@ -324,23 +230,23 @@ mod selection_tests {
         drop(first);
         assert!(!first_path.exists());
         assert!(second.0.is_dir());
-        let inv = second.invocation("addon status");
-        let result = second.addon_status(&inv, "surviving same-timestamp fixture");
+        let ctx = second.context();
+        let result = second.addon_status(&ctx, &second.0, "surviving same-timestamp fixture");
         assert_eq!(result["client"]["product"], "titan");
         assert_eq!(result["installation"]["state"], "absent");
-        assert!(!inv.home.exists());
+        assert!(!ctx.home.exists());
     }
     #[test]
     fn all_three_delivery_consumers_obey_invocation_cancellation_before_writes() {
         let fixture = Fixture::new();
-        for command in ["addon status", "addon install", "addon remove"] {
-            let inv = fixture.invocation(command);
-            inv.control.cancel_handle().store(true, Ordering::Release);
-            assert_eq!(
-                dispatch(&inv).unwrap_err().code,
-                "command.cancelled",
-                "{command}"
-            );
+        for request in [
+            Request::AddonStatus(AddonSelector::Installation(fixture.0.clone())),
+            Request::AddonInstall { installation: fixture.0.clone(), mode: InstallMode::Release { root: "unopened-release".into(), archive: None } },
+            Request::AddonRemove { installation: fixture.0.clone(), archive: "unopened-archive".into() },
+        ] {
+            let ctx = fixture.context();
+            ctx.control.tracked_cancel_handle().unwrap().cancel();
+            assert_eq!(dispatch(&ctx, &request).unwrap_err().code, "command.cancelled", "{request:?}");
         }
         assert!(
             !fixture

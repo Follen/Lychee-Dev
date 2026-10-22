@@ -30,7 +30,7 @@ fn actual_51_goto_identifier_structure() {
     let compiled = compiler.check(&staging, &cases).unwrap();
     assert_eq!(compiled["passed"], true);
     // Native Lua 5.1 permits goto identifiers. facts::lua is the separate fixed
-    // Go scanner contract, where goto remains a keyword rather than a name.
+    // external fixed reference scanner contract, where goto remains a keyword rather than a name.
     let facts: BTreeMap<_, _> = cases
         .iter()
         .map(|(name, raw)| (name.clone(), SyntaxDocument::new(raw).unwrap().facts(false)))
@@ -60,7 +60,7 @@ fn actual_51_goto_identifier_structure() {
             .diagnostics
             .is_empty()
     );
-    let report = serde_json::json!({"compiler":compiled,"facts":facts,"factsConsumer":"native-lua51-structure","invalidStatements":invalid,"scope":"Lua5.1 goto identifiers retain native structural facts; bundled luac rejects goto jumps and labels; fixed Go scanner contract remains separate"});
+    let report = serde_json::json!({"compiler":compiled,"facts":facts,"factsConsumer":"native-lua51-structure","invalidStatements":invalid,"scope":"Lua5.1 goto identifiers retain native structural facts; bundled luac rejects goto jumps and labels; external fixed reference scanner contract remains separate"});
     let first = staging.parent().unwrap().join("goto-first-report.json");
     if !first.exists() {
         fs::write(first, serde_json::to_vec_pretty(&report).unwrap()).unwrap();

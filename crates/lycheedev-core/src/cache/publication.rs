@@ -1,7 +1,7 @@
 //! Derived Source cache publication under its original invocation. No pruning,
 //! retention changes, or replay of an uncertain atomic publication occurs here.
 use super::*;
-use crate::{control::OperationControl, metadata::historical_write::finish_historical};
+use crate::{control::OperationControl, metadata::owned_write::finish_owned};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
@@ -94,9 +94,9 @@ pub fn publish_derived_controlled(
             }
             Ok(blob.clone())
         })();
-        finish_historical(result, object.close())
+        finish_owned(result, object.close())
     })();
-    let result = finish_historical(result, quota.close());
+    let result = finish_owned(result, quota.close());
     crate::selection::selection_finish(result, control.check()).map_err(|mut error| {
         if publication != "not_attempted" {
             error.details = json!({"schema":"lycheedev.cache-publication.v1","blob":blob,"state":publication,"cause":error.clone()});

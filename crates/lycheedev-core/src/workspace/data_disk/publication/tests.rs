@@ -157,7 +157,7 @@ fn cancellation_discards_only_its_private_spool_and_preserves_unknown_neighbor()
     fs::write(&foreign, b"protected").unwrap();
     let mut writer = owner.begin_object(16).unwrap();
     writer.write_bytes(b"partial").unwrap();
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(writer.commit().unwrap_err().code, "command.cancelled");
     assert_eq!(fs::read_dir(&owner.paths.staging).unwrap().count(), 1);
     assert_eq!(fs::read(foreign).unwrap(), b"protected");
@@ -174,7 +174,7 @@ fn late_failure_retains_published_object_identity_without_publishing_generation(
     writer.write_bytes(b"body").unwrap();
     let object = writer.commit().unwrap();
     let path = owner.paths.object(&object.sha256).unwrap();
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(
         owner
             .publish_generation(&storage::sha256(b"generation"), b"manifest")
@@ -448,7 +448,7 @@ fn both_terminal_scopes_survive_after_consuming_all_disk_handles() {
     let owner = resources
         .reserve_derived_cache_with_check(peak(1), &check)
         .unwrap();
-    control.cancel_handle().store(true, Ordering::Release);
+    control.tracked_cancel_handle().unwrap().cancel();
     stopped.set(true);
     let error = owner
         .finish::<()>(Err(ToolkitError::new(

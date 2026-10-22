@@ -10,7 +10,7 @@ use lycheedev_core::{
     Result, ToolkitError,
     cache::{SourceCachePublicationPhase, SourceFactsCache, SourceFactsReader, SourceFactsWriter},
     control::OperationControl,
-    metadata::historical_write::finish_historical,
+    metadata::owned_write::finish_owned,
     storage,
 };
 use serde::{Deserialize, Serialize};
@@ -487,7 +487,7 @@ impl<'a> Groups<'a> {
             self.leaf_end = leaf_end(self.files, self.next_file, self.previous_file, self.control)?;
         }
         let mut hash = Sha256::new();
-        hash.update(b"facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0");
+        hash.update(b"facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0xml-inline-v2-original-lines\0generator-v6\0");
         let mut inputs = [0; GROUP];
         let mut count = 0;
         while self.next_file < self.leaf_end && count < GROUP {
@@ -648,7 +648,7 @@ impl<'a> Groups<'a> {
         }
         if let Some(writer) = group.writer.take() {
             result = if result.is_ok() && group.seen == group.count {
-                finish_historical(
+                finish_owned(
                     result,
                     published(self.profile, |observer| {
                         writer.commit(self.control, observer)

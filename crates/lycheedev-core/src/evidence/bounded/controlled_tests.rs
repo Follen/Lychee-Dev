@@ -271,13 +271,13 @@ fn capture_existing_blob_integrity_failure_closes_guard_without_overwriting() {
 }
 #[test]
 fn capture_cleanup_join_keeps_full_primary_and_multiple_close_causes() {
-    use crate::metadata::historical_write::finish_historical;
+    use crate::metadata::owned_write::finish_owned;
     let primary = ToolkitError::new("command.cancelled", "stopped", 7)
         .with_details(serde_json::json!({"source":"capture"}));
     let metadata = ToolkitError::new("vault.metadata", "close failed", 5);
     let lock = ToolkitError::new("external.io", "lock close failed", 5);
-    let result: Result<()> = finish_historical(Err(primary.clone()), Err(metadata.clone()));
-    let combined = finish_historical(result, Err(lock.clone())).unwrap_err();
+    let result: Result<()> = finish_owned(Err(primary.clone()), Err(metadata.clone()));
+    let combined = finish_owned(result, Err(lock.clone())).unwrap_err();
     assert_eq!(
         (combined.code.as_str(), combined.exit_code),
         ("command.cancelled", 7)

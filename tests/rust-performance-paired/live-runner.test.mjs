@@ -5,8 +5,7 @@ import {readFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {RESULT_STRING_BYTES, HISTORY_EVENTS, REPEATS, SCOPES, APPEND_PHASES, verifyPerformanceReport} from './live-contract.mjs';
-import {ORACLE} from '../rust-parity/formal-lua-3.2.4/assertions.mjs';
+import {RESULT_STRING_BYTES, HISTORY_EVENTS, REPEATS, SCOPES, APPEND_PHASES, ORACLE, verifyPerformanceReport} from './live-contract.mjs';
 import {TEST, SUPPORT, performancePaths, selectTestExecutable, verifyTestOutput} from '../../tools/rust-live-offline-performance.mjs';
 const root=fileURLToPath(new URL('../..',import.meta.url));
 const clone=value=>structuredClone(value);
@@ -126,7 +125,7 @@ test('paths accept sealed records only and do not select a bare executable',()=>
   }finally{rmSync(directory,{recursive:true,force:true});}
 });
 test('benchmark remains ignored, monotonic, bounded, and production-hook-free',()=>{
-  const source=readFileSync(join(root,'crates/lycheedev-live/src/go_mailbox_v1/connection/offline_performance_tests.rs'),'utf8');
+  const source=readFileSync(join(root,'crates/lycheedev-live/src/mailbox/connection/offline_performance_tests.rs'),'utf8');
   assert.match(source,/#\[ignore = "opt-in owned offline performance runner/);
   assert.match(source,/Instant::now\(\)/);assert.match(source,/Duration::from_secs\(20\)/);
   assert.match(source,/assert_eq!\(samples.len\(\), 27\)/);
@@ -137,7 +136,7 @@ test('benchmark remains ignored, monotonic, bounded, and production-hook-free',(
   const fixtureSource=readFileSync(join(root,'crates/lycheedev-live/tests/support/formal_lua_fixture.rs'),'utf8');
   assert.match(fixtureSource,/PERFORMANCE_RESULT_STRING_BYTES: \[usize; 3\] = \[256, 16384, 131072\]/);
   assert.match(fixtureSource,/PERFORMANCE_HISTORY_EVENTS: \[usize; 3\] = \[1, 255, 256\]/);
-  assert(SUPPORT.includes('tests/rust-performance-paired/live-contract.mjs'));
+  assert(SUPPORT.includes('crates/lycheedev-live/src/mailbox/connection/offline_performance_tests.rs'));
   const runner=readFileSync(join(root,'tools/rust-live-offline-performance.mjs'),'utf8');
   assert.match(runner,/runCargo\(/);assert.match(runner,/ownedSpawnSync\(/);assert.match(runner,/'--release'/);
   assert.match(runner,/timeout: 690000/);assert.match(runner,/if \(succeeded && handlesReaped\) job.cleanup\(\)/);

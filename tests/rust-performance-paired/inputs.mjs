@@ -4,11 +4,18 @@ import {dirname, join, resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {hashFile} from '../../tools/rust-build.mjs';
-import {readZip} from '../../tools/zip.mjs';
+import {readTgz} from '../../tools/tgz.mjs';
 import {assertCorpus, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {GO_COMMIT, GO_VERSION} from './contract.mjs';
 
-export const LUALS = Object.freeze({name: 'lua-language-server', version: '3.19.1', platform: 'windows-amd64', url: 'https://github.com/LuaLS/lua-language-server/releases/download/3.19.1/lua-language-server-3.19.1-win32-x64.zip', bytes: 4453980, sha256: 'fdb9a59108cf62517813c97fa5549b0e16d1ef0688306bac728b08434db7e4cd'});
+// The repository never builds Go. The fixed Go 3.2.4 reference product is an
+// external input prepared once outside the repository; only its explicit path
+// and static byte identity are consumed here.
+export const GO_REFERENCE = Object.freeze({
+  schema: 'lycheedev.fixed-go-performance-artifact.v1',
+  commit: GO_COMMIT,
+  version: GO_VERSION,
+});
 export function safeRelative(path) {
   assert(typeof path === 'string' && path.length > 0 && !path.includes('\\'));
   assert(path.split('/').every(p => p && p !== '.' && p !== '..' && !/[:\x00-\x1f]/.test(p)), 'unsafe package path');
@@ -43,7 +50,7 @@ export function assertSeedCold(home) {
     assert(existsSync(join(home, name)), `missing initialized directory ${name}`);
     assert.equal(inventory(join(home, name)).rows.length, 0, `preseeded derived/evidence files in ${name}`);
   }
-  // LuaLS/Emmy worktrees, semantic state and derived indexes can only be created
+  // Derived Source worktrees, semantic state and indexes can only be created
   // by the timed index/query. Nothing is copied from a previously queried home.
   return inventory(home);
 }
@@ -89,15 +96,12 @@ export function proveWarmReuse(engine, before, after, envelope) {
   }
   return {verified: true, basis: 'fixed Go openIndex path and unchanged nonempty snapshot records/manifest hashes, file IDs and timestamps before/after warm command; no public hit counter is invented', before: compact(before), after: compact(after)};
 }
-export function verifyGoMetadata(text, {commit = GO_COMMIT} = {}) {
-  assert.match(text, /:\s+go1\.27\.1\r?\n/, 'fixed Go toolchain');
-  for (const [key, value] of [['vcs.revision', commit], ['vcs.modified', 'false'], ['CGO_ENABLED', '0'], ['GOOS', 'windows'], ['GOARCH', 'amd64'], ['-trimpath', 'true']]) {
-    assert(text.split(/\r?\n/).some(line => line.trim() === `build\t${key}=${value}`), `missing Go build identity ${key}=${value}`);
-  }
-  assert(!/^\s*build\t-gcflags=/m.test(text), 'nonstandard Go optimization flags');
-  return {commit, modified: false, toolchain: 'go1.27.1', cgo: 0, optimized: true, metadataSHA256: sha256(Buffer.from(text))};
-}
-export function verifyGoPackage(packageRoot, archivePath, {commit = GO_COMMIT, version = GO_VERSION} = {}) {
+// Authenticate one explicitly supplied external fixed Go package directory.
+// Its release.json identities and every package byte are re-derived from the
+// supplied directory; the Go product itself is never rebuilt or inspected by a
+// Go toolchain here. The Lua runtime payload is part of that opaque external
+// package and carries no repository-side assumption.
+export function verifyFixedGoPackage(packageRoot, {commit = GO_COMMIT, version = GO_VERSION} = {}) {
   packageRoot = resolve(packageRoot);
   const manifest = JSON.parse(readFileSync(join(packageRoot, 'release.json')));
   assert.equal(manifest.schema, 'lycheedev.release.v1'); assert.equal(manifest.version, version); assert.equal(manifest.commit, commit);
@@ -108,20 +112,47 @@ export function verifyGoPackage(packageRoot, archivePath, {commit = GO_COMMIT, v
   const seen = new Set();
   for (const row of manifest.resources) { assert(!seen.has(row.path), 'duplicate resource'); seen.add(row.path); check(row, 'payload/'); }
   for (const row of all.rows.filter(row => row.path.startsWith('payload/'))) assert(seen.has(row.path.slice(8)), 'unlisted payload file');
-  const archive = readFileSync(archivePath); assert.equal(archive.length, LUALS.bytes); assert.equal(sha256(archive), LUALS.sha256);
-  const runtimeBytes = readFileSync(join(packageRoot, 'payload/tool/luals/runtime.json'), 'utf8');
-  assert.equal(runtimeBytes.trim(), JSON.stringify(LUALS), 'fixed Go Open compares exact canonical runtime bytes');
-  const runtime = JSON.parse(runtimeBytes);
-  for (const [key, value] of Object.entries(LUALS)) assert.equal(runtime[key], value, `LuaLS ${key}`);
-  const files = readZip(archive), expectedRuntime = new Set(['tool/luals/runtime.json']);
-  for (const [name, bytes] of files) {
-    if (name.endsWith('/') && bytes.length === 0) continue;
-    if (/^meta\/3rd\/[^/]+\/\.git$/.test(name)) { assert.equal(bytes.toString(), 'gitdir: ../../../.git/modules/meta/3rd/' + name.split('/')[2] + '\n'); continue; }
-    safeRelative(name); expectedRuntime.add(`tool/luals/${name}`);
-    const actual = byName.get(`payload/tool/luals/${name}`); assert(actual && actual.bytes === bytes.length && actual.sha256 === sha256(bytes), `pinned runtime bytes ${name}`);
+  const binaryPath = join(packageRoot, safeRelative(binary.path));
+  assert.equal(lstatSync(binaryPath).size, binary.bytes); assert.equal(hashFile(binaryPath), binary.sha256);
+  return {root: packageRoot, commit, version, binary: binaryPath, binaryBytes: binary.bytes, binarySHA256: binary.sha256,
+    manifestSHA256: hashFile(join(packageRoot, 'release.json')), packageSHA256: all.sha256, packageBytes: all.bytes};
+}
+
+// Authenticate the external fixed Go 3.2.4 reference artifact directory:
+// artifact.json + dev-npm-stage/ + the matching private npm tarball.
+export function verifyGoReferenceArtifact(referenceRoot) {
+  referenceRoot = resolve(referenceRoot);
+  const artifactPath = join(referenceRoot, 'artifact.json');
+  const artifact = JSON.parse(readFileSync(artifactPath));
+  assert.equal(artifact.schema, GO_REFERENCE.schema, 'external Go reference artifact schema');
+  assert.equal(artifact.commit, GO_COMMIT, 'external Go reference commit');
+  assert.equal(artifact.privateDevelopmentPackage, true); assert.equal(artifact.publishEligible, false);
+  const packageRoot = join(referenceRoot, 'dev-npm-stage');
+  const packageFacts = verifyFixedGoPackage(packageRoot);
+  const tarballPath = join(referenceRoot, `lycheedev-local-${GO_VERSION}.tgz`);
+  const tarball = lstatSync(tarballPath); assert(tarball.isFile());
+  const tarballBytes = readFileSync(tarballPath), tarballSHA256 = sha256(tarballBytes);
+  assert.equal(tarballBytes.length, tarball.size);
+  assert.equal(tarballSHA256, artifact.tarballSHA256, 'external Go reference tarball changed');
+  // The explicit tarball and the explicit dev-npm-stage directory must be the
+  // same package: release.json and the native executable bytes are compared.
+  const entries = new Map();
+  for (const entry of readTgz(tarballBytes)) if (entry.type === '0') entries.set(entry.name, entry.bytes);
+  for (const [relativePath, tarName] of [['release.json', 'package/release.json'], ['native/windows-amd64/lycheedev.exe', 'package/native/windows-amd64/lycheedev.exe']]) {
+    const packaged = entries.get(tarName); assert(packaged, `external Go reference tarball missing ${tarName}`);
+    const onDisk = readFileSync(join(packageRoot, relativePath));
+    assert.equal(packaged.length, onDisk.length, `external Go reference tarball ${relativePath} bytes`);
+    assert.equal(sha256(packaged), sha256(onDisk), `external Go reference tarball ${relativePath} identity`);
   }
-  assert.deepEqual([...seen].filter(name => name.startsWith('tool/luals/')).sort(), [...expectedRuntime].sort(), 'complete exact LuaLS runtime inventory');
-  return {root: packageRoot, binary: join(packageRoot, binary.path), binarySHA256: binary.sha256, manifestSHA256: hashFile(join(packageRoot, 'release.json')), packageSHA256: all.sha256, runtime, archiveSHA256: LUALS.sha256};
+  // The artifact record binds exactly the supplied package bytes; nothing is
+  // taken from a repository-internal Go build, source checkout or toolchain.
+  assert.equal(artifact.package?.binarySHA256, packageFacts.binarySHA256, 'external Go reference binary identity');
+  assert.equal(artifact.package?.manifestSHA256, packageFacts.manifestSHA256, 'external Go reference manifest identity');
+  assert.equal(artifact.package?.packageSHA256, packageFacts.packageSHA256, 'external Go reference package identity');
+  return {...packageFacts, schema: GO_REFERENCE.schema, referenceRoot, artifactPath, artifactSHA256: hashFile(artifactPath),
+    tarballPath, tarballSHA256, privateDevelopmentPackage: true, publishEligible: false,
+    sourceCleanBeforeAndAfter: artifact.sourceCleanBeforeAndAfter === true, toolchain: artifact.toolchain,
+    optimized: artifact.build?.optimized === true, buildMetadataSHA256: artifact.build?.metadataSHA256};
 }
 
 // Same byte-level authentication as the original full-corpus runner. The

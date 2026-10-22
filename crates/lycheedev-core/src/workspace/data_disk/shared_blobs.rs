@@ -105,62 +105,84 @@ fn inspect_body(
 ) -> Result<bool> {
     let path = evidence::blob_path(home, &reference.sha256)?;
     let root = Directory::open_shared_controlled(&home.join("blobs"), &mut Controlled(checks))?;
+    let result = inspect_body_at(&root, &path, reference, checks, full_hash);
+    join(result, close_directory(root), checks)
+}
+
+fn inspect_body_at(
+    root: &Directory,
+    path: &Path,
+    reference: &BlobRef,
+    checks: &Checks<'_>,
+    full_hash: bool,
+) -> Result<bool> {
+    let shard_name = path
+        .parent()
+        .expect("blob shard")
+        .file_name()
+        .expect("shard name");
+    let Some(shard_handle) =
+        root.open_optional_file_controlled(shard_name, &mut Controlled(checks))?
+    else {
+        return Ok(false);
+    };
+    let opened = root.open_shared_child_controlled(shard_name, &mut Controlled(checks));
+    let closed = storage::close_file(shard_handle)
+        .err()
+        .map(ToolkitError::io);
+    let directory = match opened {
+        Ok(directory) => match join(Ok(()), closed, checks) {
+            Ok(()) => directory,
+            Err(error) => return join(Err(error), close_directory(directory), checks),
+        },
+        Err(error) => return join(Err(error), closed, checks),
+    };
     let result = (|| {
-        let shard_name = path
-            .parent()
-            .expect("blob shard")
-            .file_name()
-            .expect("shard name");
-        let Some(shard_handle) =
-            root.open_optional_file_controlled(shard_name, &mut Controlled(checks))?
+        let name = path.file_name().expect("blob name");
+        if full_hash {
+            return publication::verify_existing(
+                &directory,
+                name,
+                reference.bytes,
+                &reference.sha256,
+                checks,
+            );
+        }
+        let Some(file) = directory.open_optional_file_controlled(name, &mut Controlled(checks))?
         else {
             return Ok(false);
         };
-        let opened = Directory::open_shared_controlled(
-            path.parent().expect("blob shard"),
-            &mut Controlled(checks),
-        );
-        let closed = storage::close_file(shard_handle)
-            .err()
-            .map(ToolkitError::io);
-        let directory = match opened {
-            Ok(directory) => match join(Ok(()), closed, checks) {
-                Ok(()) => directory,
-                Err(error) => return join(Err(error), close_directory(directory), checks),
-            },
-            Err(error) => return join(Err(error), closed, checks),
-        };
-        let result = (|| {
-            let name = path.file_name().expect("blob name");
-            if full_hash {
-                return publication::verify_existing(
-                    &directory,
-                    name,
-                    reference.bytes,
-                    &reference.sha256,
-                    checks,
-                );
-            }
-            let Some(file) =
-                directory.open_optional_file_controlled(name, &mut Controlled(checks))?
-            else {
-                return Ok(false);
-            };
-            let result = file
-                .metadata()
-                .map_err(ToolkitError::io)
-                .and_then(|metadata| {
-                    if metadata.is_file() && metadata.len() == reference.bytes {
-                        Ok(true)
-                    } else {
-                        Err(integrity())
-                    }
-                });
-            finish_file(file, result, checks)
-        })();
-        join(result, close_directory(directory), checks)
+        let result = file
+            .metadata()
+            .map_err(ToolkitError::io)
+            .and_then(|metadata| {
+                if metadata.is_file() && metadata.len() == reference.bytes {
+                    Ok(true)
+                } else {
+                    Err(integrity())
+                }
+            });
+        finish_file(file, result, checks)
     })();
-    join(result, close_directory(root), checks)
+    join(result, close_directory(directory), checks)
+}
+
+fn inspect_inventory_body(
+    home: &Path,
+    reference: &BlobRef,
+    checks: &Checks<'_>,
+    root: &mut Option<Directory>,
+) -> Result<bool> {
+    let path = evidence::blob_path(home, &reference.sha256)?;
+    if root.is_none() {
+        *root = Some(Directory::open_shared_controlled(
+            &home.join("blobs"),
+            &mut Controlled(checks),
+        )?);
+        #[cfg(test)]
+        inventory_tests::directory_opened(root.as_ref().unwrap().path());
+    }
+    inspect_body_at(root.as_ref().unwrap(), &path, reference, checks, false)
 }
 
 pub(super) fn inventory_recovering(
@@ -171,83 +193,90 @@ pub(super) fn inventory_recovering(
     held: &[Directory],
 ) -> Result<(u64, u64)> {
     with_inventory_directory(&paths.shared_blobs(), held, checks, |directory| {
-        let mut complete_bytes = 0;
-        let mut pending_bytes = 0;
-        for (index, entry) in fs::read_dir(directory.path())?.enumerate() {
-            checks.check()?;
-            if index >= MAX_ENTRIES {
-                return Err(integrity());
-            }
-            let entry = entry?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            if let Some(digest) = name.strip_suffix(".repair.intent") {
-                let repair =
-                    read_record(directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
-                let original =
-                    read_record(directory, &format!("{digest}.intent"), INTENT_BYTES, checks)?
+        // One invocation-local shared root; open it only at the first body.
+        let mut root = None;
+        let result = (|| {
+            let mut complete_bytes = 0;
+            let mut pending_bytes = 0;
+            for (index, entry) in fs::read_dir(directory.path())?.enumerate() {
+                checks.check()?;
+                if index >= MAX_ENTRIES {
+                    return Err(integrity());
+                }
+                let entry = entry?;
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else {
+                    continue;
+                };
+                if let Some(digest) = name.strip_suffix(".repair.intent") {
+                    let repair = read_record(directory, name, INTENT_BYTES, checks)?
                         .ok_or_else(integrity)?;
-                let reference = decode(&format!("{digest}.intent"), &original)?;
-                let done = read_record(
-                    directory,
-                    &format!("{digest}.complete"),
-                    COMPLETE_BYTES,
-                    checks,
-                )?
-                .ok_or_else(integrity)?;
-                if repair != original || done != completion(&original) {
-                    return Err(integrity());
-                }
-                // The original completed charge still covers the canonical B.
-                // This one extra B covers a possible surviving shard stage.
-                pending_bytes = sum([pending_bytes, reference.bytes])?;
-                // Deliberately fails the older strict `<digest>.intent` decoder.
-                // Only this exact new suffix has the narrow repair meaning.
-                continue;
-            }
-            if let Some(digest) = name.strip_suffix(".complete") {
-                // A complete marker alone must never erase a retained intent.
-                if read_record(directory, &format!("{digest}.intent"), INTENT_BYTES, checks)?
-                    .is_none()
-                {
-                    return Err(integrity());
-                }
-            }
-            if !name.ends_with(".intent") {
-                continue;
-            }
-            let raw = read_record(directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
-            let reference = decode(name, &raw)?;
-            match read_record(
-                directory,
-                &format!("{}.complete", reference.sha256),
-                COMPLETE_BYTES,
-                checks,
-            )? {
-                Some(done) => {
-                    if done != completion(&raw) {
+                    let original =
+                        read_record(directory, &format!("{digest}.intent"), INTENT_BYTES, checks)?
+                            .ok_or_else(integrity)?;
+                    let reference = decode(&format!("{digest}.intent"), &original)?;
+                    let done = read_record(
+                        directory,
+                        &format!("{digest}.complete"),
+                        COMPLETE_BYTES,
+                        checks,
+                    )?
+                    .ok_or_else(integrity)?;
+                    if repair != original || done != completion(&original) {
                         return Err(integrity());
                     }
-                    if !inspect_body(home, &reference, checks, false)?
-                        && !recovery.is_some_and(|target| same_blob(target, &reference))
+                    // The original completed charge still covers the canonical B.
+                    // This one extra B covers a possible surviving shard stage.
+                    pending_bytes = sum([pending_bytes, reference.bytes])?;
+                    // Deliberately fails the older strict `<digest>.intent` decoder.
+                    // Only this exact new suffix has the narrow repair meaning.
+                    continue;
+                }
+                if let Some(digest) = name.strip_suffix(".complete") {
+                    // A complete marker alone must never erase a retained intent.
+                    if read_record(directory, &format!("{digest}.intent"), INTENT_BYTES, checks)?
+                        .is_none()
                     {
                         return Err(integrity());
                     }
-                    complete_bytes = sum([complete_bytes, reference.bytes])?;
                 }
-                None => {
-                    inspect_body(home, &reference, checks, false)?;
-                    pending_bytes = sum([pending_bytes, reference.bytes, reference.bytes])?;
+                if !name.ends_with(".intent") {
+                    continue;
+                }
+                let raw =
+                    read_record(directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
+                let reference = decode(name, &raw)?;
+                match read_record(
+                    directory,
+                    &format!("{}.complete", reference.sha256),
+                    COMPLETE_BYTES,
+                    checks,
+                )? {
+                    Some(done) => {
+                        if done != completion(&raw) {
+                            return Err(integrity());
+                        }
+                        if !inspect_inventory_body(home, &reference, checks, &mut root)?
+                            && !recovery.is_some_and(|target| same_blob(target, &reference))
+                        {
+                            return Err(integrity());
+                        }
+                        complete_bytes = sum([complete_bytes, reference.bytes])?;
+                    }
+                    None => {
+                        inspect_inventory_body(home, &reference, checks, &mut root)?;
+                        pending_bytes = sum([pending_bytes, reference.bytes, reference.bytes])?;
+                    }
                 }
             }
-        }
-        pending_bytes = sum([
-            pending_bytes,
-            durable::shard_reservations(directory, checks)?,
-        ])?;
-        Ok((complete_bytes, pending_bytes))
+            pending_bytes = sum([
+                pending_bytes,
+                durable::shard_reservations(directory, checks)?,
+            ])?;
+            Ok((complete_bytes, pending_bytes))
+        })();
+        let cleanup = root.map(close_directory).unwrap_or_default();
+        join(result, cleanup, checks)
     })
 }
 
@@ -349,6 +378,45 @@ pub fn publish_shared_blob_with_check(
     publish_shared_blob_inner(home, bytes, maximum, control, supplemental, None)
 }
 
+/// Publish two provenance bodies under one short quota owner. Each publication
+/// retains its own attribution, peak admission and checked-close contract.
+/// A later failure preserves the first body's actual publication receipts.
+pub fn publish_shared_blob_pair_with_check(
+    home: &Path,
+    bytes: [&[u8]; 2],
+    maximum: usize,
+    control: &OperationControl,
+    supplemental: &dyn Fn() -> Result<()>,
+) -> Result<[BlobRef; 2]> {
+    control.check()?;
+    supplemental()?;
+    super::super::open_controlled_with_check(home, control, supplemental)?;
+    let first = reference_for_bytes(bytes[0], maximum, control, supplemental)?;
+    let mut owner = DerivedReservation::acquire_inner(
+        None,
+        home,
+        super::super::DEFAULT_DATA_CACHE_MAX_BYTES,
+        AdditionalPeak::default(),
+        control,
+        Some(supplemental),
+        true,
+    )?;
+    let result = (|| {
+        let first =
+            publish_prehashed_with_owner(&mut owner, home, bytes[0], maximum, &first, None)?;
+        // The second peak must include the first body's completed bytes and
+        // attribution. No quota or directory owner is released between them.
+        owner.report.existing = owner.verify_usage()?;
+        control.check()?;
+        supplemental()?;
+        let second = reference_for_bytes(bytes[1], maximum, control, supplemental)?;
+        let second =
+            publish_prehashed_with_owner(&mut owner, home, bytes[1], maximum, &second, None)?;
+        Ok([first, second])
+    })();
+    owner.finish(result)
+}
+
 /// Rebuild only the body named by an already authenticated decoded alias. The
 /// original source must have passed its framing, CKey, exact length and EOF.
 /// Core separately checks final SHA/length and the immutable attribution pair.
@@ -373,6 +441,31 @@ fn publish_shared_blob_inner(
     control.check()?;
     supplemental()?;
     super::super::open_controlled_with_check(home, control, supplemental)?;
+    let reference = reference_for_bytes(bytes, maximum, control, supplemental)?;
+    if recovery.is_some_and(|expected| !same_blob(expected, &reference)) {
+        return Err(integrity());
+    }
+    let mut owner = DerivedReservation::acquire_inner_recovering(
+        None,
+        home,
+        super::super::DEFAULT_DATA_CACHE_MAX_BYTES,
+        AdditionalPeak::default(),
+        control,
+        Some(supplemental),
+        true,
+        recovery,
+    )?;
+    let result =
+        publish_prehashed_with_owner(&mut owner, home, bytes, maximum, &reference, recovery);
+    owner.finish(result)
+}
+
+fn reference_for_bytes(
+    bytes: &[u8],
+    maximum: usize,
+    control: &OperationControl,
+    supplemental: &dyn Fn() -> Result<()>,
+) -> Result<BlobRef> {
     if bytes.len() > maximum || bytes.len() as u64 > evidence::MAX_CAPTURE_BYTES {
         return Err(ToolkitError::new(
             "vault.blob_limit",
@@ -393,22 +486,7 @@ fn publish_shared_blob_inner(
         bytes: bytes.len() as u64,
     };
     intent(&reference)?;
-    if recovery.is_some_and(|expected| !same_blob(expected, &reference)) {
-        return Err(integrity());
-    }
-    let mut owner = DerivedReservation::acquire_inner_recovering(
-        None,
-        home,
-        super::super::DEFAULT_DATA_CACHE_MAX_BYTES,
-        AdditionalPeak::default(),
-        control,
-        Some(supplemental),
-        true,
-        recovery,
-    )?;
-    let result =
-        publish_prehashed_with_owner(&mut owner, home, bytes, maximum, &reference, recovery);
-    owner.finish(result)
+    Ok(reference)
 }
 
 /// Internal CAP publication borrows its one existing Data quota owner. The
@@ -571,6 +649,7 @@ fn publish_new_attribution(
         let attempt = evidence::publish_blob_attempt_predeclared_with_check(
             home,
             bytes,
+            reference,
             maximum,
             owner.control.control,
             || owner.control.extra(),
@@ -665,6 +744,7 @@ fn publish_recovered_memory(
     let attempt = evidence::publish_blob_attempt_predeclared_with_check(
         home,
         bytes,
+        reference,
         maximum,
         owner.control.control,
         || owner.control.extra(),

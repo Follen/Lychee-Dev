@@ -123,11 +123,10 @@ fn retain(home: &Path, digest: &str, control: &OperationControl) -> Result<bool>
                 break;
             }
         }
-        if raw.len() > 65536 || !crate::raw_json::is_valid(&raw) {
+        if raw.len() > 65536 {
             return Err(wire::error(format!("corrupt retain marker for {digest}")));
         }
-        let normalized = crate::evidence::normalize_go_json_strings(&raw, control)?;
-        let value: wire::Retain = serde_json::from_slice(&normalized).map_err(wire::error)?;
+        let value: wire::Retain = serde_json::from_slice(&raw).map_err(wire::error)?;
         if value.sha256 != digest {
             return Err(wire::error("retain marker identity"));
         }

@@ -117,7 +117,7 @@ fn scope(limits: Cost) -> (OperationControl, Budget) {
     (control, budget)
 }
 // with_budget_check preserves its first HTTP cause and appends the original
-// invocation/Budget checks with the existing typed finish_historical envelope.
+// invocation/Budget checks with the existing typed finish_owned envelope.
 // Follow only that exact envelope: an arbitrary nested JSON `code` cannot
 // satisfy a stop assertion, and every appended cause must deserialize intact.
 fn primary_with_later_causes(failure: &ToolkitError) -> (ToolkitError, Vec<ToolkitError>) {
@@ -199,7 +199,7 @@ fn final_page_headers_body_and_work_use_public_adapter() {
 }
 
 #[test]
-fn every_go_get_redirect_status_follows_relative_location_and_previous_referer() {
+fn every_get_redirect_status_follows_relative_location_and_previous_referer() {
     for status in [301, 302, 303, 307, 308] {
         let server = Server::new(3, move |index, stream| match index {
             0 => send(
@@ -703,7 +703,7 @@ fn cgi_proxy_is_checked_before_loopback_and_no_proxy_in_isolated_process() {
 }
 
 #[test]
-fn go_reference_resolution_and_referer_keep_original_url_components() {
+fn reference_resolution_and_referer_keep_original_url_components() {
     let base = RedirectUrl::absolute("https://user:pass@EXAMPLE.test:443/a/b?old=1#old").unwrap();
     for (location, expected) in [
         ("../c", "https://user:pass@EXAMPLE.test:443/c"),
@@ -733,7 +733,7 @@ fn go_reference_resolution_and_referer_keep_original_url_components() {
 }
 
 #[test]
-fn raw_path_is_reescaped_as_a_whole_only_when_go_requires_it() {
+fn raw_path_is_reescaped_as_a_whole_only_when_wire_requires_it() {
     for (input, output) in [
         ("/%61%2fb", "/%61%2fb"),
         ("/%61%2fb x", "/a/b%20x"),
@@ -812,7 +812,7 @@ fn expired_original_request_deadline_cannot_charge_a_send_attempt() {
 }
 
 #[test]
-fn redirect_hops_are_not_go_successful_page_requests() {
+fn redirect_hops_are_not_successful_page_requests() {
     let server = Server::new(3, |index, stream| {
         if index < 2 {
             send(
@@ -862,7 +862,7 @@ fn unsupported_redirect_scheme_is_rejected_after_qualified_drain() {
 }
 
 #[test]
-fn invalid_go_authority_is_rejected_before_any_redirect_drain() {
+fn invalid_authority_is_rejected_before_any_redirect_drain() {
     for location in [
         "http://%65xample.test/",
         "http://example%2Etest/",
@@ -901,7 +901,7 @@ fn invalid_go_authority_is_rejected_before_any_redirect_drain() {
 }
 
 #[test]
-fn go_parse_valid_transport_invalid_urls_drain_before_failure() {
+fn parse_valid_transport_invalid_urls_drain_before_failure() {
     for location in [
         "http://127.0.0.1:65536/",
         "http://127.0.0.1:99999999999999999999999/",
@@ -939,7 +939,7 @@ fn go_parse_valid_transport_invalid_urls_drain_before_failure() {
 }
 
 #[test]
-fn go_numeric_authorities_reach_transport_without_whatwg_rewriting() {
+fn numeric_authorities_reach_transport_without_whatwg_rewriting() {
     // Do not perform DNS for these names in a test: OS getaddrinfo owns their
     // interpretation. The raw connector's local forward-proxy regression
     // independently inspects the actual request and preserves these names.
@@ -961,7 +961,7 @@ fn go_numeric_authorities_reach_transport_without_whatwg_rewriting() {
 }
 
 #[test]
-fn go_authority_parse_preserves_port_stage_and_valid_userinfo() {
+fn authority_parse_preserves_port_stage_and_valid_userinfo() {
     for authority in [
         "user:pass@example.test:65536",
         "u%20ser:p%3Ass@example.test:443",
@@ -1296,7 +1296,7 @@ fn in_flight_stop_preserves_secondary_diagnostics_without_replay() {
 }
 
 #[test]
-fn deadline_during_ordinary_or_tenth_drain_has_go_public_priority() {
+fn deadline_during_ordinary_or_tenth_drain_has_public_priority() {
     for redirects in [1, 10] {
         let (closed_tx, closed_rx) = mpsc::channel();
         let server = Server::new(redirects + 1, move |index, stream| {

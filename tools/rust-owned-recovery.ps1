@@ -27,16 +27,26 @@ public static class ToolkitOwnedRecovery {
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetFileInformationByHandle(IntPtr file,int kind,IntPtr data,uint size);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
  static Exception Error(string step){return new Win32Exception(Marshal.GetLastWin32Error(),"owned_recovery."+step);}
+ static void ObserveExited(uint pid,long created,string role){
+  IntPtr process=OpenProcess(0x00101000,false,pid);
+  if(process==IntPtr.Zero){if(Marshal.GetLastWin32Error()!=87)throw Error("open_"+role);}
+  else try{
+   FT creation,exit,kernel,user;if(!GetProcessTimes(process,out creation,out exit,out kernel,out user))throw Error(role+"_identity");
+   long actual=((long)creation.high<<32)|creation.low;
+   // A reused PID proves only that this original process exited. Never kill it.
+   if(actual==created&&WaitForSingleObject(process,0)!=0)throw new Exception("owned_recovery."+role+"_still_running");
+  }finally{if(!CloseHandle(process))throw Error("close_"+role);}
+ }
+ public static string ObserveTerminal(uint wrapperPid,long wrapperCreated,int session,uint rootPid,long rootCreated){
+  if(Process.GetCurrentProcess().SessionId!=session)throw new Exception("owned_recovery.different_windows_session");
+  ObserveExited(wrapperPid,wrapperCreated,"wrapper");ObserveExited(rootPid,rootCreated,"root");
+  // The locked original terminal receipt already proves Job ACTIVE_PROCESS_ZERO,
+  // root/tree reap and all closes. This route never opens or terminates a Job.
+  return "original_terminal_reaped";
+ }
  public static string Observe(uint pid,long created,int session,string jobName,bool jobCreated){
   if(Process.GetCurrentProcess().SessionId!=session)throw new Exception("owned_recovery.different_windows_session");
-  IntPtr wrapper=OpenProcess(0x00101000,false,pid);
-  if(wrapper==IntPtr.Zero){if(Marshal.GetLastWin32Error()!=87)throw Error("open_wrapper");}
-  else try{
-   FT creation,exit,kernel,user;if(!GetProcessTimes(wrapper,out creation,out exit,out kernel,out user))throw Error("wrapper_identity");
-   long actual=((long)creation.high<<32)|creation.low;
-   // A reused PID is observed only. It never authorizes termination of that process.
-   if(actual==created&&WaitForSingleObject(wrapper,0)!=0)throw new Exception("owned_recovery.wrapper_still_running");
-  }finally{if(!CloseHandle(wrapper))throw Error("close_wrapper");}
+  ObserveExited(pid,created,"wrapper");
   // The runner publishes the job identity before CreateProcessW. With no job
   // identity and an exited wrapper, no owned root could have been created.
   if(!jobCreated)return "no_root_created_before_job_identity";
@@ -69,6 +79,9 @@ if($planBytes.Length -gt 1048576 -or $PlanSHA256 -cnotmatch '^[0-9a-f]{64}$' -or
 $p=[Text.Encoding]::UTF8.GetString($planBytes)|ConvertFrom-Json
 $uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 if($p.schema -cne 'lycheedev.owned-recovery-plan.v1' -or $p.ownerId -cnotmatch $uuid -or $p.runId -cnotmatch $uuid -or $p.channel -cne 'ordinary' -or $p.jobName -cne ('Local\LycheeDev.Owned.'+$p.runId)){throw 'owned_recovery.plan_identity'}
+if($null -ne $p.recoveryMode -and $p.recoveryMode -cne 'terminal-reaped'){throw 'owned_recovery.mode'}
+$terminalReaped=$p.recoveryMode -ceq 'terminal-reaped'
+if($terminalReaped -and (-not $p.jobCreated -or -not $p.rootRecorded -or -not $p.originalTerminalReceiptPresent -or $p.rootPid -le 0 -or $p.rootCreationFileTime -cnotmatch '^[1-9][0-9]*$')){throw 'owned_recovery.terminal_identity'}
 $root=[IO.Path]::GetFullPath($p.root).TrimEnd('\');Assert-NoReparse $root
 $directory=Join-Path $root ('.tmp\rust-disk\recovery\'+$p.ownerId+'\'+$p.runId+'\same-boot')
 Assert-Same ([IO.Path]::GetDirectoryName($Plan)) $directory
@@ -77,6 +90,7 @@ $archive=Join-Path $directory 'ordinary.lease.original';$fencePath=Join-Path $di
 $base=Join-Path $root ('.tmp\rust-disk\evidence\'+$p.ownerId+'\process-'+$p.runId)
 $expected=@($leasePath,(Join-Path $root ('.tmp\rust-disk\evidence\'+$p.ownerId+'\receipt.json')),($base+'.request.json'),($base+'.identity.json'))
 if($p.jobCreated){$expected+=@($base+'.job.json')};if($p.rootRecorded){$expected+=@($base+'.root.json')};if($p.originalTerminalReceiptPresent){$expected+=@($base+'.receipt.json')}
+if($terminalReaped){$expected+=@(Join-Path $root 'tools\rust-build-auxiliary.json')}
 $rows=@($p.files);if($rows.Count -ne $expected.Count){throw 'owned_recovery.snapshot_shape'}
 for($i=0;$i -lt $rows.Count;$i++){Assert-Same $rows[$i].path $expected[$i];Assert-NoReparse $expected[$i]}
 Assert-NoReparse $archive;Assert-NoReparse $fencePath
@@ -98,7 +112,7 @@ try{
  else{
   if([IO.File]::Exists($fencePath)){$fence=Read-Fence}
   else{
-   $observation=[ToolkitOwnedRecovery]::Observe([uint32]$p.wrapperPid,[int64]$p.wrapperCreationFileTime,[int]$p.wrapperSessionId,[string]$p.jobName,[bool]$p.jobCreated)
+   if($terminalReaped){$observation=[ToolkitOwnedRecovery]::ObserveTerminal([uint32]$p.wrapperPid,[int64]$p.wrapperCreationFileTime,[int]$p.wrapperSessionId,[uint32]$p.rootPid,[int64]$p.rootCreationFileTime)}else{$observation=[ToolkitOwnedRecovery]::Observe([uint32]$p.wrapperPid,[int64]$p.wrapperCreationFileTime,[int]$p.wrapperSessionId,[string]$p.jobName,[bool]$p.jobCreated)}
    # A sidecar published after Node's capture requires a fresh capture. Never
    # infer that the pre-CreateProcess window still holds from stale absence.
    if((-not $p.jobCreated -and [IO.File]::Exists($base+'.job.json')) -or (-not $p.rootRecorded -and [IO.File]::Exists($base+'.root.json')) -or (-not $p.originalTerminalReceiptPresent -and [IO.File]::Exists($base+'.receipt.json'))){throw 'owned_recovery.original_evidence_changed'}

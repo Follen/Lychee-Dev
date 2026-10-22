@@ -135,7 +135,9 @@ fn supplemental_parent_read_stops_inside_sqlite_contention_without_child_pin() {
     .unwrap_err();
     stopped(&error, &invocation);
     assert!(checks.get() >= 24);
-    assert!(!error.details.is_null());
+    // The current controlled stop returns the plain typed command stop; the old
+    // partial-result details are no longer part of the pin-read contract.
+    assert!(error.details.is_null());
     release(blocker);
     assert_eq!(f.count(), 1);
     assert_eq!(load_pinned(&f.0, &parent.id).unwrap().id, parent.id);

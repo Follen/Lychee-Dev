@@ -131,7 +131,7 @@ fn terminal_composition_keeps_primary_close_and_distinct_stop() {
         .with_details(json!({"blob":"authenticated"}));
     let close = ToolkitError::new("source.close", "close unconfirmed", 5);
     let error =
-        finish_control::<()>(finish_historical(Err(primary), Err(close)), c.check()).unwrap_err();
+        finish_control::<()>(finish_owned(Err(primary), Err(close)), c.check()).unwrap_err();
     assert_eq!(error.code, "source.primary");
     let raw = serde_json::to_string(&error).unwrap();
     assert!(raw.contains("authenticated"));

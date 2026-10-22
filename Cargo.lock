@@ -782,7 +782,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot",
- "sqlparser 0.62.0",
+ "sqlparser",
  "tempfile",
  "tokio",
  "url",
@@ -856,7 +856,7 @@ dependencies = [
  "log",
  "object_store",
  "recursive",
- "sqlparser 0.62.0",
+ "sqlparser",
  "tokio",
  "uuid",
  "web-time",
@@ -1021,7 +1021,7 @@ dependencies = [
  "itertools 0.14.0",
  "recursive",
  "serde_json",
- "sqlparser 0.62.0",
+ "sqlparser",
 ]
 
 [[package]]
@@ -1348,7 +1348,7 @@ dependencies = [
  "log",
  "recursive",
  "regex",
- "sqlparser 0.62.0",
+ "sqlparser",
 ]
 
 [[package]]
@@ -2516,6 +2516,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
 ]
 
 [[package]]
@@ -2566,7 +2567,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sqlparser 0.63.0",
  "tokio",
  "tokio-native-tls",
  "tokio-util",
@@ -2602,9 +2602,7 @@ dependencies = [
 name = "lycheedev-live"
 version = "3.5.0"
 dependencies = [
- "base64 0.22.1",
  "chrono",
- "flate2",
  "hex",
  "lycheedev-core",
  "lycheedev-delivery",
@@ -2634,8 +2632,6 @@ dependencies = [
  "tokio-util",
  "tree-sitter",
  "tree-sitter-lua",
- "url",
- "zip",
 ]
 
 [[package]]
@@ -3735,15 +3731,6 @@ dependencies = [
  "log",
  "recursive",
  "sqlparser_derive",
-]
-
-[[package]]
-name = "sqlparser"
-version = "0.63.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3679862809bd1f92e563cf6fd820e28f39135303668001c10331d5027183e8b4"
-dependencies = [
- "log",
 ]
 
 [[package]]

@@ -1,12 +1,10 @@
-use lycheedev_core::{control::OperationControl, storage};
+use lycheedev_core::{
+    control::{OperationControl, TrackedCancellation},
+    storage,
+};
 use lycheedev_delivery::release;
 use serde_json::json;
-use std::{
-    fs,
-    path::PathBuf,
-    sync::{Arc, atomic::AtomicBool},
-    time::Instant,
-};
+use std::{fs, path::PathBuf, time::Duration, time::Instant};
 struct Temp(PathBuf);
 impl Drop for Temp {
     fn drop(&mut self) {
@@ -53,7 +51,9 @@ fn manifest_and_inventory_admission_are_bounded_before_reads_and_share_caller_co
             .code,
         "delivery.invalid_payload"
     );
-    let cancelled = OperationControl::new(Instant::now(), Arc::new(AtomicBool::new(true)));
+    let token = TrackedCancellation::new();
+    token.cancel();
+    let cancelled = OperationControl::tracked(Instant::now() + Duration::from_secs(30), token);
     assert_eq!(
         release::inspect_with_control(&temp.0, "3.1.2", &cancelled)
             .unwrap_err()
@@ -64,7 +64,7 @@ fn manifest_and_inventory_admission_are_bounded_before_reads_and_share_caller_co
         release::inspect_with_control(
             &temp.0,
             "3.1.2",
-            &OperationControl::new(Instant::now(), Arc::new(AtomicBool::new(false)))
+            &OperationControl::uncancelable(Instant::now())
         )
         .unwrap_err()
         .exit_code,

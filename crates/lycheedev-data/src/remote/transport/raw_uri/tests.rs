@@ -489,7 +489,7 @@ fn raw_header_wait_respects_independent_deadline_without_reset_or_second_attempt
 }
 
 #[test]
-fn go_authority_identities_keep_numeric_names_ports_case_and_ipv6_zone() {
+fn authority_identities_keep_numeric_names_ports_case_and_ipv6_zone() {
     for host in [
         "127.1",
         "0177.0.0.1",
@@ -502,10 +502,8 @@ fn go_authority_identities_keep_numeric_names_ports_case_and_ipv6_zone() {
         assert_eq!(target.wire.to_string(), locator);
         assert_eq!(target.dial_host, host);
         assert_eq!(target.tls_host, host);
-        assert_eq!(
-            target.dial.as_ref().unwrap().authority().unwrap().as_str(),
-            format!("{host}:80")
-        );
+        assert_eq!(target.dial_bytes, host.as_bytes());
+        assert_eq!(target.dial_port, "80");
     }
     let target = Target::parse("https://LOCALHOST:00443/a").unwrap();
     assert_eq!(target.wire.authority().unwrap().as_str(), "LOCALHOST:00443");
@@ -516,14 +514,12 @@ fn go_authority_identities_keep_numeric_names_ports_case_and_ipv6_zone() {
     assert_eq!(target.dial_host, "fe80::1%Ethernet");
     assert_eq!(target.tls_host, "fe80::1%Ethernet");
     assert_eq!(target.route, "https://[fe80::1%Ethernet]:443/a");
-    assert_eq!(
-        target.dial.unwrap().authority().unwrap().as_str(),
-        "[fe80::1%Ethernet]:443"
-    );
+    assert_eq!(target.dial_bytes, b"fe80::1%Ethernet");
+    assert_eq!(target.dial_port, "443");
 }
 
 #[test]
-fn go_wire_raw_punycode_and_lookup_dial_are_distinct() {
+fn wire_raw_punycode_and_lookup_dial_are_distinct() {
     // Go idna.ToASCII (wire) preserves raw casing/mapping; Lookup (dial)
     // performs UTS46 mapping. Codec vectors are independently known Punycode.
     let target = Target::parse("http://BÜCHER.example/a").unwrap();
@@ -543,7 +539,9 @@ fn go_wire_raw_punycode_and_lookup_dial_are_distinct() {
     // original name, never the different wire Punycode endpoint.
     let target = Target::parse("http://-bücher.example/a").unwrap();
     assert_eq!(target.dial_host, "-bücher.example");
-    assert!(target.dial.is_none());
+    assert_eq!(target.dial_bytes, "-bücher.example".as_bytes());
+    assert_eq!(target.dial_port, "80");
+    assert_eq!(target.route, "http://-bücher.example/a");
     assert!(target.wire.authority().unwrap().as_str().is_ascii());
 }
 
@@ -805,7 +803,7 @@ fn proxy_own_literal_port_and_raw_basic_use_the_original_endpoint() {
 }
 
 #[test]
-fn socks_offers_go_methods_preserves_raw_credentials_and_unicode_fallback_target() {
+fn socks_offers_wire_methods_preserves_raw_credentials_and_unicode_fallback_target() {
     for selected in [0u8, 2] {
         let (address, peer) = server(move |mut stream| {
             let mut greeting = [0; 4];
@@ -1029,7 +1027,7 @@ fn unicode_connect_fallback_preserves_target_host_headers_and_cancelled_owner() 
 }
 
 #[test]
-fn forward_proxy_get_preserves_go_percent_host_and_exact_absolute_target() {
+fn forward_proxy_get_preserves_percent_host_and_exact_absolute_target() {
     let (address, peer) = server(|mut stream| {
         let request = header(&mut stream);
         stream
@@ -1146,7 +1144,7 @@ fn direct_invalid_host_is_empty_but_valid_percent_host_is_preserved() {
 }
 
 #[test]
-fn non_utf8_socks_target_stays_raw_until_go_wire_validation() {
+fn non_utf8_socks_target_stays_raw_until_wire_validation() {
     let (address, peer) = server(|mut stream| {
         let mut greeting = [0; 3];
         stream.read_exact(&mut greeting).unwrap();
@@ -1226,7 +1224,7 @@ fn parse_valid_hostless_requests_fail_inside_the_original_roundtrip_attempt() {
 }
 
 #[test]
-fn non_ascii_zone_keeps_go_wire_punycode_and_endpoint_separate() {
+fn non_ascii_zone_keeps_wire_punycode_and_endpoint_separate() {
     // Fixed Go PunycodeHostPort processes the whole authority without a port,
     // but the split host with a port; removeZone follows that transformation.
     for (locator, host, forward) in [
@@ -1448,7 +1446,7 @@ fn client_hello_sni(stream: &mut impl std::io::Read) -> Option<Vec<u8>> {
 }
 
 #[test]
-fn dot_tls_uses_go_name_without_changing_wire_identity_and_cancels() {
+fn dot_tls_uses_server_name_without_changing_wire_identity_and_cancels() {
     for name in [
         "example.test",
         "example.test.",
@@ -1497,7 +1495,7 @@ fn dot_tls_uses_go_name_without_changing_wire_identity_and_cancels() {
 }
 
 #[test]
-fn ip_tls_retains_go_zone_verification_input_and_omits_sni() {
+fn ip_tls_retains_zone_verification_input_and_omits_sni() {
     for tunneled in [false, true] {
         let (ready, received) = mpsc::channel();
         let (address, peer) = server(move |mut stream| {

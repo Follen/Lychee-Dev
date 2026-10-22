@@ -177,7 +177,7 @@ pub struct RootEvidence {
     pub gaps: RootGaps,
     pub read_failures: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_read_failure: Option<crate::mailbox::ReadFailure>,
+    pub first_read_failure: Option<crate::mailbox::lookup::ReadFailure>,
     pub anchor_rva: Option<u64>,
     pub root_rva: Option<u64>,
     pub anchor_sha256: Option<String>,
@@ -271,9 +271,9 @@ trait Source {
         into: &mut [u8],
         kind: RuntimeReadKind,
         budget: &mut RuntimeBudget,
-    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+    ) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
         self.read(rva, into, kind, budget)
-            .map_err(crate::mailbox::ReadError::unknown)
+            .map_err(crate::mailbox::lookup::ReadError::unknown)
     }
     fn readable_spans(
         &self,
@@ -326,7 +326,7 @@ impl Source for RuntimeModule {
         into: &mut [u8],
         kind: RuntimeReadKind,
         budget: &mut RuntimeBudget,
-    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+    ) -> std::result::Result<(), crate::mailbox::lookup::ReadError> {
         self.read_exact_observed(rva, into, kind, budget)
             .map_err(Into::into)
     }
@@ -550,7 +550,7 @@ impl<S: Source> Access<'_, S> {
         self.evidence.module_read_requested_bytes += into.len() as u64;
         if let Err(failure) = self.source.read_diagnostic(rva, into, kind, self.budget) {
             if self.evidence.first_read_failure.is_none() {
-                self.evidence.first_read_failure = Some(crate::mailbox::ReadFailure {
+                self.evidence.first_read_failure = Some(crate::mailbox::lookup::ReadFailure {
                     path: match kind {
                         RuntimeReadKind::Code => "root.recipe",
                         RuntimeReadKind::WritableData => "root.state",

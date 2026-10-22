@@ -9,7 +9,12 @@ import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {emmyRecipeFiles,emmyRecipePath,emmySupportFiles,inspectEmmy,verifyEmmyWiring} from './rust-emmy-identity.mjs';
 
 export function hashFile(path,max=512<<20){const file=lstatSync(path);if(!file.isFile()||file.isSymbolicLink()||file.size>max)throw new Error('build.file_budget');const fd=openSync(path,'r'),hash=createHash('sha256'),chunk=Buffer.alloc(65536);let bytes=0;try{for(;;){const read=readSync(fd,chunk,0,chunk.length,null);if(!read)break;bytes+=read;if(bytes>max)throw new Error('build.file_budget');hash.update(chunk.subarray(0,read));}if(bytes!==file.size)throw new Error('build.file_changed');return hash.digest('hex');}finally{closeSync(fd);}}
-export function sourceDigest(root){const hash=createHash('sha256');let entries=0;function visit(path,name){if(++entries>100000)throw new Error('build.source_budget');const info=lstatSync(path);if(info.isSymbolicLink())throw new Error('build.source_reparse');if(info.isDirectory()){for(const child of readdirSync(path).sort())visit(join(path,child),`${name}/${child}`);}else if(info.isFile()){hash.update(JSON.stringify([name,info.size,hashFile(path,64<<20)]));}else throw new Error('build.source_non_regular');}for(const name of ['Cargo.toml','Cargo.lock','crates','release','.cargo'])visit(join(root,name),name);for(const name of ['vendor','LICENSE','THIRD_PARTY_NOTICES.md','tests/rust-source-data/generate-unicode-simple.mjs'])if(existsSync(join(root,name)))visit(join(root,name),name);if(existsSync(join(root,emmyRecipePath))){for(const name of emmyRecipeFiles)visit(join(root,emmyRecipePath,name),`${emmyRecipePath}/${name}`);if(existsSync(join(root,emmyRecipePath,'patches')))visit(join(root,emmyRecipePath,'patches'),`${emmyRecipePath}/patches`);for(const name of emmySupportFiles.filter(path=>path.startsWith('tools/')))visit(join(root,name),name);}return hash.digest('hex');}
+export function sourceDigest(root){const hash=createHash('sha256');let entries=0;
+  // Runtime lock/state directories are created inside crates by the tests
+  // themselves. They are not source inputs and must not change the digest while
+  // a test batch is running (that would look like a concurrent source edit).
+  const generated=new Set(['.lycheedev-locks','.lycheedev','target','target-symbols']);
+  function visit(path,name){if(++entries>100000)throw new Error('build.source_budget');const info=lstatSync(path);if(info.isSymbolicLink())throw new Error('build.source_reparse');if(info.isDirectory()){for(const child of readdirSync(path).sort()){if(generated.has(child))continue;visit(join(path,child),`${name}/${child}`);}}else if(info.isFile()){hash.update(JSON.stringify([name,info.size,hashFile(path,64<<20)]));}else throw new Error('build.source_non_regular');}for(const name of ['Cargo.toml','Cargo.lock','crates','release','.cargo'])visit(join(root,name),name);for(const name of ['vendor','LICENSE','THIRD_PARTY_NOTICES.md','tools/generate-unicode-simple.mjs'])if(existsSync(join(root,name)))visit(join(root,name),name);if(existsSync(join(root,emmyRecipePath))){for(const name of emmyRecipeFiles)visit(join(root,emmyRecipePath,name),`${emmyRecipePath}/${name}`);if(existsSync(join(root,emmyRecipePath,'patches')))visit(join(root,emmyRecipePath,'patches'),`${emmyRecipePath}/patches`);for(const name of emmySupportFiles.filter(path=>path.startsWith('tools/')))visit(join(root,name),name);}return hash.digest('hex');}
 
 // Existing Cargo isolation template, also used by owned acceptance controllers.
 // Preserve the installed offline compiler caches before replacing user paths.
@@ -34,7 +39,7 @@ function manifestDigest(root){
 export function verifyArtifact(root,path){
   path=contained(root,resolve(path));const stat=lstatSync(path);if(!stat.isFile()||stat.size>65536)throw new Error('build.invalid_artifact_record');
   const record=JSON.parse(readFileSync(path));if(!['lycheedev.rust-build-artifact.v1','lycheedev.optimized-symbol-artifact.v1'].includes(record.schema))throw new Error('build.unknown_artifact');
-  const binary=contained(root,record.sourceBinary);if(hashFile(binary,128<<20)!==record.binarySHA256)throw new Error('build.artifact_integrity');
+  const binary=contained(root,record.sourceBinary);if(hashFile(binary,512<<20)!==record.binarySHA256)throw new Error('build.artifact_integrity');
   if(record.pdb){const pdb=contained(root,record.pdb);if(hashFile(pdb)!==record.pdbSHA256||record.sameInvocation!==true)throw new Error('build.symbol_integrity');}
   return record;
 }
@@ -42,7 +47,8 @@ export function verifyArtifact(root,path){
 // The same lease and terminal rules cover build, test, check and clippy. The
 // injected executor is used only by fault tests; production invokes Cargo.
 export function runCargo(root,args,options={}){
-  return runCargoWithDeadline(root,args,options,600000);
+  const compiling=['build','test','check','clippy'].includes(args[0]);
+  return runCargoWithDeadline(root,args,options,compiling?3600000:900000);
 }
 function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},isolateUser=false,freshOffline=false,execute=ownedSpawnSync,onSuccess,limits}={},timeoutMs){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
@@ -68,7 +74,7 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
   const adapterManifest=join(sourceRoot,'crates/lycheedev-emmy-adapter/Cargo.toml');
   let emmy;
   const hasSource=existsSync(sourceManifest),hasAdapter=existsSync(adapterManifest);
-  if(hasSource)verifyEmmyWiring(readFileSync(sourceManifest,'utf8'),{optional:true});
+  if(hasSource)verifyEmmyWiring(readFileSync(sourceManifest,'utf8'),{optional:false});
   if(hasAdapter)verifyEmmyWiring(readFileSync(adapterManifest,'utf8'),{optional:false});
   if(hasSource||hasAdapter){
     emmy=inspectEmmy(sourceRoot);
@@ -132,8 +138,12 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,is
     const output=profile==='dev'?'debug':profile;
     artifactDirectory=contained(root,resolve(artifactDirectory));mkdirSync(artifactDirectory);
     const source=join(invocation.target,output,'lycheedev.exe'),binary=join(artifactDirectory,'lycheedev.exe');
-    const expected=hashFile(source,128<<20);copyFileSync(source,binary);
-    if(hashFile(binary,128<<20)!==expected||hashFile(source,128<<20)!==expected)throw new Error('build.artifact_changed');
+    // 128 MiB no longer covers the current debug binary (134,360,576 B); the
+    // cap only rejects runaway outputs, so keep a fixed 512 MiB bound for both
+    // local debug artifacts and the (smaller) shipped release binary.
+    const binaryBudget=512<<20;
+    const expected=hashFile(source,binaryBudget);copyFileSync(source,binary);
+    if(hashFile(binary,binaryBudget)!==expected||hashFile(source,binaryBudget)!==expected)throw new Error('build.artifact_changed');
     const record={schema:'lycheedev.rust-build-artifact.v1',profile,sourceRoot,sourceBinary:binary,binarySHA256:expected,bytes:lstatSync(binary).size,inputHashes:invocation.inputHashes,environmentSHA256:invocation.environmentSHA256,channel:invocation.target,sameInvocation:true,command:['cargo',...args],buildEvidence:invocation.buildEvidence};
     if(profile==='symbols'){
       const original=join(invocation.target,output,'lycheedev.pdb');if(!existsSync(original))throw new Error('build.matching_symbols_missing');

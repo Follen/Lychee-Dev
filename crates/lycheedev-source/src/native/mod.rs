@@ -13,9 +13,30 @@ type Result<T> = std::result::Result<T, String>;
 pub const PROFILE: &str = "fixture-wow-shallow-copy-v1";
 pub const ENGINE_COMMIT: &str = "08b0873962e83bb8307e9a81052e3f41578fbc78";
 pub const ENGINE_ARCHIVE_SHA256: &str = "ae529a06b551dbb301744bea2b58ba94cb3e30340f63a8c83f9335be9086fdb7";
-pub const RULES_VERSION: &str = "wow-binding-value-graph-v7-conditional-footprints";
 pub const SOURCE_MAP_PROFILE: &str = "identity-original-utf8-no-transform-v1";
 pub const DEPENDENCY_LOCK: &[u8] = include_bytes!("../../../../Cargo.lock");
+
+/// Test-only typed stop: a live deadline with a cancelled signal yields the
+/// cancellation cause, a past deadline with a live signal yields the deadline
+/// cause. No raw token is exported beyond the operation lineage.
+#[cfg(test)]
+pub(crate) fn stopped_control(
+    expired: bool,
+    live_deadline: std::time::Instant,
+) -> lycheedev_core::control::OperationControl {
+    let signal = lycheedev_core::control::TrackedCancellation::new();
+    if !expired {
+        signal.cancel();
+    }
+    lycheedev_core::control::OperationControl::tracked(
+        if expired {
+            std::time::Instant::now() - std::time::Duration::from_secs(1)
+        } else {
+            live_deadline
+        },
+        signal,
+    )
+}
 pub fn hash(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
 struct JsonDigestWriter(Sha256);
 impl Write for JsonDigestWriter {

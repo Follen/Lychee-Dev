@@ -2,9 +2,9 @@
 // corpus manifest and actual public CLI/native-session observations.
 import assert from 'node:assert/strict';
 import {assertCorpus, corpusDigest, sha256} from '../rust-source-full-corpus/assertions.mjs';
-import {assertBoundedCoverage, assertNativeCaller, assertNativeEvidence} from '../rust-skill-usage/assertions.mjs';
+import {assertBoundedCoverage, assertNativeCaller, assertNativeEvidence} from './native-contract.mjs';
 
-export const GROUPS = Object.freeze({full: 1200000, quota: 600000, idle: 150000, lifetime: 720000});
+export const GROUPS = Object.freeze({full: 900000, quota: 600000, idle: 150000, lifetime: 720000});
 export function groupBudget(group) { assert(Object.hasOwn(GROUPS, group), 'unknown acceptance group'); return GROUPS[group]; }
 export function assertFullNative(result, oracle, manifest, callsite, {mode = 'one_shot', commit = oracle.commit} = {}) {
   assertBoundedCoverage(result);

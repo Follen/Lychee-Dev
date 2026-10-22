@@ -1,7 +1,8 @@
-use lycheedev_core::{Invocation, selection};
+use lycheedev_source::request::{AddonValidationRequest, SelectedSource, SourceContext, SourceRequest};
+use lycheedev_core::selection;
 use lycheedev_source::{SourceTools, environment, luac};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 #[test]
 #[ignore = "explicit fixed Retail ClientPin and bundled Lua51 compiler"]
@@ -211,24 +212,22 @@ fn duration_nominal_methods_follow_actual_values_and_mutations() {
     let mut reports = Vec::new();
     for (name, text, focus, expected, available) in cases {
         fs::write(addon.join("main.lua"), text).unwrap();
-        let inv = Invocation {
-            command: "source validate".into(),
-            positional: None,
+        let ctx = SourceContext {
             home: home.clone(),
             cwd: addon.clone(),
-            flags: BTreeMap::from([
-                ("--path".into(), addon.to_string_lossy().into_owned()),
-                ("--toc".into(), "Main.toc".into()),
-                ("--snapshot".into(), pin_id.clone()),
-                ("--semantic".into(), "true".into()),
-            ]),
             control: Default::default(),
         };
-        let report = match lycheedev_source::dispatch_with_tools(
-            &inv,
+        let request = SourceRequest::Validate(AddonValidationRequest {
+            selection: SelectedSource::new(pin.clone()).unwrap(),
+            root: addon.clone(),
+            toc: "Main.toc".into(),
+            semantic: true,
+            environment: None,
+            locator: format!("{}/Main.toc", addon.display()),
+        });
+        let report = match lycheedev_source::dispatch_with_tools(&ctx, &request,
             SourceTools {
                 luac: Some(&compiler),
-                luals: None,
             },
         ) {
             Ok(result) => result.data,

@@ -4,10 +4,7 @@ use std::{
     cell::RefCell,
     collections::BTreeMap,
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 struct Fixture {
     home: PathBuf,
@@ -191,23 +188,18 @@ fn admission_precedes_io_and_preserves_language_region_build_reference_order() {
     );
 }
 #[test]
-fn two_minute_child_preserves_ordered_and_legacy_cancellation_without_promotion() {
+fn two_minute_child_preserves_original_cancellation_without_extending_deadline() {
     let original = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
     let child = scoped_control(&original, None).unwrap();
     assert_eq!(child.deadline(), original.deadline());
     original.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(child.check().unwrap_err().code, "command.cancelled");
-    let raw = Arc::new(AtomicBool::new(false));
-    let legacy = OperationControl::new(Instant::now() + Duration::from_secs(300), raw.clone());
+    let long = OperationControl::uncancelable(Instant::now() + Duration::from_secs(300));
     let before = Instant::now();
-    let child = scoped_control(&legacy, None).unwrap();
+    let child = scoped_control(&long, None).unwrap();
     assert!(child.deadline() <= Instant::now() + Duration::from_secs(120));
     assert!(child.deadline() >= before + Duration::from_secs(120));
-    assert_eq!(
-        child.stop_cause().unwrap_err().code,
-        "control.cancellation_order_unavailable"
-    );
-    raw.store(true, Ordering::Release);
+    long.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(child.check().unwrap_err().code, "command.cancelled");
 }
 #[test]
@@ -381,7 +373,7 @@ fn parent_data_inherits_exact_build_and_definition_and_product_mismatch_stops_ea
 }
 
 #[test]
-fn online_refresh_does_not_consume_old_blob_refs_or_marshal_old_time() {
+fn legacy_cached_observation_is_rejected_as_identity_and_never_consumed() {
     let fixture = Fixture::new();
     fixture
         .store()
@@ -394,24 +386,15 @@ fn online_refresh_does_not_consume_old_blob_refs_or_marshal_old_time() {
             None,
         )
         .unwrap();
-    let fetch = inputs("retail", "12.1.5.70000");
-    let result = resolve_with(
-        &fixture.home,
-        &request(),
-        &fixture.control,
-        None,
-        &fetch,
-        &Defs::default(),
-    )
-    .unwrap();
-    assert_eq!(fetch.calls.borrow().len(), 4);
-    assert!(result.observed_at.ends_with('Z'));
-    let (observation, _) = fixture.store().observation("wow", "cn").unwrap().unwrap();
-    assert!(observation.versions.bytes > 0);
+    // The current typed cache cannot consume a legacy Go-time observation with
+    // invalid blob references; reading it must fail at the identity boundary
+    // instead of trusting or re-marshaling those values.
+    let error = fixture.store().observation("wow", "cn").unwrap_err();
+    assert_eq!(error.code, "records.remote_identity");
 }
 
 #[test]
-fn offline_unmarshalable_time_fails_at_capture_after_pin_publication() {
+fn offline_legacy_cached_time_is_rejected_before_data_fetch() {
     let fixture = Fixture::new();
     let store = fixture.store();
     let fetch = inputs("retail", "12.1.5.70000");
@@ -439,31 +422,22 @@ fn offline_unmarshalable_time_fails_at_capture_after_pin_publication() {
         .unwrap();
     let none = Fetch::default();
     let defs = Defs::default();
-    assert!(
-        resolve_with(
-            &fixture.home,
-            &Request {
-                offline: true,
-                ..request()
-            },
-            &fixture.control,
-            None,
-            &none,
-            &defs
-        )
-        .is_err()
-    );
+    let error = resolve_with(
+        &fixture.home,
+        &Request {
+            offline: true,
+            ..request()
+        },
+        &fixture.control,
+        None,
+        &none,
+        &defs,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "records.remote_identity");
     assert!(none.calls.borrow().is_empty());
-    assert_eq!(defs.calls.borrow().len(), 1);
-    let metadata =
-        lycheedev_core::metadata::Metadata::open_controlled(&fixture.home, false, &fixture.control)
-            .unwrap();
-    let pins = metadata.list::<PinnedSet>("pin/", 10).unwrap();
-    let captures = metadata.list::<serde_json::Value>("capture/", 10).unwrap();
-    metadata.close().unwrap();
-    assert_eq!(pins.len(), 1);
-    assert_eq!(pins[0].data.as_ref().unwrap().full_build, "12.1.5.70000");
-    assert!(captures.is_empty());
+    // The legacy observation is rejected before any definition snapshot fetch.
+    assert_eq!(defs.calls.borrow().len(), 0);
 }
 
 #[test]

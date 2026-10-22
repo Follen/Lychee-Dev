@@ -3,7 +3,7 @@
 #[path = "data_cache.rs"]
 mod data_cache;
 use lycheedev_core::{
-    Invocation, Outcome, evidence,
+    Outcome, evidence,
     selection::{self, DataPin, SelectionSpec},
     storage, workspace,
 };
@@ -217,32 +217,17 @@ impl Fixture {
         }
         pin.id
     }
-    pub fn invocation(
-        &self,
-        home: &Path,
-        pin: &str,
-        command: &str,
-        positional: Option<&str>,
-        extra: &[(&str, &str)],
-    ) -> Invocation {
-        let mut flags = BTreeMap::from([
-            ("--snapshot".into(), pin.into()),
-            (
-                "--installation".into(),
-                self.installation.to_string_lossy().into_owned(),
-            ),
-            ("--offline".into(), "true".into()),
-        ]);
-        for (name, value) in extra {
-            flags.insert((*name).into(), (*value).into());
-        }
-        Invocation {
-            command: command.into(),
-            positional: positional.map(str::to_owned),
-            flags,
+    pub fn context(&self, home: &Path, pin: &str) -> lycheedev_data::request::DataContext {
+        lycheedev_data::request::DataContext {
             home: home.into(),
             cwd: home.into(),
             control: Default::default(),
+            source: lycheedev_data::request::SourceOptions {
+                snapshot: Some(pin.into()),
+                installation: Some(self.installation.clone()),
+                offline: true,
+                ..Default::default()
+            },
         }
     }
     pub fn assert_outcome(&self, name: &str, actual: &Outcome, fields: &[&str]) {

@@ -181,10 +181,7 @@ mod tests {
     }
     #[test]
     fn deadline_and_output_overflow_reap_owned_child_and_blocked_stdin() {
-        let control = OperationControl::new(
-            Instant::now() + Duration::from_millis(100),
-            Default::default(),
-        );
+        let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(100));
         let fault = run(
             command("block"),
             Some(vec![b'x'; 4 << 20]),

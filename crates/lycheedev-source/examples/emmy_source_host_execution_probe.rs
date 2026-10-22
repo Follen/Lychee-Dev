@@ -13,78 +13,78 @@ use std::{
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, String>;
-const DATA: &str = include_str!("../../../tests/rust-source-engine/host-facts-materials.json");
+const DATA: &str = include_str!("../../../tests/fixtures/source-native/host-facts-materials.json");
 const FILES: &[(&str, &str, &str, bool)] = &[
     (
         "direct",
         "host-direct.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-direct.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-direct.lua"),
         false,
     ),
     (
         "shadow",
         "host-shadow.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-shadow.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-shadow.lua"),
         false,
     ),
     (
         "colon",
         "host-colon.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-colon.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-colon.lua"),
         false,
     ),
     (
         "slots",
         "host-slots.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-slots.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-slots.lua"),
         false,
     ),
     (
         "transfers",
         "host-transfers.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-transfers.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-transfers.lua"),
         false,
     ),
     (
         "phi",
         "host-phi.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-phi.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-phi.lua"),
         false,
     ),
     (
         "open-arity",
         "host-open-arity.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-open-arity.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-open-arity.lua"),
         true,
     ),
     (
         "unknown-effects",
         "host-unknown.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-unknown.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-unknown.lua"),
         false,
     ),
     (
         "capture-mutation",
         "host-capture-mutation.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-capture-mutation.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-capture-mutation.lua"),
         false,
     ),
     (
         "cardinality",
         "host-cardinality.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-cardinality.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-cardinality.lua"),
         false,
     ),
     (
         "return-join",
         "host-return-join.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-return-join.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-return-join.lua"),
         false,
     ),
     (
         "unknown-tail",
         "host-unknown-tail.lua",
-        include_str!("../../../tests/rust-source-engine/wow/native/host-unknown-tail.lua"),
+        include_str!("../../../tests/fixtures/source-native/wow/native/host-unknown-tail.lua"),
         false,
     ),
 ];
@@ -211,18 +211,14 @@ impl Output {
     }
 }
 fn run(out: &mut Output) -> Result<()> {
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}))?;
     for (name, file, source, open) in FILES {
         out.emit(json!({"event":"input_identity","case":name,"file":file,"bytes":source.len(),"sha256":hash(source.as_bytes())}))?;
-        let c = OperationControl::new(
-            Instant::now() + Duration::from_secs(30),
-            Arc::new(AtomicBool::new(false)),
-        );
+        let c = OperationControl::uncancelable(Instant::now() + Duration::from_secs(30));
         let prepared = prepare_case(file, source, *open, &c)?;
         let graph = prepared
             .build(
                 name,
-                EvaluatorProfile::Native,
                 Some("host-common-facts-v1"),
                 &c,
             )
@@ -597,7 +593,7 @@ fn run(out: &mut Output) -> Result<()> {
         out.emit(json!({"event":"native_host_type","case":name,"site":selected_host.site,"fact":selected_host.id,"result":native_type}))?;
         let freeze=prepared.freeze(&graph,NativeViewSelection::Load(0),&c).map(|_|json!({"accepted":true})).unwrap_or_else(|error|json!({"accepted":false,"code":error.code,"exit":error.exit_code,"error":error.to_string()}));
         out.emit(json!({"event":"scenario","case":name,"file":file,"graph":graph,"environmentContext":environment_context,"inputIdentity":prepared.inputs().identity(),"freeze":freeze,"views":"explicit_ordered_load_and_source_templates; no_explicit_entry","fullSourceAcceptance":false,"sourceExecuted":false}))?;
-        c.cancel_handle().store(true, Ordering::Release);
+        c.tracked_cancel_handle().unwrap().cancel();
         out.check(
             &format!("{name}:same_control_cancel"),
             json!(7),

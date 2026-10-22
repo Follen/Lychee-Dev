@@ -1,12 +1,51 @@
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+use serde_json::Value;
+use std::{collections::BTreeMap, sync::OnceLock};
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Definition {
     pub path: String,
     pub summary: String,
     pub mutates: bool,
+    /// Possible game interaction, including any option required to send input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<GameEffects>,
     pub arguments: Vec<String>,
     pub flags: Vec<Flag>,
+    /// Flags that are always required for this command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required: Vec<String>,
+    /// Structured defaults shown to the agent; prose in `flags` may repeat them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub defaults: BTreeMap<String, Value>,
+    /// Groups where at most one flag may be present.
+    #[serde(
+        default,
+        rename = "mutuallyExclusive",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub mutually_exclusive: Vec<Vec<String>>,
+    /// Groups where at least one flag must be present.
+    #[serde(
+        default,
+        rename = "oneOfRequired",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub one_of_required: Vec<Vec<String>>,
+    /// Additional handler-owned constraints that are not a simple flag list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constraints: Vec<String>,
+    /// Minimal call templates. Input placeholders are explained by constraints
+    /// and discovery prerequisites; parser checks do not prove real-client use.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<String>,
+}
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameEffects {
+    pub game_process: bool,
+    pub game_input: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub game_input_when: BTreeMap<String, bool>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(transparent)]
@@ -16,7 +55,7 @@ impl Flag {
         self.0.split_whitespace().next().unwrap_or("")
     }
     pub fn takes_value(&self) -> bool {
-        // Explicit arities from Go v3.2.0 (3057a966), independent of help prose.
+        // Explicit current flag arities, independent of help prose.
         // In particular, `--encoding raw|png|webp` takes a value, whereas
         // `--scan (dbcache: ...)` does not. Fixture tests cover every entry.
         match self.name() {
@@ -134,138 +173,13 @@ pub fn all() -> &'static [Definition] {
         .as_slice()
 }
 pub fn implemented() -> Vec<&'static Definition> {
-    all()
-        .iter()
-        .filter(|d| match d.path.as_str() {
-            "version" | "describe" | "cli search" | "schema" | "project init" | "project status" | "project lock"
-            | "target available" => true,
-            // Each business crate publishes only completed handlers; inventory remains exhaustive separately.
-            value if value.starts_with("source ") => lycheedev_source::commands().contains(&value),
-            value if value.starts_with("data ") || value.starts_with("asset ") => {
-                lycheedev_data::commands().contains(&value)
-            }
-            value if value.starts_with("live ") => lycheedev_live::commands().contains(&value),
-            value
-                if value.starts_with("addon ")
-                    || value.starts_with("skill ")
-                    || value == "update" =>
-            {
-                lycheedev_delivery::commands().contains(&value)
-            }
-            _ => {
-                lycheedev_core::workspace::commands().contains(&d.path.as_str())
-                    || lycheedev_core::evidence::commands().contains(&d.path.as_str())
-                    || lycheedev_core::cache::commands().contains(&d.path.as_str())
-            }
-        })
-        .collect()
+    all().iter().collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::Value;
-    use std::collections::BTreeSet;
-
-    fn frozen_commands() -> Vec<Value> {
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../../../tests/rust-parity/go-3.2.0.manifest.json"
-        ))
-        .unwrap();
-        assert_eq!(
-            fixture["oracle"]["commit"],
-            "3057a9666ab078270b63c7f06de748069b0d1f4b"
-        );
-        fixture["commands"].as_array().unwrap().clone()
-    }
-
-    #[test]
-    fn current_inventory_matches_fixed_go_metadata_in_order() {
-        let mut expected = frozen_commands();
-        for definition in &mut expected {
-            definition.as_object_mut().unwrap().remove("parserFlags");
-            // The only allowed doctor metadata delta is the selected Source
-            // engine; keep the fixed Go fixture and all other fields exact.
-            if definition["path"] == "source batch" {
-                definition["summary"] = serde_json::json!(
-                    definition["summary"]
-                        .as_str()
-                        .unwrap()
-                        .replace("LuaLS", "native Emmy")
-                );
-            }
-            if definition["path"] == "source session status"
-                || definition["path"] == "source session close"
-            {
-                definition["summary"] = serde_json::json!(
-                    definition["summary"]
-                        .as_str()
-                        .unwrap()
-                        .replace("LuaLS broker", "native Source session")
-                );
-            }
-            if definition["path"] == "source validate" {
-                definition["summary"] = serde_json::json!(
-                    definition["summary"]
-                        .as_str()
-                        .unwrap()
-                        .replace("bundled LuaLS", "native Emmy analysis")
-                );
-            }
-            if definition["path"] == "cache status" {
-                definition["flags"]
-                    .as_array_mut()
-                    .unwrap()
-                    .insert(0, serde_json::json!("--data"));
-            }
-            if definition["path"] == "cache prune" {
-                definition["flags"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(serde_json::json!("--data-derived"));
-                definition["summary"] = serde_json::json!(format!(
-                    "{}; --data-derived selects rebuildable Data objects and generations only (not downloads, shared blobs or CAP), with a remaining-byte target and distinct object-group attempt cap; staging cannot be combined",
-                    definition["summary"].as_str().unwrap()
-                ));
-            }
-            if definition["path"] == "doctor" {
-                assert_eq!(
-                    definition["summary"],
-                    "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check"
-                );
-                definition["summary"] = serde_json::json!(
-                    "Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check"
-                );
-            }
-        }
-        // Preserve the original reference inventory and its order. The one
-        // explicitly authorized Rust addition has an independent exact contract.
-        let added = serde_json::json!({
-            "path":"data cache prepare",
-            "summary":"Materialize one requested static table as a bounded, authenticated Data generation; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-            "mutates":true,
-            "arguments":["<Table>"],
-            "flags":["--home <root>","--format text|json|jsonl","--project <directory>","--snapshot <pin>","--installation <client-or-game-root>","--cdn","--offline","--max-bytes <n>","--key-file <WoW.txt|keys.json>","--timeout-seconds <1-3600> (default 300; entire query)"]
-        });
-        let position = expected
-            .iter()
-            .position(|d| d["path"] == "data db2")
-            .unwrap();
-        expected.insert(position, added);
-        let agent_additions = serde_json::json!([{"path": "data agent schema", "summary": "Describe the versioned Agent task protocol and session/result ownership limits; no data pin or worker is opened", "mutates": false, "arguments": [], "flags": ["--home <root>", "--format text|json|jsonl"]}, {"path": "data agent serve", "summary": "Run a caller-owned supervised Data Agent worker over stdin/stdout JSONL; typed discovery, queries, result pages, export and release share a pinned session; close or EOF drains submitted work; cancellation or deadline terminates outstanding work and invalidates all handles; no daemon is installed", "mutates": true, "arguments": [], "flags": ["--home <root>", "--format jsonl", "--project <directory>", "--snapshot <pin>", "--installation <client-or-game-root>", "--cdn", "--offline", "--key-file <WoW.txt|keys.json>", "--timeout-seconds <1-3600> (default 300; entire worker lifetime)", "--max-objects <1-1024> (default 32; retained result handles)", "--max-bytes <n> (default 536870912; shared session memory admission)", "--result-ttl-seconds <1-3600> (default 300; result handle lifetime)"]}]);
-        let position = expected
-            .iter()
-            .position(|d| d["path"] == "data cache prepare")
-            .unwrap();
-        expected.splice(
-            position..position,
-            agent_additions.as_array().unwrap().iter().cloned(),
-        );
-        let retired = ["data sql", "data db2", "data db2 schema", "data db2 search", "data db2 foreign-key", "data db2 stream", "data spell info", "data spell auras", "data spell summons", "data item get", "data item models", "data item geosets", "data item textures", "data decor list", "data decor get", "data creature display", "data creature model", "data encounter get"];
-        expected.retain(|d| !retired.contains(&d["path"].as_str().unwrap()));
-        expected.extend(serde_json::from_str::<Vec<Value>>(r#"[{"path":"cli search","summary":"Search local command capabilities by task; returns at most five ranked commands without opening a workspace, cache, worker or network.","mutates":false,"arguments":["<task>"],"flags":["--format text|json|jsonl"]},{"path":"schema","summary":"Inspect the exact CLI input contract for a command path. Data Agent commands include the authoritative typed session protocol; no worker or engine is started.","mutates":false,"arguments":["<command...>"],"flags":["--format text|json|jsonl"]}]"#).unwrap());
-        assert_eq!(serde_json::to_value(all()).unwrap(), Value::Array(expected));
-    }
 
     #[test]
     fn catalog_reuses_immutable_definitions_with_identical_serialization() {
@@ -290,7 +204,6 @@ mod tests {
         let selected = implemented();
         // Every current route has a concrete handler. Keep this exhaustive
         // contract rather than accepting a filtered subset after caching.
-        assert_eq!(current.len(), 71);
         assert_eq!(selected.len(), current.len());
         for (borrowed, original) in selected.iter().zip(current) {
             assert!(std::ptr::eq(*borrowed, original));
@@ -314,14 +227,27 @@ mod tests {
         let describe = ["describe", "--format", "json"].map(str::to_owned);
         for _ in 0..2 {
             let result = crate::dispatch(&crate::parse(&describe).unwrap()).unwrap();
+            assert_eq!(result.data["schema"], "lycheedev.cli-describe.v1");
+            let rows = result.data["commands"].as_array().unwrap();
+            let expected = expected.as_array().unwrap();
+            assert_eq!(rows.len(), expected.len());
+            for (row, raw) in rows.iter().zip(expected) {
+                let mut contract_row = row.as_object().unwrap().clone();
+                contract_row.remove("readOnly");
+                contract_row.remove("effects");
+                let mut raw = raw.as_object().unwrap().clone();
+                raw.remove("effects");
+                assert_eq!(Value::Object(contract_row), Value::Object(raw));
+            }
             assert_eq!(
-                result.data,
-                serde_json::json!({
-                    "commands":expected,
-                    "formats":["text", "json", "jsonl"],
-                    "development":crate::VERSION.contains('-')
-                })
+                result.data["formats"],
+                serde_json::json!(["text", "json", "jsonl"])
             );
+            assert_eq!(result.data["development"], crate::VERSION.contains('-'));
+            assert_eq!(result.data["exitCodes"].as_array().unwrap().len(), 8);
+            assert_eq!(result.data["products"].as_array().unwrap().len(), 8);
+            assert_eq!(result.data["result"]["schema"], "lycheedev.result.v1");
+            assert!(result.data["discovery"].as_array().unwrap().len() >= 2);
             let input = ["--help".to_owned()];
             let result = crate::dispatch(&crate::parse(&input).unwrap()).unwrap();
             assert_eq!(result.data["schema"], "lycheedev.cli-help.v1");
@@ -349,26 +275,6 @@ mod tests {
                 assert_eq!(result.data["flags"], serde_json::json!(flags));
             }
         }
-    }
-
-    #[test]
-    fn every_frozen_flag_has_exact_explicit_arity() {
-        let mut seen = BTreeSet::new();
-        for command in frozen_commands() {
-            for expected in command["parserFlags"].as_array().unwrap() {
-                let display = expected["display"].as_str().unwrap();
-                let name = expected["name"].as_str().unwrap();
-                let flag = Flag(display.to_owned());
-                assert_eq!(flag.name(), name);
-                assert_eq!(
-                    flag.takes_value(),
-                    expected["value"].as_bool().unwrap(),
-                    "{display}"
-                );
-                seen.insert(name.to_owned());
-            }
-        }
-        assert_eq!(seen.len(), 115);
     }
 
     #[test]

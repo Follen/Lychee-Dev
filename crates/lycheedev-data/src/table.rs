@@ -17,9 +17,6 @@ use std::{
     },
 };
 mod row_projection;
-pub(crate) use row_projection::ProjectedRows;
-#[cfg(test)]
-pub(crate) use row_projection::projected_row_bindings;
 use row_projection::{RowCollector, RowSelection};
 mod availability;
 pub(crate) use availability::{Availability, inspect_available_budgeted};
@@ -940,7 +937,7 @@ fn open_source<'a>(
     table.index()?;
     Ok(table)
 }
-// Go 3.2.3 charges ID/copy maps, physical locations, sorted/partition IDs and
+// Retained compact-index accounting charges ID/copy maps, physical locations, sorted/partition IDs and
 // chain scratch up front. Rust's independent safety estimate covers compact
 // HashMap/HashSet capacity rounding and aggregate growth peaks, Vec storage,
 // and fixed small-map control allocations. Sparse offset/extent storage has
@@ -1758,19 +1755,6 @@ impl<'a> Table<'a> {
         let mut allocation = RowAllocation::new(self.source.budget.as_deref(), false);
         self.row_projected_inner(id, text_bytes, selected, &mut allocation)
     }
-    /// Decode once and keep the temporary row lease live until the cursor has
-    /// finished its consumer. Retained copies need their own admission.
-    #[cfg(test)]
-    pub(crate) fn leased_row_projected(
-        &self,
-        id: u32,
-        text_bytes: usize,
-        selected: Option<&BTreeSet<String>>,
-    ) -> Result<LeasedRow<'_, BTreeMap<String, Value>>> {
-        let mut allocation = RowAllocation::new(self.source.budget.as_deref(), true);
-        let value = self.row_projected_inner(id, text_bytes, selected, &mut allocation)?;
-        Ok(LeasedRow { value, allocation })
-    }
     fn row_projected_inner(
         &self,
         id: u32,
@@ -1779,11 +1763,6 @@ impl<'a> Table<'a> {
         allocation: &mut RowAllocation<'_>,
     ) -> Result<BTreeMap<String, Value>> {
         self.decode_row(id, text_bytes, RowSelection::Names(selected), allocation)
-    }
-    /// The selection Vec has already been admitted by its owning provider.
-    /// Moving it into this immutable bound plan adds no heap allocation.
-    pub(crate) fn projected_rows(&self, selected: Vec<usize>) -> Result<ProjectedRows<'_, 'a>> {
-        ProjectedRows::new(self, selected)
     }
     pub(crate) fn leased_row_values(
         &self,

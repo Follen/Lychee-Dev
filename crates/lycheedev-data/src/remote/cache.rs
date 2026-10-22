@@ -14,7 +14,7 @@ use crate::{
 use lycheedev_core::{
     Result, ToolkitError,
     control::OperationControl,
-    evidence::{self, BlobRef},
+    evidence::{self},
     metadata::DataCacheMetadata,
     storage::{self, ExclusiveLock},
 };
@@ -22,12 +22,12 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{
     path::Path,
-    sync::{Arc, atomic::AtomicBool},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 pub(crate) mod wire;
-pub(crate) use wire::{CachedBlob, Observation, ObservationTime};
+pub(crate) use wire::{BlobRef, Observation, ObservationTime};
 
 pub(crate) trait MetadataFetcher {
     fn fetch(
@@ -85,13 +85,7 @@ pub(crate) fn child_control(
     deadline: Instant,
 ) -> Result<OperationControl> {
     control.check()?;
-    match control.ordered_child(deadline) {
-        Ok(child) => Ok(child),
-        Err(error) if pure_expected(&error, "control.cancellation_order_unavailable") => {
-            Ok(control.child(deadline, Arc::new(AtomicBool::new(false))))
-        }
-        Err(error) => Err(error),
-    }
+    control.ordered_child(deadline)
 }
 // Same consuming-owner pattern as Core storage::finish_file: no close retry,
 // full typed causes, and stop checked after cleanup has actually completed.
@@ -184,37 +178,13 @@ impl Store<'_> {
                 Err(error) => return Err(error),
             };
             self.check()?;
-            // The normalization view never replaces original metadata bytes.
             let scratch = raw.bytes.len().checked_mul(3).ok_or_else(identity)?;
             let _reserved = self
                 .budget
                 .map(|b| b.reserve_retained(scratch))
                 .transpose()?;
-            // One bounded (<=1 MiB) Core Go-grammar admission pass over the
-            // original bytes, including ignored fields and max depth 10000.
-            // This CPU-only scanner has no internal callback; check both scopes
-            // before/after rather than claiming mid-scan independent cancellation.
+            let value = serde_json::from_slice(&raw.bytes).map_err(|_| identity())?;
             self.check()?;
-            let valid = lycheedev_core::raw_json::is_valid(&raw.bytes);
-            self.check()?;
-            if !valid {
-                return Err(identity());
-            }
-            let normalized =
-                evidence::normalize_go_json_strings(&raw.bytes, control).map_err(|error| {
-                    if matches!(
-                        error.code.as_str(),
-                        "command.cancelled" | "command.deadline"
-                    ) {
-                        error
-                    } else {
-                        identity()
-                    }
-                })?;
-            // Core's <=1 MiB string normalizer has only invocation callbacks.
-            // Recheck the independent scope before starting deserialization.
-            self.check()?;
-            let value = serde_json::from_slice(&normalized).map_err(|_| identity())?;
             Ok(Some((value, raw.generation)))
         })
     }
@@ -355,12 +325,9 @@ impl Store<'_> {
         let cache_key = format!("remote-config/{key}");
         let guard = self.lease(&cache_key)?;
         let result = (|| {
-            if let Some((reference, _)) = self.read::<CachedBlob>(&cache_key)? {
+            if let Some((reference, _)) = self.read::<BlobRef>(&cache_key)? {
                 let raw = self.read_blob(&reference, 4 << 20)?;
-                return Ok((
-                    configuration(raw, key, self.budget)?,
-                    reference.into_core()?,
-                ));
+                return Ok((configuration(raw, key, self.budget)?, reference));
             }
             if is_offline {
                 return Err(offline());
@@ -496,7 +463,7 @@ impl Route {
             offline: is_offline,
             refreshed: false,
         };
-        let raw = if let Some((reference, _)) = store.read::<CachedBlob>(&route.key)? {
+        let raw = if let Some((reference, _)) = store.read::<BlobRef>(&route.key)? {
             store.read_blob(&reference, catalog::MAX_BYTES)?
         } else if let Some((observation, _)) =
             store.read::<Observation>(&format!("remote-catalog/{product}/{region}"))?

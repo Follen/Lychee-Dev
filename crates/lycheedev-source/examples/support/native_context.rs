@@ -46,7 +46,7 @@ impl NativeInput {
         control: &lycheedev_core::control::OperationControl,
     ) -> Result<Self> {
         Ok(Self {
-            prepared: prepare(fixture_inputs(names, true, control)?, control)
+            prepared: prepare(fixture_inputs(names, control)?, control)
                 .map_err(|e| e.to_string())?,
         })
     }
@@ -62,25 +62,20 @@ impl NativeInput {
             .freeze(graph, selection, self.operation_control())
             .map_err(|e| e.to_string())
     }
-    fn graph(&self, name: &str, phase: &str, ordered: &[&str], patch: &str) -> Result<Graph> {
-        self.graph_for_scope(name, phase, ordered, patch, None)
+    fn graph(&self, name: &str, phase: &str, ordered: &[&str]) -> Result<Graph> {
+        self.graph_for_scope(name, phase, ordered, None)
     }
     fn graph_for_scope(
         &self,
         name: &str,
         phase: &str,
         ordered: &[&str],
-        patch: &str,
         scope: Option<&str>,
     ) -> Result<Graph> {
-        if Some(patch) != option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256") {
-            return Err("fixture patch differs from compiled engine".into());
-        }
         self.build_execution(
             name,
             phase,
             ordered,
-            EvaluatorProfile::Native,
             scope,
             self.operation_control(),
         )
@@ -198,12 +193,7 @@ fn decision_json(input: &NativeInput, decision: &BindingDecision<BoundValue>) ->
     }
 }
 fn native_golden(out: &mut NativeOutput) -> Result<()> {
-    let patch = option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")
-        .ok_or("missing compile-time context patch identity")?;
-    if patch.len() != 64 || !patch.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("invalid compile-time patch identity".into());
-    }
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":patch}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256}))?;
     for name in NATIVE_FILES {
         out.emit(json!({"event":"input_identity","name":name,"file":name,"bytes":source(name).len(),"sha256":hash(source(name).as_bytes())}))?;
     }
@@ -222,9 +212,9 @@ fn native_golden(out: &mut NativeOutput) -> Result<()> {
         "generic-calls.lua",
     ];
     let graphs = [
-        input.graph("after-a", "after_load", &order_a, patch)?,
-        input.graph("unknown-a", "unknown", &order_a, patch)?,
-        input.graph("after-b", "after_load", &order_b, patch)?,
+        input.graph("after-a", "after_load", &order_a)?,
+        input.graph("unknown-a", "unknown", &order_a)?,
+        input.graph("after-b", "after_load", &order_b)?,
     ];
     let providers: Vec<_> = graphs
         .iter()
@@ -568,12 +558,7 @@ fn native_golden(out: &mut NativeOutput) -> Result<()> {
     Ok(())
 }
 fn native_coverage_red(out: &mut NativeOutput) -> Result<()> {
-    let patch = option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256")
-        .ok_or("missing compile-time context patch identity")?;
-    if patch.len() != 64 || !patch.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("invalid compile-time patch identity".into());
-    }
-    out.emit(json!({"event":"build_identity","compiledPatchSHA256":patch,"scope":"coverage-red"}))?;
+    out.emit(json!({"event":"build_identity","engineCommit":ENGINE_COMMIT,"engineArchiveSHA256":ENGINE_ARCHIVE_SHA256,"scope":"coverage-red"}))?;
     for name in COVERAGE_FILES {
         out.emit(json!({"event":"input_identity","name":name,"file":name,"bytes":source(name).len(),"sha256":hash(source(name).as_bytes())}))?;
     }
@@ -583,7 +568,6 @@ fn native_coverage_red(out: &mut NativeOutput) -> Result<()> {
         "fixed-return-unknown-argument",
         "after_load",
         COVERAGE_FILES,
-        patch,
         Some("fixed-return-unknown-argument-v1"),
     )?;
     let provider = input.freeze(&graph)?;

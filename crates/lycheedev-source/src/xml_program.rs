@@ -1,7 +1,6 @@
 //! Ordered XML program extraction shared by production Source and the v8 probe.
 //! Schema ancestry is extraction provenance, never Lua nominal inheritance.
 use std::{collections::{BTreeMap,BTreeSet},time::Instant};
-#[cfg(feature="emmy-prototype")]
 use emmylua_parser::{LuaAstNode,LuaAstToken,LuaCallExpr,LuaLanguageLevel,LuaNameToken,LuaParseErrorKind,LuaParser,ParserConfig};
 use quick_xml::{Reader,events::{BytesStart,Event}};
 use serde::Serialize;
@@ -14,8 +13,8 @@ fn err<T>(message:&str)->Result<T>{Err(message.to_owned())}
 pub const COMMIT:&str="31c7f7b9cc79e56c986b365c06a6afbcf3c9177b";
 pub const ENGINE:&str="08b0873962e83bb8307e9a81052e3f41578fbc78";
 pub const XML_RULE_REVISION:&str="xml-map-v8";
-pub const XSD:&[u8]=include_bytes!("../../../tests/rust-source-engine/xml-retail-UI.xsd");
-pub const COMPANION:&str=include_str!("../../../tests/rust-source-engine/xml-companion-manifest.json");
+pub const XSD:&[u8]=include_bytes!("../../../tests/fixtures/source-native/xml-retail-UI.xsd");
+pub const COMPANION:&str=include_str!("../../../tests/fixtures/source-native/xml-companion-manifest.json");
 pub const MAX_FILE:usize=8<<20;
 pub const MAX_DECODED:usize=16<<20;
 pub const MAX_SEGMENTS:usize=200_000;
@@ -470,7 +469,6 @@ fn finish_body(program: &mut XmlProgram, body: Body, end: usize, close: Span, li
     Ok(())
 }
 
-#[cfg(feature="emmy-prototype")]
 fn syntax_facts(source: &MappedText, remaining_facts:usize) -> Result<Value> {
     let tree = LuaParser::parse(&source.text, ParserConfig::with_level(LuaLanguageLevel::Lua51));
     let errors = tree.get_errors().iter().filter(|error| error.kind == LuaParseErrorKind::SyntaxError)
@@ -504,8 +502,6 @@ fn syntax_facts(source: &MappedText, remaining_facts:usize) -> Result<Value> {
         "bindingFactsExported":false,"syntaxAuthority":"luac-5.1.5 required; Emmy raw Lua51 label gap remains"}))
 }
 
-#[cfg(not(feature="emmy-prototype"))]
-fn syntax_facts(_: &MappedText, _:usize)->Result<Value>{Ok(json!({"state":"not_checked","names":[],"calls":[],"bindingFactsExported":false}))}
 
 /// One transactional parse: malformed XML returns Err and no partial program.
 pub fn extract(path: &str, raw: &[u8]) -> Result<XmlProgram> {
@@ -714,4 +710,3 @@ fn extract_profile(path: &str, raw: &[u8], catalog: &Catalog, deadline: Option<I
             "occurrences":MAX_OCCURRENCES,"scripts":MAX_SCRIPTS,"depth":MAX_DEPTH,"cooperativeParseWallSeconds":30}});
     Ok(program)
 }
-

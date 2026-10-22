@@ -42,6 +42,37 @@ fn hash(value: &OwnedValue) -> u64 {
     value.hash(&mut hasher);
     hasher.finish()
 }
+
+#[test]
+fn nominal_type_identity_survives_containers_and_rejects_erased_or_foreign_types() {
+    struct Context;
+    impl super::super::BindingContext for Context {
+        fn identity(&self) -> &str {
+            "nominal"
+        }
+        fn resolve(&self, _: BindingSite) -> super::super::BindingDecision<super::super::BoundValue> {
+            super::super::BindingDecision::NotManaged
+        }
+    }
+    let session =
+        super::super::OwnedBindingSession::new_checked(Arc::new(Context), || Ok::<_, ()>(()))
+            .unwrap();
+    let foreign =
+        super::super::OwnedBindingSession::new_checked(Arc::new(Context), || Ok::<_, ()>(()))
+            .unwrap();
+    let a = OwnedValue::nominal(&session, "catalog-a", "Duration");
+    let same = OwnedValue::nominal(&session, "catalog-a", "Duration");
+    assert_eq!(a, same);
+    assert_eq!(hash(&a), hash(&same));
+    assert_ne!(a, OwnedValue::plain(a.structural_type().clone()));
+    assert_ne!(a, OwnedValue::nominal(&foreign, "catalog-a", "Duration"));
+    assert_ne!(a, OwnedValue::nominal(&session, "catalog-b", "Duration"));
+    assert_ne!(a, OwnedValue::nominal(&session, "catalog-a", "Curve"));
+    assert!(a.nominal_belongs_to(&session));
+    assert!(!a.nominal_belongs_to(&foreign));
+    let pack = OwnedValue::pack(vec![a.clone()]);
+    assert_eq!(pack.result_slot(0), Some(a));
+}
 fn wrap(ty: LuaType, children: Vec<OwnedValue>) -> OwnedValue {
     OwnedValue::with_structural_children(ty, children)
 }

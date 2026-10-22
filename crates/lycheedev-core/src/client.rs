@@ -67,7 +67,7 @@ fn exists(directory: &Directory, name: &str, control: &mut impl MetadataControl)
 }
 
 /// Delivery identity is separate from the shared UI/API source family.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Product {
     pub id: &'static str,
     pub family: &'static str,
@@ -78,6 +78,9 @@ pub struct Product {
     pub channel: &'static str,
     pub reused_slot: bool,
     pub interface: Option<u32>,
+    /// Accepted user and canonical spellings. Identity mapping only; these
+    /// never collapse two deliveries or authorize a build range.
+    pub aliases: &'static [&'static str],
 }
 /// Ordered current data catalog from the fixed Go 3.2.1 release.
 pub static PRODUCTS: [Product; 7] = [
@@ -91,6 +94,7 @@ pub static PRODUCTS: [Product; 7] = [
         channel: "",
         reused_slot: false,
         interface: Some(120105),
+        aliases: &["retail", "wow", "正式服"],
     },
     Product {
         id: "classic",
@@ -102,6 +106,7 @@ pub static PRODUCTS: [Product; 7] = [
         channel: "",
         reused_slot: false,
         interface: Some(50504),
+        aliases: &["classic", "wow_classic", "怀旧服", "经典版"],
     },
     Product {
         id: "classic-era",
@@ -113,6 +118,7 @@ pub static PRODUCTS: [Product; 7] = [
         channel: "",
         reused_slot: false,
         interface: Some(11509),
+        aliases: &["classic-era", "classic_era", "永久60", "经典旧世"],
     },
     Product {
         id: "titan",
@@ -124,6 +130,7 @@ pub static PRODUCTS: [Product; 7] = [
         channel: "",
         reused_slot: false,
         interface: Some(38002),
+        aliases: &["titan", "wow_classic_titan", "泰坦", "经典泰坦", "时光服"],
     },
     Product {
         id: "forever-asia-beta",
@@ -135,6 +142,7 @@ pub static PRODUCTS: [Product; 7] = [
         channel: "asia-beta",
         reused_slot: true,
         interface: Some(16001),
+        aliases: &["forever", "无限服", "无限服（国际服）", "asia-beta"],
     },
     Product {
         id: "forever-cn-beta",
@@ -146,6 +154,7 @@ pub static PRODUCTS: [Product; 7] = [
         channel: "cn-beta",
         reused_slot: true,
         interface: Some(16001),
+        aliases: &["forever-cn-beta", "cn-beta", "国服无限服", "无限服（国服）"],
     },
     Product {
         id: "anniversary",
@@ -157,10 +166,11 @@ pub static PRODUCTS: [Product; 7] = [
         channel: "",
         reused_slot: false,
         interface: Some(20506),
+        aliases: &["anniversary", "wow_anniversary", "周年服"],
     },
 ];
 /// Legacy wow_forever metadata does not identify either regional beta track.
-static LEGACY_FOREVER: Product = Product {
+pub static LEGACY_FOREVER: Product = Product {
     id: "forever",
     family: "forever",
     display_name: "Forever",
@@ -170,12 +180,60 @@ static LEGACY_FOREVER: Product = Product {
     channel: "",
     reused_slot: true,
     interface: Some(16001),
+    aliases: &["wow_forever"],
 };
 pub fn product(value: &str) -> Option<&'static Product> {
     PRODUCTS
         .iter()
         .chain(std::iter::once(&LEGACY_FOREVER))
         .find(|p| p.id == value)
+}
+/// Current product identities for CLI discovery and the first-party Skill quick
+/// table. Series and TOC interfaces come from the verified baselines; this is
+/// identity mapping, not a claimed build range or runtime acceptance. The two
+/// Forever deliveries stay separate even though they share a source family.
+pub fn discovery_products() -> Vec<serde_json::Value> {
+    PRODUCTS
+        .iter()
+        .chain(std::iter::once(&LEGACY_FOREVER))
+        .map(|product| {
+            let baselines: Vec<_> = VERIFIED_BASELINES
+                .iter()
+                .filter(|baseline| {
+                    baseline.product == product.id || baseline.product == product.family
+                })
+                .collect();
+            let mut series: Vec<_> = baselines.iter().map(|b| b.series).collect();
+            series.sort_unstable();
+            series.dedup();
+            if series.is_empty() {
+                series.push(product.series);
+            }
+            let mut interfaces: Vec<u32> = baselines.iter().map(|b| b.interface).collect();
+            interfaces.sort_unstable();
+            interfaces.dedup();
+            if interfaces.is_empty() {
+                interfaces.extend(product.interface);
+            }
+            let delivery = !std::ptr::eq(product, &LEGACY_FOREVER);
+            serde_json::json!({
+                "id": product.id,
+                "family": product.family,
+                "displayName": product.display_name,
+                "catalogProduct": product.catalog_product,
+                "channel": product.channel,
+                "commonNames": product.aliases,
+                "buildSeries": series,
+                "tocInterfaces": interfaces,
+                "delivery": delivery,
+                "sharedSourceFamily": product.family == "forever",
+                "ambiguousLocally": !delivery,
+                "note": if delivery { "" } else {
+                    "legacy family-wide metadata; choose forever-asia-beta or forever-cn-beta by region"
+                },
+            })
+        })
+        .collect()
 }
 pub fn catalog_product(value: &str) -> Option<&'static Product> {
     if value == "wow_forever" {
@@ -845,7 +903,7 @@ mod tests {
         }
     }
     #[test]
-    fn catalog_schema_matches_go_records_even_for_inactive_rows() {
+    fn catalog_schema_matches_reference_records_even_for_inactive_rows() {
         const HEADER: &str =
             "Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\n";
         const KEY: &str = "0123456789abcdef0123456789abcdef";
@@ -1380,9 +1438,9 @@ mod tests {
         assert_eq!(client_data_product(&inspect(&path).unwrap()), "forever");
     }
 
-    // Go v3.2.1 TestClientEvidencePrecedence additions plus retained 12.1.0.
+    // Fixed-reference evidence-precedence cases plus retained 12.1.0.
     #[test]
-    fn go_321_retail_series_resolve_by_product_and_build() {
+    fn retail_series_resolve_by_product_and_build() {
         for (build, interface) in [("12.1.5.70391", 120105), ("12.1.0.69933", 120100)] {
             for (folder, flavor, version, from_catalog) in [
                 ("_retail_", "wow", "", true),
@@ -1413,7 +1471,7 @@ mod tests {
     }
 
     #[test]
-    fn go_321_retail_catalog_rejects_unsupported_conflicting_and_ambiguous_builds() {
+    fn retail_catalog_rejects_unsupported_conflicting_and_ambiguous_builds() {
         for (flavor, version, rows, message) in [
             (
                 "wow",
@@ -1453,12 +1511,12 @@ mod tests {
         }
     }
 
-    // Port of TestClientEvidencePrecedence at fixed Go 3.2.0 commit
+    // Fixed-reference evidence-precedence cases pinned to commit
     // 3057a9666ab078270b63c7f06de748069b0d1f4b, through the installation wrapper.
     // Additional cases cover metadata-backed folder fallback and the records
     // layer's contradiction gate; pure selection precedence is tested separately.
     #[test]
-    fn go_320_client_evidence_precedence() {
+    fn reference_client_evidence_precedence() {
         struct Case {
             name: &'static str,
             folder: &'static str,
@@ -1843,7 +1901,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_precedence_and_installation_consistency_are_distinct_go_layers() {
+    fn selection_precedence_and_installation_consistency_are_distinct_resolution_layers() {
         struct Case {
             name: &'static str,
             folder: &'static str,
@@ -2078,7 +2136,7 @@ mod tests {
                 installation_ok: false,
             },
             Case {
-                name: "plus sign is not a Go build digit",
+                name: "plus sign is not a reference build digit",
                 folder: "custom",
                 flavor: "wow",
                 version: "12.1.0.+1",
@@ -2136,7 +2194,7 @@ mod tests {
         }
     }
     #[test]
-    fn first_nonempty_flavor_uses_go_word_matching_and_does_not_read_lower_priority_file() {
+    fn first_nonempty_flavor_uses_reference_word_matching_and_does_not_read_lower_priority_file() {
         for value in [
             "wow",
             "WOW",

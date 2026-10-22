@@ -1,21 +1,14 @@
 //! Captured original bytes and a manifest precede one atomic external publish.
-use super::{fault, image, input, output};
+use crate::request::DataContext;
+use super::{image, input, output};
 use crate::{capture, phase_profile::Phase};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError,
+    Outcome, Result, ToolkitError,
     evidence::{self, CaptureInput},
     storage::Destination,
 };
 use serde_json::{Value, json};
-use std::path::Path;
 
-fn number(inv: &Invocation, flag: &str, default: usize) -> Result<usize> {
-    inv.flag(flag)
-        .map(str::parse)
-        .transpose()
-        .map_err(|_| ToolkitError::arguments(format!("invalid {flag}")))
-        .map(|value| value.unwrap_or(default))
-}
 /// Records only returned, committed identities. No error or successful callback
 /// can replay a capture/output. Unknown commits without returned IDs stay unknown.
 struct Progress {
@@ -79,79 +72,23 @@ struct Options<'a> {
     pixels: usize,
     maximum: usize,
 }
-pub fn run(inv: &Invocation) -> Result<Outcome> {
-    inv.control.check()?;
-    if inv.flag_bool("--cdn") && inv.flag("--installation").is_some() {
-        return Err(ToolkitError::arguments(
-            "choose either --cdn or --installation, not both",
-        ));
-    }
-    let id = inv
-        .flag("--file-id")
-        .map(str::parse::<u32>)
-        .transpose()
-        .map_err(|_| ToolkitError::arguments("invalid --file-id"))?
-        .unwrap_or(0);
-    if (!inv.flag_bool("--cdn")
-        && inv
-            .flag("--installation")
-            .filter(|v| !v.is_empty())
-            .is_none())
-        || inv.flag("--snapshot").filter(|v| !v.is_empty()).is_none()
-        || id == 0
-    {
-        return Err(ToolkitError::arguments(
-            "asset export requires --snapshot, --file-id, and either --installation or --cdn",
-        ));
-    }
-    let output_path = inv
-        .flag("--output")
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| ToolkitError::arguments("asset export requires --output"))?;
-    let encoding = inv
-        .flag("--encoding")
-        .filter(|value| !value.is_empty())
-        .unwrap_or("raw");
-    let mipmap = number(inv, "--mipmap", 0)?;
-    let channels = inv.flag("--channels").unwrap_or("");
-    let pixels = number(inv, "--max-pixels", 0)?;
-    if encoding == "raw" && (mipmap != 0 || !channels.is_empty() || pixels != 0)
-        || !["raw", "png", "webp"].contains(&encoding)
-        || mipmap > 15
-        || encoding != "raw" && pixels > 64 << 20
-        || channels.chars().any(|channel| !"rgba".contains(channel))
-        || channels
-            .chars()
-            .any(|channel| channels.matches(channel).count() != 1)
-    {
-        return Err(fault("records.export_options", 2));
-    }
+pub fn run(ctx: &DataContext, request: &super::request::ExportRequest) -> Result<Outcome> {
+    ctx.control.check()?;
     let options = Options {
-        encoding,
-        mipmap,
-        maximum: inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?,
-        pixels: if pixels == 0 { 16 << 20 } else { pixels },
-        channels: if channels.is_empty() {
-            "rgba".into()
-        } else {
-            "rgba"
-                .chars()
-                .filter(|name| channels.contains(*name))
-                .collect()
-        },
+        encoding: request.encoding.as_str(), mipmap: request.mipmap,
+        channels: request.channels.clone(), pixels: request.max_pixels, maximum: request.maximum_bytes,
     };
-    let destination =
-        output::destination_scoped(inv, Path::new(output_path), inv.flag_bool("--overwrite"))?;
+    let destination = output::destination_scoped(ctx, &request.output, request.overwrite)?;
     let mut progress = Progress::default();
-    let result = input::with_casc_verified(inv, id, &mut |source| {
+    let result = input::with_casc_verified(ctx, request.file_id, &mut |source| {
         progress.committed(source.capture);
-        publish(inv, &destination, source, &options, &mut progress)
+        publish(ctx, &destination, source, &options, &mut progress)
     });
-    let result = output::finish_closes(result, destination.close(), &inv.control);
+    let result = output::finish_closes(result, destination.close(), &ctx.control);
     progress.finish(result)
 }
 fn publish(
-    inv: &Invocation,
+    ctx: &DataContext,
     destination: &Destination,
     source: input::VerifiedView<'_>,
     options: &Options<'_>,
@@ -179,7 +116,7 @@ fn publish(
             *pixels,
             *maximum,
             meter,
-            &inv.control,
+            &ctx.control,
         )?)
     };
     let source_id = source.capture["id"]
@@ -188,7 +125,7 @@ fn publish(
     let artifact = if let Some(encoded) = &encoded {
         let capture_phase = meter.phase(Phase::ArtifactCapture);
         let artifact = evidence::commit_capture_budgeted_with_dependencies_and_metadata(
-            &inv.home,
+            &ctx.home,
             &mut *source.metadata,
             CaptureInput {
                 bytes: &encoded.bytes,
@@ -199,7 +136,7 @@ fn publish(
                 truncated: false,
             },
             &[source_id],
-            &inv.control,
+            &ctx.control,
             meter,
         )?;
         drop(capture_phase);
@@ -226,7 +163,7 @@ fn publish(
     };
     let capture_phase = meter.phase(Phase::ManifestCapture);
     let capture = evidence::commit_capture_budgeted_with_dependencies_and_metadata(
-        &inv.home,
+        &ctx.home,
         &mut *source.metadata,
         CaptureInput {
             bytes: &body,
@@ -237,7 +174,7 @@ fn publish(
             truncated: false,
         },
         dependencies,
-        &inv.control,
+        &ctx.control,
         meter,
     )?;
     drop(capture_phase);
@@ -254,7 +191,7 @@ fn publish(
     };
     if let Some(encoded) = &encoded {
         output::publish_reader_scoped(
-            inv,
+            ctx,
             destination,
             &mut std::io::Cursor::new(&encoded.bytes),
             bytes,
@@ -264,7 +201,7 @@ fn publish(
         )?;
     } else {
         output::publish_reader_scoped(
-            inv,
+            ctx,
             destination,
             source.blob,
             bytes,

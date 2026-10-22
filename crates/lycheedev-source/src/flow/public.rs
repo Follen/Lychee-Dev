@@ -1,6 +1,6 @@
 //! Public pinned-source flow uses the common graph in an owned CLI worker.
-use crate::{SourceTools, environment, git, index, native::*, relations};
-use lycheedev_core::{Invocation, Result, ToolkitError, control::OperationControl, storage};
+use crate::{SourceTools, environment, git, index, native::*, relations, request::SourceContext};
+use lycheedev_core::{Result, ToolkitError, control::OperationControl, storage};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -44,10 +44,11 @@ mod load_plan;
 
 /// Collect immutable pin bytes and actual compiler results before worker admission.
 pub fn context_flow(
-    inv: &Invocation,
+    inv: &SourceContext,
     reading: &relations::Reading,
     tools: &SourceTools<'_>,
     facts: &[index::LoadFact],
+    reuse_session: bool,
 ) -> Result<Value> {
     inv.control.check()?;
     let runtime = tools.luac.ok_or_else(|| {
@@ -71,13 +72,12 @@ pub fn context_flow(
         )]));
     }
     let source_identity = json!({"snapshot":reading.pin.id,"repository":source.repository,"product":source.product,"commit":source.exact_commit});
-    let load_plan::Selection { mut ordered, mut input_gaps, input_bytes, load_evidence } = load_plan::collect(
-        path,
-        &reading.index,
-        facts,
-        &source_identity,
-        &inv.control,
-    )?;
+    let load_plan::Selection {
+        mut ordered,
+        mut input_gaps,
+        input_bytes,
+        load_evidence,
+    } = load_plan::collect(path, &reading.index, facts, &source_identity, &inv.control)?;
     let mut names = ordered.clone().unwrap_or_else(|| vec![path.into()]);
     names.sort();
     names.dedup();
@@ -109,8 +109,25 @@ pub fn context_flow(
                 ),
             )]));
         }
-        let text = String::from_utf8(raw)
-            .map_err(|_| ToolkitError::new("flow.invalid_input", "flow source must be UTF8", 4))?;
+        let text = match std::str::from_utf8(&raw) {
+            Ok(text) => text.to_owned(),
+            // Comment-only invalid bytes are inert; same-width analysis keeps
+            // positions. Token/string invalid bytes are reported unavailable
+            // rather than replaced into a legal value.
+            Err(_) if crate::lua_tree::invalid_bytes_are_comment_only(&raw) => {
+                crate::encoding::analysis(&raw).into_owned()
+            }
+            Err(_) => {
+                let warning = crate::encoding::warning(&raw).expect("invalid source bytes");
+                return Ok(incomplete(vec![gap(
+                    "source_encoding_unavailable",
+                    format!(
+                        "{} line {}: invalid UTF-8 outside a comment cannot be analyzed without replacing token bytes; preserved in the archived source",
+                        name, warning.line
+                    ),
+                )]));
+            }
+        };
         files.insert(name, text);
     }
     let compiler_files = files
@@ -142,7 +159,9 @@ pub fn context_flow(
     if let Some(environment) = &reading.environment {
         for record in &environment.facts {
             inv.control.check()?;
-            if record.kind == "function" && record.owner.is_none() && record.name.split('.').all(|part| words.contains(part))
+            if record.kind == "function"
+                && record.owner.is_none()
+                && record.name.split('.').all(|part| words.contains(part))
             {
                 if api.len() == 32 {
                     input_gaps.push(gap(
@@ -214,15 +233,15 @@ pub fn context_flow(
     }
     let mut command = Command::new(std::env::current_exe()?);
     command.arg("--source-flow-worker");
-    let output = crate::process::run_controlled(
+    let output = crate::process::run_with_operation_control(
         command,
         WORKER_BYTES,
         deadline.saturating_duration_since(Instant::now()),
         Some(bytes),
-        Some(inv.control.token()),
+        &inv.control,
     )
     .map_err(|mut error| {
-        error.code = error.code.replace("luals.", "flow.");
+        error.code = error.code.replace("source.process_", "flow.");
         error
     })?;
     inv.control.check()?;
@@ -251,7 +270,7 @@ pub fn context_flow(
     }
     response["syntaxCheck"] = syntax;
     response["executionMode"] = json!("owned_one_shot");
-    response["sessionReuseRequested"] = json!(inv.flag_bool("--session-reuse"));
+    response["sessionReuseRequested"] = json!(reuse_session);
     response["sessionReused"] = json!(false);
     response["lifecycle"] = json!({"owner":"source_owned_process","elapsedMillisecondsThroughRetirement":elapsed,"budgetMilliseconds":WORKER_MILLIS,"retired":true});
     let mut flow = response
@@ -494,10 +513,7 @@ fn execute(request: Request, control: &OperationControl) -> Result<Value> {
 /// Private same-binary worker; input is owned data from the public pinned-source command.
 pub fn worker_stdio() -> Result<()> {
     let started = Instant::now();
-    let control = OperationControl::new(
-        started + Duration::from_millis(WORKER_MILLIS),
-        Arc::new(AtomicBool::new(false)),
-    );
+    let control = OperationControl::uncancelable(started + Duration::from_millis(WORKER_MILLIS));
     let mut bytes = Vec::new();
     std::io::stdin()
         .take(WORKER_INPUT_BYTES as u64 + 1)

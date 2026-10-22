@@ -41,7 +41,7 @@ fn consume(file: &mut VerifiedFile) -> Result<(u64, String)> {
     Ok((bytes, casc::hex(&digest.finalize())))
 }
 #[test]
-fn independent_verified_cold_warm_sessions_keep_digest_identity_and_go_counters() {
+fn independent_verified_cold_warm_sessions_keep_digest_identity_and_retained_counters() {
     let f = Fixture::new();
     let mut statistics = Vec::new();
     // Independent query owners match Go NewSession/Close. Same-session ready

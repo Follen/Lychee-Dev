@@ -1,7 +1,7 @@
 //! Exact SUM/AVG accumulators inside DataFusion's grouping/merge execution.
 //! The state is rational; partial groups never merge already-rounded answers.
 use super::{QueryOwner, external, unsupported, values};
-use crate::relational::{Scalar, engine_compat};
+use crate::query_value::{self as scalar, Scalar};
 use arrow_array::{Array, ArrayRef, BooleanArray, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, FieldRef};
 use datafusion::{
@@ -72,7 +72,7 @@ impl AggregateUDFImpl for ExactAggregate {
     fn accumulator(&self, args: AccumulatorArgs) -> Result<Box<dyn Accumulator>> {
         if args.is_distinct || !args.order_bys.is_empty() {
             return Err(unsupported(
-                "Exact DISTINCT/ordered aggregate state has not yet completed engine adaptation",
+                "Exact DISTINCT/ordered aggregate state is not supported by the current engine",
             ));
         }
         self.owner.retain(512)?;
@@ -125,7 +125,7 @@ impl ExactAccumulator {
         let next = self
             .count
             .checked_add(count)
-            .ok_or_else(|| external(engine_compat::numeric_error()))?;
+            .ok_or_else(|| external(scalar::numeric_error()))?;
         let bits = (self.sum.numer().bits() + ratio.denom().bits())
             .max(ratio.numer().bits() + self.sum.denom().bits())
             + 1;
@@ -161,7 +161,7 @@ impl Accumulator for ExactAccumulator {
             // through add(). Never accumulate a per-row scratch charge.
             let owner = self.owner.clone();
             let _input = owner.budget.reserve_retained(512).map_err(external)?;
-            self.add(engine_compat::exact(&value).map_err(external)?, 1, integer)?;
+            self.add(scalar::exact(&value).map_err(external)?, 1, integer)?;
         }
         Ok(())
     }
@@ -176,9 +176,9 @@ impl Accumulator for ExactAccumulator {
                 .ok_or_else(|| external(super::limit()))?,
         )?;
         let value = if self.average {
-            engine_compat::finish_average(&self.sum, self.count)
+            scalar::finish_average(&self.sum, self.count)
         } else {
-            engine_compat::finish_sum(&self.sum, self.integer)
+            scalar::finish_sum(&self.sum, self.integer)
         }
         .map_err(external)?;
         values::write(value, &self.output)

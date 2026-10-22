@@ -1,12 +1,12 @@
 //! Explicit source-only product observations; does not perform client input.
 use lycheedev_core::{
-    Invocation, evidence,
+    request::RequestContext, evidence,
     selection::{self, SourcePin},
 };
-use lycheedev_source::{SourceTools, environment, luac, luals};
+use lycheedev_source::{SourceTools, environment, luac};
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs,
     path::PathBuf,
 };
@@ -20,7 +20,7 @@ fn argument(kind: &str) -> Option<&'static str> {
 }
 #[test]
 #[ignore = "explicit four authenticated source observations and actual bundled tools; default resolver may fetch exact commits"]
-fn four_distinct_client_pins_default_resolver_actual_catalog_luac_luals() {
+fn four_distinct_client_pins_default_resolver_actual_catalog_luac_native() {
     let manifest_path =
         PathBuf::from(std::env::var_os("LYCHEEDEV_MATRIX_PINS").expect("explicit prepared pins"));
     let observed: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
@@ -112,28 +112,22 @@ fn four_distinct_client_pins_default_resolver_actual_catalog_luac_luals() {
         serde_json::from_value(compiler_manifest["runtime"].clone()).unwrap(),
     )
     .unwrap();
-    let runtime_path = stage.join("runtime");
-    let runtime = luals::Runtime::unpack_pinned(
-        &PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("fixed archive")),
-        &runtime_path,
-    )
-    .unwrap();
-    let inv = Invocation {
-        command: "source validate".into(),
-        positional: None,
+    let ctx = lycheedev_source::request::SourceContext {
         home: home.clone(),
         cwd: stage.clone(),
-        flags: BTreeMap::from([
-            ("--matrix".into(), config.to_string_lossy().into()),
-            ("--semantic".into(), "true".into()),
-        ]),
         control,
     };
-    let result = lycheedev_source::dispatch_with_tools(
-        &inv,
+    let (configuration, matrix_root) = lycheedev_source::matrix::read_config(&config, &ctx.control).unwrap();
+    let request = lycheedev_source::request::MatrixValidationRequest {
+        configuration: config.clone(),
+        root: matrix_root,
+        targets: configuration.targets,
+        semantic: true,
+    };
+    let result = lycheedev_source::matrix::dispatch(
+        &ctx, &request,
         SourceTools {
             luac: Some(&compiler),
-            luals: Some(&runtime),
         },
     )
     .unwrap();
@@ -147,20 +141,12 @@ fn four_distinct_client_pins_default_resolver_actual_catalog_luac_luals() {
     }
     let mut proofs = vec![];
     for capture in &result.provenance {
-        let proof = evidence::dispatch(&Invocation {
-            command: "evidence verify".into(),
-            positional: Some(capture["id"].as_str().unwrap().into()),
-            flags: BTreeMap::new(),
-            home: home.clone(),
-            cwd: stage.clone(),
-            control: inv.control.clone(),
-        })
+        let proof = evidence::dispatch(&RequestContext {
+            home: home.clone(), cwd: stage.clone(), control: ctx.control.clone(),
+        }, evidence::EvidenceRequest::Verify { id: capture["id"].as_str().unwrap().into() })
         .unwrap();
         assert_eq!(proof.data["verified"], true);
         proofs.push(proof.data);
     }
-    fs::write(home.parent().unwrap().join("four-product-sdk-report.json"),serde_json::to_vec_pretty(&json!({"observed":observed,"APIs":apis,"result":result.data,"captures":proofs,"compiler":compiler_manifest["runtime"],"runtime":luals::pinned(),"scope":"four distinct actual source pins, observed API type metadata, default exact resolver and actual bundled tools; source-only Forever, no interactive acceptance or packaged CLI/Go full parity"})).unwrap()).unwrap();
-    drop(runtime);
-    assert!(runtime_path.starts_with(&stage));
-    fs::remove_dir_all(runtime_path).unwrap();
+    fs::write(home.parent().unwrap().join("four-product-sdk-report.json"),serde_json::to_vec_pretty(&json!({"observed":observed,"APIs":apis,"result":result.data,"captures":proofs,"compiler":compiler_manifest["runtime"],"runtime":"emmy_native_common_facts","scope":"four distinct actual source pins, observed API type metadata, default exact resolver and actual bundled tools; source-only Forever, no interactive acceptance or packaged CLI/reference full parity"})).unwrap()).unwrap();
 }

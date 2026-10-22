@@ -1,44 +1,200 @@
-# Lychee Dev Toolkit · Rust 迁移
+# Lychee Dev
 
 [English](README.md)
 
-`rust-refactor` 是**尚未完成的 Rust 实现**，目标行为与固定 Go 3.2.3 一致，不是新发行版，也不表示功能或性能已经通过验收。
+[![CI](https://github.com/Follen/Lychee-Dev/actions/workflows/ci.yml/badge.svg?branch=rust-refactor)](https://github.com/Follen/Lychee-Dev/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/lycheedev)](https://www.npmjs.com/package/lycheedev)
+[![platform](https://img.shields.io/badge/platform-Windows_amd64-0078d4)](https://github.com/Follen/Lychee-Dev)
+[![runtime dependencies](https://img.shields.io/badge/npm_runtime_dependencies-0-52a788)](packages/npm/lycheedev/package.json)
+[![license](https://img.shields.io/badge/license-MIT-52a788)](LICENSE)
 
-未发布 Rust 候选版本为 **3.5.0**，发行配置渠道为 **beta**。包版本与 Go 3.2.3 行为基线分别固定；本次没有执行发布或 npm dist-tag 操作。
+Lychee Dev 是面向开发者与 Agent 的魔兽世界调查工具：Rust 原生 CLI、游戏内 Lua
+工作台插件、第一方 Agent Skill 与 npm 包。它把魔兽世界问题变成固定源码证据、
+类型化游戏数据、导出的资源或指定客户端上的受权观察，并保留可复查的结果。
 
-最终验收现要求 **Emmy 上游源码零修改**：全部现有补丁须由自有 crate 与公开 API 的等价实现替代，完整保留 XML/Lua 增强。当前源码候选已选择未修改的上游树，真实上下文查询和诊断由自有 adapter 执行；编译、完整语义差分、全量 Retail 与性能仍待验收。
+发布平台为 **Windows amd64**。产品版本只以
+[release/version.json](release/version.json) 为准，当前为 **3.5.0**。
 
-## 唯一目标与固定基线
+## 能力
 
-基线为 **v3.2.3**，发布 tag 解析后的精确提交 **`3766f9cacb52e93a803a626187e2a1d54a445468`**（[发行源码](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/README.md)）。不得用滚动 main、Go 3.1.2、任意开发二进制或之后的修复替代。
+| 领域 | 能回答的问题 |
+| --- | --- |
+| 源码 | 固定暴雪 UI 或第三方插件版本：声明、调用者、上下文、加载闭包、验证、秘密值传播与版本差异。 |
+| 数据 | 类型化 DB2 记录与元数据：catalog、字段、外键、筛选、Join、聚合、分页、导出与 Hotfix 记录；法术、物品、生物、遭遇和装饰物报告。 |
+| 资源 | Listfile 搜索、CASC 文件检查、原始导出、BLP2 转 PNG/无损 WebP；本地安装或显式 CDN 来源。 |
+| 实机 | 通过现有插件与 Lycheedev mailbox protocol v1，在单个已验证客户端上执行有界 Lua 探针、读取已验证报告、恢复并收尾。 |
+| 证据 | 固定 pin 与项目锁、内容寻址 capture、校验、打包与有界缓存管理。 |
+| 交付 | 从发布包受管安装、更新和移除插件与 Skill；npm CLI 更新交接。 |
 
-此前 v3.2.2（`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`）、v3.2.1（`10b561db5706702cd42e047eaeed4ccb5e825351`）和 v3.2.0（`3057a9666ab078270b63c7f06de748069b0d1f4b`）的夹具与结果保持原身份。[3.2.1](docs/toolkit/rust-go-3.2.1-increment.md)及[3.2.2](docs/toolkit/rust-go-3.2.2-increment.md)仍是累积要求；新增[3.2.3增量](docs/toolkit/rust-go-3.2.3-increment.md)涵盖准入后自适应Data内存、紧凑WDC记录、保语义的索引IN选择与Data恢复指引。Rust新增验收全部待执行。已核精确tag及源码；发行二进制/资产未验证。
+源码、数据与资源工作不需要运行游戏；实机工作需要一个已登录且加载受管插件的客户端。
 
-以 Go 3.2.3 定行为，复用已有 Rust 成果；逐模块差分决定保留、替换、补齐，不一律从零重写，也不因旧 Rust 协议已存在而继续沿用。
+## 环境要求
 
-仅改变宿主实现语言与 Source 引擎：**Rust + EmmyLua 直接分析库/native worker/session，替代 LuaLS**。其余全部业务、同一份 Lua addon、CLI、版本化 Skill、交付及完整 **Lycheedev mailbox protocol v1** 都要与固定正式版本等价。
+- Windows amd64（`x86_64-pc-windows-msvc`），当前唯一交付目标。
+- [Node.js](https://nodejs.org/) **22.14.0 或更高**，用于 npm 启动器与打包工具；
+  CLI 本体是原生可执行文件，不依赖运行时 npm 包。
+- Source 仓库准备需要 `PATH` 中有 Git。
+- 数据工作需要已安装客户端或显式选择的 CDN 来源；部分内容加密或不可用，会如实报告。
+- 实机工作需要有受支持的客户端、运行中的游戏进程和受管插件。代码支持不等于实机验收。
 
-性能目标是每条必需路径的**可控耗时减少至少 70%，Rust ≤ Go 的 30%**。同机器、同数据、等价结果与校验，cold/warm 分开独立重复；下载及不可控外部等待单列。尚无本次测量证明达标，禁止删功能、少校验或缩小输入取巧。
+## 安装与部署
 
-## 文档入口
+```powershell
+npm install --global lycheedev
+lycheedev version --format json
+```
 
-- [handover.md](handover.md)：当前决策、状态、证据与缺口的唯一事实来源；需要用户或实机配合的测试全部在最后一节。
-- [DESIGN.md](DESIGN.md)：从上述事实来源派生的目标架构和兼容规则。
-- [todo.md](todo.md)：有顺序的执行及验收清单，不另写竞争的状态叙述。
-- [固定 Go 协议](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/docs/live-protocol.md)：完整线协议、恢复、输入和诊断合同。
+npm 包包含原生 CLI、插件与 Agent Skill。安装 npm 包**不会**自动部署插件或 Skill：
 
-旧 `docs/toolkit/` 计划与测试报告保留为历史证据；旧 Go 3.1.2 目标、50%性能门槛、四槽 exact-COMMIT 重设计及旧输入假设均不能覆盖本次目标。
+```powershell
+$release = Join-Path (npm root -g) 'lycheedev'
+$client  = 'D:\Game\World of Warcraft\_retail_'   # 你的客户端目录
+$skill   = Join-Path $env:USERPROFILE '.agents\skills\lycheedev'
 
-## 当前代码与构建边界
+lycheedev addon install --release $release --installation $client
+lycheedev skill install --release $release --path $skill
+```
 
-`crates/` 已有 cli、core、source、data、live、delivery、windows、emmy-adapter、binding-contracts 九个 crate。Source 使用自有 adapter 和中立合同，固定上游引擎不再反向依赖这些合同。默认 `emmy-prototype` 直接链接未修改的 EmmyLua commit `08b0873962e83bb8307e9a81052e3f41578fbc78`，身份与原版848个文件完全相符；[third_party/emmy](third_party/emmy/README.md) 记录源码、archive、许可证及空生产补丁清单。自有派生算法保留原MIT署名。准备脚本物化被忽略的依赖目录，历史patched版本仅作为独立固定测试参考保留，不进入生产依赖。源码身份已核不等于编译或行为验收。
+先检查目标，之后用受管更新器更新：
 
-组件实际通过不等于完整 Source、默认 Live、最终安装包或性能已验收。完整 Retail 原生分析已暴露真实 API 生成错误，新修复须在精确候选上复跑；正式 runtime/input/backend 已接默认公共生命周期，精确候选验收仍未完成。精确通过/失败/未运行证据见 [handover.md](handover.md)，剩余模块见 [todo.md](todo.md)。独立可复建和最终打包门槛仍未完成。
+```powershell
+lycheedev update --plan --format json
+lycheedev update
+```
 
-交付平台仍为 Windows amd64；Source/Data/资源调查不依赖运行游戏，真实客户端只用于最后的 Live 验收。
+`update` 同步 npm CLI 与受管 Skill/插件。`--release <root>` 用已安装的发布包离线
+应用；重复的 `--path` / `--installation` 显式限定目标。文件完成不等于运行中的游戏
+或已有 Agent 上下文已激活：客户端仍需要 reload。
 
-## 本次范围
+## 发现能力
 
-首批提交仅文档，用户随后已授权全量实施本计划；仍不发送游戏输入、不发布、不合入 main。每批更新同一独立草稿 PR，实现后按 handover 执行四阶段串行循环审计。先做离线与可自动执行的 Windows 检查，需要用户、真实游戏或特定交互机器配合的测试放最后。历史失败和产物必须保留；死代码须完成引用、feature、打包与回归核查后再删。
+CLI 面向 Agent 自解释。先按任务搜索，再只读取需要的合同：
 
-正式安装说明见[固定 Go README](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/README.md)，不得把 npm 安装说成安装本分支未完成的 Rust 候选。旧 README 和工作台 UI 设计保留在 [docs/history](docs/history/)。
+```powershell
+lycheedev cli search "spell cooldown" --format json
+lycheedev schema target resolve
+lycheedev data agent schema
+lycheedev describe --format json
+lycheedev <command> --help
+```
+
+发现只读命令元数据：不创建工作区、不打开缓存、不启动 worker、不联网、不连接游戏。
+完整已安装命令列表由 `lycheedev describe` 提供；Data 的权威 Agent 任务与会话合同由
+`lycheedev data agent schema` 提供。
+
+## 示例
+
+### 源码
+
+```powershell
+lycheedev init
+$source = lycheedev source sync --source wow-ui-source --product retail --ref refs/heads/live --format json | ConvertFrom-Json
+$sourcePin = $source.result.id
+
+lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json
+lycheedev source context --snapshot $sourcePin --symbol-id <symbolId> --format json
+```
+
+分支只解析一次并固定为不可变 pin；后续读取复用该 pin 或项目锁。精确文件、关系、
+版本比较和插件加载闭包分别使用 `source inspect`、`source refs`、`source diff` 与
+`source validate`。
+
+### 数据
+
+```powershell
+$target  = lycheedev target resolve --installation $client --region cn --locale zhCN --format json | ConvertFrom-Json
+$dataPin = $target.result.id
+
+lycheedev data agent serve --snapshot $dataPin --installation $client --format jsonl
+```
+
+打开一个调用方拥有的 `data agent serve` 进程，按
+`lycheedev schema data agent serve` 声明的类型化 JSONL 任务发送请求。会话持有固定
+数据身份与结果句柄，供分页、导出和 capture 使用；关闭或 deadline 会结束该归属。
+已发布的版本列表用 `target available`，命名目标配置用
+`target add` / `target show` / `target list`。
+
+### 资源
+
+```powershell
+lycheedev asset search --snapshot $dataPin --listfile community-csv --query "interface/icons" --format json
+lycheedev asset export --snapshot $dataPin --installation $client --file-id 123456 --encoding png --output .\icon.png
+```
+
+默认导出原始字节；显式 encoding 才做图像转换。缺失名称、变体歧义、缺钥或超出上限
+都是错误，不是空结果成功。
+
+### 实机（仅受权任务）
+
+```powershell
+lycheedev live instances --format json
+lycheedev live doctor --pid <pid> --format json        # 只读就绪检查
+lycheedev live connect --installation $client --format json
+lycheedev live probe put --name <name> --file <probe.lua>
+lycheedev live execute --session <CON-id> --probe <name> --request <key> --format json
+lycheedev live disconnect <CON-id>
+```
+
+实机工作绑定单个已验证进程/runtime，并保留持久归属、请求身份与恢复 journal。
+`live doctor --fix` 只在受权安装/目标范围内修复；没有当前输入协议时，首次激活可能
+需要一次手动 reload。已提交或结果未知的输入不会重放。`live status`、`live resume`
+与 `live session` 用于检查和恢复原工作。
+
+### 工作区、缓存与证据
+
+```powershell
+lycheedev doctor --format json
+lycheedev cache status --data --format json
+lycheedev evidence list --limit 20 --format json
+lycheedev evidence verify <CAP-id>
+```
+
+`cache prune` 只回收普通可重建缓存；Data 派生对象回收是显式的 `--data-derived`
+操作。capture 与已提交证据会保留到显式移除。Data 默认容量预算为十进制 5 GB
+（5,000,000,000 字节），可用 `lycheedev config set` 配置。
+
+## 结果与限制
+
+- 普通命令返回版本化 `lycheedev.result.v1` envelope；JSONL 输出使用
+  begin/record/end 帧，成功需要合法 end 帧。Data Agent 会话使用自己的版本化协议。
+- `complete`、`partial`、`pending`、truncated 与 unknown 分别报告；空的 partial
+  结果永远不能证明不存在。
+- 退出码：`0` 完成，`2` 参数/选择，`3` 能力/环境，`4` 输入/协议，`5` 外部/业务失败，
+  `6` pending，`7` cancelled，`8` internal。
+- 会话结果句柄归会话所有；CAP 是已提交证据，可在会话结束后保留。分页与导出消费
+  保留结果，不重新执行查询。
+- 缺失内容、缺钥、覆盖不足和配额都以错误或显式缺口报告，不用其他 build、region、
+  product 或 client 替换。
+
+## 仓库结构
+
+| 路径 | 内容 |
+| --- | --- |
+| [crates/lycheedev-cli](crates/lycheedev-cli/) | 命令目录、解析、发现、应用编排与公共输出。 |
+| [crates/lycheedev-source](crates/lycheedev-source/) | 固定源码身份、加载闭包、分析、查询、关系与验证。 |
+| [crates/lycheedev-emmy-adapter](crates/lycheedev-emmy-adapter/)、[crates/lycheedev-binding-contracts](crates/lycheedev-binding-contracts/) | 围绕固定 Emmy 上游引擎的窄适配层与共享类型。 |
+| [crates/lycheedev-data](crates/lycheedev-data/) | CASC/WDC/BLTE 输入、Engine、DataFusion、Data Agent 会话、资源与 Hotfix。 |
+| [crates/lycheedev-live](crates/lycheedev-live/) | 游戏实例绑定、Mailbox、输入、恢复、报告与收尾。 |
+| [crates/lycheedev-delivery](crates/lycheedev-delivery/) | 受管安装、更新事务、插件/Skill 交付与 npm 交接。 |
+| [crates/lycheedev-core](crates/lycheedev-core/) | 共享身份、错误、控制、工作区、存储与证据。 |
+| [crates/lycheedev-windows](crates/lycheedev-windows/) | Windows 句柄、文件、进程、Job、IPC 与输入边界。 |
+| [addon/](addon/) | 现有游戏内 Lua 工作台插件、客户端配置与 Mailbox v1。 |
+| [skills/lycheedev](skills/lycheedev/) | 第一方 Agent Skill 及其按任务读取的 references。 |
+| [packages/npm/lycheedev](packages/npm/lycheedev/) | npm 包与原生 CLI 启动器。 |
+| [tools/](tools/)、[tests/](tests/) | 构建、打包、CI 与测试工具；夹具与测试目标。 |
+| [release/](release/) | 版本源、发布工具身份、许可证补充清单与数据。 |
+
+## 文档
+
+- [DESIGN.md](DESIGN.md)：业务目标、架构边界、公开合同与 Skill/CLI 使用面。
+- [AGENTS.md](AGENTS.md)：仓库工作规则、文档分工与验证政策。
+- [todo.md](todo.md)：未完成的实现、清理、CI 与验证工作。
+- [test.md](test.md)：当前测试用途、入口与覆盖。
+- [handover.md](handover.md)：当前分支、协作边界、实际验证结果与阻塞。
+- [skills/lycheedev/SKILL.md](skills/lycheedev/SKILL.md)：已安装的 Agent Skill。
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)：第三方组件与署名。
+
+## 许可证
+
+项目自有代码以 [MIT 许可证](LICENSE)分发。第三方组件保留各自许可证，见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

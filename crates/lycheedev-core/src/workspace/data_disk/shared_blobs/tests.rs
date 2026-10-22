@@ -114,6 +114,153 @@ fn exact_peak_counts_body_stage_and_records_then_releases_only_finished_peak() {
     assert_eq!(f.publish(b"body").unwrap().sha256, blob.sha256);
     assert_eq!(f.usage(), usage);
 }
+
+#[test]
+fn pair_second_peak_includes_first_completed_blob_and_preserves_its_publication() {
+    // Each new four-byte body needs 216 bytes of peak. Once first completes,
+    // its body plus intent/complete records still occupy 84 bytes: 300 total.
+    let f = Fixture::new(299);
+    let error = publish_shared_blob_pair_with_check(
+        &f.0,
+        [b"body", b"next"],
+        4,
+        &OperationControl::default(),
+        &|| Ok(()),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "vault.data_cache_budget_exceeded");
+    assert_eq!(error.details["reservation"]["existing"]["sharedBlobBytes"], 4);
+    assert_eq!(error.details["reservation"]["admittedPeakBytes"], 300);
+    let first_sha = storage::sha256(b"body");
+    assert!(
+        error.details["publicationReceipts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|receipt| {
+                receipt["kind"] == "shared-blob"
+                    && receipt["sha256"] == first_sha
+                    && receipt["state"] == "Published"
+            })
+    );
+    assert_eq!(
+        fs::read(evidence::blob_path(&f.0, &first_sha).unwrap()).unwrap(),
+        b"body"
+    );
+    assert!(f.receipt(b"body", "complete").is_file());
+    assert!(!f.receipt(b"next", "intent").exists());
+    assert_eq!(stages(&f.0), 0);
+    // A new operation can acquire quota after the failed second publication.
+    assert_eq!(f.publish(b"body").unwrap().sha256, first_sha);
+    assert_eq!(f.usage().total().unwrap(), 84);
+    f.limit(300);
+    let pair = publish_shared_blob_pair_with_check(
+        &f.0,
+        [b"body", b"next"],
+        4,
+        &OperationControl::default(),
+        &|| Ok(()),
+    )
+    .unwrap();
+    for (reference, bytes) in pair.iter().zip([b"body", b"next"]) {
+        assert_eq!(reference.sha256, storage::sha256(bytes));
+        assert_eq!(reference.bytes, 4);
+        assert_eq!(
+            fs::read(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap(),
+            bytes
+        );
+    }
+    let usage = f.usage();
+    assert_eq!(usage.shared_blob_bytes, 8);
+    assert_eq!(usage.generation_namespace_bytes, 160);
+    assert_eq!(usage.retained_shared_peak_bytes, 0);
+    assert_eq!(usage.total().unwrap(), 168);
+}
+
+#[test]
+fn pair_reuses_both_completed_bodies_above_a_reduced_limit_without_growth() {
+    let f = Fixture::new(300);
+    let control = OperationControl::default();
+    let original = publish_shared_blob_pair_with_check(
+        &f.0,
+        [b"body", b"next"],
+        4,
+        &control,
+        &|| Ok(()),
+    )
+    .unwrap();
+    let usage = f.usage();
+    f.limit(1);
+    let reused = publish_shared_blob_pair_with_check(
+        &f.0,
+        [b"body", b"next"],
+        4,
+        &control,
+        &|| Ok(()),
+    )
+    .unwrap();
+    for (original, reused) in original.iter().zip(&reused) {
+        assert_eq!(original.sha256, reused.sha256);
+        assert_eq!(original.bytes, reused.bytes);
+    }
+    assert_eq!(fs::read_dir(f.paths().shared_blobs()).unwrap().count(), 4);
+    assert_eq!(stages(&f.0), 0);
+    f.limit(300);
+    assert_eq!(f.usage(), usage);
+}
+
+#[test]
+fn pair_identical_inputs_keep_one_body_and_one_attribution_pair() {
+    let f = Fixture::new(216);
+    let pair = publish_shared_blob_pair_with_check(
+        &f.0,
+        [b"body", b"body"],
+        4,
+        &OperationControl::default(),
+        &|| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(pair[0].sha256, storage::sha256(b"body"));
+    assert_eq!(pair[0].sha256, pair[1].sha256);
+    assert_eq!(pair[0].bytes, 4);
+    assert_eq!(pair[1].bytes, 4);
+    assert_eq!(f.usage().total().unwrap(), 84);
+    assert_eq!(fs::read_dir(f.paths().shared_blobs()).unwrap().count(), 2);
+}
+
+#[test]
+fn pair_second_publication_stop_keeps_first_body_and_releases_quota() {
+    let f = Fixture::new(1024);
+    let observed = Cell::new(false);
+    let error = publish_shared_blob_pair_with_check(
+        &f.0,
+        [b"body", b"next"],
+        4,
+        &OperationControl::default(),
+        &|| {
+            if f.receipt(b"next", "intent").exists() {
+                observed.set(true);
+                Err(stop())
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .unwrap_err();
+    assert!(observed.get());
+    assert_eq!(error.code, "fixture.budget_cancelled");
+    assert!(f.receipt(b"body", "complete").is_file());
+    assert!(!f.receipt(b"next", "intent").exists());
+    assert_eq!(stages(&f.0), 0);
+    let reference = f.publish(b"body").unwrap();
+    assert_eq!(reference.sha256, storage::sha256(b"body"));
+    assert_eq!(
+        fs::read(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap(),
+        b"body"
+    );
+    assert_eq!(f.usage().total().unwrap(), 84);
+}
+
 #[test]
 fn preexisting_source_and_evidence_body_requires_new_attribution_capacity_and_is_never_deleted() {
     let f = Fixture::new(215);

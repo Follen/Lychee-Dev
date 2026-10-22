@@ -163,9 +163,7 @@ mod tests {
         availability.partitions[0].ids_complete = true;
         assert!(availability.record_unavailable(2, &budget).unwrap());
         assert!(!availability.record_unavailable(99, &budget).unwrap());
-        control
-            .cancel_handle()
-            .store(true, std::sync::atomic::Ordering::Release);
+        control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(
             availability
                 .record_unavailable(2, &budget)

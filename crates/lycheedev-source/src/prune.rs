@@ -1,7 +1,7 @@
 //! Explicit source checkout reclamation. Immutable pins, facts, mirrors and evidence are outside ownership.
 use crate::{catalog, git};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError,
+    Outcome, Result, ToolkitError,
     selection::{SourcePin, valid_digest},
     storage::{self, ExclusiveLock},
     workspace,
@@ -539,18 +539,8 @@ pub fn prune_with_control(
     result.complete = result.after_bytes <= budget;
     Ok(result)
 }
-pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    let target = inv
-        .required("--target-bytes")?
-        .parse::<u64>()
-        .ok()
-        .filter(|target| *target <= i64::MAX as u64)
-        .ok_or_else(|| {
-            ToolkitError::arguments(
-                "source prune --target-bytes requires a nonnegative signed 64-bit integer",
-            )
-        })?;
-    let data = prune_with_control(&inv.home, target, &inv.control)?;
+pub fn dispatch(ctx: &crate::request::SourceContext, target: u64) -> Result<Outcome> {
+    let data = prune_with_control(&ctx.home, target, &ctx.control)?;
     let complete = data.complete;
     let mut result = Outcome::new(serde_json::to_value(data)?);
     result.complete = complete;

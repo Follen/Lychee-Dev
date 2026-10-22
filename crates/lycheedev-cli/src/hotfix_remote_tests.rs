@@ -124,7 +124,7 @@ fn admitted_raidbots_record_and_hex_hash_reach_typed_public_output() {
     let f = Fixture::new();
     let inv = parse(&f.argv("raidbots", false)).unwrap();
     let mut bytes = Vec::new();
-    lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap();
+    crate::hotfix_cli::render(&inv, None, &mut bytes).unwrap();
     let public: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(public["result"]["records"].as_array().unwrap().len(), 1);
     assert_eq!(public["result"]["records"][0]["recordId"], 2);
@@ -137,7 +137,7 @@ fn admitted_dbcache_local_and_scan_use_eight_digit_hex_without_decimal_regressio
     let f = Fixture::new();
     for scan in [false, true] {
         let inv = parse(&f.argv("dbcache", scan)).unwrap();
-        let output = lycheedev_data::dispatch(&inv).unwrap();
+        let output = crate::hotfix_cli::dispatch(&inv).unwrap();
         let value = if scan {
             &output.data["result"]["query"]["Filter"]
         } else {
@@ -260,7 +260,7 @@ fn admitted_decimal_looking_hash_is_hex_and_maximum_budgets_are_accepted() {
     let mut args = f.argv("dbcache", false);
     let at = args.iter().position(|a| a == "--table-hash").unwrap();
     args[at + 1] = "00000042".into();
-    let output = lycheedev_data::dispatch(&parse(&args).unwrap()).unwrap();
+    let output = crate::hotfix_cli::dispatch(&parse(&args).unwrap()).unwrap();
     assert_eq!(output.data["page"]["filter"]["tableHash"], 0x42);
     assert!(
         output.data["page"]["entries"]
@@ -399,7 +399,7 @@ fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
     )
     .unwrap();
     let mut bytes = Vec::new();
-    let error = lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap_err();
+    let error = crate::hotfix_cli::render(&inv, None, &mut bytes).unwrap_err();
     assert_eq!(error.code, "records.hotfix_offline");
     assert_eq!(error.exit_code, 3);
     assert!(bytes.is_empty());
@@ -420,7 +420,7 @@ fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
         }
         let inv = parse(&a).unwrap();
         let mut bytes = Vec::new();
-        lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap();
+        crate::hotfix_cli::render(&inv, None, &mut bytes).unwrap();
         let public: Value = serde_json::from_slice(&bytes).unwrap();
         let fetch = &public["result"]["coverage"]["fetch"];
         assert_eq!(
@@ -436,6 +436,28 @@ fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
         assert_eq!(public["result"]["coverage"]["fullQueryComplete"], true);
     }
 
+    // Presentation can fail after Wago has already committed its result capture.
+    // Reuse this exact authenticated offline page; do not issue a second query to recover it.
+    struct ClosedOutput { attempts: usize }
+    impl std::io::Write for ClosedOutput {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            self.attempts += 1;
+            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "closed hotfix output"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+    let mut closed=ClosedOutput {attempts:0};
+    let failure=crate::hotfix_cli::render(&inv,None,&mut closed).unwrap_err();
+    assert_eq!((failure.code.as_str(),failure.exit_code),("command.output_failed",5));
+    assert_eq!(closed.attempts,1);
+    assert_eq!(failure.details["primary"]["details"]["originalCause"]["code"],"external.io");
+    let captures=failure.details["completedCaptures"].as_array().unwrap();
+    assert_eq!(captures.len(),1);
+    let capture=evidence::read_capture(&f.home,captures[0].as_str().unwrap()).unwrap();
+    assert_eq!(capture["provenance"]["kind"],"hotfix-records");
+    let body=evidence::read_blob(&f.home,&capture["blob"],32<<20).unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["coverage"]["fetch"]["requests"],0);
+
     // A hit is still required to verify the receipt's embedded identity.
     DataCacheMetadata::put_controlled_with_check(
         &f.home,
@@ -447,7 +469,7 @@ fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
     )
     .unwrap();
     let mut bytes = Vec::new();
-    let error = lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap_err();
+    let error = crate::hotfix_cli::render(&inv, None, &mut bytes).unwrap_err();
     assert_eq!(error.code, "records.hotfix_cache_corrupt");
     assert_eq!(error.exit_code, 4);
     assert!(bytes.is_empty());

@@ -304,9 +304,25 @@ fn busy_input_mutex_does_not_run_fresh_guard_or_queue_stale_input() {
     let (release_tx, release_rx) = mpsc::sync_channel(0);
     // Only this test's fixed mutex is acquired. The worker cannot send keys.
     let thread = std::thread::spawn(move || {
-        let _lock = lycheedev_windows::NamedLock::acquire(&name).unwrap();
+        use windows::{
+            Win32::{
+                Foundation::{CloseHandle, WAIT_OBJECT_0},
+                System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject},
+            },
+            core::PCWSTR,
+        };
+        let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+        // SAFETY: this fixture owns the named handle and releases its same-thread ownership before closing it.
+        let handle = unsafe { CreateMutexW(None, false, PCWSTR(name.as_ptr())) }.unwrap();
+        let acquired = unsafe { WaitForSingleObject(handle, 0) };
+        if acquired != WAIT_OBJECT_0 {
+            unsafe { CloseHandle(handle) }.unwrap();
+            panic!("fixture mutex unavailable");
+        }
         ready_tx.send(()).unwrap();
         let _ = release_rx.recv_timeout(Duration::from_secs(5));
+        unsafe { ReleaseMutex(handle) }.unwrap();
+        unsafe { CloseHandle(handle) }.unwrap();
     });
     ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     let control = Control::new();

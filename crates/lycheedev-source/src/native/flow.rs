@@ -303,7 +303,7 @@ impl<'a,'b> FlowProjector<'a,'b> {
 
 impl SourceQueries<'_> {
     pub fn flow(&self,options:FlowOptions,mut page:PageRequest)->lycheedev_core::Result<FlowResult>{
-        self.validate_target(&options.target)?;
+        let declaration_target=self.validate_target(&options.target)?;
         let graph=self.graph.ok_or_else(||input_error("flow requires an execution graph"))?;
         let budget=graph.inputs.corpus.limits.flow.as_ref().ok_or_else(||input_error("flow budget must be admitted before graph construction"))?;
         let native=graph.native_invocations.as_ref().ok_or_else(||input_error("flow requires native facts"))?;
@@ -315,7 +315,7 @@ impl SourceQueries<'_> {
             if !projector.executed(&call.context){continue}
             let fact=&graph.calls[call.call];
             let callee=&graph.uses[fact.callee];
-            if !self.target_matches(&options.target,&fact.site,self.lexical_id_at(&callee.site).as_deref(),self.call_cell(callee),Some(&callee.decision)){continue}
+            if !self.target_matches(&options.target,declaration_target,&fact.site,self.lexical_id_at(&callee.site),self.call_cell(callee),Some(&callee.decision)){continue}
             let rules=call.host_binding.and_then(|binding|host.bindings[binding].declaration.rules());
             if let Some(rules)=rules{
                 for slot in &call.arguments{

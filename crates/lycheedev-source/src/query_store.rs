@@ -2,17 +2,17 @@
 //! strategies scan borrowed string slices and allocate only matched facts.
 //! Original document bytes use an authenticated rebuildable Source cache;
 //! missing or corrupt entries are recovered from the fixed Git identity.
-use crate::index::{self, Document, Index, Symbol, persistence_wire};
+use crate::index::{self, Index, Symbol, persistence_wire};
 use lycheedev_core::{
     Result, ToolkitError,
     control::OperationControl,
-    metadata::{Metadata, historical_write::finish_historical},
+    metadata::{Metadata, owned_write::finish_owned},
     selection::{SourcePin, valid_digest},
     storage,
 };
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io::Read,
     path::Path,
@@ -139,23 +139,6 @@ impl<'a> Image<'a> {
             }
         }
         Ok(image)
-    }
-    fn adopt_originals(&mut self, originals: Vec<Document>) -> Result<()> {
-        if originals.len() != self.meta.documents.len() {
-            return Err(invalid("Cold query document identities differ"));
-        }
-        for (target, mut source) in self.meta.documents.iter_mut().zip(originals) {
-            if target.path != source.path
-                || target.sha256 != source.sha256
-                || target.bytes != source.bytes
-            {
-                return Err(invalid("Cold query document identities differ"));
-            }
-            target.text = source.text.take();
-            // source Facts and unselected full-index symbols are no longer
-            // needed. Only authenticated original allocations cross projection.
-        }
-        Ok(())
     }
     fn string(&self, raw: &[u8], offset: usize) -> Result<&'a str> {
         let start = number(raw, offset)?;
@@ -351,7 +334,7 @@ pub fn load_with_control(
     let key = format!("source/rust-query-file/{identity}");
     let metadata = Metadata::open_controlled(home, true, control)?;
     let existing = metadata.read_controlled::<Value>(&key, control);
-    let existing = finish_historical(existing, metadata.close());
+    let existing = finish_owned(existing, metadata.close());
     let raw = match existing {
         Ok(manifest) if manifest["schema"] == SCHEMA && manifest["identity"] == identity => {
             read_image(home, &manifest["blob"], control)?
@@ -360,10 +343,7 @@ pub fn load_with_control(
         Err(e) if e.code == "vault.record_missing" && e.details.is_null() => None,
         Err(e) => return Err(e),
     };
-    let cached = raw.is_some();
-    let (raw, originals) = if let Some(raw) = raw {
-        (raw, None)
-    } else {
+    let Some(raw) = raw else {
         let lock = storage::ExclusiveLock::acquire_controlled(
             &home
                 .join("locks")
@@ -371,7 +351,7 @@ pub fn load_with_control(
             control,
         )?;
         let built = (|| {
-            let full = index::build_with_control(home, pin, control)?;
+            let mut full = index::build_with_control(home, pin, control)?;
             let raw = write_image(&full, &identity, control)?;
             let blob =
                 lycheedev_core::cache::publish_derived_controlled(home, &raw, MAX_BYTES, control)?;
@@ -381,16 +361,22 @@ pub fn load_with_control(
                 &json!({"schema":SCHEMA,"identity":identity,"blob":blob}),
                 control,
             )?;
-            Ok((raw, Some(full.documents)))
+            // The complete Index has already passed its construction or cache
+            // admission. Retain it instead of decoding and projecting the image
+            // just published; Index::search applies the same query selectors.
+            // Preserve the build's actual Git/cache observations.
+            full.summary.io["projection"] = json!("full-index");
+            full.summary.io["elapsedMs"] = json!(started.elapsed().as_millis());
+            Ok(full)
         })();
-        crate::persistence::finish_control(finish_historical(built, lock.close()), control.check())?
+        return crate::persistence::finish_control(
+            finish_owned(built, lock.close()),
+            control.check(),
+        );
     };
     control.check()?;
-    let mut image = Image::decode(&raw, &identity, control)?;
-    if let Some(originals) = originals {
-        image.adopt_originals(originals)?;
-    }
-    let projected = image.project(home, pin, text, mode, topic, cached, raw.len(), started)?;
+    let image = Image::decode(&raw, &identity, control)?;
+    let projected = image.project(home, pin, text, mode, topic, true, raw.len(), started)?;
     control.check()?;
     Ok(projected)
 }
@@ -455,7 +441,7 @@ pub fn status_with_control(
         }
         Ok(status)
     })();
-    crate::persistence::finish_control(finish_historical(result, metadata.close()), control.check())
+    crate::persistence::finish_control(finish_owned(result, metadata.close()), control.check())
 }
 fn read_image(
     home: &Path,
@@ -506,9 +492,9 @@ fn write_image(map: &Index, identity: &str, control: &OperationControl) -> Resul
 }
 fn write_image_sections(map: &Index, meta: Vec<u8>, control: &OperationControl) -> Result<Vec<u8>> {
     let mut pool = vec![];
-    let mut interned = BTreeMap::<String, (usize, usize)>::new();
+    let mut interned = HashMap::<String, (usize, usize)>::new();
     let mut records = vec![];
-    let mut names = BTreeMap::<String, BTreeSet<usize>>::new();
+    let mut names = BTreeMap::<&str, Vec<usize>>::new();
     let mut intern = |value: &str, output: &mut Vec<u8>| -> Result<()> {
         control.check()?;
         let &(start, len) = if let Some(pair) = interned.get(value) {
@@ -550,14 +536,23 @@ fn write_image_sections(map: &Index, meta: Vec<u8>, control: &OperationControl) 
         put(&mut records, s.line)?;
         put(&mut records, s.end_line)?;
         put(&mut records, s.ordinal)?;
+        // Symbol IDs arrive in ascending order. Borrow the unchanged names and
+        // suppress only repeated aliases of this same row, preserving the
+        // sorted, distinct postings without cloned keys or per-ID tree nodes.
         for name in [&s.name, &s.target] {
             if !name.is_empty() {
-                names.entry(name.clone()).or_default().insert(id);
+                let ids = names.entry(name.as_str()).or_default();
+                if ids.last() != Some(&id) {
+                    ids.push(id);
+                }
             }
         }
         if s.kind == "declaration" {
             for (at, _) in s.name.match_indices('.') {
-                names.entry(s.name[at + 1..].into()).or_default().insert(id);
+                let ids = names.entry(&s.name[at + 1..]).or_default();
+                if ids.last() != Some(&id) {
+                    ids.push(id);
+                }
             }
         }
         if records.len() > MAX_BYTES || names.len() > 4_000_000 {
@@ -606,6 +601,7 @@ fn write_image_sections(map: &Index, meta: Vec<u8>, control: &OperationControl) 
 mod tests {
     use super::*;
     use crate::facts::Facts;
+    use crate::index::Document;
     fn map() -> (Index, SourcePin) {
         let pin = SourcePin {
             repository: "fixture".into(),
@@ -699,15 +695,15 @@ mod tests {
             let other = projected
                 .search(&pin, "PIN", text, mode, topic, 1, "")
                 .unwrap();
-            for field in [
-                "results",
-                "relations",
-                "truncated",
-                "nextCursor",
-                "matchCoverage",
-            ] {
-                assert_eq!(first[field], other[field], "{text}/{mode}/{topic}/{field}");
-            }
+            let without_io = |mut data: Value| {
+                data["coverage"].as_object_mut().unwrap().remove("io");
+                data
+            };
+            assert_eq!(
+                without_io(first.clone()),
+                without_io(other),
+                "{text}/{mode}/{topic}"
+            );
             if let Some(cursor) = first["nextCursor"].as_str() {
                 let next = full
                     .search(&pin, "PIN", text, mode, topic, 1, cursor)
@@ -715,9 +711,21 @@ mod tests {
                 let other = projected
                     .search(&pin, "PIN", text, mode, topic, 1, cursor)
                     .unwrap();
-                assert_eq!(next["results"], other["results"]);
+                assert_eq!(without_io(next), without_io(other));
             }
         }
+        // Row 0 repeats its target as a suffix alias; rows 1 and 3 repeat
+        // name/target. All three share a key, while only declarations add suffixes.
+        full.symbols[0].target = "Timer.After".into();
+        full.symbols[1].name = "Timer.After".into();
+        full.symbols[1].target = "Timer.After".into();
+        full.symbols[3].name = "Timer.After".into();
+        full.symbols[3].target = "Timer.After".into();
+        let raw = write_image(&full, &identity, &OperationControl::default()).unwrap();
+        let image = Image::decode(&raw, &identity, &OperationControl::default()).unwrap();
+        assert_eq!(image.exact_ids("Alpha.Timer.After").unwrap(), [0]);
+        assert_eq!(image.exact_ids("Timer.After").unwrap(), [0, 1, 3]);
+        assert_eq!(image.exact_ids("After").unwrap(), [0, 1]);
     }
     #[test]
     fn binary_metadata_preserves_public_fields_and_omits_source_payloads() {
@@ -742,38 +750,6 @@ mod tests {
             serde_json::to_value(&full.assets).unwrap()
         );
         assert_eq!(decoded.meta.compatibility_gaps, full.compatibility_gaps);
-    }
-    #[test]
-    fn cold_projection_moves_all_original_allocations_including_empty_documents() {
-        let (mut full, pin) = map();
-        full.documents.push(Document {
-            path: "Empty.lua".into(),
-            text: Some(Vec::new()),
-            sha256: storage::sha256(&[]),
-            bytes: 0,
-            facts: Facts::default(),
-            facts_locator: None,
-        });
-        full.summary.documents = full.documents.len();
-        full.summary.ast_files = full.documents.len();
-        let pointer = full.documents[0].text.as_ref().unwrap().as_ptr();
-        let identity = index::fingerprint(&pin);
-        let raw = write_image(&full, &identity, &OperationControl::default()).unwrap();
-        let mut image = Image::decode(&raw, &identity, &OperationControl::default()).unwrap();
-        image.adopt_originals(full.documents).unwrap();
-        assert_eq!(
-            image.meta.documents[0].text.as_ref().unwrap().as_ptr(),
-            pointer
-        );
-        assert_eq!(image.meta.documents[1].text.as_deref(), Some([].as_slice()));
-        assert!(image.meta.documents[0].facts.declarations.is_empty());
-        let mut mismatched = image.meta.documents;
-        mismatched[0].path = "Wrong.lua".into();
-        let mut image = Image::decode(&raw, &identity, &OperationControl::default()).unwrap();
-        assert_eq!(
-            image.adopt_originals(mismatched).unwrap_err().code,
-            "codebase.source_integrity"
-        );
     }
     #[test]
     fn file_projection_rejects_truncated_offsets_identity_and_invalid_strings() {

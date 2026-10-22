@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-const RULES: &str = "source-native-semantic-api-v5-xml-objects";
+const RULES: &str = "source-native-semantic-api-v6-call-return-checks";
 const CHECKER_FAMILIES: [&str; 8] = [
     "param-type-mismatch",
     "return-type-mismatch",
@@ -44,12 +44,18 @@ pub fn check(
     let mut inputs = Vec::new();
     for (path, bytes) in files {
         control.check()?;
+        // A raw-bytes CAP holding invalid UTF-8 is not labelled as UTF-8 text.
+        let media_type = if crate::encoding::is_utf8(bytes) {
+            "text/x-lua"
+        } else {
+            "application/octet-stream"
+        };
         let capture = evidence::commit_capture_bounded(
             home,
             lycheedev_core::evidence::CaptureInput {
                 bytes: bytes,
                 maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
-                media_type: "text/x-lua",
+                media_type,
                 provenance: json!({"kind":"source-semantic-input","locator":path,"snapshot":snapshot,"sourceCommit":client.exact_commit}),
                 complete: true,
                 truncated: false,
@@ -123,7 +129,7 @@ pub fn check(
     result["sourceMapRules"] = json!(xml_inline::SOURCE_MAP_RULES);
     result["notChecked"] = json!([
         "other diagnostic families",
-        "script-object nominal identity and inheritance",
+        "script-object type inheritance",
         "unknown or dynamic API metadata",
         "XML native lifecycle timing and native UI type inheritance",
         "combat, taint and game runtime behavior"
@@ -145,21 +151,49 @@ fn analyze(
         crate::native_research::api_environment(&catalog.facts, Some(&catalog.manifest), control)?;
     let config = crate::engine_config::addon_diagnostics();
     let mut source_files = Vec::new();
+    let mut encoding_warnings = Vec::new();
+    let mut encoding_gaps = Vec::new();
     for (path, bytes) in files {
         control.check()?;
-        let text = String::from_utf8(bytes.clone()).map_err(|_| {
-            ToolkitError::new("codebase.source_integrity", "semantic input is not UTF8", 4)
-        })?;
+        let (original, analysis_text, map, content_sha256) = match std::str::from_utf8(bytes) {
+            Ok(text) => (
+                text.to_owned(),
+                text.strip_prefix('\u{feff}').unwrap_or(text).to_owned(),
+                if text.starts_with('\u{feff}') {
+                    SourceMap::Utf8BomPrefix
+                } else {
+                    SourceMap::Identity
+                },
+                storage::sha256(bytes),
+            ),
+            // Comment-only invalid bytes are semantically inert: the same-width
+            // analysis view keeps byte positions. Invalid bytes in a token or
+            // string value must keep their real syntax result, so that file is
+            // reported unavailable instead of analyzing substituted text.
+            Err(_) => {
+                let warning = crate::encoding::warning(bytes).expect("invalid source bytes");
+                if !crate::lua_tree::invalid_bytes_are_comment_only(bytes) {
+                    encoding_gaps.push(json!({"code":"source_encoding_unavailable","path":path,"line":warning.line,"byteOffset":warning.byte_offset,"message":warning.message()}));
+                    continue;
+                }
+                encoding_warnings.push(warning.json(path));
+                let text = crate::encoding::analysis(bytes).into_owned();
+                let analysis_text = text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned();
+                let map = if text.starts_with('\u{feff}') {
+                    SourceMap::Utf8BomPrefix
+                } else {
+                    SourceMap::Identity
+                };
+                let content_sha256 = storage::sha256(text.as_bytes());
+                (text, analysis_text, map, content_sha256)
+            }
+        };
         source_files.push(SourceFileInput {
             path: path.clone(),
-            content_sha256: storage::sha256(bytes),
-            analysis_utf8: text.strip_prefix('\u{feff}').unwrap_or(&text).into(),
-            map: if text.starts_with('\u{feff}') {
-                SourceMap::Utf8BomPrefix
-            } else {
-                SourceMap::Identity
-            },
-            original_utf8: text,
+            content_sha256,
+            analysis_utf8: analysis_text.into(),
+            map,
+            original_utf8: original,
         });
     }
     let luac = compiler.manifest();
@@ -169,11 +203,18 @@ fn analyze(
         xml_inputs.push(json!({"path":script.key,"xmlSHA256":script.xml_sha256,"sourceMapSHA256":storage::sha256(&serde_json::to_vec(&script.mapping_manifest())?)}));
     }
     let xml_program = Arc::new(crate::xml_load::Program::from_closure(closure, control)?);
+    // Disclose the only boundary transform: comment-confined invalid bytes are
+    // replaced by one ASCII byte each, keeping every analysis byte position.
+    let source_encoding = if encoding_warnings.is_empty() {
+        "identity"
+    } else {
+        "invalid-byte-single-ascii-replacement-preserving-byte-length-v1"
+    };
     let admitted = SourceInputs::admit(
         SourceInputSpec {
             files: source_files,
             workspace_root: PathBuf::from("C:/lycheedev/addon-semantic"),
-            source_identity: json!({"rules":RULES,"client":client,"manifest":closure.manifest,"xmlSourceMapRules":xml_inline::SOURCE_MAP_RULES,"xmlInputs":xml_inputs}),
+            source_identity: json!({"rules":RULES,"client":client,"manifest":closure.manifest,"sourceEncoding":source_encoding,"xmlSourceMapRules":xml_inline::SOURCE_MAP_RULES,"xmlInputs":xml_inputs}),
             phase: "after_load".into(),
             ordered_occurrences: vec![],
             config,
@@ -195,11 +236,14 @@ fn analyze(
         prepared.build_xml_plan("addon-semantic-load", xml_program.clone(), None, control)?;
     let mut diagnostics = Vec::new();
     let mut coverage = Vec::new();
-    let mut gaps = graph
-        .xml
-        .as_ref()
-        .map(|facts| facts.gaps.clone())
-        .unwrap_or_default();
+    let mut gaps = encoding_gaps;
+    gaps.extend(
+        graph
+            .xml
+            .as_ref()
+            .map(|facts| facts.gaps.clone())
+            .unwrap_or_default(),
+    );
     for (occurrence, path) in ordered.iter().enumerate() {
         collect(
             &prepared,
@@ -395,9 +439,11 @@ fn analyze(
         }
     }
     let complete = gaps.is_empty() && !coverage.iter().any(|row| row["state"] == "unavailable");
-    Ok(
-        json!({"state":if complete{"checked"}else{"partial"},"passed":diagnostics.is_empty(),"complete":complete,"diagnostics":diagnostics,"coverage":coverage,"gaps":gaps,"inputIdentity":prepared.inputs().identity_sha256(),"loadPlan":LoadPlan::Known(ordered),"xmlProgram":xml_program.as_ref(),"xmlFacts":graph.xml,"xmlEntries":xml_entries,"entryPolicy":"hypothetical_after_load; XML self is the exact instance; remaining arguments unspecified","checkerFamilies":CHECKER_FAMILIES}),
-    )
+    let mut result = json!({"state":if complete{"checked"}else{"partial"},"passed":diagnostics.is_empty(),"complete":complete,"diagnostics":diagnostics,"coverage":coverage,"gaps":gaps,"inputIdentity":prepared.inputs().identity_sha256(),"loadPlan":LoadPlan::Known(ordered),"xmlProgram":xml_program.as_ref(),"xmlFacts":graph.xml,"xmlEntries":xml_entries,"entryPolicy":"hypothetical_after_load; XML self is the exact instance; remaining arguments unspecified","checkerFamilies":CHECKER_FAMILIES});
+    if !encoding_warnings.is_empty() {
+        result["encodingWarnings"] = json!(encoding_warnings);
+    }
+    Ok(result)
 }
 
 fn owns(site: &Site, file: &str, scope: Option<&Site>, entries: &[EntryCandidate]) -> bool {
