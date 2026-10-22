@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -103,7 +104,38 @@ test('Node and Rust toolchains are pinned consistently', () => {
     assert.match(text, /node-version: '24\.18\.1'/, `${name} must pin Node 24.18.1`);
     assert.match(text, /rustup toolchain install 1\.99\.0 --profile minimal/, `${name} must install the pinned Rust toolchain`);
   }
-  assert.match(ci, /if \(\$LASTEXITCODE -ne 0 -or \$version -notmatch 'release: 1\\\.99\\\.0'\)/);
+  assert.match(ci, /if \(\$LASTEXITCODE -ne 0 -or \$version -cnotcontains 'release: 1\.99\.0'\)/);
+});
+
+test('actual PowerShell toolchain checks accept multiline pinned output and reject drift or command failure', {skip: process.platform !== 'win32'}, () => {
+  const lines = ['rustc 1.99.0 (example)', 'binary: rustc', 'commit-hash: example',
+    'commit-date: 2026-01-01', 'host: x86_64-pc-windows-msvc', 'release: 1.99.0', 'LLVM version: 22.1.0'];
+  const fixtures = [
+    {name: 'pinned-multiline', lines, exit: 0, rejected: false},
+    {name: 'command-failed', lines, exit: 1, rejected: true},
+    ...['1.98.0', '1.99.01', '1.99.0-nightly'].map(version => ({name: version,
+      lines: lines.map(line => line.startsWith('release: ') ? `release: ${version}` : line), exit: 0, rejected: true})),
+    {name: 'missing-release', lines: lines.filter(line => !line.startsWith('release: ')), exit: 0, rejected: true},
+    {name: 'non-field-substring', lines: lines.map(line => line.startsWith('release: ') ? `note: ${line}` : line), exit: 0, rejected: true},
+  ];
+  const literal = value => "'" + value.replaceAll("'", "''") + "'";
+  const commands = [], expected = [];
+  for (const [job, body] of jobBodies(ci)) {
+    if (!body.includes('$version = rustc -Vv')) continue;
+    const check = /^\s*if \(\$LASTEXITCODE[^\n]*\$version[^\n]*\) \{ throw "rustc drift: \$version" \}\s*$/m.exec(body)?.[0].trim();
+    assert(check, `${job} needs its actual toolchain rejection condition`);
+    for (const fixture of fixtures) {
+      commands.push(`$version=@(${fixture.lines.map(literal).join(',')});$LASTEXITCODE=${fixture.exit};$rejected=$false;try{${check}}catch{$rejected=$true};[Console]::Out.WriteLine((${literal(`${job}:${fixture.name}:`)}+$rejected))`);
+      expected.push(`${job}:${fixture.name}:${fixture.rejected ? 'True' : 'False'}`);
+    }
+  }
+  assert.equal(expected.length, 14, 'exercise both build jobs with all positive and negative outputs');
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+    Buffer.from(commands.join('\n'), 'utf16le').toString('base64')], {
+    encoding: 'utf8', windowsHide: true, shell: false, timeout: 10000, maxBuffer: 1 << 20,
+  });
+  assert.equal(result.error, undefined); assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), expected);
 });
 
 test('build stage compiles each required configuration exactly once', () => {

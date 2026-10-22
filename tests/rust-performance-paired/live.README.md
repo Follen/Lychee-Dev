@@ -2,12 +2,12 @@
 
 This is a **Rust-only diagnostic**, not B06 performance acceptance. It runs the
 real Rust Driver, protocol codec, durable journal, snapshot and terminal
-projection against the authenticated fixed-Go323 Lua peer. It does not open a
-game, send native input, use a network service or execute arbitrary caller Lua.
-The Go behavior oracle remains `3766f9cacb52e93a803a626187e2a1d54a445468`.
+projection against the current addon and authenticated Lua protocol peer. It
+does not open a game, send native input, use a network service or execute
+arbitrary caller Lua. It neither loads nor rebuilds a frozen Go implementation.
 
-The existing formal9 bridge/runtime/113-file fixture authentication and peer
-ownership are reused. The default nine recovery cases and their fixed source
+The formal bridge's sealed Lua runtime, four current addon/protocol inputs and
+peer ownership are reused. The default nine recovery cases and their fixed source
 allowlist are unchanged. Only `Peer::start_performance` enables the three exact
 locally generated source strings and diagnostic counters. This benchmark does
 not replace the nine recovery/error tests or claim new real-client coverage.
@@ -58,10 +58,10 @@ receipts. Do not overwrite old reports or bypass an occupied channel.
 The runner uses existing `runCargo` admission/owner/target logic, source hashes
 before/after compilation, Cargo's same-invocation structured artifact message,
 exact test executable hash, build owner proof, current support hashes, sealed
-Lua runtime receipt and fixed-Go fixture authentication. The new release-test
+Lua runtime receipt and current bridge-input authentication. The release-test
 artifact records the source identity actually executed. A matching unused CLI
-build is deliberately not a prerequisite. The original formal9 runner's
-separate CLI identity contract is unchanged.
+build is deliberately not a prerequisite. The formal bridge consumes its
+authenticated test executable and Lua inputs separately.
 
 The controller requires the exact single test, all 27 reports, all nine complete
 three-sample cells, exact input/BODY identities and normal cleanup proofs for
@@ -172,20 +172,25 @@ its public byte API while its writer helper also returns the already-computed
 checksum. Exactly 2-MiB JSON plus LF remains writable but not reader-valid, so
 such writes cannot install a cache that bypasses the stricter next read.
 
-The current fixed Go host recovery test is not an equivalent timed adapter for
-this expanded result-size/history/owned-projection matrix. Reusing its Lua
+The external fixed Go reference is not an equivalent timed adapter for this
+expanded result-size/history/owned-projection matrix. The current addon Lua
 business peer establishes neither same-input Go host timing nor a speed ratio.
 `goHostComparison=not_available` and `acceptance=diagnostic_only` are explicit.
 A future comparable host adapter must preserve the same input, checks, journal
 work and complete timing before any Go/Rust ratio is reported.
 
-## Portable checks and current boundary
+## Portable checks and retained historical measurements
 
 ```sh
 node --test tests/rust-performance-paired/live-runner.test.mjs tools/rust-formal-lua-bridge.test.mjs
 ```
 
-The 1360 baseline's 66 Node tests validate fixture identity, strict report arithmetic, negative
+The measurements below belong to their named historical baselines and do not
+establish current-tree acceptance. Keep their original values; current business
+coverage is recorded in test.md and handover.md. Performance optimization and
+additional performance runs are paused because the user accepted performance.
+
+The 1360 baseline's 66 Node tests validated fixture identity, strict report arithmetic, negative
 samples, exact executable/result selection, ownership-entry wiring and the
 unchanged original nine-case controller. Their synthetic numeric parser inputs
 are not benchmark evidence. Rustfmt parsing is also not compilation.
@@ -217,7 +222,7 @@ boundaries remain, and no safe sync coalescing has been established. The remaini
 snapshot/artifact bucket is about 31 ms per sample in total, not a promised
 removable amount. No game or comparable Go-host latency was measured.
 
-## Current call-local borrowed-artifact candidate
+## Retained call-local borrowed-artifact measurements
 
 The durable append/checkpoint snapshot now borrows ordinary code and raw result
 bytes directly from the immutable caller State. Invalid UTF-8 **code** keeps the
@@ -256,7 +261,7 @@ do not enter these counters. Readers accept complete historical 0890 reports
 without append profiles and 1360 reports without ownership fields, but reject
 partially omitted ownership observations in a new matrix.
 
-Current cloud checks: 76 Node tests passed, including ten added ownership-schema
+At that historical baseline, 76 Node tests passed, including ten added ownership-schema
 cases; rustfmt parsing and diff checks passed. Five new Rust regressions cover
 borrowed pointer/capacity/lifetime, malformed code/first-owner normalization,
 all code-owner deduplication/empty values, same-length external artifact changes

@@ -135,7 +135,7 @@ jobs:
           rustup override set 1.99.0
           if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
           $version = rustc -Vv
-          if ($LASTEXITCODE -ne 0 -or $version -notmatch 'release: 1\.99\.0') { throw "rustc drift: $version" }
+          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
       - name: Fetch locked dependencies (network preparation, no product compile)
         run: node tools/rust-cargo.mjs --owner ci-fetch-test -- fetch --locked
       - name: Compile the test configuration once (cargo test --no-run)
@@ -178,7 +178,7 @@ jobs:
           rustup override set 1.99.0
           if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
           $version = rustc -Vv
-          if ($LASTEXITCODE -ne 0 -or $version -notmatch 'release: 1\.99\.0') { throw "rustc drift: $version" }
+          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
       - name: Fetch locked dependencies (network preparation, no product compile)
         run: node tools/rust-cargo.mjs --owner ci-fetch-release -- fetch --locked
       - name: Build the release CLI from this source tree
