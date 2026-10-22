@@ -1,0 +1,8 @@
+<Bindings>
+<Binding name="A&amp;B" runOnUp="true" header="H" category="C">R&#117;<![CDATA[n]]>(keystate)
+R<!--x-->un(keystate)&#13;return</Binding>
+<!--<Binding name="FAKE">Ghost()</Binding>-->
+<ModifiedClick action="SELFCAST" default="ALT"/>
+<Binding name="Empty" bindingContext="HousingEditorLayoutMode"/>
+<Binding name="A&amp;B">local keystate="up";Run(keystate)</Binding>
+</Bindings>

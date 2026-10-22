@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { readTarGz, writeTarGz } from './tar.mjs';
+import { readTarGz, readTarGzFile, writeTarGz } from './tar.mjs';
 import { readTgz } from './tgz.mjs';
 
 function fixture(t) {
@@ -24,7 +24,7 @@ test('round trip preserves spaces, CJK names, binary and empty content', async t
     { name: 'empty.txt', bytes: '' },
   ];
   assert.equal(await writeTarGz(entries, out), out);
-  const read = await readTarGz(readFileSync(out));
+  const read = await readTarGzFile(out);
   assert.deepEqual([...read.keys()], ['bin/data.bin', 'empty.txt', 'notes/read me.txt', '文档/说明.txt']);
   assert.equal(read.get('notes/read me.txt').toString('utf8'), 'hello world');
   assert.equal(read.get('文档/说明.txt').toString('utf8'), '荔枝开发工具');
@@ -49,7 +49,7 @@ test('per-entry mode is recorded and content reads back unchanged', async t => {
   await writeTarGz([{ name: 'b.txt', bytes: 'bbb' }, { name: 'a.txt', bytes: 'aaa', mode: 0o600 }], out);
   const entries = readTgz(readFileSync(out));
   assert.deepEqual(entries.map(entry => [entry.name, entry.mode, entry.type]), [['a.txt', 0o600, '0'], ['b.txt', 0o644, '0']]);
-  const read = await readTarGz(readFileSync(out));
+  const read = await readTarGzFile(out);
   assert.equal(read.get('a.txt').toString('utf8'), 'aaa');
   assert.equal(read.get('b.txt').toString('utf8'), 'bbb');
 });
@@ -68,7 +68,7 @@ test('long names split at a slash boundary and round trip', async t => {
   assert.ok(Buffer.byteLength(ascii) > 100 && Buffer.byteLength(cjk) > 100);
   const out = join(root, 'long.tar.gz');
   await writeTarGz([[ascii, 'ascii'], [cjk, 'cjk']], out);
-  const read = await readTarGz(readFileSync(out));
+  const read = await readTarGzFile(out);
   assert.deepEqual([...read.keys()], [ascii, cjk]);
   assert.equal(read.get(ascii).toString('utf8'), 'ascii');
   assert.equal(read.get(cjk).toString('utf8'), 'cjk');
@@ -101,7 +101,7 @@ test('empty entry list round trips to an empty map', async t => {
   const root = fixture(t);
   const out = join(root, 'empty.tar.gz');
   await writeTarGz([], out);
-  const read = await readTarGz(readFileSync(out));
+  const read = await readTarGzFile(out);
   assert.equal(read.size, 0);
   assert.deepEqual(read, new Map());
 });

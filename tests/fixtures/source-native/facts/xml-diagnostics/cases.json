@@ -1,0 +1,166 @@
+{
+  "schema": "lycheedev.source-facts-malformed-cases.v1",
+  "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "cases": [
+    {
+      "id": "bang_comment_open_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui><!-"
+    },
+    {
+      "id": "bang_comment_open_wrong",
+      "path": "Fixture.xml",
+      "source": "<Ui><!-x>"
+    },
+    {
+      "id": "bang_comment_open_lf",
+      "path": "Fixture.xml",
+      "source": "<Ui><!-\n-->"
+    },
+    {
+      "id": "bang_comment_open_crlf",
+      "path": "Fixture.xml",
+      "source": "<Ui><!-\r\n-->"
+    },
+    {
+      "id": "bang_cdata_open_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui><!["
+    },
+    {
+      "id": "bang_cdata_prefix_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui><![CDA"
+    },
+    {
+      "id": "bang_cdata_prefix_wrong",
+      "path": "Fixture.xml",
+      "source": "<Ui><![CDATx[x]]>"
+    },
+    {
+      "id": "bang_cdata_prefix_lowercase",
+      "path": "Fixture.xml",
+      "source": "<Ui><![cdata[x]]>"
+    },
+    {
+      "id": "bang_cdata_prefix_lf",
+      "path": "Fixture.xml",
+      "source": "<Ui><![CD\nATA[x]]>"
+    },
+    {
+      "id": "bang_cdata_prefix_crlf",
+      "path": "Fixture.xml",
+      "source": "<Ui><![CD\r\nATA[x]]>"
+    },
+    {
+      "id": "bang_preserves_prior_facts",
+      "path": "Fixture.xml",
+      "source": "<Ui>\n<Frame name=\"Before\" inherits=\"Base\"/><Include file=\"Earlier.xml\"/>\n<!-\nx>\n<Frame name=\"After\"/></Ui>"
+    },
+    {
+      "id": "bang_valid_comment_cdata",
+      "path": "Fixture.xml",
+      "source": "<Ui><Frame name=\"F\"><OnLoad>R<![CDATA[u]]><!-- gap -->n()</OnLoad></Frame></Ui>"
+    },
+    {
+      "id": "end_name_missing",
+      "path": "Fixture.xml",
+      "source": "</>"
+    },
+    {
+      "id": "end_name_leading_space",
+      "path": "Fixture.xml",
+      "source": "<Ui></ Ui>"
+    },
+    {
+      "id": "end_name_leading_lf",
+      "path": "Fixture.xml",
+      "source": "<Ui></\nUi>"
+    },
+    {
+      "id": "end_open_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui></"
+    },
+    {
+      "id": "end_name_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui></Ui"
+    },
+    {
+      "id": "end_space_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui></Ui \n"
+    },
+    {
+      "id": "end_name_digit",
+      "path": "Fixture.xml",
+      "source": "<Ui></1Ui>"
+    },
+    {
+      "id": "end_name_dash",
+      "path": "Fixture.xml",
+      "source": "<Ui></-Ui>"
+    },
+    {
+      "id": "end_name_multiple_colons",
+      "path": "Fixture.xml",
+      "source": "<Ui></a:b:c>"
+    },
+    {
+      "id": "end_trailing_text",
+      "path": "Fixture.xml",
+      "source": "<Ui></Ui junk>"
+    },
+    {
+      "id": "end_trailing_text_lf",
+      "path": "Fixture.xml",
+      "source": "<Ui></Ui\n junk>"
+    },
+    {
+      "id": "end_trailing_text_crlf",
+      "path": "Fixture.xml",
+      "source": "<Ui></Ui\r\n junk>"
+    },
+    {
+      "id": "end_trailing_slash",
+      "path": "Fixture.xml",
+      "source": "<Ui></Ui/>"
+    },
+    {
+      "id": "end_preserves_prior_facts",
+      "path": "Fixture.xml",
+      "source": "<Ui>\n<Frame name=\"Before\" inherits=\"Base\"/><Include file=\"Earlier.xml\"/>\n</Ui\n junk>\n<Frame name=\"After\"/>"
+    },
+    {
+      "id": "end_mismatch_control",
+      "path": "Fixture.xml",
+      "source": "<Ui><Frame name=\"Before\"></Ui>"
+    },
+    {
+      "id": "end_whitespace_control",
+      "path": "Fixture.xml",
+      "source": "<Ui><Frame name=\"F\"></Frame \n ></Ui>"
+    },
+    {
+      "id": "namespace_empty_prefix_control",
+      "path": "Fixture.xml",
+      "source": "<Ui><:Frame name=\"F\"></:Frame></Ui>"
+    },
+    {
+      "id": "namespace_empty_suffix_control",
+      "path": "Fixture.xml",
+      "source": "<Ui><Frame: name=\"F\"></Frame:></Ui>"
+    },
+    {
+      "id": "attribute_no_space_control",
+      "path": "Fixture.xml",
+      "source": "<Ui><Frame name=\"F\"inherits=\"Base\"method=\"Shown\"/></Ui>"
+    },
+    {
+      "id": "duplicate_attribute_no_space_control",
+      "path": "Fixture.xml",
+      "source": "<Ui><Frame name=\"Old\"name=\"F\"/></Ui>"
+    }
+  ]
+}

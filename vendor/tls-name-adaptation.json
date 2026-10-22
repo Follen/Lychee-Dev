@@ -1,0 +1,237 @@
+{
+  "schema": "lycheedev.tls-name-adaptation.v1",
+  "scope": "Two pinned Windows TLS API adaptations; tokio-native-tls and all original certificate policy algorithms unchanged",
+  "goBehaviorCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "goToolchain": "go1.27.1",
+  "patch": "vendor/tls-verification-name.patch",
+  "patchSHA256": "25205104cab5e529be060417e5c77fc880a0e02d533b27f65481f626461b35a4",
+  "cargoLock": "Finite source-identity change only; NOT_RESOLVED_BY_CARGO here",
+  "packages": [
+    {
+      "name": "schannel",
+      "version": "0.1.29",
+      "registry": "https://crates.io",
+      "archiveSHA256": "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939",
+      "archiveBytes": 34352,
+      "files": [
+        {
+          "path": ".cargo_vcs_info.json",
+          "sha256": "85405a6dca13d8d585b4eedbf55643ee4d31988d92cc98c9bf30671d3a4c85b2",
+          "bytes": 94,
+          "candidateSHA256": "85405a6dca13d8d585b4eedbf55643ee4d31988d92cc98c9bf30671d3a4c85b2"
+        },
+        {
+          "path": "Cargo.lock",
+          "sha256": "9e42626cd21577a1de603914fcf78fe56b29b201587aa964d5a1a35c37e9d993",
+          "bytes": 616,
+          "candidateSHA256": "9e42626cd21577a1de603914fcf78fe56b29b201587aa964d5a1a35c37e9d993"
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "929f428ff42001e8c5f41d30b396d8c4995da4e25921987d33cf862d56eed633",
+          "bytes": 1695,
+          "candidateSHA256": "929f428ff42001e8c5f41d30b396d8c4995da4e25921987d33cf862d56eed633"
+        },
+        {
+          "path": "Cargo.toml.orig",
+          "sha256": "031774ac518f74efac72f601efcb8ed1617f9651458c72fd8d07c2002808d1a6",
+          "bytes": 1016,
+          "candidateSHA256": "031774ac518f74efac72f601efcb8ed1617f9651458c72fd8d07c2002808d1a6"
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "aa72991ac35b4de0034da0afe943e62b48c4092fc2ba13ae47806d8e9a4ad551",
+          "bytes": 1053,
+          "candidateSHA256": "aa72991ac35b4de0034da0afe943e62b48c4092fc2ba13ae47806d8e9a4ad551"
+        },
+        {
+          "path": "README.md",
+          "sha256": "1356487328648f2e2ee621872cc0adb930d1f6929e587ceb1877ef3eb989fd44",
+          "bytes": 364,
+          "candidateSHA256": "1356487328648f2e2ee621872cc0adb930d1f6929e587ceb1877ef3eb989fd44"
+        },
+        {
+          "path": "src/alpn_list.rs",
+          "sha256": "1401fa57397540a42c3fa3b00c4bf901150b63d020a112d63ae56f17c241a98b",
+          "bytes": 3386,
+          "candidateSHA256": "1401fa57397540a42c3fa3b00c4bf901150b63d020a112d63ae56f17c241a98b"
+        },
+        {
+          "path": "src/cert_chain.rs",
+          "sha256": "a09c6ca084b19a5ecd86b115454c4de7ce5e1146c747c6e25adec1af5ee4708d",
+          "bytes": 3955,
+          "candidateSHA256": "a09c6ca084b19a5ecd86b115454c4de7ce5e1146c747c6e25adec1af5ee4708d"
+        },
+        {
+          "path": "src/cert_context.rs",
+          "sha256": "1a8f104990313b514a67c3f97d1c4d954b5fa18d15b2a54a40a8e7f8a7789848",
+          "bytes": 23728,
+          "candidateSHA256": "1a8f104990313b514a67c3f97d1c4d954b5fa18d15b2a54a40a8e7f8a7789848"
+        },
+        {
+          "path": "src/cert_store.rs",
+          "sha256": "88e9b4e8b7b8109baf2c96612965d7fe249aa6513ed75a4dd3d243298f900a29",
+          "bytes": 17098,
+          "candidateSHA256": "88e9b4e8b7b8109baf2c96612965d7fe249aa6513ed75a4dd3d243298f900a29"
+        },
+        {
+          "path": "src/context_buffer.rs",
+          "sha256": "f6b667b55d8e6f4c1826519e9030066cd489399dca2d55bb927fe7f583f62715",
+          "bytes": 568,
+          "candidateSHA256": "f6b667b55d8e6f4c1826519e9030066cd489399dca2d55bb927fe7f583f62715"
+        },
+        {
+          "path": "src/crypt_key.rs",
+          "sha256": "1d0d8baeafbe30a2e43ff677fc8e707150306f92d13ede6692ba8d84dba9e0e4",
+          "bytes": 292,
+          "candidateSHA256": "1d0d8baeafbe30a2e43ff677fc8e707150306f92d13ede6692ba8d84dba9e0e4"
+        },
+        {
+          "path": "src/crypt_prov.rs",
+          "sha256": "77284f20aeac4faa3747ef156b1e4ffe0b2e994229e975392a2d624936660dc9",
+          "bytes": 13070,
+          "candidateSHA256": "77284f20aeac4faa3747ef156b1e4ffe0b2e994229e975392a2d624936660dc9"
+        },
+        {
+          "path": "src/ctl_context.rs",
+          "sha256": "0fabd379c98ac3325c357c0188a7eebd1036a10ce029e64b82a53e6ef19bb02e",
+          "bytes": 5773,
+          "candidateSHA256": "0fabd379c98ac3325c357c0188a7eebd1036a10ce029e64b82a53e6ef19bb02e"
+        },
+        {
+          "path": "src/key_handle.rs",
+          "sha256": "01e8b642db3759b3cb73c035a664404353a6b1d77f571b7591047a23d3163a1a",
+          "bytes": 143,
+          "candidateSHA256": "01e8b642db3759b3cb73c035a664404353a6b1d77f571b7591047a23d3163a1a"
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "17b4cd6e510e045d9ad56557e4e66b9a2d39a18111840ea3cc970674f106ae2e",
+          "bytes": 3046,
+          "candidateSHA256": "17b4cd6e510e045d9ad56557e4e66b9a2d39a18111840ea3cc970674f106ae2e"
+        },
+        {
+          "path": "src/ncrypt_key.rs",
+          "sha256": "25d08cdb4c9337cfe3983c4381a95536c2fc24b7aeb8df23ddf4367ad9e17943",
+          "bytes": 346,
+          "candidateSHA256": "25d08cdb4c9337cfe3983c4381a95536c2fc24b7aeb8df23ddf4367ad9e17943"
+        },
+        {
+          "path": "src/schannel_cred.rs",
+          "sha256": "4799f99767d15a4eb03853686e77129d79eb743e2f6ed6c4d4d1357bc6c537fb",
+          "bytes": 13878,
+          "candidateSHA256": "4799f99767d15a4eb03853686e77129d79eb743e2f6ed6c4d4d1357bc6c537fb"
+        },
+        {
+          "path": "src/security_context.rs",
+          "sha256": "dba9600184d526e6a1dd582e1fcf66658fe8dcc707b6997692e7f85078beffd3",
+          "bytes": 4274,
+          "candidateSHA256": "dba9600184d526e6a1dd582e1fcf66658fe8dcc707b6997692e7f85078beffd3"
+        },
+        {
+          "path": "src/test.rs",
+          "sha256": "b787f4852ff2d8e8a39ee75ffb4677ef4459ea90085bdc3a341613751b92808e",
+          "bytes": 35537,
+          "candidateSHA256": "b787f4852ff2d8e8a39ee75ffb4677ef4459ea90085bdc3a341613751b92808e"
+        },
+        {
+          "path": "src/tls_stream.rs",
+          "sha256": "c1eb9ac4a44582f7cdd522fb7ae9122b4a9fb3ee8ec9c6b4d96f20982feb7981",
+          "bytes": 37905,
+          "candidateSHA256": "09443b7c9bc44830e5e962bc6181ac913ec4e38dee1ecaa2eafdd79e4cdc8b73"
+        }
+      ],
+      "license": "MIT",
+      "repository": "https://github.com/steffengy/schannel-rs"
+    },
+    {
+      "name": "native-tls",
+      "version": "0.2.18",
+      "registry": "https://crates.io",
+      "archiveSHA256": "465500e14ea162429d264d44189adc38b199b62b1c21eea9f69e4b73cb03bbf2",
+      "archiveBytes": 29967,
+      "files": [
+        {
+          "path": ".cargo_vcs_info.json",
+          "sha256": "cecffa46ecaf3515dacc4880a8cebc2a529fab00e3c7031971a1109f3391299a",
+          "bytes": 94,
+          "candidateSHA256": "cecffa46ecaf3515dacc4880a8cebc2a529fab00e3c7031971a1109f3391299a"
+        },
+        {
+          "path": "Cargo.lock",
+          "sha256": "a3928b982a0b8fa95f3aef000dfa05dde16bb4ce1f414a996974fdd94e77667a",
+          "bytes": 17038,
+          "candidateSHA256": "a3928b982a0b8fa95f3aef000dfa05dde16bb4ce1f414a996974fdd94e77667a"
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "3cdcd2f06ca3cd71aac96d88f7048ce1dbd72440b5a76edc528054cdbb1db6dc",
+          "bytes": 2407,
+          "candidateSHA256": "3cdcd2f06ca3cd71aac96d88f7048ce1dbd72440b5a76edc528054cdbb1db6dc"
+        },
+        {
+          "path": "Cargo.toml.orig",
+          "sha256": "9f111327fd54608fad6a5c110d0532063efc8162535cac9c80dd5c12fa5f1d3a",
+          "bytes": 1366,
+          "candidateSHA256": "9f111327fd54608fad6a5c110d0532063efc8162535cac9c80dd5c12fa5f1d3a"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358,
+          "candidateSHA256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "f2ad7982ddbfa8c45eb965315718c55b70b9cc311b49afacb50d5fe84173ae2c",
+          "bytes": 1074,
+          "candidateSHA256": "f2ad7982ddbfa8c45eb965315718c55b70b9cc311b49afacb50d5fe84173ae2c"
+        },
+        {
+          "path": "README.md",
+          "sha256": "a59a63c13dd923321256b18e2417d6c34b8e4bdd3d824955ef52ed56e854e76c",
+          "bytes": 2968,
+          "candidateSHA256": "a59a63c13dd923321256b18e2417d6c34b8e4bdd3d824955ef52ed56e854e76c"
+        },
+        {
+          "path": "build.rs",
+          "sha256": "cced9508b412b57c2a53478cd8dcf9ef39a945bab314e85e825a0f3adda22f14",
+          "bytes": 719,
+          "candidateSHA256": "cced9508b412b57c2a53478cd8dcf9ef39a945bab314e85e825a0f3adda22f14"
+        },
+        {
+          "path": "src/imp/openssl.rs",
+          "sha256": "d832fb9ebe0cbf470a57b300ae368e285cdfa2934c10c9057ceee7d3fefd8a07",
+          "bytes": 17028,
+          "candidateSHA256": "d832fb9ebe0cbf470a57b300ae368e285cdfa2934c10c9057ceee7d3fefd8a07"
+        },
+        {
+          "path": "src/imp/schannel.rs",
+          "sha256": "b59661db1000fa5016e134906cc017d83c6878ac1d3a260886aecc1c9d0042ae",
+          "bytes": 18318,
+          "candidateSHA256": "ccf2879eaec07fa3e1d7255b6861ae68e9498935ad79e796a6fce7ed0d4329be"
+        },
+        {
+          "path": "src/imp/security_framework.rs",
+          "sha256": "3d0e6d13f18e2d3742aad44a2a2fcf719eefeaf815e16b6ec542e5301c8d94da",
+          "bytes": 21488,
+          "candidateSHA256": "3d0e6d13f18e2d3742aad44a2a2fcf719eefeaf815e16b6ec542e5301c8d94da"
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "a703abee1799058d5140b2dfbe441e84544680ca97f6ef09d722764c7d746ae6",
+          "bytes": 24481,
+          "candidateSHA256": "6c725838bf6acd4a203d085b83796550ac1ee9132669826efa2d83301aee78fb"
+        },
+        {
+          "path": "src/test.rs",
+          "sha256": "ae2f7f0c7d9912bf5e7b59a4c74e69f56d9c9c9f08ff537c4a2fad7339aa0638",
+          "bytes": 20361,
+          "candidateSHA256": "ae2f7f0c7d9912bf5e7b59a4c74e69f56d9c9c9f08ff537c4a2fad7339aa0638"
+        }
+      ],
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-native-tls/rust-native-tls"
+    }
+  ]
+}

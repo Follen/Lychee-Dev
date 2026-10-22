@@ -1,0 +1,6 @@
+﻿<?xml
+version 	= '1.0'	encoding = "uTf-8"standalone='no' 
+?>
+<Ui 空白 = '甲	乙
+丙丁
+戊' name="A&amp;B" empty = ''><Script>Run()</Script></Ui>

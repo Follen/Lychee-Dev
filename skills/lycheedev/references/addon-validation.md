@@ -1,108 +1,38 @@
 # Addon validation
 
-Use this workflow for TOC/XML/Lua load closure, interface compatibility,
-static addon checks, and cross-client validation.
+Read for TOC/XML/Lua closure and client compatibility. Use the actual addon bytes
+and intended relative TOC: the source snapshot supplies a fixed reference, not
+replacement local bytes. Keep working changes/addon revision separately. Do not
+substitute a recursive scan for a release's ordered load closure.
 
-## Validate the real closure
-
-Select the exact pinned source and the addon input. `--path` selects the actual
-local addon bytes being checked; `--snapshot` selects the source reference and
-does not replace those bytes with the repository revision. Preserve the addon
-revision or working changes separately. For client compatibility, use the
-matching fixed client API source; for third-party semantic research, retain its
-separate client environment as described below.
-
-Validate the named relative TOC and ordered Lua/XML closure; the CLI prepares
-any missing source mapping:
-
-```text
-lycheedev source validate --path <addon-root> --toc <relative-toc-file> --snapshot <pin> --format json
-```
-
-For a fixed multi-client check, provide a matrix config:
-
-```text
-lycheedev source validate --matrix <config.json> --format json
-```
-
-The minimum config has one target; add a target for each selected client:
+Use installed help for single validation or a matrix. The matrix file shape is:
 
 ```json
-{
-  "path": "./addon",
-  "targets": [
-    {
-      "id": "classic",
-      "toc": "Example.toc",
-      "product": "classic",
-      "ref": "<40-character-source-commit>"
-    }
-  ]
-}
+{"path":"./addon","targets":[{"id":"classic","toc":"Example.toc","product":"classic","ref":"<40-character-source-commit>"}]}
 ```
 
-Replace the example path, TOC and commit with the actual inputs. `path` resolves
-relative to the config file; `toc` is relative to that addon root. Each target
-requires a unique `id`, `toc`, `product` and `ref`; the optional source field defaults to
-`wow-ui-source`. Use the exact 40-character commit for a fixed comparison, or an
-explicit full `refs/tags/...` / `refs/heads/...` ref whose resolved commit is
-retained. A branch ref selects its current commit at preparation time, not a
-historical version. Unknown fields are rejected.
+Path is relative to the config; TOC is relative to that addon root. Each target
+needs a unique ID, TOC, product and ref; optional source defaults to wow-ui-source.
+Use real inputs and a fixed commit, or retain the commit resolved from an explicit
+full ref. A current branch does not identify a historical version. Unknown fields
+are rejected; describe/help does not provide this JSON schema.
 
-Otherwise validate one pinned closure as above. Check `describe` for command
-options; it does not provide the matrix JSON schema. Keep each client result separate, including
-interface/build identity, missing files, parser issues, unresolved dynamic
-edges, and representative locations. Do not validate a recursive directory
-scan when the question is about the release TOC.
+Single validation's loadValid covers paths/order/syntax; staticValid adds the
+returned checks. A source name match does not prove binding identity or argument
+types. Missing names can be local/dynamic. Inspect complete, unresolved,
+interfaceStatus, checks and notChecked even after exit 0. Unknown interface commits
+remain unresolved; never infer them from folder/version labels.
 
-For a single pinned validation, `load.loadValid` covers paths, ordered references
-and syntax. `staticValid` adds the checks listed in `checks`; source-name presence
-is not binding-identity or argument-type validation. Missing source names may be
-addon-local or dynamic and remain unresolved, rather than being reported as
-nonexistent game APIs.
+Matrix targets have resolvedCommit, toc, loadClosure, valid, diagnostics,
+unresolved and coverage rather than the single-result shape. Keep each client's
+gaps; aggregate success cannot erase them. Static/semantic success does not prove
+runtime loading, combat, taint, visual behavior or performance.
 
-`complete: false` means coverage is still incomplete even when the command exits
-successfully. Inspect `unresolved`, `interfaceStatus`, `checks` and `notChecked`.
-An actual static failure exits nonzero while preserving the result and capture.
-Interface matching currently uses only the Toolkit's exact project-approved
-commit baselines; an unknown commit is unresolved, not guessed from its version.
-
-Treat `staticValid: true` as “the reported checks found no error.” It is not
-proof of in-game loading, taint safety, combat behavior, performance, or
-visual correctness. Those require the appropriate live or visual evidence and
-must be reported as untested when absent.
-
-Matrix results have a different shape: inspect each `targets[]` entry's
-`resolvedCommit`, `toc`, `loadClosure`, `valid`, `diagnostics`, `unresolved` and
-`coverage`; use `summary` to compare shared and target-only facts. The single
-validation fields above are not matrix fields. Matrix `valid: true` can coexist
-with unresolved coverage, so retain each target's gaps rather than declaring all
-clients complete from the aggregate result.
-
-Use `--semantic` only when LuaLS diagnostics will answer the question. The CLI
-verifies the bundled runtime before use; a missing tool is a capability gap,
-not a reason to replace the fixed source. If semantic setup blocks the command,
-run the same validation without `--semantic`, `--environment` or `--release`
-to obtain the ordinary static result, retaining the semantic failure separately.
-For a third-party addon source, pass a fixed client API source with
-`--semantic --environment <client-pin>`; the toolkit does not infer Retail from
-the addon folder or product name. This flag applies to a single pinned validation; a
-multi-client semantic matrix uses each target's own pinned client API source.
-If a target is a third-party repository without that environment, report the
-capability gap instead of applying one client's definitions to every target.
-There is no per-target environment field in the matrix schema, and combining
-`--matrix` with `--environment` is rejected. Use client API source targets for
-the semantic matrix, or separate single validations when distinct third-party
-source/environment pairs are required.
-Semantic results include registered captures for the
-checked inputs, generated definitions, configuration and raw report. Verify
-their IDs when preserving or comparing evidence. LuaLS diagnostics and a clean
-static check do not prove secret-value safety or secure execution taint.
-Single validation with `--semantic` keeps `complete: false` by design even when
-diagnostics pass; distinguish that boundary from a concrete missing prerequisite.
-Do not raise budgets or repeat the command simply to obtain `complete: true`.
-
-Identify a client from its `.flavor.info` and `version.txt` metadata and build,
-never from its directory name. Missing or conflicting identity stays unresolved.
-Do not add unsupported client branches or hand-maintain a second product/build
-catalog in this workflow.
+Semantic analysis is optional evidence. A missing engine/tool leaves a capability
+gap; the same static validation can still be useful without semantic/environment/
+release options. Third-party source needs its fixed client API environment.
+Matrix has no per-target environment field and cannot combine with a global
+environment: use client API targets or separate validations for distinct source/
+environment pairs. Preserve semantic input/report captures. Single semantic
+validation intentionally retains incomplete coverage; do not raise budgets to
+force complete=true. Identify actual clients from verified metadata, not folders.

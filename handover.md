@@ -1,109 +1,115 @@
-更新日期：2026-10-21，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
+# 当前交接
 
-## 当前交付：3.2.5 发行
+以 [DESIGN.md](DESIGN.md) 为业务与架构目标；待办见 [todo.md](todo.md)，测试用途与入口见 [test.md](test.md)，工作规则见 [AGENTS.md](AGENTS.md)。本文件只保存当前状态。
 
-- 用户要求推送GitHub并生成新Release；本次为3.2.5，沿用main及latest渠道。实现提交`c3450d9a32`及对应`v3.2.5`标签已推送；沿用此前发布后直接更新本机的要求，无新分支、worktree或PR。
-- 主代理负责Source编码修复、版本同步、发布验收及本机受管更新。实现已完成，同一Forever PIN的8组query和异常行inspect通过，详见下方；版本源和渠道清单已同步为3.2.5。提交前build/vet、版本/Skill/发行输入检查、93项Node测试全部通过；Lua5.1必需完整Go套件通过（2962项pass事件、42项既有可选skip、0fail，32个测试包通过；包并发2、测试并发4、包时限20分钟）。
-- [main CI](https://github.com/Follen/Lychee-Dev/actions/runs/39589863771)及[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/39589869187)全部成功，包含源码重建、真实LuaLS/Source、Windows隔离安装、OIDC发布及registry重新安装验收。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.5)已发布，六项产物齐全；registry独立回读确认latest=3.2.5、next=3.1.2，integrity和provenance元数据存在，不声称完成其密码学验证。
-- 本机受管update已返回complete=true：CLI、1份Skill及7个客户端addon全部current=3.2.5；PATH实际执行提交`c3450d9a32`、workspaceDirty=false，原npm更新事务已结束。此次Skill通过正常受管更新完成，未重启Codex或操作游戏；addon等待后续reload，Skill供新Agent上下文使用。
-- 正式CLI按原Forever PIN复验query和397–403行inspect成功：4481文档、0语法诊断、1编码告警、coverage.complete=true；18128原字节及SHA-256不变。query capture为`CAP-0c07d22691698456bf52c47df4344e0f1f348fcfdefa09c62d2244362420743d`，inspect为`CAP-c2ff74d5dab50f2cf1a06e107ad11d0b9bf9374fc304f05e1e79255c5aa0a355`。
-- 发布、本机更新、正式包复验及临时清理全部完成。按用户要求编写固定文件清单的PowerShell脚本，逐个删除`.tmp/source-forever-encoding`和`.tmp/release-3.2.5`中的18个临时文件，再移除空目录；已核实两目录及一次性清理脚本均不存在。原PIN、镜像、captures和其他项目保留。
+## 工作区、目标与分工
 
-## 当前修复：SOURCE-FOREVER-ENCODING
+- 工作区：`.worktrees/pr14-local-dev`；分支：`rust-refactor`；既有 [draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。本批本地验证基线为`aa468aeca1c4ebfbeca06e801a4cb1f9494cfce7`加任务改动；当前提交以分支为准。版本以 `release/version.json` 为准，当前3.5.0。
+- 用户目标：完成设计文档全部设计；当前性能已接受，先回归全部业务，再循环审计。最新要求是先统一梳理Source调用语义，集中修改、集中验证，再恢复完整业务回归。停止性能优化和补跑，保留已有测量事实。
+- 用户已授权提交并推送本任务到现有分支、更新draft PR #14及运行真实CI；实机仅授权当前Retail，包括必要的受管升级、正式输入、重载及清理。其他客户端、全局Skill安装、合并、发布及渠道变更未获授权。
+- 本批已提交推送至`eca771a18f941719c52a019d9ae7e12bab2a31b9`，PR说明已更新、冲突已解决并保持draft。已修复旧变量名测试、rustc多行版本判定和两个npm报告消费者；同一实际tgz修正版本参数后审计通过、零违规，相关31项Node测试通过。[当前PR CI](https://github.com/Follen/Lychee-Dev/actions/runs/39832911646)静态Node测试208通过、6失败：5项固定Rust身份检查遇到host默认1.99.1，另1项Cargo helper admission为disabled但未输出原因；尚未编译。static已补固定1.99.0及Rustup/Cargo身份诊断，保留helper enabled断言并补实际拒绝原因，不盲改身份许可；24项工具测试、3项atomic源码断言及语法检查通过，日志在`.tmp/ci-static-toolchain/`。runner_recovery已停写，协调者提交推送后核实真实CI。
+- 当前Retail暴露LIVE-01发送前INPUT复核问题；live_retirement仅完成三个Live文件的临时计时插桩并已停写，协调者负责owned构建、同实例测量和最终修复整合。诊断dev CLI已构建，路径`.tmp/business-regression/live-diagnostic/artifact/artifact.json`；插桩不可作为正式成果提交。CI代理仅改workflow/tools，不触碰冻结的Rust输入；原生队列由协调者串行使用。
+- 主分支核对确认当前addon已包含main代码，只有3.5.0版本号不同；保留Rust替换结果，接入main历史以解决PR冲突。另修正本地发布清单`preserveLatest`为registry实际的3.2.5（只读`npm view`确认），不改beta目标或远程标签；删除无消费者且仍调用已退役EncodeSignal的`tests/protocol/writer.lua`，当前正式bridge的四项输入与精确数值覆盖不变。
+- 两轮审计修改及本批安装包的受影响验证全部通过。安装包基线源码`3ff2a83c4a0e5f03f5d70883a564423bad53bdbbce70ab7d39f7618053f936be`的`audit-2` all-targets构建通过（93+1，receipt `de1e643f-a86d-41ec-828b-dea633a36178`）；adapter全部19个测试程序、Source完整库712项（5项ignored）、真实checker families及nominal通过。CLI库211项及两实际CLI程序各3项、Data transport101项、CI工具回归和18项workflow结构检查通过。新Release、隔离npm安装、包内receiver/发现信息及Retail/Forever均通过。这些结果不覆盖后续Live修复；其余Actions、symlink权限和实机缺口见下文。
+- 原生构建/测试共用既有owner队列，单Cargo job、默认栈、50 GiB build cache、5 GiB scratch、2 GiB空闲预留，隔离用户目录。用户已要求为大型编译留足时间：Cargo编译批次默认改为60分钟，测试执行保持各自业务期限。工具维护只处理阻断实际验证的问题。
 
-- 用户报告3.2.4的source query在Forever 1.60.1.70450固定提交`172a387e3ab85b26e6640d3058d5ec1e6ccd4c63`失败。沿用main，基线`c9bd90ea2b`；主代理负责Source分析/索引、回归和必要文档；explore_source_encoding完成下游编码边界的只读探索，没有产品文件写入。
-- 已通过PATH正式CLI复现原命令和`codebase.analysis_encoding_or_budget`；原PIN身份已核对。初始`source list --snapshot`显示ready=false、snapshotFiles=0。固定树4481份文档中仅`Interface/AddOns/Blizzard_NewPlayerExperience/Camelot/Blizzard_TutorialData.lua`第400行注释含非法UTF-8字节0x92（偏移12719，文件18128字节），没有超过32MiB的文档；全局UTF-8拒绝导致整个索引中止，未进入LuaLS。
-- 已按用户补充要求将编码告警与语法诊断分离：告警不降低coverage、AST文件数或addon加载有效性；query和inspect共用U+FFFD显示，原始归档与哈希保留，非UTF-8归档不声称UTF-8编码。真实语法错误和跳过的超限文件仍影响完整性，单文件超限单独报告路径/实际字节数/上限。索引与文件facts使用v3缓存格式自动重建，固定提交、PIN和parserRevision不变。
-- 回归先复现错误分类、inspect拒绝和加载失败，再确认修复。build/vet及Lua5.1必需环境下addoncheck、codebase/...、command整包通过；覆盖告警位置、query/inspect显示及原字节归档、AST统计、同提交diff、非法token和超限。提交前完整检查和发行状态以上方3.2.5交付为准。
-- 开发CLI在原PIN `PIN-4156b40776bf2bb2caa2c8517ea26b93b61a1c211241607c30db82297cf727f9` 完成precise/exploratory×api/lua×issecretvalue/SecretReturns八组查询，以及异常正文query和397–403行inspect；全部ok=true、exit0。4481文档/4481 AST、0跳过、0诊断、1编码告警，coverage.complete=true；limit/关系预览的真实截断仍保留。异常行显示一致，query/inspect SHA-256相同；inspect保留18128原字节。原命令capture为`CAP-60d8d999097090f67de1a26f01d03cdcc093c2637fac9b9ef432a381a2813015`，inspect为`CAP-c360177a7682bb2bb4e68e07f6895ce6cc5fb901bcf2ba935dd34ab805d7d547`。
-- 实现、验证及临时清理完成，纳入3.2.5；提交、发布与本机安装状态以上方交付为准。可复用回归保留在internal测试；原PIN、镜像和查询captures保留，没有游戏操作，无未完成的本轮实现项。
+## 已接通的业务范围
 
-## 当前交付：3.2.4 发行
+- **类型化边界与使用面：** Source、Data、Live、Core、Delivery接收各自请求，Invocation留在CLI；入口冻结项目/安装选择。69项命令的解析、help、describe、schema、示例与Skill发现来自唯一`commands.json`，实际无home发现与正常退出已通过。
+- **Data：** 通用查询和12项领域任务走Agent Session → Engine → DataFusion。完整值、关系、顺序、UnionAll重复项、Iterate previous-delta、精确整数、Page/CSV/CAP及Analyze已回归；既有句柄不依赖原输入继续可读。raw/图片/Hotfix CSV/demux统一发布与计量，Unknown或清理失败保留未结算额度；不自动收编历史未归属数据，`total_data_coverage_complete`仍为false。
+- **Source：** 固定原版Emmy、自有adapter、TOC/XML、API环境、声明/引用/调用/关系/差异、二进制Facts/Index和受管luac已接通。非UTF8原字节、哈希和位置保留，编码告警独立；未知或条件写保持partial。32 MiB+17超限文件不丢失同快照合法文档。冷查询复用刚发布的完整索引，热查询继续认证并投影。
+- **Live/Delivery：** 当前addon、Mailbox v1、SessionOwner、500槽、有效键位、持久输入意图、原请求/deadline恢复、不重放、报告与cleanup分离已有离线回归。正式Lua bridge已接当前addon和受管Lua；离线结果不证明H01—H08游戏行为。
+- **清理与CI：** Go产品源码、旧执行器/协议/测试及冻结副本、旧CI和失效文档已移除；Data旧借用游标与无生产用途转发已退役。CI按static → 每种配置一次构建 → 下游复用 → release-ready接通；本机build/seal/verify/run及显式许可证closure复用通过。真实Actions和跨job绝对路径仍待核实。
 
-- 用户明确授权提交到main、版号加一、发布npm并更新本机插件。本次为3.2.4，沿用latest；实现提交`29bdbdaff5`已直接推送main，`v3.2.4`固定同一提交，不另建分支或PR。
-- 主代理负责发行及本机受管更新。范围为FB-COMBAT-01修复、回归和3.2.4版本同步；[main CI](https://github.com/Follen/Lychee-Dev/actions/runs/39533085883)及[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/39533113368)全部成功，含源码重建、真实LuaLS/Source、隔离安装、OIDC发布与registry重新安装验收。
-- 版本同步后的build/vet、版本/Skill/发行输入检查及93项Node工具/启动器测试已通过；Lua5.1必需完整Go套件通过（2947项pass事件、42项既有可选skip、0fail，32个测试包通过，包并发2、测试并发4、包时限20分钟）。游戏实机验收不由文件更新替代。
-- 用户明确允许关闭LycheeGroup项目已完成业务的旧连接 `CON-fb153033bbcb72b47b486e45187e4395`；已在原项目正常disconnect成功（closed=true、bound=false，报告verified、cleanup=released/complete），报告和恢复记录保留，安装占用已解除。
-- npm独立回读确认`latest=3.2.4`、`next=3.1.2`，integrity及provenance元数据存在，不声称完成provenance密码学验证。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.4)六项产物齐全。
-- 本机CLI、1份Skill和7个客户端addon均已为3.2.4，最终受管update返回`complete=true`且全部`current`，PATH实际运行提交`29bdbdaff5`、workspaceDirty=false。Skill目录移动曾被拒绝，当前Codex进程持有其references目录句柄；按用户“把Skill弄到位、不重启Codex”的明确要求，核对23个Skill文件与正式3.2.4完全一致后，仅在原目录同步正式安装记录，再由CLI完成整套验收及原更新事务收尾。没有重启Codex或运行游戏；addon需后续reload，Skill供新Agent上下文使用。
-- 本次发行、安装和清理全部完成；已移除本轮`.tmp/release-3.2.4`、诊断工具、一次性脚本及完成后的Skill事务备份，原npm更新事务已正常结束。没有未完成的本轮安装；其他项目的报告、恢复记录及worktree保留。
+## 本轮业务回归与未闭合问题
 
-## 当前修复：FB-COMBAT-01 聊天框键盘传播
+两轮审计修改与实际验证：
 
-- 用户在原因调查后要求修复 `ChatFrame1EditBox:SetPropagateKeyboardInput()` 的保护调用错误。沿用 `main`（基线 `bae2c587d6`），主代理负责 `FocusBindings.lua`、`InputState.lua`、对应回归和文档；没有新PR或子代理文件分工，已随3.2.4提交推送，发行状态见上方。
-- 已确认 `addon/Bridge/FocusBindings.lua:40` 在战斗判断前调用该API；原聊天回调也在这次调用之后。持续战斗足以到达此错误路径，无需假设进战竞态。Retail 12.1.5固定源码 `18c6d677b605b312f3d813d498404631fb941977` 的API声明标记 `HasRestrictions=true`，但不公开C层的具体限制；原报错未附战斗状态，不能确认5次实际发生时机。
-- 已实现：按键回调在传播设置前检查战斗，原处理函数始终保留，并在其返回后复核状态；战斗中不接管新焦点、Ready为false。停用立即撤销INPUT/采样/焦点监听；若旧编辑框尚未恢复，仅用既有框架的脱战事件完成恢复后注销，不新增frame或轮询。
-- 验证已完成：受保护API模拟先失败于原第40行，修复后通过；覆盖持续战斗按键、焦点切换、原回调改变状态、停用后的脱战恢复、清理前重启及无接管编辑框时的零清理事件。`go build ./...`、`go vet ./...`、Lua5.1必需的addon/协议整包通过，diff空白检查通过。3.2.4完整发行检查已通过，结果见上方。
-- 本次修复已随3.2.4发布并安装到本机7个客户端；尚未运行游戏复验聊天框战斗按键及停用恢复，实机待办保留在 `todo.md`，不能由离线结果倒填。
+| ID | 已确认的问题与修改 | 验证状态 |
+| --- | --- | --- |
+| A01 callback | 可空callback的泛Function实参未比较具体签名，却可能记为完成；完成度现复用实际参数分支，兼容与诊断规则保持。 | 四场景及adapter全部19个测试程序通过；报告`.tmp/business-regression/audit-2-adapter-report.json`。 |
+| A02 receiver | 显式typed self漏比较；普通隐式receiver诊断指0..0或显式参数。比较已统一到实际参数检查，位置取receiver自身。 | 旧已安装包三例复现，receipt `fc423c80-3b31-4057-a78e-8521f00dae1d`；adapter与真实Source三例通过。 |
+| A03 CLI发现 | 连接/恢复/断开/重载/bugs误标无游戏输入，status/session误标接触进程；live doctor修复效应未表达，status仍提BTP。 | 效应改由commands.json声明，live doctor的gameInputWhen标明--fix，清除失效BTP说明与npm README开发分支badge。静态Skill合同、版本、6项Skill工具、CLI库211项及实际CLI两程序各3项通过；报告`.tmp/business-regression/audit-1-cli-report.json`。 |
+| A04 CI回收 | 普通测试未回收后继续启动，后项可能覆盖未回收事实。 | 已停止后续启动并保留错误/证据/报告；11项纯Node回归通过。 |
+| A05 Data冗余 | 两条HTTP读取链的read_bounded/collect共4包装仅测试调用。 | 已删除，测试直接调用正式collect_admitted；body/gzip/取消/收费等101项通过，报告`.tmp/business-regression/audit-1-data-transport-report.json`。 |
+| A06 CI报告 | 三个validate报告上传默认仅成功后执行，失败报告留在临时runner。 | 三步加always，原job失败状态保持；18项结构测试通过。 |
+| A07 泛型receiver | 显式T=number的colon receiver未代入类型，table被接受；等价dot能报错。 | 旧包四场景已复现，receipt `658ccabf-c12d-4ad9-bba2-cb67a6d61ec8`；receiver已走现有泛型代入/别名/条件类型规则，adapter共16场景及真实Source四场景通过。 |
+| A08 adapter冗余 | plain_atom无任何调用；旧scope_metrics计数器只写无消费者。 | 已删除函数及测试计数，不变更生产语义；adapter全部测试通过。 |
 
-## 当前交付：3.2.3 发行
+当前Source完整库报告`.tmp/business-regression/audit-2-source-unit-report.json`；真实checker families和nominal报告`.tmp/rust-disk/evidence/3cc1f90d-c144-4319-9e6d-4aad59cff234/summary.json`，原断言及partial边界保留。此前完整业务回归的默认程序原报告`.tmp/business-regression/default-report.json`保留Delivery首次失败。
 
-- 用户授权的合入并推送main、版号加一和npm发布已完成：3.2.3沿用latest。按用户此前“npm发布之后，直接安装到本机”的要求，正式发布后也已完成本机受管update。
-- 本次已直接提交并推送main，实现提交`3766f9c`；没有本任务PR，另一个Rust PR及保留worktree不属于本轮。`v3.2.3`固定同一提交；主代理完成正式流水线、registry核验、本机更新和正式包复验，当前没有待交接任务。
-- release/version.json及npm-channel清单与派生文件均为3.2.3。本地build/vet、Lua5.1必需完整Go套件（2947项pass事件、42项既有可选skip、0fail）、93项Node测试、版本/Skill/导入/发行输入检查全部通过。
-- [正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38762706792)全部成功，包含必需CI、CGO、正式包构建、源码重建、真实LuaLS/Source、Windows隔离安装、摘要门禁、OIDC发布及registry重新安装验收；[main CI](https://github.com/Follen/Lychee-Dev/actions/runs/38762648214)也全部成功。独立registry回读确认`latest=3.2.3`、`next=3.1.2`，integrity和provenance元数据存在，不声称完成provenance密码学验证。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.3)六项产物齐全。
-- 本机受管update返回`complete=true`，CLI、1份Skill和7个客户端addon均为`current`。PATH实际运行3.2.3、commit=`3766f9c`、workspaceDirty=false。Skill需新Agent上下文，游戏内addon需后续reload；本轮文件安装没有新增Live连接或游戏输入，不计入新的七产品实机覆盖。
-- 已安装正式CLI按原pin复验：35-ID SQL返回35个唯一ID、无缺失，8组克隆名一致；spell info441776返回“致命一击”，元数据预算经3次扩容从128到320 MiB。缺密钥分区仍为partial/complete=false。SQL capture为`CAP-513f9257a9e0de402211d45b8ae37ef156881045cfe5ef7589a3dd8f8a198737`，spell info为`CAP-462699f3c27acb457edf99f86b51ea568606d829b7f41c29060ac9f3e13cd49f`。已清理本轮`.tmp/release-3.2.3`，CLI captures保留；本次发行和本机更新全部完成。
-
-## 当前任务：SpellName 查询元数据预算
-
-- 用户报告正式3.2.2对Retail CN zhCN 12.1.5.70391的SpellName查询报`records.query_resource_budget: metadata_bytes`，随后确认采用动态预算。沿用`main`（基线`f298633`），没有新PR。主代理完成预算/入口/索引/回归/文档及固定数据验证；pr13_review_data完成SQL IN优化，pr13_review_delivery完成限定只读复核，当前无待交接文件负责人。
-- 原触发点：source/定义准备计费97259207字节，SpellName索引再需79935940字节，超出128 MiB共享预算。紧凑ID索引让复制记录共享物理位置，索引计费降为37247372字节；WDC2隐式别名计费已补齐。SQL数值IN复用Source.Equal，避免35项列表整表逐行比较耗尽执行预算；两项均有先红后绿回归。
-- 固定384 MiB临时方案已替换：Windows在获得slot后按可用物理/提交/虚拟地址余量最小值的一半、除以并发容量，确定本查询天花板；初始retained/scratch512 MiB及metadata128 MiB按低内存缩减，随后按需扩容并重新查询内存余量。七处查询入口共用同一预算，去除导航和SQL提前固定截断；显式静态预算及非Windows开发保持原固定默认值。SQL/导航增加memoryBudget报告，失败保留维度及用量；网络/工作量、单文件、表头和SQL执行器限制独立。
-- 动态版本实际复验：固定pin原SQL返回35/35唯一ID，8组克隆名一致；SQL未需扩容，spell info441776元数据计费285567127字节、经3次扩容从128到320 MiB。本地441776和CDN JSONL begin/record/end、exit0均成功。SQL capture为`CAP-b8bfc33c69e405d45c366b15a4a7426137cfda44f8c1b1113a44c36199d635eb`，spell info为`CAP-05b016882eafdd457961201091310e5beb5f7fb149657660c25555864bab230b`；加密分区仍partial/complete=false，本批全部ID有名称。此前固定方案的CDN441144也已成功。
-- 实现阶段build/vet、Lua5.1必需的records/...、vault和command整包、Skill合同及生成命令检查通过。新增回归覆盖大表/scratch扩容、低内存、并发分额、计费原子性、OS读取失败、原生Windows读取和嵌套lease所有权；动态实现限定复核无可操作问题。完整Go/Lua套件和3.2.3交付进度以上方发行状态为准；`.tmp/dynamic-budget`和旧`.tmp/spellname-budget`均已清理，CLI captures保留。
-
-## 已完成交付：3.2.2 发行
-
-- 用户已授权提交3.2.2、合并main、发布npm，并在发布后直接安装到本机。沿用`latest`渠道，`next`仍为3.1.2；不改动已有发行产物。
-- 当前在`main`；[PR #16](https://github.com/Follen/Lychee-Dev/pull/16)已合并，实现提交`969fe48`，合并提交`0bec60e`。`v3.2.2`已固定该合并提交并推送。主代理负责最终发布及registry核验；此前功能实测和限定范围复核已完成。
-- 版本源与发行渠道清单已同步为3.2.2，CLI/addon/npm派生文件已生成。本地build/vet、Lua 5.1必需完整Go套件（2922项pass事件、42项既有可选skip、0fail）、93项Node工具/启动器检查、版本/Skill/发行输入检查通过；PR必需[CI](https://github.com/Follen/Lychee-Dev/actions/runs/38723851897)及分支CI全部通过，远端已准备固定公开输入并验收。
-- [正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38725056854)全部成功，包含必需CI、CGO预检、正式包构建、源码重建比较、真实LuaLS/Source检查、Windows隔离安装、摘要门禁、OIDC发布和registry重新安装验收。独立registry回读确认`latest=3.2.2`、`next=3.1.2`，integrity和provenance元数据存在，不声称完成provenance密码学验证。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.2)六项产物齐全。
-- 本机受管`update`返回`complete=true`，CLI、1份Skill及7个客户端addon均为`current`。PATH实际运行3.2.2、commit=`0bec60e`、workspaceDirty=false。Skill需新Agent上下文加载，游戏内addon需后续reload激活；本轮只同步文件，未新增Live连接，不计入新的七产品实机覆盖。已按限定绝对路径清理`.tmp/release-3.2.2`；本次发行、本机更新及临时清理均已完成。
-
-## 当前任务：槽位自动启用与 Mailbox 重载
-
-- 用户要求主插件加载时检查当前角色的500个槽位，启用被禁用的槽位，并通过Mailbox通知CLI重载。保留现有角色、原连接、输入不重放和重载验证合同；不修改其他插件的启用状态。
-- 实现基线`6df4390`；实现和Retail实测已完成，已受管部署测试版，发行状态以上方3.2.2交付为准。主代理负责Go连接/重载、文档和最终验证；pr13_review_live已完成Lua启用检查、Mailbox字段及对应回归，pr13_review_delivery已完成Go限定范围只读复核，无可操作发现。
-- Lua在现有启动元数据遍历内按角色GUID启用禁用槽，复查并统一保存；成功修改通过`Mailbox.input.slotReloadRequired`请求重载，失败走启动诊断。CLI在bind发布前处理请求，保留原CON、重载请求、业务交易和期限；已有重载的新runtime再次要求启用时可继续重载，submitted/uncertain仍不重发。没有新增轮询或批量加载槽。
-- 已确认此次故障来自另一个角色沿用的旧槽位禁用配置；此前成功角色500槽均启用。本次实测前doctor确认所选PID无占用、0预约；本任务没有操作原LycheeGroup项目或其恢复记录。
-- 已通过build/vet、正常Windows环境下的channel/addon/protocol整包（Lua 5.1必需，包并发2、测试并发4、包时限20分钟）、submitted/uncertain/missing outcome分别跨重启不重放的定向回归，以及Skill合同和文档本地链接检查。旧测试已按新增绑定前读取调整，保留原输入不重放和两份未决预约的恢复约束。
-- 本次实现、离线验证及Retail 12.1.5.70391实测已完成：灵止光／死亡之翼原有17个禁用槽，部署后启动自动启用并保存；新鲜INPUT记录slotReloadRequired=true，CLI在同一CON及原期限内追加一次槽启用重载，新runtime绑定成功。此前另有一次测试版激活重载；两者分别只提交一次。游戏内探针确认500/500启用，角色AddOns.txt禁用数为0、其他插件设置无变化，报告verified/released并返回42。共8次已提交输入交换无重复，7次等待均0消息。CON-f68a01a481d7cd9100d0694ef9644988已正常关闭；最终doctor全绿、无owner、0预约。已清理本次实现和实测临时目录。实测结束时游戏为测试版addon，全局CLI/Skill仍为正式3.2.1；后续发行及本机更新状态以上方3.2.2交付为准。
-
-## 已发布基线：3.2.1
-
-- [PR #15](https://github.com/Follen/Lychee-Dev/pull/15)已按用户授权合并，合并提交为`10b561db`；实现提交`83463a03`，最终PR提交`842823df`的[Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38675723476)五项必需作业及汇总全部通过。`v3.2.1`固定合并提交，[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38676733974)全部成功；npm `latest=3.2.1`，`next=3.1.2`，已发布3.2.0产物不变。
-- 本次范围为Retail 12.1.5/120105兼容与R1215-INPUT-01键盘优先等待，以及3.2.1版本和发布说明。主代理负责整合、文档、全部实机及发行；pr13_review_delivery已完成客户端/安装/包装审查，pr13_review_live已完成输入/恢复审查，两者均无可操作发现，未写文件或运行游戏。
-- Retail基线固定Gethe live提交`18c6d677b605b312f3d813d498404631fb941977`（12.1.5.70391）；TOC、ClientGate、客户端基线与500槽声明新增120105并保留120100。安装按产品和构建系列匹配，旧槽通过既有受管路径迁移。
-- R1215-INPUT-01已实现：Native持有被动键盘监听，所有键松开且连续500ms无事件后重新核验INPUT；忙时零消息返回原Driver等待，已开始组合键完成抬键，submitted/uncertain只等待原回执。不能保证消除与已开始组合键恰好重叠的误触。
-
-## 已完成验证
-
-- Retail兼容改动的build/vet、受影响Node 16项、版本检查及完整Lua必需Go套件通过（2891测试事件、2625叶节点pass、42skip、0fail）。这次完整运行早于键盘功能加入，不能代表最终3.2.1。
-- 3.2.1最终build/vet、Lua 5.1必需完整Go套件通过：2902测试事件、2634叶节点pass、42skip、0fail、无未完成测试，包并发2、测试并发4、包时限20分钟。skip保留helper及本机缺少的固定输入/原始材料/权限；固定公开集成输入另由本次PR及发布CI验证，不倒填本地结果。
-- Node工具和启动器92项通过，唯一缺archive的跳过项使用固定LuaLS archive单独补跑通过，共93项实际通过。版本、Skill合同/生成命令、发行源码输入检查通过。键盘改动此前desktop/channel整包及定向race通过，Windows被动监听实测收到按键/松键并满足500ms静默。
-- 12.1.5实机受管升级后，125份报告全部verified/released、500个数值往返比较通过；prepare/commit/confirm/release各125次，另2次bind、1次unbind、1次自动容量reload，共504次输入交换各提交一次。跨两个runtime，不称单runtime逐个执行500个物理槽。
-- 按用户要求，本机全局CLI通过本地开发包升级并同步受管Skill和Retail。用户在游戏按住W约4秒，两次held检查均0消息；松开后469ms仍等待静默期，随后完成原请求。四个业务交换各提交一次，报告verified且返回42，原期限不变。
-- 两轮实机连接均正常disconnect；当时最终doctor全绿、无owner、0预约。本机已从3.2.0开发包切换到npm正式3.2.1；PATH CLI确认commit=`10b561db`、workspaceDirty=false，受管Skill与Retail addon更新complete=true。Skill供新Agent上下文使用，游戏内addon需下一次reload激活；本次发布后未再操作游戏或新增CON。
-
-## 7项实机结果
-
-以下为此前3.2.0修复在Retail 12.1.0的已完成范围，不代替本轮版本检查或七产品完整安装矩阵：
-
-| ID | 实际检查及限制 |
+| ID / 范围 | 当前事实与下一步 |
 | --- | --- |
-| R3-01 Trace | 真实页面回调错误、自有方法调用与停止；非硬件点击，临时hook已reload清理 |
-| R3-06 拾取器 | 用户真实进入/退出战斗；dock、键盘脚本及输入保护关闭，F/Enter/Esc正常 |
-| R4-01 输入与恢复 | 完整交易、running原请求resume、28次交换及采样间隔；真实崩溃/缺outcome仍仅离线覆盖 |
-| R4-04 bridge状态 | 默认option、off/on、保存off后reload及恢复新runtime连接 |
-| R4-07 Objects | 真实页面错误处理、5000字partial/limited、健康对象恢复；临时快照已reload清理 |
-| R5-01 数值 | 四种double与%.17g文本往返相等，报告verified/released |
-| R20 连接故障 | 公开map固定schema后新runtime空回执及完整交易通过；旧3.1.2原包唯一根因仍未知 |
+| REG-01 Delivery | `main_checkpoint_rejects_same_version_replacement_without_replay`曾在升级准备阶段报Windows错误5。同一程序exact、完整addon事务19项及最后完整库156项均通过，原因仍未定。完整库报告`.tmp/business-regression/repaired-3-delivery-report.json`；原失败fixture保留，不增加重试或改写业务预期。 |
+| REG-02 进程回收 | 已验证测试helper关闭根句柄后，在原15秒deadline内等待同一Job归零；真实supervisor与Source/Data隔离通过。原失败时成员身份未知，不声称曾有worker泄漏。 |
+| REG-03 Source语义 | 已验证。调用许可、参数比较、返回类型/数量及coverage各守其证据边界；统一后的真实nominal、返回数量/控制流、公开semantic validate、catalog及checker families全部通过。最后非尾vararg由list入口正确调整，精确空/单/多值、SourceCall/Exact Entry、参数/self偏移、赋值和未知尾经Source完整库及真实原失败场景验证；unknown仍为partial，未降低数量断言。 |
+| REG-04 Lua桥接 | 已验证。统一解释器报告`.tmp/business-regression/lua/build-report.json`；当前addon35套×6客户端配置通过（`1160f78e-b14f-4415-bce4-df5bdb8764a4`），正式Rust桥接11项通过（`d9e0f50c-20a4-4300-8ced-46d3fc0f5623`）。 |
+| REG-05 Data缺钥 | 已验证。真实准备链和重试次数通过；删除没有合同依据的总decode_work大小不等式，保留实际阶段次数和成本观察。新鲜fixture与业务用例通过（`d6eba767-2bee-4648-aa9e-45a84cdf88f0`），报告`.tmp/business-regression/data-key-repaired-3-report.json`。 |
+| REG-06 XML Facts | 已验证Script与handler的声明、关系、原始行映射及新缓存身份。Source库、公共XML查询和最后修复产物的16个显式XML场景均通过；最终XML及四产品Source矩阵报告为`.tmp/rust-disk/evidence/6f8668a5-c634-475a-b65c-68722a4d5383/summary.json`。 |
+| N07 CPU取消 | 新实际worker CPU进展后取消用例通过，连同其余supervisor用例共7项通过；核原15秒deadline内Job回收、旧句柄失效与不重放。报告`.tmp/business-regression/repaired-3-supervisor-report.json`。这不证明某一次DataFusion poll完全不yield。 |
 
-## 发行与剩余范围
+此前真实return count、semantic validate及catalog已通过，报告分别保留于`.tmp/rust-disk/evidence/ce11292f-8e31-43c5-83bb-5b912eac3d51/summary.json`和`.tmp/rust-disk/evidence/000afdda-3def-45d5-8b23-47a680181d6c/summary.json`；后者同时保留非尾vararg原失败，修复已由当前完整库和families验证。Delivery完整库156项通过的源码为`5d30313a798614abac33d03afcd07e549815916ef05cf0de9afa18ca9f2bfe5c`，不受本批Source改动影响。
 
-- 3.2.0已由[PR #13](https://github.com/Follen/Lychee-Dev/pull/13)合并后发布，发行标签`v3.2.0`固定`3057a966`；[发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38608441597)及[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.0)完整成功，`next`仍为3.1.2。
-- 3.2.1发布流水线完成合并提交CI、真实LuaLS/Source、源码重建、Windows正式包安装运行、摘要校验、OIDC发布、registry回读和重新安装验证；[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.1)六项产物齐全。独立registry回读确认版本、latest渠道、integrity与provenance元数据存在，不声称完成provenance密码学验证。
-- 七产品干净首次安装、重新登录及完整升级矩阵仍见[todo.md](todo.md)。上述发行验收结束时没有未关闭的测试连接；后续任务状态以上方当前任务为准。
-- 3.2.1实现、审查、合并、发布及本机正式包更新均已完成。发布后的游戏内addon等待用户下次reload，七产品剩余实机范围按todo.md保留。
-- 本轮临时目录`.tmp/keyboard-priority/`已按用户要求通过限定绝对路径的脚本删除；清理前已确认实验连接关闭、报告verified/released，无待恢复操作。删除1368个文件，共90338196字节，清理脚本随后移除。用户此前要求留下的其他任务材料、原ZIP、恢复记录及`.worktrees/rust-refactor`继续保留。
+其他仍有效的业务验证：
+
+- 实际CLI flow、Source会话复用/取消/原请求恢复、Data断管后的Source隔离及公共XML三组通过（`876a600a-775d-4ca2-ac7a-dfc91025d2a1`）。Live隔离部分仅用正式持久化API构造输入，不涉及游戏。
+- 320 MiB内容检查与完整导出通过（`082cc2d5-3aa1-4f67-81a9-9e0d70c1f698`）；实际Retail Data Session通过（`9cb3a31f-a0ef-4f62-93f4-c323c274bc10`）。
+- 四产品Source矩阵以固定Classic提交`1028c1e687f721ba9d3af14d1b12a5745e4227c7`在最终语义修复产物通过（`6f8668a5-c634-475a-b65c-68722a4d5383`）；最初临时输入与固定TOC不匹配的失败保留。最终同批XML 16例均通过。
+- 两项文件symlink测试因Windows 1314权限受阻，未执行重定向断言。缺依赖、ignored与环境受阻均不计为业务通过。
+
+## 已安装包与固定输入
+
+当前Release已包含两轮审计修改：artifact `.tmp/business-regression/release-audit/artifact.json`，源码`3ff2a83c4a0e5f03f5d70883a564423bad53bdbbce70ab7d39f7618053f936be`，二进制SHA-256 `62222ecd6c6f57c726dafc0ed8f75ddd8d9f7da4c19bf982d6e3695e4ad87553`，build receipt `2871f477-73ea-4c87-af90-13022fa38e86`。实际编译17m56s，当前运行期限为60分钟。隔离npm包报告`.tmp/delivery/npm-audit/report.json`：安装、包内Skill launcher、受管luac、显式许可证closure复用及实际Source语法检查均通过，未发布。包内七个receiver场景及命令效应通过（`3ee94983-ce37-46d9-afdc-839ef021df0c`）；完整Retail Source/native/会话复用通过（`908e5b33-76ef-417d-9fa4-9830f2390e66`，输入与产物保持一致）；Forever冷/热/原字节/编码告警/inspect/diff/luac/native复用通过（`8fe70325-7d31-4cf2-8281-3bdba19cc075`）。
+
+审计前v12包的公共Source flow/native会话隔离/XML（`e9687ca5-84b0-4266-927c-335f931eac02`）、显式refs/context（`136211d9-2e7b-4d55-8ea0-1376af16b630`）、luac/inline/ordered/validate_contract（`f963d2db-a194-4f1e-8dec-c4a2f2b967a6`）通过，未受本批修改影响。v12完整Retail及Forever报告分别为`b55e25ec-6ad3-48e6-ac81-aaf957f21d26`和`65d5eeeb-094a-4e2a-813b-9acaa4057034`；它们不代替本批安装包验证。
+
+七产品Map各自固定PIN，完整核对值、顺序、CSV、CAP、来源、缓存复用和关闭：
+
+| 产品/build | 已验证结果与receipt |
+| --- | --- |
+| Retail 12.1.5.70448 | 1,187行完整；`7ca9bdc5-3cf6-4f74-9c39-80c6fdf39c68`；预备缓存`ff0cd19f-193d-4329-be73-1d0fb68cab0f`。 |
+| Classic 5.5.4.70531 | 285行完整；`37ae35bd-d555-4942-b57d-b0fe97c3b0e0`。 |
+| Classic Era 1.15.9.70003 | 59行完整；`fa9eb4a3-7ff5-415e-abf1-1d6db06b3c28`。 |
+| Anniversary 2.5.6.70006 | 83行完整；`022c7e3f-dabc-4ba5-82c5-0f6ef2c3f9de`。 |
+| Titan 3.80.2.70522 | 130行完整；`e19fd8a1-9cc7-4ad7-9b0c-7163688cb332`。 |
+| Forever Asia beta 1.60.1.70450 | 73行可读、8行不可用，partial全路径通过；`8611ee01-9ee8-4178-b8a0-62f00b95d34e`。 |
+| Forever CN beta 1.60.1.70450 | 独立PIN，73行可读、8行不可用，partial全路径通过；`20789daa-2f7d-4092-90eb-44c3cc2780bb`。 |
+
+Forever缺失key ID为`0da4670db36fb2a9`、`d2c028cb7ac14d0b`、`da0e7785727a0a65`；外部固定参考报告相同分段和记录。已核对缺失记录及CAP的`complete=false`。Retail FID 134400的inspect/raw/PNG/WebP/CAP也通过（`daf1fc07-ee18-4e5d-9b4f-51913331912c`）：raw 3,916字节、图片64×64完整RGBA与独立预期一致。这些结果不证明其他表、全部资源或游戏行为。
+
+## 已接受的性能与清理限制
+
+- Source正式四组各20对完整一致，index冷/热中位比值38.75%/37.69%，query冷/热46.40%/29.12%，达到原50%目标；报告`94f3afa3-0cb3-4239-91ed-c3e2c5bb28d6`。describe冷/热只计正确性，整份报告仍为`fullB01B07Acceptance=false`。
+- Data内容与数值完整单对及独立复核通过正确性，未达到原50%目标。内容冷Rust/Go 440.59/188.79 ms、热166.40/146.15 ms（`d607974a-079d-4bd8-8ef7-dd7d2facf718`）；数值fresh 592.04/138.32 ms、prepare-inclusive 761.05/142.40 ms、first-after-prepare 376.29/142.40 ms、subsequent 371.93/112.38 ms（`3d5dc8c2-b367-4663-9a80-01d18a96eff8`）。双方完整业务生命周期与原始控制器总时均保留，不回写历史口径。
+- 用户指定Cargo target/scratch清理已执行，target随构建重新生成。13个已解决实验scratch的删除曾被自动审批拒绝（`blocked by policy`），仍保留，不重试绕过。外部参考、活动输入、性能失败输入和未解决恢复记录`4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b`、`de770010-ea9c-40fa-a48e-27141a6e0d64`保留；旧receipt的active不代表当前进程仍运行。`.worktrees/rust-refactor`明确保留。
+
+## 下一步
+
+1. 本地完整业务回归与两轮审计已完成，修复已在本批安装包验证。后续只因新改动、实际失败或明确未解决的问题补验。
+2. 按已有授权提交、推送本任务并检查真实Actions及跨job路径。两项symlink测试需要创建文件符号链接的权限；当前令牌没有该权限，系统未读取到开发者模式启用标记，环境设置未变更。
+3. 当前Retail已加载3.5.0；原未绑定CON经第二次用户reload已完成关闭。先诊断修复LIVE-01，再继续同实例正式业务；其余客户端保留未验证状态。
+
+## 最后执行：需要真实客户端或用户配合的验证
+
+`D:/Game/World of Warcraft`的七产品安装、executable与共享CASC文件已确认存在；Retail为12.1.5.70448，两Forever Beta为1.60.1.70450。用户仅授权当前Retail；下列跨客户端项目仍保留具体缺口。
+
+当前Retail只读doctor报告`.tmp/rust-disk/evidence/ca9928b7-aec8-4845-8210-a9a1a047437d/readiness.json`：PID `12032`，进程创建FILETIME `134371419009029958`，HWND `242684304`，build `12.1.5.70448`。磁盘为干净受管3.2.5（commit `c3450d9a32d6ea1334f0209897cc02ab06502ba6`）；500槽、0待处理预留、无owner。新CLI报告`mailbox_release_mismatch`，需受管升级后手动reload。此次没有创建CON或发送输入；诊断未证明游戏业务通过。报告中另有临时脚本误调用顶层`instances`的参数错误，正式命令为`live instances`；已知目标不再重复发现。
+
+授权后用本批已安装候选包执行`live doctor --fix`，受管交付成功后进入`activation_waiting_manual_reload`，退出6。原项目为`.tmp/business-regression/live-retail-audit/project`；CON为`CON-772d4ff02d794e1da489f49fea92651e`；请求为`retail-audit-activation-20261023`；PID/创建时间/HWND未变。报告`.tmp/business-regression/live-retail-audit/activate.json`及receipt `9c578590-60cd-4c17-8435-048d33477882`保留。用户已明确回复完成手动`/reload`；后续恢复原CON。doctor响应中的deployment是修复前的3.2.5诊断，不能当作修复后的磁盘状态。
+
+升级后只读复查`.tmp/business-regression/live-retail-audit/after-upgrade-doctor.json`确认干净受管3.5.0、500槽、0预留及原CON归属。用户手动reload后，原CON发现runtime `000000150001da9537dd9ada27e93a3c`，GUID `Player-741-066A34E3`；开始原600秒激活预算。首次恢复遇到过期INPUT；随后的只读`.tmp/business-regression/live-retail-audit/input-doctor.json`全部健康，取得新鲜INPUT、`escapeLimit=0`、执行`ALT-CTRL-F12`和重载`ALT-CTRL-F11`，receipt `91f6d434-1ba7-4ecc-98a5-4a3f1d33e86e`。该诊断不证明绑定或业务完成。
+
+**LIVE-01｜发送前复核阻断。** 随后四次输入记录均为`not_sent / messagesQueued=0`；sample至outcome为1487、1409、1346、1268ms。路径在采样后多次完整验证deployment，并要求复读仍为同一地址/时间戳且500ms内；具体耗时正由临时插桩区分，未放宽边界或声称已修复。普通disconnect进入`closing_exchange_unconfirmed`；用户第二次手动reload后，`resume-cleanup.json`退出0、`closed=true / complete=true`，新runtime `000000160001dcf86a866d9ed3405688`的连续新鲜样本完成旧运行时退役，receipt `e97efacd-f54e-4d64-b3c9-471f9ff6744a`。原CON已关闭且未重放，业务报告仍不可用。后续诊断激活使用独立请求`retail-input-diagnostic-20261023`，只针对同一PID/创建身份；不得改写原期限或清除原记录。
+
+临时诊断的同实例实际分段见`diagnostic-activate.json`，receipt `b68fcf9d-97d0-424f-aaf6-aa8d295b0365`：采样128ms、样本年龄223ms、intent落盘4.8ms、input.check55ms、monitor0.26ms、publication acquire519ms、verify517ms、首guard51ms、复读76ms，最后`same_publication=false`。主要耗时在采样后的publication准备，不是反复全模块根扫描。该诊断CON为`CON-6dba6d65e83c8fd4bcbbcc6fff011684`，reload intent仅not_sent/0，原期限`1792695381145`；尚未关闭或完成激活，后续只恢复原CON。live_retirement只读核对该瓶颈的最小修复，协调者整合验证。
+
+| ID | 验证目标 | 需要的实际结果 |
+| --- | --- | --- |
+| H01 | Retail、Classic、Classic Era、Titan、Forever Asia Beta、Forever CN Beta、Anniversary分别连接与执行。 | 产品/build、实例、报告、清理和断开；两个beta分别记录。 |
+| H02 | 当前500槽受管安装、更新与首次激活。 | 无兼容新鲜INPUT时手动reload；原连接恢复，发现/启用/加载各有事实。 |
+| H03 | 有效绑定、用户输入活动、焦点、战斗与protected/secret边界。 | 零Esc、零聊天文本、不抢前台；只释放本次注入按键，原deadline不延长。 |
+| H04 | 同安装多进程与跨产品实例。 | PID/创建时间/HWND、GUID/runtime/owner/fence独立，发布与恢复不串线。 |
+| H05 | 500槽容量边界、reload/relogin。 | 原请求与期限保持，槽不违规复用，报告与运行时退役事实准确。 |
+| H06 | 可控中断、未知输入与cleanup恢复。 | submitted/uncertain不重放，原连接/请求/期限保留；已验证报告与cleanup pending分别记录。 |
+| H07 | 按角色GUID的槽启用与故障恢复。 | doctor默认只读，受管修复按原连接完成；未就绪不报ready，不改foreign元数据。 |
+| H08 | 确需实机的有界Live耗时场景。 | 同一候选产物、业务与输入，记录原始总耗时和分段；不设Go耗时比值门槛。 |

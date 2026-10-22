@@ -1,0 +1,135 @@
+name: release
+
+# Release-ready workflow for a version tag. The Rust product is built exactly
+# once inside the reusable CI workflow; this file only freezes the tag identity,
+# reuses the CI run's captured artifacts and seals the SAME release candidate
+# that the CI validate stage exercised. It never compiles, re-packs a tarball or
+# replaces a binary.
+#
+# Publication is intentionally absent: the current authorization covers
+# preparation and verification only, and the previous Go release pipeline
+# (npm publish / GitHub release creation) is retired with the old product.
+# A later publication workflow must consume this sealed artifact unchanged.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24.18.1'
+  RUST_VERSION: '1.99.0'
+
+jobs:
+  identity:
+    name: release identity - verify tag, version and channel
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Install pinned Rust toolchain (release/tools/rust.json)
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Freeze the tagged release identity
+        run: |
+          node tools/ci-release.mjs identity --tag $env:GITHUB_REF_NAME --ref $env:GITHUB_REF --out .tmp/ci/release-identity/identity.json
+          if ($LASTEXITCODE -ne 0) { throw 'release identity verification failed' }
+      - name: Preserve the release identity
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-identity
+          path: .tmp/ci/release-identity
+          if-no-files-found: error
+
+  ci:
+    name: reusable CI build/validate/release-ready
+    needs: [identity]
+    uses: ./.github/workflows/ci.yml
+
+  release-ready:
+    name: release-ready - seal the CI-validated release candidate
+    needs: [identity, ci]
+    if: needs.ci.result == 'success'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Download the tagged release identity
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-identity
+          path: .tmp/ci/release-identity
+      - name: Download the CI-validated release candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-release-candidate
+          path: .tmp/ci/release-candidate
+      - name: Seal the same verified release content
+        run: |
+          node tools/ci-release.mjs seal --candidate .tmp/ci/release-candidate --identity .tmp/ci/release-identity/identity.json --out .tmp/ci/release-sealed
+          if ($LASTEXITCODE -ne 0) { throw 'release seal failed' }
+      - name: Preserve the sealed release content
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-sealed
+          path: .tmp/ci/release-sealed
+          if-no-files-found: error
+
+  release-required:
+    name: release-required
+    if: always()
+    needs: [identity, ci, release-ready]
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Reject failures, skipped stages and cancellation
+        env:
+          IDENTITY_RESULT: ${{ needs.identity.result }}
+          CI_RESULT: ${{ needs.ci.result }}
+          RELEASE_READY_RESULT: ${{ needs.release-ready.result }}
+        run: |
+          $failed = @()
+          foreach ($entry in ([ordered]@{ identity = $env:IDENTITY_RESULT; ci = $env:CI_RESULT; 'release-ready' = $env:RELEASE_READY_RESULT }).GetEnumerator()) {
+            if ($entry.Value -ne 'success') { $failed += "$($entry.Key)=$($entry.Value)" }
+          }
+          if ($failed.Count -ne 0) { throw "required release stages did not succeed: $($failed -join ', ')" }
+          Write-Output 'release-ready sealed content verified from the same CI run'

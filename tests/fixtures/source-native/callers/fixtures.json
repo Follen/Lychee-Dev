@@ -1,0 +1,22 @@
+{
+  "schema": "lycheedev.source-caller-fixtures.v1",
+  "sourceRepository": "Gethe/wow-ui-source",
+  "sourceCommit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+  "sourceExecution": false,
+  "files": [
+    {
+      "fixture": "ActionButton.lua",
+      "originalPath": "Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua",
+      "bytes": 62267,
+      "sha256": "54fb5625a5e8aa343cbbc0be805b23e2b3b329011e792448e6b732a4bebd8cba",
+      "gitBlob": "34ce1b2f5ef3c4eb679da7e8b02b1222ea122db1"
+    },
+    {
+      "fixture": "Blizzard_Keybindings.lua",
+      "originalPath": "Interface/AddOns/Blizzard_Settings_Shared/Blizzard_Keybindings.lua",
+      "bytes": 16093,
+      "sha256": "412c059a2ffac8db03069e4395d47c519083ffc13fbb0d3c166fd290b264c418",
+      "gitBlob": "af219910426bd9bc338afa1c5afa8dffbc3bd975"
+    }
+  ]
+}

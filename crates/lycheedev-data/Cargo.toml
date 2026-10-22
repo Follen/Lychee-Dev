@@ -1,0 +1,49 @@
+[package]
+name = "lycheedev-data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait = "=0.1.92"
+datafusion = { version = "=54.0.0", default-features = false, features = ["sql", "recursive_protection"] }
+arrow-array = { version = "=58.3.0", features = ["pool"] }
+arrow-buffer = "=58.3.0"
+flatbuffers = "=25.12.19"
+arrow-schema = "=58.3.0"
+arrow-ipc = { version = "=58.3.0", default-features = false }
+lycheedev-core = { path = "../lycheedev-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "raw_value", "unbounded_depth"] }
+chrono.workspace = true
+base64 = "=0.22.1"
+sha2 = "0.10"
+md-5 = "0.10.6"
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs"] }
+miniz_oxide = { version = "=0.9.1", default-features = false, features = ["block-boundary"] }
+regex = "1.12"
+num-rational = "=0.4.2"
+num-traits = "=0.2.19"
+ureq = { version = "=3.1.2", default-features = false, features = ["native-tls"] }
+png = "=0.18.1"
+image-webp = "=0.2.4"
+
+# Operation-owned cancellable HTTP, with platform TLS and explicit policies.
+reqwest = { version = "=0.12.24", default-features = false, features = ["native-tls", "stream", "socks"] }
+tokio = { version = "=1.53.2", default-features = false, features = ["rt", "net", "time", "io-util", "macros"] }
+tokio-util = { version = "=0.7.19", default-features = false, features = ["io"] }
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+idna = "=1.1.0"
+
+# Preserve admitted Go request targets without WHATWG path normalization.
+hyper = { version = "=1.12.0", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = ["client-legacy", "client-proxy", "http1", "tokio"] }
+hyper-tls = "=0.6.0"
+native-tls = "=0.2.18"
+tokio-native-tls = "=0.3.1"
+tower-service = "=0.3.3"
+
+[dev-dependencies]
+# Fixture-only access to the existing pinned SQLite cache metadata backend.
+rusqlite.workspace = true

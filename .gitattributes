@@ -1,1 +1,5 @@
 * text=auto eol=lf
+# Fixed external inputs keep their original bytes, including line endings.
+tests/fixtures/source-native/** -text
+tests/fixtures/db2/** -text
+tests/fixtures/hotfix-wago/** -text

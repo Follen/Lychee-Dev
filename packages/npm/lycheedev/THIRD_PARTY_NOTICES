@@ -1,483 +1,107 @@
-THIRD-PARTY NOTICES for Lychee Dev Toolkit
+THIRD-PARTY NOTICES for Lychee Dev
 
 Project-owned code is distributed under the MIT license in LICENSE.
-The third-party components below retain their own licenses and attribution.
-Component versions are pinned in go.sum and compiled into the shipped binaries;
-build- and test-only modules are not redistributed and are not listed here.
-
-Corresponding source: https://github.com/Follen/Lychee-Dev at the exact commit
-recorded in release.json, with source archives attached to the matching release
-at https://github.com/Follen/Lychee-Dev/releases/tag/v<version>.
-
-===============================================================================
-Lua Language Server (LuaLS) 3.19.1 - payload/tool/luals/
-https://github.com/LuaLS/lua-language-server/releases/tag/3.19.1
-License: MIT for the LuaLS project; full upstream notice is retained at
-payload/tool/luals/LICENSE.
-===============================================================================
-
-The pinned Windows runtime archive is distributed intact as private CLI data.
-It includes Microsoft Visual C++ runtime DLLs under payload/tool/luals/bin/
-(concrt140, msvcp140*, vcruntime140*). Those DLLs are Microsoft components,
-not LuaLS MIT-licensed source. Their redistribution is governed by Microsoft's
-Visual C++ v14 Redistributable and Runtime terms:
-https://visualstudio.microsoft.com/license-terms/
-
-Other files in the pinned LuaLS archive retain their upstream notices and
-licenses. The release inventory records every file's SHA-256 and byte length.
-
-===============================================================================
-github.com/HugoSmits86/nativewebp v1.3.0 - compiled into native/ binaries
-https://github.com/HugoSmits86/nativewebp/tree/v1.3.0
-License: MIT
-===============================================================================
-
-MIT License
-
-Copyright (c) 2024 Hugo Smits
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-===============================================================================
-github.com/yuin/gopher-lua v1.1.1 - compiled into native/ binaries
-https://github.com/yuin/gopher-lua
-License: MIT
-===============================================================================
-
-The MIT License (MIT)
-
-Copyright (c) 2015 Yusuke Inuzuka
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-===============================================================================
-github.com/dustin/go-humanize v1.0.1 - compiled into native/ binaries
-(through modernc.org/sqlite and modernc.org/libc)
-https://github.com/dustin/go-humanize
-License: MIT
-===============================================================================
-
-Copyright (c) 2005-2008  Dustin Sallings <dustin@spy.net>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-<http://www.opensource.org/licenses/mit-license.php>
-
-===============================================================================
-github.com/mattn/go-isatty v0.0.20 - compiled into native/ binaries
-(through modernc.org/libc)
-https://github.com/mattn/go-isatty
-License: MIT
-===============================================================================
-
-Copyright (c) Yasuhiro MATSUMOTO <mattn.jp@gmail.com>
-
-MIT License (Expat)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-===============================================================================
-github.com/ncruces/go-strftime v0.1.9 - compiled into native/ binaries
-(through modernc.org/libc)
-https://github.com/ncruces/go-strftime
-License: MIT
-===============================================================================
-
-MIT License
-
-Copyright (c) 2022 Nuno Cruces
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-===============================================================================
-github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec -
-compiled into native/ binaries (through modernc.org/mathutil)
-https://github.com/remyoudompheng/bigfft
-License: BSD-3-Clause
-===============================================================================
-
-Copyright (c) 2012 The Go Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the name of Google Inc. nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-===============================================================================
-golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b,
-golang.org/x/image v0.24.0,
-golang.org/x/sys v0.36.0 - compiled into native/ binaries
-(https://go.googlesource.com/exp / image / sys)
-License: BSD-3-Clause (identical text for all three modules)
-===============================================================================
-
-Copyright 2009 The Go Authors.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the name of Google LLC nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-Note: golang.org/x/image is linked into the binaries as the WebP/RIFF
-decoder dependency of nativewebp (golang.org/x/image/webp, riff, vp8, vp8l).
-
-===============================================================================
-modernc.org/sqlite v1.39.1 - compiled into native/ binaries
-https://gitlab.com/cznic/sqlite
-License: BSD-3-Clause (the underlying SQLite amalgamation is dedicated to the
-public domain by its authors: https://sqlite.org/copyright.html)
-===============================================================================
-
-Copyright (c) 2017 The Sqlite Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this
-list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-this list of conditions and the following disclaimer in the documentation
-and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its contributors
-may be used to endorse or promote products derived from this software without
-specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-===============================================================================
-modernc.org/libc v1.66.10 - compiled into native/ binaries
-https://gitlab.com/cznic/libc
-License: BSD-3-Clause, plus LICENSE-GO (BSD-3-Clause, The Go Authors) for the
-Go-derived portions bundled in that module
-===============================================================================
-
-Copyright (c) 2017 The Libc Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the names of the authors nor the names of the
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-===============================================================================
-modernc.org/mathutil v1.7.1 - compiled into native/ binaries
-https://gitlab.com/cznic/mathutil
-License: BSD-3-Clause
-===============================================================================
-
-Copyright (c) 2014 The mathutil Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the names of the authors nor the names of the
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-===============================================================================
-modernc.org/memory v1.11.0 - compiled into native/ binaries
-https://gitlab.com/cznic/memory
-License: BSD-3-Clause, plus LICENSE-GO (BSD-3-Clause, The Go Authors) and
-LICENSE-MMAP-GO (BSD-3-Clause, Evan Shaw) for the Go- and mmap-go-derived
-portions bundled in that module
-===============================================================================
-
-Copyright (c) 2017 The Memory Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the names of the authors nor the names of the
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-LICENSE-GO (applies to Go-derived portions of modernc.org/libc and
-modernc.org/memory):
-
-Copyright (c) 2009 The Go Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the name of Google Inc. nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-LICENSE-MMAP-GO (applies to the mmap-go-derived portion of
-modernc.org/memory):
-
-Copyright (c) 2011, Evan Shaw <edsrzf@gmail.com>
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the copyright holder nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-===============================================================================
-Bob Jenkins lookup3 hash (implemented in the toolkit source of the native
-binaries) - public domain
-https://burtleburtle.net/bob/c/lookup3.c
-===============================================================================
-
-The lookup3 hash (May 2006) by Bob Jenkins is in the public domain and is used
-as a format corruption check for CASC archive indexes, not as a cryptographic
-integrity primitive. No upstream source file is redistributed.
-
-===============================================================================
-Blizzard Entertainment event catalog data - payload/addon/Modules/Events/
-===============================================================================
-
-Generated from official Blizzard_APIDocumentationGenerated interface
-documentation; source mirror wow-ui-source
-(https://github.com/Gethe/wow-ui-source) at the commit recorded in each
-generated CatalogData_*.lua file header. World of Warcraft and Blizzard
+Copyright (c) 2026 Follen (FollenFang).
+
+Corresponding source
+--------------------
+The exact source for this package is the Lychee Dev repository at the commit
+recorded in release.json, with corresponding source archives attached to the
+matching release on GitHub:
+https://github.com/Follen/Lychee-Dev/releases/tag/v<version>
+The product version is defined only by release/version.json.
+
+Distributed payload
+-------------------
+native/windows-amd64/lycheedev.exe  native Rust CLI
+bin/lycheedev.mjs                  Node launcher (platform/integrity check and
+                                   argument, stream and exit-code forwarding)
+payload/addon/                     existing Lychee Dev Lua addon
+payload/skill/                     first-party Agent Skill
+payload/tool/luac/                 pinned managed Lua 5.1 compiler
+
+Rust dependency closure
+-----------------------
+The Rust dependency closure is appended to this file when the package is
+assembled. It lists every reachable Cargo.lock dependency of the native
+executable with the exact license text from the crate or from the recorded
+license supplement. The supplements are recorded in release/licenses/catalog.json;
+the build/package check is tools/rust-license-inventory.mjs.
+
+Two registry crates are consumed as exact local patch sources for the Windows
+TLS connector: native-tls 0.2.18 (MIT OR Apache-2.0) and schannel 0.1.29 (MIT).
+Their original license files are retained under vendor/, and the exact source
+identity, archive hashes and replayable delta are recorded in
+vendor/tls-name-adaptation.json and vendor/tls-verification-name.patch. The
+adaptation separates SNI and certificate-verification names; original
+certificate chain/name policy and trust behavior are unchanged.
+
+Lua 5.1.5
+---------
+The managed Lua 5.1.5 compiler/runtime is built from the official Lua source
+(MIT, PUC-Rio) and its notice is appended to this file when the package is
+assembled. It is part of the native payload used by Source syntax validation and
+Live probe tooling; it is not an npm dependency.
+
+Existing in-game addon
+----------------------
+payload/addon/ is the existing Lychee Dev addon implementation, distributed
+under the project MIT license. Its event catalog files under
+Modules/Events/CatalogData_*.lua are generated from official
+Blizzard_APIDocumentationGenerated interface documentation mirrored by
+wow-ui-source (https://github.com/Gethe/wow-ui-source); the exact source commit
+is recorded in each generated file header. World of Warcraft and Blizzard
 Battle.net are trademarks or registered trademarks of Blizzard Entertainment,
 Inc. in the U.S. and/or other countries.
 
+Fixed external inputs in the shipped package
+--------------------------------------------
+EmmyLua Analyzer Rust
+  Source: https://github.com/CppCXY/emmylua-analyzer-rust
+  Commit: 08b0873962e83bb8307e9a81052e3f41578fbc78
+  License: MIT (Copyright (c) 2024-2026 CppCXY)
+  The production engine is the complete, unmodified upstream tree whose archive,
+  tree hash and license identity are recorded in third_party/emmy/identity.json.
+  Contextual business behavior and derived control-flow, relation, member,
+  transform, signature, diagnostic and checker code live in the owned
+  crates/lycheedev-emmy-adapter and are attributed under the same MIT license;
+  the upstream permission and warranty notice is retained in
+  crates/lycheedev-emmy-adapter/LICENSE-EmmyLua.
 
-============================================================
-github.com/Microsoft/go-winio v0.6.2
-https://github.com/microsoft/go-winio/tree/v0.6.2
-============================================================
-The MIT License (MIT)
+Unicode data
+  Source: https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt
+  SHA-256: 2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c
+  License: Unicode License V3
+  (https://unicode.org/license.txt, text retained in
+  crates/lycheedev-data/UNICODE-LICENSE)
+  The shipped Unicode simple-casing table is generated by
+  tools/generate-unicode-simple.mjs from this fixed data file. The generator,
+  generated table, source hash and license identity are recorded in
+  release/licenses/catalog.json.
 
-Copyright (c) 2015 Microsoft
+Additional current source attributions
+--------------------------------------
+Go-derived Data compatibility code
+  The redirect/reference handling, gzip framing, fixed Host/canonical-endpoint
+  rules and SOCKS5 handshake adapters under
+  crates/lycheedev-data/src/remote/transport/ adapt Go 1.27.1 standard-library
+  behavior. They remain Copyright 2009 The Go Authors under BSD-3-Clause; the
+  complete notice is retained in
+  crates/lycheedev-data/src/remote/transport/GO-LICENSE.
+  crates/lycheedev-data/src/hotfix/remote/entities.rs is generated from Go
+  1.27.1 HTML entity data and retains the Go notice in
+  crates/lycheedev-data/src/hotfix/remote/GO-HTML-LICENSE.
+  crates/lycheedev-windows/src/mailbox_input/go_unicode/ contains generated Go
+  Unicode 17.0.0 case-folding data under the same BSD-3-Clause notice
+  (crates/lycheedev-windows/src/mailbox_input/go_unicode/LICENSE).
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Bob Jenkins lookup3 checksum
+  The CASC index corruption check uses the public-domain lookup3 hash (May 2006)
+  by Bob Jenkins (https://burtleburtle.net/bob/c/lookup3.c). It is not a
+  cryptographic integrity primitive and no upstream source file is redistributed.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+SQLite
+  The workspace uses the bundled SQLite distribution through rusqlite;
+  SQLite is dedicated to the public domain by its authors
+  (https://sqlite.org/copyright.html). The crate-level license text is included
+  in the appended Rust dependency closure.

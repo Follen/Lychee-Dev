@@ -9,6 +9,8 @@ __pycache__/
 
 # npm package build output
 node_modules/
+packages/cli/vendor/
+packages/cli/*.tgz
 
 # Native toolkit build output
 /lycheedev
@@ -19,10 +21,11 @@ packages/npm/lycheedev/payload/
 packages/npm/lycheedev/release.json
 packages/npm/lycheedev/*.tgz
 
-# Temporary outputs; remove completed task artifacts instead of accumulating them
+# Local working artifacts and evidence (never shipped)
 .tmp/
 .lycheedev/
-
-# Local task checkouts
-/.worktrees/
-/.claude/worktrees/
+# Per-crate runtime lock files created by tests; never tracked.
+.lycheedev-locks/
+# Rust workspace build outputs; generated evidence stays under the existing .tmp rule.
+/target/
+/target-symbols/

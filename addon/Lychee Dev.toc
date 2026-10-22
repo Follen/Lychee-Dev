@@ -1,6 +1,6 @@
 ## Interface: 120105, 120100, 50504, 38002, 16001, 11509, 20506
 ## Title: Lychee Dev
-## Version: 3.2.5
+## Version: 3.5.0
 ## SavedVariables: LycheeToolkitDB
 ## SavedVariablesPerCharacter: LycheeToolkitBridgeDB
 

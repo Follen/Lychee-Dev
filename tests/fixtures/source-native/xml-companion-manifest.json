@@ -1,0 +1,14 @@
+{
+  "schema": "lycheedev.xml-companion.v1",
+  "repository": "wow-ui-source",
+  "commit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+  "originalInputManifestSHA256": "7c2ba06f96d302621f9f9f0f505e0f66fd978e1509325119ba769ba511b1934a",
+  "originalDocumentCount": 4036,
+  "scope": "Additional same-commit XML schema; original 4036-document input manifest unchanged",
+  "path": "Interface/AddOns/Blizzard_SharedXML/UI.xsd",
+  "fixture": "xml-retail-UI.xsd",
+  "bytes": 70231,
+  "sha256": "3addc00906cd293304c48c5c2642bdd9962b4f6402b2605e21f4975c4254771c",
+  "implicitParameters": "not supplied by this schema; not injected",
+  "execution": "never"
+}

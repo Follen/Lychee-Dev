@@ -10,17 +10,29 @@ import { spawnSync } from 'node:child_process';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
+for (let index = 0; index < argv.length; index += 2) {
+  if (!['--skill-root', '--bin', '--contract-file'].includes(argv[index]) || !argv[index + 1] || argv[index + 1].startsWith('--')) throw new Error(`invalid option: ${argv[index]}`);
+}
 function option(name) {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : undefined;
 }
 const skillRoot = option('--skill-root') ?? join(repository, 'skills', 'lycheedev');
 const binary = option('--bin');
+const contractFile = option('--contract-file');
+const canonical = JSON.parse(readFileSync(join(repository, 'crates/lycheedev-cli/src/commands.json'), 'utf8'));
+if (binary && contractFile) throw new Error('choose --bin or --contract-file');
 
 function describe() {
-  const result = binary
-    ? spawnSync(binary, ['describe', '--format=json'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 120000 })
-    : spawnSync('go', ['run', './cmd/lycheedev', 'describe', '--format=json'], { cwd: repository, encoding: 'utf8', shell: false, windowsHide: true, timeout: 300000 });
+  if (!binary && !contractFile) return canonical;
+  // Static reference checking only. A supplied contract cannot prove that a
+  // candidate implements it; --bin remains the actual advertised-surface gate.
+  if (contractFile) {
+    const contract = JSON.parse(readFileSync(contractFile, 'utf8'));
+    if (!Array.isArray(contract.commands) || !contract.commands.length) throw new Error('contract file returned no commands');
+    return contract.commands;
+  }
+  const result = spawnSync(binary, ['describe', '--format=json'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 120000 });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`describe failed: ${result.status}\n${result.stdout}\n${result.stderr}`);
   const envelope = JSON.parse(result.stdout);
@@ -35,7 +47,9 @@ for (const command of describe()) {
     flags: new Map(command.flags.map(display => [display.split(/\s+/)[0], display])),
   });
 }
-const oneTokenPaths = new Set([...contracts.keys()].filter(path => !path.includes(' ')));
+// Keep missing groups visible when checking an explicit binary's declarations.
+const knownPaths = new Set([...canonical.map(command => command.path), ...contracts.keys()]);
+const oneTokenPaths = new Set([...knownPaths].filter(path => !path.includes(' ')));
 
 function markdownFiles(root) {
   const files = [];
@@ -63,24 +77,25 @@ function commandPieces(text) {
   return pieces;
 }
 
-const topGroups = new Set([...contracts.keys()].map(path => path.split(' ')[0]));
+const topGroups = new Set([...knownPaths].map(path => path.split(' ')[0]));
 const violations = [];
 const references = [];
 
 function checkInvocation(file, invocation) {
   const tokens = invocation.split(/\s+/).filter(Boolean);
-  if (tokens[0] === 'lycheedev') tokens.shift();
+  const explicit = tokens[0] === 'lycheedev';
+  if (explicit) tokens.shift();
   else if (!topGroups.has(tokens[0])) return;
   if (!tokens.length || tokens[0] === '--help' || (tokens[0] && tokens[0].startsWith('--'))) return;
   // A lone group name can be a component enum ("skill"/"addon"), not an
   // invocation. Actual root commands such as update/version still get checked.
-  if (tokens.length === 1 && !contracts.has(tokens[0])) return;
+  if (tokens.length === 1 && !knownPaths.has(tokens[0]) && !explicit) return;
   let path = tokens[0];
   let consumed = 1;
   // Prefer the longest matching command path (3-word rows like
   // "data decor list" have no 2-word contract for their prefix).
   for (const depth of [3, 2]) {
-    if (tokens.length >= depth && contracts.has(tokens.slice(0, depth).join(' '))) {
+    if (tokens.length >= depth && knownPaths.has(tokens.slice(0, depth).join(' '))) {
       path = tokens.slice(0, depth).join(' ');
       consumed = depth;
       break;
@@ -88,7 +103,7 @@ function checkInvocation(file, invocation) {
   }
   if (consumed === 1 && !contracts.has(tokens[0]) && !oneTokenPaths.has(tokens[0])) {
     // Unknown leading word pair: only report when it looks like a command.
-    if (topGroups.has(tokens[0])) violations.push(`${file}: unknown command reference "${tokens.slice(0, 2).join(' ')}" in ${JSON.stringify(invocation)}`);
+    if (explicit || topGroups.has(tokens[0])) violations.push(`${file}: unknown command reference "${tokens.slice(0, 2).join(' ')}" in ${JSON.stringify(invocation)}`);
     return;
   }
   const contract = contracts.get(path);
@@ -118,10 +133,18 @@ for (const file of markdownFiles(skillRoot)) {
   for (const piece of commandPieces(markdown)) {
     for (const invocation of piece.split(/(?<=\S);\s*(?=lycheedev\s)/)) checkInvocation(file, invocation.replace(/[.;,]$/, ''));
   }
+  // Generated directory flag spans belong to the preceding command row.
+  // Checking isolated `--flag` spans would silently discard their contract.
+  for (const row of markdown.matchAll(/^- `([^`]+)` — (?:mutates|read-only)\.[^\n]*\r?\n  Flags: (.+)$/gm)) {
+    const flags = [...row[2].matchAll(/`([^`]+)`/g)].map(match => match[1]);
+    checkInvocation(file, `${row[1]} ${flags.join(' ')}`);
+  }
 }
 
 process.stdout.write(`${JSON.stringify({
   skillRoot,
+  contractSource: contractFile ? resolve(contractFile) : binary ?? 'crates/lycheedev-cli/src/commands.json',
+  checkKind: 'static-reference-consistency',
   files: markdownFiles(skillRoot).length,
   contracts: contracts.size,
   references: references.length,
