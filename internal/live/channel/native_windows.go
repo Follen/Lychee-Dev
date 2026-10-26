@@ -33,6 +33,7 @@ type Native struct {
 	inputWait                 inputSampleWait
 	inputAttemptProbe         receiptAttemptProbe
 	keyboardActivity          *desktop.KeyboardActivity
+	resetSlotsOnClose         bool // Doctor will archive the entire pool after proven runtime destruction.
 }
 
 type mailboxLookup interface {

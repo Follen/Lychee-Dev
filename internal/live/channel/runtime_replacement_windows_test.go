@@ -13,6 +13,50 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
+func TestReplacementWaitsForFreshPeriodicInput(t *testing.T) {
+	old, fixture := replacementFixture()
+	now, reads := int64(10600), 0
+	read := func(context.Context) (Identity, memory.Record, error) {
+		reads++
+		o := fixture.Witness.Observation
+		o.SampleMillis = now / 1000 * 1000
+		r, _ := relocationRecord(t, 128, o, uint32(now/1000))
+		return fixture.Current, r, nil
+	}
+	fresh := func(ctx context.Context) (Identity, memory.Record, error) {
+		return freshReplacementRead(ctx, old, read, func(context.Context) error { now += 100; return nil }, func() int64 { return now })
+	}
+	proof, err := observeMailboxReplacement(context.Background(), old, 1, 2, fresh,
+		func(context.Context) error { now += 1100; return nil }, func() int64 { return now })
+	if err != nil || proof == nil || proof.Validate(old) != nil || reads > 12 {
+		t.Fatalf("periodic input never reached a fresh pair: proof=%+v reads=%d err=%v", proof, reads, err)
+	}
+}
+
+func TestReplacementFreshWaitHonorsCancellationAndSameRuntime(t *testing.T) {
+	old, fixture := replacementFixture()
+	for _, same := range []bool{false, true} {
+		reads, waits := 0, 0
+		ctx, cancel := context.WithCancel(context.Background())
+		read := func(context.Context) (Identity, memory.Record, error) {
+			reads++
+			current := fixture.Current
+			if same {
+				current = old
+			}
+			o := fixture.Witness.Observation
+			o.Runtime, o.SampleMillis = current.Runtime, 10000
+			r, _ := relocationRecord(t, 128, o, 1)
+			return current, r, nil
+		}
+		_, _, err := freshReplacementRead(ctx, old, read, func(context.Context) error { waits++; cancel(); return ctx.Err() }, func() int64 { return 10600 })
+		cancel()
+		if reads != 1 || same && (waits != 0 || err != nil) || !same && (waits != 1 || !errors.Is(err, context.Canceled)) {
+			t.Fatal(same, reads, waits, err)
+		}
+	}
+}
+
 func TestMailboxRuntimeReplacementRequiresAdvancingCurrentPublication(t *testing.T) {
 	for _, mode := range []string{"valid", "freshness_boundary", "future_boundary", "immutable_history", "sequence_stalled", "sample_stalled", "runtime_changed", "old_runtime", "initial_expired", "latest_expired", "future", "identity_guid", "identity_owner", "identity_fence", "identity_slot", "build_changed", "product_changed", "release_changed", "no_capability", "nonce", "ticket", "kind", "sequence_zero", "sequence_wrap", "payload_limit", "missing_observation", "invalid_json"} {
 		t.Run(mode, func(t *testing.T) {

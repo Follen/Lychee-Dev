@@ -38,7 +38,7 @@ func TestPassiveDiscoveryParsesWithoutDowngradingToActive(t *testing.T) {
 
 func TestNoCacheCompatibilityFlagPreservesNativeOptions(t *testing.T) {
 	for _, args := range [][]string{
-		{"--no-cache", "live", "doctor", "--fix", "--installation", "client", "--pid", "42"},
+		{"--no-cache", "doctor", "--fix", "--installation", "client", "--pid", "42"},
 		{"live", "connect", "--session", "CON-x", "--wait-seconds", "10", "--no-cache"},
 		{"live", "execute", "--session", "CON-x", "--request", "sample", "--file", "probe.lua", "--budget-seconds", "5", "--policy", "observation", "--no-cache"},
 		{"live", "disconnect", "CON-x", "--no-cache"},
@@ -66,7 +66,6 @@ func TestNoCacheCompatibilityFlagPreservesNativeOptions(t *testing.T) {
 		{"live", "instances", "--no-cache"},
 		{"live", "status", "CON-x", "--no-cache"},
 		{"live", "session", "CON-x", "--no-cache"},
-		{"doctor", "--no-cache"},
 		{"live", "connect", "--no-cache=false"},
 		{"live", "connect", "--no-cache", "--no-cache"},
 	} {

@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.5 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.6 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 ## 组成与职责
 
@@ -86,7 +86,7 @@ Forever 扫描主模块 `.text` 的可读区间，保留短读前缀，对剩余
 
 容量不足时重载并在新 runtime 继续原请求。报告已核实且 release 回执缺失超过 5 秒时，在原期限内允许一次独立重载清理；保留原报告，验证旧 runtime 退役后才记为清理完成。短暂读取变化在原调用内重读，不延长持久预算。
 
-`live doctor` 只读检查，`--fix` 复用受管安装和原连接。首次没有兼容且新鲜的 INPUT 时，保留目标等待一次手动重载。
+`doctor` 只读检查，`--fix` 复用受管安装和原连接。首次没有兼容且新鲜的 INPUT 时，保留目标等待一次手动重载。
 
 旧窗口队列、光学/QR 和 SavedVariables 执行驱动已退役；OP/BTP 历史记录保留查看、取消及必要处置，不恢复执行。当前执行、重载和错误调查要求 Native CON。
 

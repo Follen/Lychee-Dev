@@ -1,8 +1,11 @@
 # 待办与验证范围
 
-基线：3.2.5；更新日期：2026-10-21。发行版本源为 3.2.5，沿用渠道 `latest`。
+基线：3.2.6；更新日期：2026-10-26。发行版本源为 3.2.6，沿用渠道 `latest`。
 
 ## 待办
+
+- [x] DOCTOR-SLOT-RECOVERY：诊断/修复统一到doctor，补齐损坏槽归档重建、硬重置、中断续走、原运行时关闭及采样过期等待。实机已恢复原项目连接并完成后续业务，统一doctor只读复验正常；3.2.6同步后build/vet、命令/Skill/发行输入、93项Node测试和Lua5.1必需完整Go套件通过，正式发布待流水线完成。
+- [ ] 补充新doctor自动槽修复与hard-reset的破坏性实机验收；本轮此部分为离线fixture，不扩大七产品实机矩阵。
 
 - [x] SOURCE-FOREVER-ENCODING：非UTF-8编码信息已独立为告警，不降低分析完整性、AST数量或addon加载有效性；query/inspect共用显示规则，原字节与哈希保留。Forever 1.60.1.70450原PIN及提交`172a387e`的8组查询、异常正文查询和第400行inspect均成功；4481文档/4481 AST、0跳过、0语法诊断、1告警，coverage.complete=true，真实结果截断仍保留。build/vet、Lua5.1必需完整Go套件和93项Node测试通过；已随3.2.5提交`c3450d9a32`推送main并发布，本机CLI、Skill及7个客户端addon更新完成，正式CLI原PIN复验通过，临时清理已完成。交付结果见[当前交付](handover.md#当前交付325-发行)，实现证据见[当前修复](handover.md#当前修复source-forever-encoding)。
 

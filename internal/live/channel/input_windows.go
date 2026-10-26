@@ -80,13 +80,11 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 			return InputOutcome{Disposition: "not_sent", Reason: "slot_route_changed"}, err
 		}
 	} else {
-		// Reload loads no slot payload. Validate the pool under its own lock,
-		// then release it before the physical burst or runtime readiness wait.
-		_, err := delivery.InspectSlots(ctx, n.Parent, n.Version)
-		closeErr := n.Publication.Close()
-		n.Publication = nil
-		if err = errors.Join(err, closeErr); err != nil {
-			return InputOutcome{Disposition: "not_sent", Reason: "slot_pool_invalid"}, err
+		// Reload loads no slot payload, so pool health cannot authorize or
+		// prevent it. Release the lease before the physical burst; the fixed
+		// target guard and fresh INPUT still authorize the actual reload key.
+		if err := n.unlockPublication(); err != nil {
+			return InputOutcome{Disposition: "not_sent", Reason: "shared_publication"}, err
 		}
 	}
 	if a.Observation == nil || !a.Observation.validBindings() || a.Observation.Bindings.Reload == "" {

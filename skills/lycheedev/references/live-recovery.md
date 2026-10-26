@@ -143,6 +143,11 @@ with the host clock to establish replacement.
 
 For runtime replacement, the CLI saves `runtimeEnd` before retiring only the
 old CON's exact reservations.
+An expired current INPUT sample is reread within the bounded observation period
+until a fresh publication is available; this does not renew the business budget.
+Missing or malformed slot metadata is retained without reconstructing consumed
+receipts. Use `doctor --fix` to archive and rebuild a damaged pool after the
+original connection is closed.
 Saved proof can finish interrupted retirement even after character selection.
 Without a new sample or saved proof, character selection stays pending. This path
 sends no input, binds no replacement, and does not change the old actor or replay
@@ -181,7 +186,7 @@ verified HWND through PostMessage without activating or stealing the foreground.
 The CLI verifies process/window identity and rejects minimized targets. Agents
 do not send keys, clear focus, decode colors or locate memory addresses manually.
 
-For `input_binding_unavailable`, run `live doctor` on the same CON and resolve
+For `input_binding_unavailable`, run `doctor` on the same CON and resolve
 the selected target’s effective binding before further input. Do not change user bindings or protocol keys, or repeat wake to
 test the conflict. A ready input observation does not prove the shortcut reaches
 the receiver. If input was already submitted or uncertain, retain the original

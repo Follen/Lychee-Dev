@@ -43,16 +43,17 @@ type DoctorDeployment struct {
 	Slots   *delivery.SlotAssessment `json:"slots,omitempty"`
 }
 type DoctorResult struct {
-	Protocol   string               `json:"protocol"`
-	Healthy    bool                 `json:"healthy"`
-	Checks     []DoctorCheck        `json:"checks"`
-	Target     *live.ClientWindow   `json:"target,omitempty"`
-	Deployment *DoctorDeployment    `json:"deployment,omitempty"`
-	Bootstrap  *BootstrapState      `json:"bootstrap,omitempty"`
-	Identity   *Identity            `json:"identity,omitempty"`
-	Input      *InputObservation    `json:"input,omitempty"`
-	Owner      *journal.WindowOwner `json:"owner,omitempty"`
-	Connection *ProjectResult       `json:"connection,omitempty"`
+	RepairArchive string               `json:"repairArchive,omitempty"`
+	Protocol      string               `json:"protocol"`
+	Healthy       bool                 `json:"healthy"`
+	Checks        []DoctorCheck        `json:"checks"`
+	Target        *live.ClientWindow   `json:"target,omitempty"`
+	Deployment    *DoctorDeployment    `json:"deployment,omitempty"`
+	Bootstrap     *BootstrapState      `json:"bootstrap,omitempty"`
+	Identity      *Identity            `json:"identity,omitempty"`
+	Input         *InputObservation    `json:"input,omitempty"`
+	Owner         *journal.WindowOwner `json:"owner,omitempty"`
+	Connection    *ProjectResult       `json:"connection,omitempty"`
 }
 
 func (r *DoctorResult) add(id, state, detail, next string) {
@@ -63,7 +64,7 @@ func (r *DoctorResult) add(id, state, detail, next string) {
 }
 
 // Doctor observes one target without claiming it, loading slots, or sending keys.
-// Both command entrypoints call this same implementation.
+// The unified doctor command uses this for diagnosis and repair verification.
 func (p *Project) Doctor(ctx context.Context, request TargetRequest, session string) (r DoctorResult) {
 	r.Protocol, r.Healthy = ProtocolName, true
 	var target live.ClientWindow
@@ -98,7 +99,7 @@ func (p *Project) Doctor(ctx context.Context, request TargetRequest, session str
 			r.Deployment.Version, r.Deployment.Commit = state.Receipt.Version, state.Receipt.Commit
 		}
 		if state.State != "managed" || state.Receipt == nil || state.Receipt.Version != buildinfo.Version {
-			r.add("live.installation", "blocked", state.State, "live doctor --fix --release <current distribution> installs or upgrades a clean managed addon")
+			r.add("live.installation", "blocked", state.State, "doctor --fix --release <current distribution> installs or upgrades a clean managed addon")
 		} else {
 			r.add("live.installation", "ok", "clean managed addon "+state.Receipt.Version, "")
 		}
@@ -182,7 +183,7 @@ func (p *Project) Doctor(ctx context.Context, request TargetRequest, session str
 		return
 	}
 	if identity.InputState == bridge.PreviousMailboxSchema {
-		r.add("live.runtime", "blocked", "loaded runtime needs the protocol-name update", "live doctor --fix reloads once using its verified two-key INPUT")
+		r.add("live.runtime", "blocked", "loaded runtime needs the protocol-name update", "doctor --fix reloads once using its verified two-key INPUT")
 	} else {
 		r.add("live.runtime", "ok", identity.Runtime, "")
 	}

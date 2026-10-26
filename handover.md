@@ -1,4 +1,15 @@
-更新日期：2026-10-21，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
+更新日期：2026-10-26，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
+
+## 当前交付：3.2.6 与 doctor 恢复
+
+- 用户已明确要求发布npm 3.2.6，沿用main及latest；发布后按既有要求更新本机CLI、Skill和受管插件。基线`b524921c54`，不新建分支、worktree或PR。主代理完成版本同步及本地发行检查，下一步推送固定提交和v3.2.6标签，由正式流水线发布；尚未发布或更新本机。
+- 主代理完成单一doctor入口、整合及文档；slot_reset_worker完成delivery/slot_reset，slot_retirement_worker完成退休与槽修复关闭路径，doctor_repair_worker完成channel/doctor_repair及迁移fixture，均已交回并停止写入。
+- 已用正式3.2.5复现：原CON持有有效runtimeEnd，但缺失`.lycheedev-slots.json`使精确槽退休失败；未关闭的窗口占用又阻止受管重装。现已将修复编排集中到channel，诊断与修复共用公开doctor入口。
+- 用户要求先初始化JSON和500槽，再修改代码。已在原项目保留63份非空载荷和完整连接日志，初始化槽池并通过InspectSlots；原`CON-fc08a9d9b9382f1e9b55c6abae978023`已正常关闭，原未知业务状态未提升。新`CON-52addb75ebd21a0eb286625b593ff21d`在LycheeGroup原项目成功绑定，保留供其继续调查；未修改LycheeGroup业务或组队状态。
+- 公开命令已统一为doctor：默认只读，--fix恢复，--fix --hard-reset归档并初始化500槽。损坏清单、损坏槽、原runtime尚存、默认归档中断续走、旧版升级、共享占用及未知输入保留均有离线回归；对应缺陷已先复现后修复。
+- 后续新连接的重载绑定等待已处理：用户手动reload后，正常disconnect按新runtime证据关闭CON-52...，此前verified报告保留；新CON-67b2def81ac72b887cf22c766cdf7c51成功绑定，业务任务完成60秒声音采集后正常关闭。开发版统一doctor只读实机复验healthy=true、无owner；没有为回归重新破坏游戏槽池。
+- 3.2.6版本同步后本地验证通过：build/vet、版本/Skill合同（83命令、228引用、0违规）、发行输入检查、93项Node测试；Lua5.1必需完整Go套件（包并发2、测试并发4、包时限20分钟），32个测试包通过、3061项pass事件、0fail。42项测试按既有环境或辅助入口跳过，另3个包无测试。新增重置流程未做破坏性实机复验，七产品矩阵未扩展。
+- 本轮临时恢复脚本、只读诊断脚本与完整测试日志已从`.tmp/slot-pool-recovery-20261026`清除；原项目中的连接日志、已验证报告和63份原载荷归档保留。
 
 ## 当前交付：3.2.5 发行
 

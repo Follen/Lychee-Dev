@@ -50,6 +50,7 @@ type Envelope struct {
 
 type Options struct {
 	fix                                  bool
+	hardReset                            bool
 	updatePaths, updateInstallations     []string
 	semantic                             bool
 	staticOnly, sourceFlow, sessionReuse bool
@@ -957,6 +958,8 @@ func parseOptions(args []string) (Options, error) {
 			switch arg {
 			case "--fix":
 				opts.fix = true
+			case "--hard-reset":
+				opts.hardReset = true
 			case "--stdin":
 				opts.stdin = true
 			case "--passive":

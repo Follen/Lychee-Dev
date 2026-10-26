@@ -18,6 +18,6 @@
 
 历史持久化覆盖仅验证只读查看和取消处置；旧 Live 执行驱动与 envelope 基线已移除。这些结果不能证明当前协议的游戏实机场景。
 
-当前实机验收直接使用公共 live doctor/connect/execute/resume/reload/disconnect 命令，遵循 [协议](../../docs/live-protocol.md)，并对照 [待办矩阵](../../todo.md)。保留本次失败所需的原连接；不要为了重跑创建竞争请求或重放未知输入。
+当前实机验收直接使用公共 `doctor` 以及 `live` 下的 connect、execute、resume、reload、disconnect 命令，遵循 [协议](../../docs/live-protocol.md)，并对照 [待办矩阵](../../todo.md)。保留本次失败所需的原连接；不要为了重跑创建竞争请求或重放未知输入。
 
 工作台探针保留在 probes/，用于明确授权的特定场景。临时日志和捕获放入 .tmp，完成后清理。

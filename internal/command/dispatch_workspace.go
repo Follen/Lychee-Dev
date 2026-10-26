@@ -184,11 +184,14 @@ func runConfigVerb(ctx context.Context, route string, opts Options, response *En
 	return 0, nil
 }
 
-// runDoctor aggregates the independent read-only health checks. Exit 3 is
+// runDoctor aggregates health checks and optionally repairs the selected live target. Exit 3 is
 // reserved for checks with error status: warn results (a brand new workspace
 // without a metadata database yet, stale temporary files) describe degraded
 // but working states and stay at exit 0 with the check visible.
 func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, error) {
+	if err := validateDoctorOptions(opts); err != nil {
+		return 2, err
+	}
 	root, err := workspaceRoot(opts.home)
 	if err != nil {
 		return 0, err
@@ -207,7 +210,8 @@ func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, erro
 		toolCheck.NextStep = "install the complete lycheedev npm package or native release for source refs/context semantic analysis and source validate --semantic"
 	}
 	checks = append(checks, toolCheck)
-	checks = append(checks, liveDoctorChecks(ctx, opts)...)
+	liveChecks, liveReport, liveErr := doctorLive(ctx, opts, response)
+	checks = append(checks, liveChecks...)
 	// The mirror check joins only when the nearest project declares a product;
 	// doctor never invents a repository or a product default.
 	if directory, projectErr := projectDirectory(""); projectErr == nil {
@@ -222,7 +226,14 @@ func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, erro
 		}
 	}
 	response.Context["workspace"] = root
-	response.Result = map[string]any{"healthy": !failed, "checks": checks}
+	result := map[string]any{"healthy": !failed && liveErr == nil, "checks": checks}
+	if liveReport != nil {
+		result["live"] = liveReport
+	}
+	response.Result = result
+	if liveErr != nil {
+		return 0, liveErr
+	}
 	if failed {
 		return 0, errDoctorUnhealthy
 	}

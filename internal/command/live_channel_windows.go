@@ -15,9 +15,6 @@ import (
 )
 
 func runChannelCommand(ctx context.Context, route, argument string, opts Options, response *Envelope) (bool, int, error) {
-	if route == "live doctor" {
-		return runLiveDoctorCommand(ctx, opts, response)
-	}
 	if (route == "live execute" || route == "live reload" || route == "live bugs") && !strings.HasPrefix(opts.session, "CON-") {
 		return true, 2, errors.New("Native execution requires --session CON-...; historical OP/BTP execution is retired")
 	}

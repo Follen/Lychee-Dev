@@ -14,7 +14,7 @@ import (
 
 // No memory access or input: OS process lifetime is the authority for resource
 // retirement only. The append-only intent retains all interrupted transactions.
-func (p *Project) disconnectEnded(ctx context.Context, id string, meta projectTarget) (ProjectResult, error) {
+func (p *Project) disconnectEnded(ctx context.Context, id string, meta projectTarget, resetSlots bool) (ProjectResult, error) {
 	window := meta.Target.Window
 	if meta.Owner.Resource != fmt.Sprintf("window/%d/%d/%d", window.ProcessID, window.ProcessStartedAt, window.Handle) {
 		return ProjectResult{}, desktop.ErrIdentityChanged
@@ -42,7 +42,9 @@ func (p *Project) disconnectEnded(ctx context.Context, id string, meta projectTa
 	}
 	// Publication may have died before or after its atomic payload replacement.
 	// Retire only envelopes preserved in this connection, under the shared lock.
-	if d.State.Transaction != nil || d.State.Recovery != nil && d.State.Recovery.Transaction != nil {
+	// A doctor reset archives all original bytes after the OS-proven close.
+	// Its pending reservation metadata is preserved for that archive as well.
+	if !resetSlots && (d.State.Transaction != nil || d.State.Recovery != nil && d.State.Recovery.Transaction != nil) {
 		publication, e := vault.TryAcquireLease(ctx, filepath.Join(parent, ".lycheedev-slot-locks"), "publication")
 		if e != nil {
 			return present(d), e

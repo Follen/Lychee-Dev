@@ -97,6 +97,11 @@ func (n *Native) RetireReplacedRuntime(ctx context.Context, e bridge.SlotEnvelop
 	if err = n.Guard(ctx); err != nil {
 		return err
 	}
+	if n.resetSlotsOnClose {
+		// Destruction proof closes only this connection. Keep every original
+		// slot byte for the subsequent maintenance-gated reset archive.
+		return nil
+	}
 	return delivery.RetireSlotRuntime(ctx, n.Parent, n.Version, n.Consumer, e, proof.Current.Runtime)
 }
 

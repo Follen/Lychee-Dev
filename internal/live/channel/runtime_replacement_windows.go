@@ -50,7 +50,19 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 		}
 		return current, found.Records[0], nil
 	}
-	return observeMailboxReplacement(ctx, old, n.Target.ProcessID, n.Target.ProcessStartedAt, read, func(ctx context.Context) error {
+	fresh := func(ctx context.Context) (Identity, memory.Record, error) {
+		return freshReplacementRead(ctx, old, read, func(ctx context.Context) error {
+			timer := time.NewTimer(100 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		}, uptimeMillis)
+	}
+	return observeMailboxReplacement(ctx, old, n.Target.ProcessID, n.Target.ProcessStartedAt, fresh, func(ctx context.Context) error {
 		timer := time.NewTimer(1100 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -60,6 +72,28 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 			return nil
 		}
 	}, uptimeMillis)
+}
+
+// INPUT can update less frequently than its freshness window. Await the next
+// current publication within the caller's observation deadline; an expired
+// business budget still permits these reads, never additional input.
+func freshReplacementRead(ctx context.Context, old Identity, read func(context.Context) (Identity, memory.Record, error), pause func(context.Context) error, now func() int64) (Identity, memory.Record, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return Identity{}, memory.Record{}, err
+		}
+		current, record, err := read(ctx)
+		if err != nil {
+			return current, record, err
+		}
+		o, valid := replacementRecord(record)
+		if !valid || current.Runtime == old.Runtime || o.Runtime != current.Runtime || o.SampleMillis >= now()-500 {
+			return current, record, nil
+		}
+		if err := pause(ctx); err != nil {
+			return Identity{}, memory.Record{}, err
+		}
+	}
 }
 
 func observeMailboxReplacement(ctx context.Context, old Identity, pid uint32, creation uint64, read func(context.Context) (Identity, memory.Record, error), pause func(context.Context) error, now func() int64) (*RuntimeReplacementProof, error) {

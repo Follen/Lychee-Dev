@@ -3,7 +3,7 @@
 
 # Command reference
 
-84 implemented commands. Every command accepts `--format text|json|jsonl`;
+83 implemented commands. Every command accepts `--format text|json|jsonl`;
 `--help` works on the root and on any command. Read the JSON envelope, not
 just the exit code; preserve capture IDs and partial/truncated warnings.
 
@@ -91,8 +91,8 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 ## doctor
 
-- `doctor` — read-only. Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--session <CON-id>`, `--project <directory>`, `--offline`.
+- `doctor` — mutates. Diagnose workspace, data, LuaLS, source and a selected live target or original CON; read-only by default; --fix repairs managed installation and recovers the original connection; --fix --hard-reset archives and initializes all 500 slots; exit 3 means an unhealthy check
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--session <CON-id>`, `--project <directory>`, `--fix`, `--hard-reset (requires --fix)`, `--offline`, `--release <distribution-root>`, `--output <upgrade-archive>`, `--request <idempotency-key>`, `--wait-seconds <1-600> (default 30)`, `--no-cache`.
 
 ## evidence
 
@@ -126,8 +126,6 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live probe remove <name>` — mutates. Tombstone one probe name for future selection while retaining immutable revisions and operation evidence: live probe remove <name>
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live doctor` — mutates. Diagnose one PID or retained CON without input; --fix installs a clean release when needed and resumes or activates that same target under Lycheedev mailbox protocol v1; missing runtime requires one manual reload
-  Flags: `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--session <CON-id>`, `--project <directory>`, `--fix`, `--release <distribution-root>`, `--output <upgrade-archive>`, `--request <idempotency-key>`, `--wait-seconds <1-600> (default 30)`, `--no-cache`.
 - `live instances` — read-only. List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding
   Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client-or-game-root>`, `--passive`.
 - `live connect` — mutates. Discover and freshly bind a native memory/500-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work

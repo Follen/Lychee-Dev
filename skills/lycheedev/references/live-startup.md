@@ -1,4 +1,4 @@
-# Live doctor and startup
+# Doctor and startup
 
 Use this for first contact, a newly installed or upgraded addon, or a startup
 failure. Disk installation and a loaded runtime are separate facts. Native live
@@ -6,11 +6,10 @@ uses Lycheedev mailbox protocol v1: a named Mailbox, 500 slots and two formal ga
 
 ## Diagnose the selected target
 
-Use the installed CLI's known `describe`/help capabilities before selecting a
-doctor command; reuse that information when already available. If `live doctor`
-is absent, do not substitute top-level `doctor` unless its actual help includes
-the required live target checks. A newer Skill or the same displayed version
-number does not establish the same commit, wire protocol or slot inventory.
+The current CLI has one `doctor` command for workspace and live diagnosis and
+repair. Check the installed CLI's known `describe`/help capabilities before using
+these flags with an older installation. A newer Skill or the same displayed
+version number does not establish the same commit, wire protocol or slot inventory.
 Keep an older CON with its matching CLI for supported diagnosis/recovery;
 [current drivers cannot execute old-wire journals](live-recovery.md#durable-evidence-and-older-journals).
 Do not replace its journal or install a new driver merely to make these examples fit.
@@ -20,16 +19,16 @@ Use `live instances --passive` only when a target is missing. Folder names,
 shared builds and the Windows foreground window do not identify a connection.
 
 ```text
-lycheedev live doctor --project <project-directory> --installation <client> --pid <pid> --format json
-lycheedev live doctor --project <project-directory> --session <CON-id> --format json
+lycheedev doctor --project <project-directory> --installation <client> --pid <pid> --format json
+lycheedev doctor --project <project-directory> --session <CON-id> --format json
 ```
 
 Doctor checks the managed files, 500-slot inventory, PID ownership, runtime
 locator, independent bootstrap diagnostic, current runtime and fresh INPUT.
 It sends no keys and creates no connection. Read each check’s state, detail and
 nextStep. A bootstrap snapshot explains startup; only fresh INPUT authorizes
-machine input. Top-level `doctor` with the same target selectors includes these
-same checks alongside workspace/data/source checks.
+machine input. These live details appear in `result.live`, with the checks also
+included alongside workspace/data/source checks in `result.checks`.
 
 ## Complete the authorized repair
 
@@ -37,7 +36,7 @@ Within an authorized live task, activation and recovery need no repeated approva
 Use `--fix` when diagnosis requires installation, activation or connection recovery:
 
 ```text
-lycheedev live doctor --fix --project <project-directory> --installation <client> --pid <pid> --format json
+lycheedev doctor --fix --project <project-directory> --installation <client> --pid <pid> --format json
 ```
 
 The packaged CLI uses its own distribution. Development or separately staged
@@ -45,6 +44,20 @@ releases can supply `--release <release-root>`; `--output <archive-directory>`
 selects the upgrade archive. The CLI installs absent files or upgrades a clean
 managed installation through the existing installer. Modified/unmanaged files
 need [installation](installation.md) diagnosis, not an overlay copy.
+
+Missing or damaged slot manifests and slot files are archived and rebuilt after
+the original connection is retired. To explicitly initialize all 500 slots, use
+`doctor --fix --hard-reset` with the same target or original CON. This keeps the
+original journals and payload archive; it does not mark unknown business as
+successful or replay submitted input. An unresolved live owner still has to be
+closed through its original project before shared installation files can change.
+If that runtime is still active, repair uses the existing recorded reload flow
+to obtain destruction evidence before resetting. An active control request keeps
+its original deadline and submitted input; repair does not replace it.
+Interrupted resets retain their archive reference in the original project.
+Repeat `doctor --fix` there to finish the same reset. `result.live.repairArchive`
+is the base path accepted by `--output`; the original slot files are in its
+`.slots` sibling.
 
 | Result | Continue |
 | --- | --- |

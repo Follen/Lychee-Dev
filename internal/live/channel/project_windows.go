@@ -563,16 +563,16 @@ func (p *Project) retire(ctx context.Context, id string, result ProjectResult) (
 	return result, journal.RetireConnectionWindow(ctx, parent, meta.Owner)
 }
 func (p *Project) Disconnect(ctx context.Context, id string) (ProjectResult, error) {
-	return p.disconnectMode(ctx, id, false)
+	return p.disconnectMode(ctx, id, false, false)
 }
 
 // CloseForRepair closes the original owned runtime before replacing a damaged or
 // older installation. Its runtime release and journal remain authoritative; it
 // never resumes a business request before recording the close intent.
 func (p *Project) CloseForRepair(ctx context.Context, id string) (ProjectResult, error) {
-	return p.disconnectMode(ctx, id, true)
+	return p.disconnectMode(ctx, id, true, false)
 }
-func (p *Project) disconnectMode(ctx context.Context, id string, repair bool) (ProjectResult, error) {
+func (p *Project) disconnectMode(ctx context.Context, id string, repair, reloadToClose bool) (ProjectResult, error) {
 	state, err := p.Status(id)
 	if errors.Is(err, journal.ErrMemoryTornTail) {
 		if repairErr := p.recoverTail(ctx, id); repairErr != nil {
@@ -600,11 +600,15 @@ func (p *Project) disconnectMode(ctx context.Context, id string, repair bool) (P
 		return state, err
 	}
 	if ended != "" {
-		return p.disconnectEnded(ctx, id, meta)
+		return p.disconnectEnded(ctx, id, meta, reloadToClose)
 	}
 	return p.driveMode(ctx, id, repair, func(d *Driver) error {
 		if err := d.RequestClose(ctx); err != nil {
 			return err
+		}
+		if reloadToClose {
+			d.Backend.(*Native).resetSlotsOnClose = true
+			return d.closeSlotRepairWith(ctx, d.Backend.(*Native), meta.Target.Window)
 		}
 		return d.continueOrRetire(ctx, d.Backend.(*Native), true)
 	})

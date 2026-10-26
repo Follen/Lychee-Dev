@@ -71,7 +71,7 @@ can cover that fresh connection after the old one is safely retired. It never
 transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
-For startup or readiness failures, use `live doctor` before choosing a repair.
+For startup or readiness failures, use `doctor` before choosing a repair.
 Its default is read-only; `--fix` follows the task’s authorized installation and
 live scope. A returned manual reload wait needs one user action in that exact
 window, then resume the same CON. Do not simulate chat input.

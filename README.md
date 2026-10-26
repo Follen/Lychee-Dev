@@ -6,7 +6,7 @@
 
 [设计](Design.md) · [Live 协议](docs/live-protocol.md) · [开发指南](docs/development.md) · [更新记录](Changelog.md) · [待办与验证范围](todo.md)
 
-**当前版本为 3.2.5，npm 发行渠道为 `latest`。** 版本以 [release/version.json](release/version.json) 为准，发布产物见 [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases)。
+**当前版本为 3.2.6，npm 发行渠道为 `latest`。** 版本以 [release/version.json](release/version.json) 为准，发布产物见 [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases)。
 
 ## 功能
 
@@ -82,7 +82,7 @@ CLI 在运行时通过指令特征和 RIP 相对位移找到 Lua 根，沿 Lua s
 
 每个客户端进程有独立连接，共享安装通过槽预约协调。中断沿原连接和请求恢复；报告核实与资源清理分别记录。已提交但结果未知的输入不会重放。
 
-首次连接或异常先运行 `live doctor`；需要修复时用 `live doctor --fix`。首次安装尚无可验证 INPUT 时，需要在指定客户端手动重载一次。详细规则见 [Live 协议](docs/live-protocol.md)。
+首次连接或异常先运行 `doctor`；需要修复时用 `doctor --fix`，归档并初始化500槽用 `doctor --fix --hard-reset`。首次安装尚无可验证 INPUT 时，需要在指定客户端手动重载一次。详细规则见 [Live 协议](docs/live-protocol.md)。
 
 ## 开发与许可
 
