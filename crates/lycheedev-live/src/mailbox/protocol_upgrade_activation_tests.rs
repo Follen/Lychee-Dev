@@ -102,3 +102,86 @@ fn prepared_previous_runtime_reload_keeps_original_activation_deadline() {
         [crate::mailbox::state::InputKind::Reload]
     );
 }
+
+fn reject_reload_target_mismatch(phase: ActivationPhase, field: &str) {
+    let f = Fixture::new();
+    let counts = Rc::new(RefCell::new(Counts::default()));
+    let clock = Rc::new(Cell::new(1000));
+    let (mut service, id) = start(&f, &counts, &clock);
+    f.mutate(&id, |a| a.phase = phase);
+    let original = f.read(&id);
+    let mut candidate = if phase == ActivationPhase::Prepared {
+        identity('2')
+    } else {
+        // A previous two-key runtime may leave manual wait through the same
+        // controlled reload route, after checking the original selected target.
+        clock.set(9_000_000);
+        previous_identity()
+    };
+    match field {
+        "build" => candidate.build = "foreign-build".into(),
+        "product" => candidate.product = "classic".into(),
+        _ => unreachable!(),
+    }
+    counts.borrow_mut().candidates = vec![candidate];
+    counts.borrow_mut().capability = true;
+    let book = ConnectionBook::open(&f.root).unwrap();
+    let owner = book
+        .activation_status(&id, &OperationControl::default())
+        .unwrap()
+        .metadata
+        .owner;
+    let outcome = service.resume_with_activation(&id, &OperationControl::default());
+    let failure = crate::mailbox::connection::classify_error(
+        outcome
+            .error()
+            .expect("mismatched runtime must be rejected"),
+    )
+    .expect("target mismatch has a stable public error");
+    assert_eq!(failure.code, "live.channel_runtime_build_mismatch");
+    assert_eq!(outcome.into_report().unwrap().session, id);
+    assert_eq!(counts.borrow().inputs, 0);
+    assert!(counts.borrow().actions.is_empty());
+    assert_eq!(counts.borrow().opens, counts.borrow().closes);
+    let after = book
+        .activation_status(&id, &OperationControl::default())
+        .unwrap();
+    assert_eq!(after.metadata.owner, owner);
+    assert_eq!(after.activation.phase, phase);
+    assert_eq!(after.activation.budget, original.budget);
+    assert_eq!(after.activation.request, original.request);
+    assert_eq!(after.activation.prior_runtime, original.prior_runtime);
+    assert!(
+        !after.paths.log_path().exists(),
+        "a rejected runtime must not seed the CON journal"
+    );
+    assert_eq!(
+        inspect_window_owner(
+            &f.target.addon_parent(),
+            &f.target.resource(),
+            &OperationControl::default()
+        )
+        .owner,
+        Some(owner)
+    );
+}
+
+#[test]
+fn prepared_activation_rejects_build_mismatch_before_reload() {
+    reject_reload_target_mismatch(ActivationPhase::Prepared, "build");
+}
+
+#[test]
+fn prepared_activation_rejects_product_mismatch_before_reload() {
+    reject_reload_target_mismatch(ActivationPhase::Prepared, "product");
+}
+
+#[test]
+fn manual_wait_previous_runtime_rejects_build_mismatch_before_reload() {
+    reject_reload_target_mismatch(ActivationPhase::WaitingManualReload, "build");
+}
+
+#[test]
+fn manual_wait_previous_runtime_rejects_product_mismatch_before_reload() {
+    reject_reload_target_mismatch(ActivationPhase::WaitingManualReload, "product");
+}

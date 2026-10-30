@@ -290,7 +290,7 @@ test('Windows Cargo helper admission retains identical startup job and root wrap
  const f=fixture(t,'cargo-helper-binding',{v2:true});f.request.command='cargo';f.request.args=['test','--help'];f.request.cargoBuild=true;
  const result=run(f);assert.equal(result.status,0,result.stderr);const terminal=proof(f);
  const cargoSHA256=createHash('sha256').update(readFileSync(terminal.binary)).digest('hex');
- const admissionEvidence=JSON.stringify({helperAdmission:terminal.helperAdmission,cargo:{path:terminal.binary,sha256:cargoSHA256,reviewedSHA256:policy.cargoSHA256}});
+ const admissionEvidence=JSON.stringify({helperAdmission:terminal.helperAdmission,cargo:{path:terminal.binary,sha256:cargoSHA256,reviewedSHA256s:policy.cargo.map(row=>row.sha256)}});
  t.diagnostic(admissionEvidence);
  assert.equal(terminal.helperAdmission.state,'enabled',admissionEvidence);assert.equal(terminal.handlesClosed,true);assert.equal(terminal.treeReaped,true);
  const start=JSON.parse(readFileSync(f.request.identity)),job=JSON.parse(readFileSync(f.base+'.job.json')),root=JSON.parse(readFileSync(f.request.rootIdentity));

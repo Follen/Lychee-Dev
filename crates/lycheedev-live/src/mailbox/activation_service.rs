@@ -452,6 +452,11 @@ where
                         && (a.phase == ActivationPhase::Prepared
                             || candidate.input_state == super::super::PREVIOUS_SCHEMA)
                     {
+                        if candidate.build != lease.record.metadata.target.client.full_build
+                            || candidate.product != lease.record.metadata.target.client.product
+                        {
+                            return Err(error("live.channel_runtime_build_mismatch"));
+                        }
                         if !candidate.owner.is_empty() {
                             return Err(error("live.channel_ownership_changed"));
                         }

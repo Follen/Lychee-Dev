@@ -142,7 +142,8 @@ if($requestData.msvcCompile -eq $true){
   $policy=[Text.Encoding]::UTF8.GetString($policyRaw)|ConvertFrom-Json
   if($policy.schema -ne 'lycheedev.build-auxiliary-policy.v1'){throw 'owned.auxiliary_policy_schema'}
   $cargoIdentity=Open-IdentityFile $binary
-  if($cargoIdentity.sha256 -ne $policy.cargoSHA256){throw 'owned.unreviewed_cargo_identity'}
+  if(@($policy.cargo).Count -lt 1 -or @($policy.cargo).Count -gt 8){throw 'owned.auxiliary_policy_budget'}
+  if(-not @($policy.cargo|Where-Object {$_.sha256 -ceq $cargoIdentity.sha256})){throw 'owned.unreviewed_cargo_identity'}
   $helperAdmission=@{state='enabled';cargo=$cargoIdentity;helpers=@()}
   if(@($policy.helpers).Count -lt 1 -or @($policy.helpers).Count -gt 8){throw 'owned.auxiliary_policy_budget'}
   foreach($helper in $policy.helpers){

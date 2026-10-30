@@ -48,7 +48,7 @@ export function capture(root,ownerId,{terminalReaped=false}={}){
     // This explicit route is solely for the observed Cargo-helper clobber. Its
     // original Job accounting and checked close, not PID absence, prove reap.
     const policy=read(root,join(root,'tools/rust-build-auxiliary.json')),a=t.helperAdmission,programFiles=Object.entries(process.env).find(([key])=>key.toLowerCase()==='programfiles')?.[1];
-    need(q.cargoBuild===true&&q.msvcCompile!==true&&['build','check','test','clippy'].includes(q.args[0])&&t.forced===true&&t.knownAuxiliaryCleanup===true&&policy.value.schema==='lycheedev.build-auxiliary-policy.v1'&&a?.state==='enabled'&&a.cargo?.sha256===policy.value.cargoSHA256&&same(t.binary,a.cargo.path)&&basename(t.binary).toLowerCase()==='cargo.exe'&&programFiles,'terminal_helper_admission');
+    need(q.cargoBuild===true&&q.msvcCompile!==true&&['build','check','test','clippy'].includes(q.args[0])&&t.forced===true&&t.knownAuxiliaryCleanup===true&&policy.value.schema==='lycheedev.build-auxiliary-policy.v1'&&a?.state==='enabled'&&Array.isArray(policy.value.cargo)&&policy.value.cargo.length>0&&policy.value.cargo.length<=8&&policy.value.cargo.some(row=>row.sha256===a.cargo?.sha256)&&same(t.binary,a.cargo.path)&&basename(t.binary).toLowerCase()==='cargo.exe'&&programFiles,'terminal_helper_admission');
     need(Array.isArray(a.helpers)&&a.helpers.length>=1&&a.helpers.length<=8,'terminal_helper_admission');
     for(const helper of a.helpers){
       const expected=policy.value.helpers.filter(entry=>same(join(programFiles,entry.programFilesPath),helper.path));

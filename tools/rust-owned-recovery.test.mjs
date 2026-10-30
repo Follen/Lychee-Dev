@@ -235,7 +235,7 @@ function terminalCaptureFixture(t){
  const bad={...binding,wrapperPid:0,wrapperCreationFileTime:''},job={schema:'lycheedev.owned-job.v1',...bad,createdNew:true,limitFlags:8192,jobHandleInherited:false},native={schema:'lycheedev.owned-root.v1',...bad,pid:789,creationFileTime:'101',jobAssignedAtCreation:true,rootAssignment:'PROC_THREAD_ATTRIBUTE_JOB_LIST'};
  const receipt={schema:'lycheedev.owned-process.v1',identitySource:'request-v2',runId,startupIdentity:q.identity,rootIdentity:q.rootIdentity,pid:789,creationFileTime:'101',binary:cargo.path,rootReaped:true,treeReaped:true,handlesClosed:true,toolIdentityLocksClosed:true,outputReadersComplete:true,activeProcesses:0,exitCode:0,error:null,deadlineHit:false,outputLimit:false,forced:true,knownAuxiliaryCleanup:true,helperAdmission:{state:'enabled',cargo,helpers:[helper]},auxiliaryProcesses:[{pid:790,creationFileTime:'102',jobMember:true,reviewedAuxiliary:true,error:null,image:helper.path}]};
  const command=[q.command,...q.args],owner={schema:'lycheedev.disk-owner.v1',id:ownerId,owner:'terminal-fixture',directory:join(root,'.tmp/rust-scratch',ownerId),state:'interrupted',activePid:null,handlesReaped:false,command,commandSHA256:hash(Buffer.from(JSON.stringify(command)))};
- const policy={schema:'lycheedev.build-auxiliary-policy.v1',cargoSHA256:cargo.sha256,helpers:[{...helper,programFilesPath:'fixture-vctip.exe'}]};
+ const policy={schema:'lycheedev.build-auxiliary-policy.v1',cargo:[{sha256:'e'.repeat(64)},{sha256:cargo.sha256}],helpers:[{...helper,programFilesPath:'fixture-vctip.exe'}]};
  const documents=new Map([[lease,{schema:'lycheedev.build-lease.v1',state:'active',channel:'ordinary',token:randomUUID(),pid:123,owner:owner.owner}],[join(evidence,'receipt.json'),owner],[q.identity,start],[base+'.job.json',job],[q.rootIdentity,native],[q.receipt,receipt],[join(root,'tools/rust-build-auxiliary.json'),policy]]);
  for(const [path,value]of documents)save(path,value);writeFileSync(q.stdout,'original stdout');writeFileSync(q.stderr,'original stderr');
  return {root,ownerId,runId,base,lease,q,receipt,start,job,native,policy,documents,save};
@@ -254,6 +254,13 @@ test('terminal-reaped capture preserves strict default and authenticates the kno
  }
  for(const[path,bytes]of before)assert.deepEqual(readFileSync(path),bytes,'no original evidence changed after rejection');
 });
+test('terminal-reaped capture rejects an unreviewed Cargo binary hash',t=>{
+ const f=terminalCaptureFixture(t);
+ f.receipt.helperAdmission.cargo.sha256='a'.repeat(64);
+ f.save(f.q.receipt,f.receipt);
+ assert.throws(()=>capture(f.root,f.ownerId,{terminalReaped:true}),/terminal_helper_admission/);
+});
+
 test('terminal-reaped native observation checks exact exited identities without opening a Job',()=>{
  const source=readFileSync(new URL('./rust-owned-recovery.ps1',import.meta.url),'utf8'),terminal=source.slice(source.indexOf(' public static string ObserveTerminal('),source.indexOf(' public static string Observe('));
  assert.match(terminal,/ObserveExited\(wrapperPid,wrapperCreated,"wrapper"\)/);assert.match(terminal,/ObserveExited\(rootPid,rootCreated,"root"\)/);assert.doesNotMatch(terminal,/OpenJobObjectW|TerminateJobObject/);
