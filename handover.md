@@ -6,10 +6,13 @@
 - 已用实际文件的延迟事件回调复现：GetCurrentBindingSet返回0或nil时，两个默认键已设置，SaveBindings抛出相同错误；返回1或2正常。用户日志未记录具体返回值。现有fixture固定返回2，未覆盖方案未就绪。
 - 已实现：仅在需要补齐默认键时，于写入前验证并固定1/2方案；无效或secret值不写入，启动路径等待BINDINGS_LOADED/UPDATE_BINDINGS，战斗时切换为脱战等待。重试重新读取玩家设置，写入前注销监听防止同步重入；手动重置完成等待时同步清除旧诊断。
 - 验证通过：原错误先在新增Lua回归中复现，修复后覆盖0/nil/非法编号/字符串/secret、账号与角色方案、绑定期间返回值变化、玩家修改、战斗切换、重复事件及手动重置；build/vet和Lua5.1必需的tests/protocol、tests/addon整包通过（后者覆盖六类客户端fixture）。固定Retail源码`18c6d677b605b312f3d813d498404631fb941977`确认两个绑定事件均为同步事件；各客户端事件目录均包含它们。
-- 已开始3.2.7版本同步和完整发行检查；检查通过后推送固定提交及v3.2.7标签，由正式流水线发布。尚未发布、安装到游戏或实机复验，实机验收保留在todo.md。
-- 3.2.7版本同步后build/vet、版本/Skill合同、发行输入和93项Node测试通过。本地Lua必需完整Go运行中31包通过，delivery包因20分钟总时限终止（最后测试处于槽文件写入，无断言失败）；15个未完成测试已单独补跑通过，delivery的94个顶层测试均有完成结果，合并两次记录为3029项测试pass、42项skip、0测试fail。初次整包超时仍单独记录，云端须完整复验。
-- 用户随后明确要求取消整包限时。本地baseline、CI、发行验收及文档统一显式使用`-timeout=0`，保留并发限制、产品期限与测试内部定向等待；历史验收记录不改写。修改后93项Node测试再次全部通过，下一步推送正式发布标签。
-- 本机默认update预检查遇到两处环境冲突：`_classic_beta_`仍有1.60.1.70450旧exe，但当前`.build.info`没有wow_classic_beta记录；`_cn_beta_`缺少`.flavor.info`。当前构建清单已含wowf 1.60.1.70658；本次不扩展产品支持或改写安装身份。明确选择Skill和其余五个客户端的预检查已通过，发布后更新这些目标，两个旧测试服目录保留原状。
+- 实现提交`dcb35d7f36`及固定同一提交的`v3.2.7`标签已推送；[main CI](https://github.com/Follen/Lychee-Dev/actions/runs/41053821612)和[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/41053821606)全部成功，包含Lua必需完整Go套件、竞态检测、源码重建、真实LuaLS/Source、Windows隔离安装、OIDC发布及registry重新安装验收。实机验收保留在todo.md。
+- 3.2.7版本同步后build/vet、版本/Skill合同、发行输入和93项Node测试通过。本地Lua必需完整Go运行中31包通过，delivery包因20分钟总时限终止（最后测试处于槽文件写入，无断言失败）；15个未完成测试已单独补跑通过，delivery的94个顶层测试均有完成结果，合并两次记录为3029项测试pass、42项skip、0测试fail。初次整包超时仍单独记录，云端完整复验已通过。
+- 用户随后明确要求取消整包限时。本地baseline、CI、发行验收及文档统一显式使用`-timeout=0`，保留并发限制、产品期限与测试内部定向等待；历史验收记录不改写。修改后93项Node测试再次全部通过，云端按新设置完整复验通过。
+- [GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.7)已发布，六项产物齐全；独立registry回读确认latest=3.2.7、next=3.1.2，integrity和provenance元数据存在。
+- 本机默认update预检查遇到两处环境冲突：`_classic_beta_`仍有1.60.1.70450旧exe，但当前`.build.info`没有wow_classic_beta记录；`_cn_beta_`缺少`.flavor.info`。当前构建清单已含wowf 1.60.1.70658；本次不扩展产品支持或改写安装身份，两个旧测试服目录保留原状。
+- 明确选择Skill及retail/classic/titan/anniversary/classic-era五个客户端的受管update已完成：complete=true、六个目标全部current，CLI为3.2.7、提交`dcb35d7f36`、workspaceDirty=false，npm更新事务不存在。正式服安装文件已含新绑定方案校验及等待处理。游戏等待后续reload，Skill供新Agent上下文使用；本次未操作游戏，实机覆盖不变。
+- 发布、可识别目标更新和本轮清理已完成。固定文件清单的PowerShell脚本删除`.tmp/release-3.2.7`中的18份临时文件、空目录及一次性脚本；原项目记录、报告和其他worktree保留。两个旧测试服的安装身份问题未改动，不属于本次快捷键修复。
 
 ## 当前交付：3.2.6 与 doctor 恢复
 
