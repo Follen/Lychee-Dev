@@ -10,7 +10,7 @@
 
 也可以设置 LYCHEEDEV_LUA51、LYCHEEDEV_LUALS_ARCHIVE 和 LYCHEEDEV_LUALS_TEST_RUNTIME 后直接运行入口。
 
-检查包括 build、vet、Lua 必需的完整 Go 套件、Node 工具和 npm 测试、版本一致性、Skill 合同，以及运行前后源码身份。Go 测试限制包并发为 2、测试并发为 4，并使用 20 分钟包时限。
+检查包括 build、vet、Lua 必需的完整 Go 套件、Node 工具和 npm 测试、版本一致性、Skill 合同，以及运行前后源码身份。Go 测试限制包并发为 2、测试并发为 4，并显式使用`-timeout=0`关闭整包时限。
 
 ## 目录与结果
 

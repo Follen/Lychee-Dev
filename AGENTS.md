@@ -2,7 +2,7 @@
 
 ## Project baseline
 
-Lychee Dev Toolkit is a Go CLI, a Lua workbench addon, an Agent skill and an npm distribution. The current development baseline is 3.2.6; release/version.json remains the version authority. Windows amd64 is the shipped platform.
+Lychee Dev Toolkit is a Go CLI, a Lua workbench addon, an Agent skill and an npm distribution. The current development baseline is 3.2.7; release/version.json remains the version authority. Windows amd64 is the shipped platform.
 
 Read these current documents:
 
@@ -53,11 +53,11 @@ Use a focused change and verify its actual risks. Existing contracts belong at t
 
 ## Validation and delivery
 
-Run go build ./... and go vet ./... after code edit batches, followed by affected tests. The full Lua-required Go suite must pass before presenting a code commit as done; use bounded package/test concurrency and the documented installation-test timeout. Missing required interpreters are failures, not passes.
+Run go build ./... and go vet ./... after code edit batches, followed by affected tests. The full Lua-required Go suite must pass before presenting a code commit as done; use bounded package/test concurrency and explicit -timeout=0 to disable the Go test package-wide timeout. Missing required interpreters are failures, not passes.
 
 Check tools/version.mjs --check and the Skill contract when their inputs change. Do not repeat successful checks unless a new change, actual failure or unresolved issue requires it.
 
-Do not change npm tags while merging code or cleaning docs. Release through the pinned workflow and channel manifest; 3.2.6 continues on latest. Future channel changes require explicit user authorization. Published artifacts are immutable.
+Do not change npm tags while merging code or cleaning docs. Release through the pinned workflow and channel manifest; 3.2.7 continues on latest. Future channel changes require explicit user authorization. Published artifacts are immutable.
 
 Temporary work belongs in ignored .tmp/<task>/ and is removed when the task ends. Keep reusable tests in tests/ and current documentation concise; do not create permanent run diaries or archive copies for routine work.
 

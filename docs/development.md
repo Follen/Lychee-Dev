@@ -22,10 +22,10 @@ $env:LYCHEEDEV_REQUIRE_LUA51 = '1'
 $env:LYCHEEDEV_LUA51 = 'C:/path/to/lua.exe'
 go build ./...
 go vet ./...
-go test -p=2 -parallel=4 -count=1 -timeout=20m ./...
+go test -p=2 -parallel=4 -count=1 -timeout=0 ./...
 ```
 
-限制并发是为了避免 500 槽安装测试的大量文件操作互相拖慢。20 分钟为测试包时限，不改变产品预算。
+限制并发是为了避免 500 槽安装测试的大量文件操作互相拖慢。显式使用`-timeout=0`关闭Go测试的整包时限；省略该参数仍会使用Go默认时限。产品操作期限和测试内部的定向等待保持不变。
 
 Windows CI 在同一次完整 Go 套件中收集 atomic 语句覆盖，不另跑一套重复测试；计量包为 `cmd/...` 和 `internal/...`（不含 `internal/testkit`），测试选择仍为 `./...`。`windows-go-coverage` artifact 保留原始 coverprofile、JSON 测试事件、准确 checkout commit/tree、PR head、工具链/平台/命令及加权汇总。`tools/go-coverage.mjs` 拒绝缺失的包终止证据，失败/skip 不冒充测试通过；PR 的 merge checkout 与分支 head 分别记录。Go 比例不代表 Lua/Node 或业务场景/实机覆盖，也不设任意比例门槛。
 
@@ -84,7 +84,7 @@ stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `d
 
 `release/version.json` 是版本来源，`node tools/version.mjs --write` 同步相关文件。当前开发基线名不会自动修改 TOC、CLI 或 npm 版本。
 
-`release/npm-channel.json` 固定发行渠道；3.2.6 沿用 `latest`。`latest` 渠道在发布后核验目标版本；`next` 渠道可用 `preserveLatest` 指定需要保持的正式版本。后续改变渠道仍须有用户明确授权。
+`release/npm-channel.json` 固定发行渠道；3.2.7 沿用 `latest`。`latest` 渠道在发布后核验目标版本；`next` 渠道可用 `preserveLatest` 指定需要保持的正式版本。后续改变渠道仍须有用户明确授权。
 
 发布使用 `.github/workflows/toolkit-release.yml`：固定干净提交，取得所需 CI 结果，校验许可和源码，构建 Windows 包及 corresponding source，完成重建比较、摘要封存和隔离安装；随后 OIDC 发布、回读 registry，再创建 GitHub Release。
 

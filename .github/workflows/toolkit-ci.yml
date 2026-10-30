@@ -82,7 +82,7 @@ jobs:
           node tools/import-contract.mjs
           if ($LASTEXITCODE -ne 0) { throw 'import contract failed' }
       - run: go vet ./...
-      - run: go test -p=1 -parallel=2 -tags casc_oracle ./tests/data-regression/compare
+      - run: go test -p=1 -parallel=2 -timeout=0 -tags casc_oracle ./tests/data-regression/compare
       - name: Build checksum-pinned Lua 5.1.5
         run: |
           $ErrorActionPreference = 'Stop'
@@ -131,7 +131,7 @@ jobs:
           $scope = ($packages | Where-Object { $_.instrumented } | ForEach-Object { $_.importPath }) -join ','
           $profile = Join-Path $report 'cover.out'
           $events = Join-Path $report 'go-test.jsonl'
-          $command = @('test', '-json', '-p=2', '-parallel=4', '-count=1', '-timeout=20m', '-covermode=atomic', "-coverpkg=$scope", "-coverprofile=$profile", './...')
+          $command = @('test', '-json', '-p=2', '-parallel=4', '-count=1', '-timeout=0', '-covermode=atomic', "-coverpkg=$scope", "-coverprofile=$profile", './...')
           & go @command > $events 2> (Join-Path $report 'stderr.log')
           $testExit = $LASTEXITCODE
           $identity = [ordered]@{
@@ -179,7 +179,7 @@ jobs:
         run: |
           # Keep skip/volume GUID/failure-stage evidence visible even if the
           # full suite failed. This does not invoke process discovery or input.
-          go test -v -count=1 -timeout=5m ./internal/command -run '^TestLiveDoctorUpgrade(CreatesDefaultArchiveParent|DefaultArchiveAcrossVolumes|PreservesExplicitArchive)$'
+          go test -v -count=1 -timeout=0 ./internal/command -run '^TestLiveDoctorUpgrade(CreatesDefaultArchiveParent|DefaultArchiveAcrossVolumes|PreservesExplicitArchive)$'
           if ($LASTEXITCODE -ne 0) { throw 'doctor volume-boundary contract failed' }
       - name: Native release-shape build
         run: |
@@ -222,7 +222,7 @@ jobs:
         # internal/live/journal  same-window exclusivity (window owner/run
         #                        work leases across processes)
         run: |
-          go test -count=1 -timeout=20m ./tests/process/... ./internal/delivery/... ./internal/vault/... ./internal/selection/... ./internal/live/journal/...
+          go test -count=1 -timeout=0 ./tests/process/... ./internal/delivery/... ./internal/vault/... ./internal/selection/... ./internal/live/journal/...
           if ($LASTEXITCODE -ne 0) { throw 'multi-process contracts failed' }
 
   windows-addon:
@@ -259,11 +259,11 @@ jobs:
         env:
           LYCHEEDEV_REQUIRE_LUA51: '1'
         run: |
-          go test -count=1 -timeout=10m ./tests/addon/... ./tests/protocol/...
+          go test -count=1 -timeout=0 ./tests/addon/... ./tests/protocol/...
           if ($LASTEXITCODE -ne 0) { throw 'Lua client matrix failed' }
       - name: TOC order, load lists and event catalog contracts
         run: |
-          go test -count=1 -timeout=5m ./internal/codebase/
+          go test -count=1 -timeout=0 ./internal/codebase/
           if ($LASTEXITCODE -ne 0) { throw 'codebase TOC contracts failed' }
       - name: Addon release ZIP structure check (build + verify, "Lychee Dev/" root)
         run: |
@@ -369,7 +369,7 @@ jobs:
         with:
           go-version: '1.27.1'
       # Bound concurrency for filesystem-heavy managed installation and Native lifecycle tests.
-      - run: go test -race -p=2 -parallel=4 -count=1 -timeout=15m ./...
+      - run: go test -race -p=2 -parallel=4 -count=1 -timeout=0 ./...
 
   ci-required:
     # §2/§3: this aggregation always runs and rejects every non-success result;

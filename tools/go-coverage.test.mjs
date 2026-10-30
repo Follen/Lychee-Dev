@@ -12,7 +12,7 @@ const one = `${root}/internal/one`, two = `${root}/cmd/two`, helper = `${root}/i
 const profile = `mode: atomic\n${one}/a.go:1.1,1.2 9 0\n${one}/a.go:2.1,2.2 1 1\n${two}/b.go:1.1,1.2 1 1\n`;
 const identity = () => ({ testedCommit: 'a'.repeat(40), testedTree: 'b'.repeat(40), requestedPrHead: 'a'.repeat(40),
   goVersion: 'go version go1.27.1 windows/amd64', goos: 'windows', goarch: 'amd64',
-  command: ['go', 'test', '-json', '-covermode=atomic', `-coverpkg=${one},${two}`, '-coverprofile=cover.out', '-p=2', '-parallel=4', '-count=1', '-timeout=20m', './...'],
+  command: ['go', 'test', '-json', '-covermode=atomic', `-coverpkg=${one},${two}`, '-coverprofile=cover.out', '-p=2', '-parallel=4', '-count=1', '-timeout=0', './...'],
   exitCode: 0, packages: [{ importPath: one, hasTests: true, instrumented: true },
     { importPath: two, hasTests: false, instrumented: true }, { importPath: helper, hasTests: false, instrumented: false, helper: true }] });
 const event = (Package, Action, Test) => ({ Package, Action, ...(Test ? { Test } : {}) });

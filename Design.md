@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.6 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.7 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 ## 组成与职责
 
