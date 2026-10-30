@@ -3,10 +3,10 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
-import { RECORD_SCHEMA, readTestRecord, runTestPrograms, packageName, isFormalBridge } from './ci-test-programs.mjs';
+import { RECORD_SCHEMA, buildTestPrograms, readTestRecord, runTestPrograms, packageName, isFormalBridge } from './ci-test-programs.mjs';
 import { sourceDigest } from './rust-build.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -27,6 +27,52 @@ function record(overrides = {}) {
   };
 }
 function write(value) { writeFileSync(recordPath, JSON.stringify(value, null, 2)); return recordPath; }
+
+function buildFixture(name) {
+  const directory=join(base,name);
+  for(const child of ['crates/fixture','release','.cargo'])mkdirSync(join(directory,child),{recursive:true});
+  for(const child of ['Cargo.toml','Cargo.lock','.cargo/config.toml','crates/fixture/Cargo.toml'])writeFileSync(join(directory,child),'fixture');
+  return directory;
+}
+
+test('test-program builds forward default and explicit jobs to Cargo and the sealed command',()=>{
+  for(const jobs of [undefined,2]){
+    const directory=buildFixture(`jobs-${jobs??'default'}`),output=join(directory,'artifact');let calls=0,received;
+    const built=buildTestPrograms({root:directory,output,...(jobs===undefined?{}:{jobs}),execute(command,args,options){
+      calls++;assert.equal(command,'cargo');received=args;
+      const target=join(options.env.CARGO_TARGET_DIR,'debug/deps');mkdirSync(target,{recursive:true});
+      const executable=join(target,'fixture.exe');writeFileSync(executable,'mock libtest program');
+      const messages=[{reason:'compiler-artifact',executable,package_id:'path+file:///fixture#fixture@0.1.0',target:{kind:['lib'],name:'fixture'},profile:{test:true}},{reason:'build-finished',success:true}];
+      return {status:0,handlesReaped:true,stdout:Buffer.from(messages.map(value=>JSON.stringify(value)).join('\n')),stderr:Buffer.alloc(0)};
+    }});
+    const expected=['test','--locked','--offline','--workspace','--all-targets','--no-run','--message-format=json-render-diagnostics','-j',String(jobs??1)];
+    assert.equal(calls,1);assert.deepEqual(received,expected);assert.deepEqual(built.command,['cargo',...expected]);
+    assert.deepEqual(JSON.parse(readFileSync(join(output,'test-programs.json'))).command,built.command);
+    assert.equal(built.programs.length,1);
+  }
+});
+
+test('invalid build jobs refuse admission before creating output or launching Cargo',()=>{
+  const directory=buildFixture('invalid-jobs'),output=join(directory,'artifact');let calls=0;
+  for(const jobs of [0,5,2.5,'bad',null,true])assert.throws(()=>buildTestPrograms({root:directory,output,jobs,execute(){calls++;throw new Error('compiler must not start');}}),/build.invalid_jobs/);
+  assert.equal(calls,0);assert.equal(existsSync(output),false);assert.equal(existsSync(join(directory,'.tmp')),false);
+});
+
+test('build CLI rejects invalid, missing and repeated jobs without enabling jobs on run',()=>{
+  const script=join(root,'tools/ci-test-programs.mjs'),output=join(base,'cli-invalid-output');
+  for(const [args,expected] of [
+    [['build',output,'--jobs','0'],/build.invalid_jobs/],
+    [['build',output,'--jobs','2.5'],/build.invalid_jobs/],
+    [['build',output,'--jobs'],/ci-test-programs.option_value_missing/],
+    [['build',output,'--jobs','--owner','fixture'],/ci-test-programs.option_value_missing/],
+    [['build',output,'--jobs','2','--jobs','3'],/ci-test-programs.duplicate_option/],
+    [['run',recordPath,'--jobs','2'],/ci-test-programs.unknown_option/],
+  ]){
+    const result=spawnSync(process.execPath,[script,...args],{cwd:root,encoding:'utf8',windowsHide:true,shell:false});
+    assert.equal(result.status,1);assert.match(result.stderr,expected);
+  }
+  assert.equal(existsSync(output),false);
+});
 
 test('a record from this workspace, commit and source tree is accepted', () => {
   const loaded = readTestRecord(root, write(record()));

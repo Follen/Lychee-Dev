@@ -39,7 +39,7 @@ Mailbox 的业务合同见 DESIGN 的 Live 章节，具体格式对照当前 [ad
 
 ## 验证与 CI
 
-使用现有 owned Cargo runner、固定任务源码/测试工作区、锁定的离线依赖、单 job和默认栈。大型构建应留足编译时间，Cargo编译批次默认允许60分钟；不得用短业务命令的时限统一限制完整构建。测试执行沿用相应业务期限。构建缓存默认上限为 50 GiB，scratch 默认 5 GiB；它们与产品的十进制 5 GB Data 容量是不同概念。隔离 HOME、Skill、npm 和测试临时状态，不用额外 target 或无 owner 的 Cargo 绕过当前队列。
+使用现有 owned Cargo runner、固定任务源码/测试工作区、锁定的离线依赖和默认栈。本机默认单 job；Windows CI 显式使用两个编译 job，仍由各自 runner 的同一 owner 队列执行。大型构建应留足编译时间，Cargo编译批次默认允许60分钟；不得用短业务命令的时限统一限制完整构建。测试执行沿用相应业务期限。构建缓存默认上限为 50 GiB，scratch 默认 5 GiB；它们与产品的十进制 5 GB Data 容量是不同概念。隔离 HOME、Skill、npm 和测试临时状态，不用额外 target 或无 owner 的 Cargo 绕过当前队列。
 
 Rust 改动按影响执行 workspace all-targets 检查/构建及当前受影响测试，Lua、Windows 和包验证使用各自正式入口。版本、命令/Skill、打包输入改变时运行对应检查。成功检查不因“不放心”重复；仅新改动、实际失败或未解决问题触发补验。
 

@@ -14,7 +14,7 @@ export function sourceDigest(root){const hash=createHash('sha256');let entries=0
   // themselves. They are not source inputs and must not change the digest while
   // a test batch is running (that would look like a concurrent source edit).
   const generated=new Set(['.lycheedev-locks','.lycheedev','target','target-symbols']);
-  function visit(path,name){if(++entries>100000)throw new Error('build.source_budget');const info=lstatSync(path);if(info.isSymbolicLink())throw new Error('build.source_reparse');if(info.isDirectory()){for(const child of readdirSync(path).sort()){if(generated.has(child))continue;visit(join(path,child),`${name}/${child}`);}}else if(info.isFile()){hash.update(JSON.stringify([name,info.size,hashFile(path,64<<20)]));}else throw new Error('build.source_non_regular');}for(const name of ['Cargo.toml','Cargo.lock','crates','release','.cargo'])visit(join(root,name),name);for(const name of ['vendor','LICENSE','THIRD_PARTY_NOTICES.md','tools/generate-unicode-simple.mjs'])if(existsSync(join(root,name)))visit(join(root,name),name);if(existsSync(join(root,emmyRecipePath))){for(const name of emmyRecipeFiles)visit(join(root,emmyRecipePath,name),`${emmyRecipePath}/${name}`);if(existsSync(join(root,emmyRecipePath,'patches')))visit(join(root,emmyRecipePath,'patches'),`${emmyRecipePath}/patches`);for(const name of emmySupportFiles.filter(path=>path.startsWith('tools/')))visit(join(root,name),name);}return hash.digest('hex');}
+  function visit(path,name){if(++entries>100000)throw new Error('build.source_budget');const info=lstatSync(path);if(info.isSymbolicLink())throw new Error('build.source_reparse');if(info.isDirectory()){for(const child of readdirSync(path).sort()){if(generated.has(child))continue;visit(join(path,child),`${name}/${child}`);}}else if(info.isFile()){hash.update(JSON.stringify([name,info.size,hashFile(path,64<<20)]));}else throw new Error('build.source_non_regular');}for(const name of ['Cargo.toml','Cargo.lock','crates','release','.cargo'])visit(join(root,name),name);for(const name of ['vendor','LICENSE','THIRD_PARTY_NOTICES.md','tools/generate-unicode-simple.mjs','tests/fixtures'])if(existsSync(join(root,name)))visit(join(root,name),name);if(existsSync(join(root,emmyRecipePath))){for(const name of emmyRecipeFiles)visit(join(root,emmyRecipePath,name),`${emmyRecipePath}/${name}`);if(existsSync(join(root,emmyRecipePath,'patches')))visit(join(root,emmyRecipePath,'patches'),`${emmyRecipePath}/patches`);for(const name of emmySupportFiles.filter(path=>path.startsWith('tools/')))visit(join(root,name),name);}return hash.digest('hex');}
 
 // Existing Cargo isolation template, also used by owned acceptance controllers.
 // Preserve the installed offline compiler caches before replacing user paths.
@@ -130,10 +130,32 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
   }
 }
 
-export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,isolateUser=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={},execute=ownedSpawnSync}={}){
+export function validateCargoJobs(value=1){
+  if(!['number','string'].includes(typeof value)||(typeof value==='string'&&!/^[1-4]$/.test(value)))throw new Error('build.invalid_jobs');
+  const jobs=Number(value);if(!Number.isInteger(jobs)||jobs<1||jobs>4)throw new Error('build.invalid_jobs');return jobs;
+}
+
+export function parseBuildOptions(argv){
+  const positional=[],seen=new Set();let oneShot=false,jobs=1;
+  for(let index=0;index<argv.length;index++){
+    const arg=argv[index];
+    if(!arg.startsWith('-')){positional.push(arg);continue;}
+    if(!['--one-shot','--jobs'].includes(arg))throw new Error(`build.unknown_option: ${arg}`);
+    if(seen.has(arg))throw new Error(`build.duplicate_option: ${arg}`);seen.add(arg);
+    if(arg==='--one-shot'){oneShot=true;continue;}
+    const value=argv[++index];if(value===undefined||value.startsWith('-'))throw new Error('build.option_value_missing: --jobs');
+    jobs=validateCargoJobs(value);
+  }
+  if(!positional[0])throw new Error('usage: node tools/rust-build.mjs <new-artifact-directory> [dev|release|symbols] [--one-shot] [--jobs 1..4]');
+  if(positional.length>2)throw new Error('build.unexpected_argument');
+  const [directory,profile='dev']=positional;if(!['dev','release','symbols'].includes(profile))throw new Error('build.invalid_profile');
+  return{directory,profile,oneShot,jobs};
+}
+
+export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,jobs=1,isolateUser=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={},execute=ownedSpawnSync}={}){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(!['dev','release','symbols'].includes(profile))throw new Error('build.invalid_profile');
-  const args=['build','--locked','--offline','-j','1','--profile',profile,'-p',packageName];
+  const args=['build','--locked','--offline','-j',String(validateCargoJobs(jobs)),'--profile',profile,'-p',packageName];
   return runCargo(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot,isolateUser,environment,onSuccess(invocation){
     const output=profile==='dev'?'debug':profile;
     artifactDirectory=contained(root,resolve(artifactDirectory));
@@ -155,6 +177,6 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,is
   }});
 }
 if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){
-  const [directory,profile='dev']=process.argv.slice(2);if(!directory)throw new Error('usage: node tools/rust-build.mjs <new-artifact-directory> [dev|release|symbols] [--one-shot]');
-  console.log(JSON.stringify(buildRust(process.cwd(),directory,{profile,oneShot:process.argv.includes('--one-shot'),isolateUser:profile==='release'}),null,2));
+  const {directory,...options}=parseBuildOptions(process.argv.slice(2));
+  console.log(JSON.stringify(buildRust(process.cwd(),directory,{...options,isolateUser:options.profile==='release'}),null,2));
 }

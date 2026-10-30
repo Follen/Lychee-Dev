@@ -59,11 +59,23 @@ test('staging preserves the whole Skill and reports actual missing capabilities'
   assert.deepEqual(receipt.missingFlags, []);
   assert.throws(() => stageSkill(destination, commands), /receipt_exists|EEXIST/);
 });
+test('staging creates missing CI parent directories without overwriting its Skill or receipt', t => {
+  const root = fixture(t), destination = join(root, '.tmp', 'ci', 'build-release', 'skill', 'staged');
+  stageSkill(destination, commands);
+  assert.deepEqual(readFileSync(join(destination, 'SKILL.md')), readFileSync(resolve('skills/lycheedev/SKILL.md')));
+  const receiptPath = destination + '.contract.json';
+  const receipt = readFileSync(receiptPath);
+  assert.equal(JSON.parse(receipt).schema, 'lycheedev.skill-declared-contract.v1');
+  assert.deepEqual(JSON.parse(receipt).missingCommands, []);
+  assert.deepEqual(JSON.parse(receipt).missingFlags, []);
+  assert.throws(() => stageSkill(destination, commands), /receipt_exists/);
+  assert.deepEqual(readFileSync(receiptPath), receipt);
+});
 test('invalid declarations and occupied destinations are never staged', t => {
-  const root = fixture(t), destination = join(root, 'skill');
+  const root = fixture(t), destination = join(root, 'missing-parent', 'skill');
   for (const invalid of [[], [commands[0], commands[0]], [{...commands[0], flags: null}]]) assert.throws(() => stageSkill(destination, invalid), /invalid_contract/);
   assert.deepEqual(readdirSync(root), []);
-  mkdirSync(destination);
+  mkdirSync(destination, {recursive: true});
   writeFileSync(join(destination, 'sentinel'), 'preserve');
   assert.throws(() => stageSkill(destination, commands), {code: 'EEXIST'});
   assert.deepEqual(readdirSync(destination), ['sentinel']);

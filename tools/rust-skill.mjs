@@ -36,6 +36,9 @@ export function stageSkill(destination, commands) {
   // The receipt is a sibling artifact, not instructions or part of the Skill.
   const receipt = `${destination}.contract.json`;
   if (existsSync(receipt)) throw new Error('rust-skill.receipt_exists');
+  // CI may select a nested output whose staging parent does not exist yet.
+  // Create only the ancestors recursively; the Skill root remains exclusive.
+  mkdirSync(dirname(destination), { recursive: true });
   // Require a new directory. Never overwrite an installed or prior staged Skill.
   mkdirSync(destination);
   // The exclusively created root is already ours. Copy each child into it;

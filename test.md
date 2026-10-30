@@ -116,10 +116,10 @@
 | 入口 | 验证的业务或边界 |
 | --- | --- |
 | [version.test.mjs](tools/version.test.mjs)、[addon-package.test.mjs](tools/addon-package.test.mjs)、[tar.test.mjs](tools/tar.test.mjs) | 版本源同步、addon TOC/资源打包与归档字节/CJK 路径；addon 打包已去掉旧 Go 用例。 |
-| [skill-contract.test.mjs](tools/skill-contract.test.mjs)、[skill-launcher.test.mjs](tools/skill-launcher.test.mjs)、[rust-package-smoke.test.mjs](tools/rust-package-smoke.test.mjs) | Skill 合同/链接、Windows npm 启动、隔离安装 smoke 编排；需补极简使用面与 N09 真实安装。 |
-| [workflow-structure.test.mjs](tools/workflow-structure.test.mjs) | 新 CI 四阶段、artifact 消费、无隐式重建、release 复用同一验证内容；所有 action 固定提交，包含带名称步骤的 uses；三个validate失败后仍上传报告且保持job失败。实际PowerShell正反例核对rustc多行版本输出；npm审计消费v1报告内的CLI版本。本地检查不代替Actions运行。 |
-| [ci-test-programs.test.mjs](tools/ci-test-programs.test.mjs) | 预编译程序与support复用；普通程序或Lua bridge未回收时保留原失败报告并停止后续启动，已回收的业务失败仍允许后续测试。 |
-| [rust-build.test.mjs](tools/rust-build.test.mjs)、[rust-disk.test.mjs](tools/rust-disk.test.mjs) | owned 构建、60分钟编译期限与独立的依赖查询期限、产物/工具链、build cache/scratch 额度（50 GiB/5 GiB）；运行时锁文件不误报源码变化，实际源码编辑仍拒绝；不是产品 Data 容量验证。 |
+| [skill-contract.test.mjs](tools/skill-contract.test.mjs)、[skill-launcher.test.mjs](tools/skill-launcher.test.mjs)、[rust-package-smoke.test.mjs](tools/rust-package-smoke.test.mjs) | Skill 合同/链接、嵌套staging父目录创建及目标排他、Windows npm 启动、隔离安装 smoke 编排；N09 的实际安装另行验证。 |
+| [workflow-structure.test.mjs](tools/workflow-structure.test.mjs) | CI 四阶段、artifact 消费、无隐式重建、release 复用同一验证内容；原生与打包分离，下载/分配置编译缓存、编译提交身份、成功编译后的缓存保存及PR单次触发。所有action固定提交，validate失败仍上传报告并保持失败。实际PowerShell正反例核对rustc多行版本输出；npm审计消费v1报告内的CLI版本。本地检查不代替Actions运行。 |
+| [ci-test-programs.test.mjs](tools/ci-test-programs.test.mjs) | 预编译程序与support复用，默认/显式编译并发传递与非法参数零启动；普通程序或Lua bridge未回收时保留原失败报告并停止后续启动，已回收的业务失败仍允许后续测试。 |
+| [rust-build.test.mjs](tools/rust-build.test.mjs)、[rust-disk.test.mjs](tools/rust-disk.test.mjs) | owned 构建、60分钟编译期限与独立的依赖查询期限、默认/显式并发、产物/工具链、build cache/scratch 额度（50 GiB/5 GiB）；源码摘要纳入实际嵌入的tests/fixtures，运行时锁文件不误报源码变化，实际源码编辑仍拒绝；不是产品 Data 容量验证。 |
 | [rust-owned-process.test.mjs](tools/rust-owned-process.test.mjs)、[rust-owned-process-atomic-job.test.mjs](tools/rust-owned-process-atomic-job.test.mjs)、[rust-local-owned-process.test.mjs](tools/rust-local-owned-process.test.mjs)、[rust-owned-recovery.test.mjs](tools/rust-owned-recovery.test.mjs)、[rust-owned-memory.test.mjs](tools/rust-owned-memory.test.mjs) | Job/进程创建、启动记录、I/O、取消、资源回收与测量。Cargo helper许可使用固定清单内的精确Rustup启动器哈希，启动与恢复共同验证；未知哈希仍拒绝，Job与root wrapper绑定保持。 |
 | [rust-unsafe-boundaries.test.mjs](tools/rust-unsafe-boundaries.test.mjs)、[rust-license-inventory.test.mjs](tools/rust-license-inventory.test.mjs)、[rust-emmy-identity.test.mjs](tools/rust-emmy-identity.test.mjs)、[luac.test.mjs](tools/luac.test.mjs) | FFI 边界、许可证、固定 Emmy 上游身份与 luac 打包；CI 复用已有原生产物。 |
 | [rust-formal-lua.test.mjs](tools/rust-formal-lua.test.mjs)、[rust-formal-lua-bridge.test.mjs](tools/rust-formal-lua-bridge.test.mjs) | Lua 桥接 runner 准备/结果判断；已改接当前 addon 与受管 Lua 5.1，无旧 rust-parity 依赖。 |

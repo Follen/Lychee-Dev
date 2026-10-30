@@ -9,9 +9,10 @@ name: ci
 #                          (`cargo test --no-run`) and records the harness
 #                          executables plus the binary targets their
 #                          compile-time CARGO_BIN_EXE_* paths point at.
-#   * build-release        builds the release CLI, the pinned managed luac, the
-#                          pinned Lua 5.1 interpreter, the addon ZIP, the exact
-#                          staged Skill and the npm package payload - one time.
+#   * build-release-native builds the release CLI, the pinned managed luac and
+#                          Lua 5.1 interpreter, and records the license closure.
+# build-release assembles the addon, Skill and npm payload from the sealed
+# native artifact. A packaging failure can rerun without recompiling.
 #
 # Every downstream job downloads this run's artifacts, verifies the sealed
 # build manifest (`tools/ci-artifacts.mjs verify --require ...`) and then uses
@@ -27,7 +28,7 @@ name: ci
 
 on:
   push:
-    branches: [rust-refactor]
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -125,6 +126,7 @@ jobs:
     needs: [static]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
@@ -150,10 +152,46 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
           $version = rustc -Vv
           if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
+      - name: Restore Cargo dependency downloads
+        id: cargo-deps
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-
+      - name: Restore test configuration compilation cache
+        id: cargo-target
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ runner.arch }}-windows2025-test-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-windows2025-test-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-
       - name: Fetch locked dependencies (network preparation, no product compile)
+        id: fetch
         run: node tools/rust-cargo.mjs --owner ci-fetch-test -- fetch --locked
+      - name: Save authenticated Cargo downloads before compilation
+        if: steps.cargo-deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ steps.cargo-deps.outputs.cache-primary-key }}
       - name: Compile the test configuration once (cargo test --no-run)
-        run: node tools/ci-test-programs.mjs build .tmp/ci/build-test --owner ci-test-programs-build
+        id: compile
+        env:
+          LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
+          LYCHEEDEV_BUILD_DIRTY: 'false'
+          CARGO_INCREMENTAL: '0'
+        run: node tools/ci-test-programs.mjs build .tmp/ci/build-test --owner ci-test-programs-build --jobs 2
       - name: Seal the build artifact manifest
         run: node tools/ci-artifacts.mjs seal --out .tmp/ci/build-test/build-manifest.json --component test-programs=.tmp/ci/build-test
       - name: Preserve this run's test programs
@@ -162,10 +200,116 @@ jobs:
           name: ci-build-test
           path: .tmp/ci/build-test
           if-no-files-found: error
+      - name: Save successful test compilation even if later sealing or upload fails
+        if: always() && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ steps.cargo-target.outputs.cache-primary-key }}
+
+  build-release-native:
+    name: build - release native artifacts (compiled once)
+    needs: [static]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Prepare authenticated fixed EmmyLua source (no upstream execution)
+        run: |
+          python third_party/emmy/prepare.py --download
+          if ($LASTEXITCODE -ne 0) { throw 'Emmy source preparation failed' }
+      - name: Install pinned Rust toolchain (release/tools/rust.json)
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+          $version = rustc -Vv
+          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
+      - name: Restore Cargo dependency downloads
+        id: cargo-deps
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-
+      - name: Restore release configuration compilation cache
+        id: cargo-target
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ runner.arch }}-windows2025-release-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-windows2025-release-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-
+      - name: Fetch locked dependencies (network preparation, no product compile)
+        id: fetch
+        run: node tools/rust-cargo.mjs --owner ci-fetch-release -- fetch --locked
+      - name: Save authenticated Cargo downloads before compilation
+        if: steps.cargo-deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ steps.cargo-deps.outputs.cache-primary-key }}
+      - name: Build the release CLI from this source tree
+        id: compile
+        env:
+          LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
+          LYCHEEDEV_BUILD_DIRTY: 'false'
+        run: node tools/rust-build.mjs .tmp/ci/build-release/cli release --one-shot --jobs 2
+      - name: Build the managed luac with the pinned MSVC/SDK identity
+        run: |
+          $pinned = Get-Content release/tools/luac.json | ConvertFrom-Json
+          node tools/luac.mjs build .tmp/ci/build-release/luac --msvc-version $pinned.toolchain.version --sdk-version $pinned.toolchain.sdkVersion
+          if ($LASTEXITCODE -ne 0) { throw 'managed luac build failed' }
+      - name: Build the checksum-pinned Lua 5.1.5 interpreter for the addon suites
+        run: |
+          node tools/rust-formal-lua.mjs build .tmp/ci/build-release/lua51
+          if ($LASTEXITCODE -ne 0) { throw 'Lua 5.1 interpreter build failed' }
+      - name: Record the dependency license closure once beside the CLI
+        run: node tools/rust-dependencies.mjs .tmp/ci/build-release/cli/license-closure
+      - name: Seal native outputs before package assembly
+        run: |
+          node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/native-manifest.json `
+            --component cli-release=.tmp/ci/build-release/cli `
+            --component luac=.tmp/ci/build-release/luac `
+            --component lua51=.tmp/ci/build-release/lua51
+      - name: Preserve native artifacts independently of packaging
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-release-native
+          path: .tmp/ci/build-release
+          if-no-files-found: error
+      - name: Save successful release compilation even if later packaging fails
+        if: always() && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ steps.cargo-target.outputs.cache-primary-key }}
 
   build-release:
-    name: build - release artifacts (release configuration, compiled once)
-    needs: [static]
+    name: build - release packaging (reuse native artifacts)
+    needs: [static, build-release-native]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     defaults:
@@ -181,37 +325,25 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.18.1'
-      - name: Prepare authenticated fixed EmmyLua source (no upstream execution)
-        run: |
-          python third_party/emmy/prepare.py --download
-          if ($LASTEXITCODE -ne 0) { throw 'Emmy source preparation failed' }
-      - name: Install pinned Rust toolchain (release/tools/rust.json)
+      - name: Install pinned Rust toolchain for manifest verification
         run: |
           rustup toolchain install 1.99.0 --profile minimal
           if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
           rustup override set 1.99.0
           if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
-          $version = rustc -Vv
-          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
-      - name: Fetch locked dependencies (network preparation, no product compile)
-        run: node tools/rust-cargo.mjs --owner ci-fetch-release -- fetch --locked
-      - name: Build the release CLI from this source tree
-        run: node tools/rust-build.mjs .tmp/ci/build-release/cli release --one-shot
-      - name: Build the managed luac with the pinned MSVC/SDK identity
-        run: |
-          $pinned = Get-Content release/tools/luac.json | ConvertFrom-Json
-          node tools/luac.mjs build .tmp/ci/build-release/luac --msvc-version $pinned.toolchain.version --sdk-version $pinned.toolchain.sdkVersion
-          if ($LASTEXITCODE -ne 0) { throw 'managed luac build failed' }
-      - name: Build the checksum-pinned Lua 5.1.5 interpreter for the addon suites
-        run: |
-          node tools/rust-formal-lua.mjs build .tmp/ci/build-release/lua51
-          if ($LASTEXITCODE -ne 0) { throw 'Lua 5.1 interpreter build failed' }
+      - name: Download this run's native artifacts and license closure
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-release-native
+          path: .tmp/ci/build-release
+      - name: Verify native inputs before assembly (no rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/native-manifest.json --require cli-release,luac,lua51
       - name: Build the addon release ZIP (structure verified)
         run: node tools/addon-package.mjs build --out .tmp/ci/build-release/addon
       - name: Stage the exact Skill against the release CLI
         run: node tools/rust-skill.mjs .tmp/ci/build-release/skill/staged .tmp/ci/build-release/cli/lycheedev.exe
       - name: Assemble the npm package payload from the verified build inputs
-        run: node tools/rust-package-smoke.mjs .tmp/ci/build-release/npm-package .tmp/ci/build-release/luac --artifact .tmp/ci/build-release/cli/artifact.json --profile release --assembly-only
+        run: node tools/rust-package-smoke.mjs .tmp/ci/build-release/npm-package .tmp/ci/build-release/luac --artifact .tmp/ci/build-release/cli/artifact.json --profile release --assembly-only --dependency-closure .tmp/ci/build-release/cli/license-closure
       - name: Seal the build artifact manifest
         run: |
           node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/build-manifest.json `
@@ -230,7 +362,7 @@ jobs:
 
   validate-rust:
     name: validate - Rust workspace test programs (from build artifact)
-    needs: [static, build-test-programs, build-release]
+    needs: [static, build-test-programs, build-release-native]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     defaults:
@@ -262,10 +394,10 @@ jobs:
       - name: Download this run's Lua interpreter and original build evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: ci-build-release
+          name: ci-build-release-native
           path: .tmp/ci/build-release
       - name: Verify the Lua build component (no interpreter rebuild fallback)
-        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/build-manifest.json --require lua51
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/native-manifest.json --require lua51
       - name: Run the compiled test programs directly
         run: |
           node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --report .tmp/ci/validate-rust/report.json --formal-lua .tmp/ci/build-release/lua51/build-report.json
@@ -466,7 +598,7 @@ jobs:
   ci-required:
     name: ci-required
     if: always()
-    needs: [static, build-test-programs, build-release, validate-rust, validate-addon, validate-package, release-ready]
+    needs: [static, build-test-programs, build-release-native, build-release, validate-rust, validate-addon, validate-package, release-ready]
     runs-on: windows-2025
     defaults:
       run:
@@ -482,6 +614,7 @@ jobs:
           NATIVE: ${{ needs.static.outputs.native }}
           STATIC_RESULT: ${{ needs.static.result }}
           BUILD_TEST_RESULT: ${{ needs.build-test-programs.result }}
+          BUILD_NATIVE_RESULT: ${{ needs.build-release-native.result }}
           BUILD_RELEASE_RESULT: ${{ needs.build-release.result }}
           VALIDATE_RUST_RESULT: ${{ needs.validate-rust.result }}
           VALIDATE_ADDON_RESULT: ${{ needs.validate-addon.result }}
@@ -495,6 +628,7 @@ jobs:
           }
           $required = [ordered]@{
             'build-test-programs' = $env:BUILD_TEST_RESULT
+            'build-release-native' = $env:BUILD_NATIVE_RESULT
             'build-release' = $env:BUILD_RELEASE_RESULT
             'validate-rust' = $env:VALIDATE_RUST_RESULT
             'validate-addon' = $env:VALIDATE_ADDON_RESULT

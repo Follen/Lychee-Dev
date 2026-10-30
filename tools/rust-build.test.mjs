@@ -3,6 +3,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {existsSync,statSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,dirname} from 'node:path';
 import {defaults} from './rust-disk.mjs';
 import {buildRust,hashFile,runCargo,verifyArtifact} from './rust-build.mjs';
+import * as build from './rust-build.mjs';
 test('sealed artifact reuse verifies exact binary and same-invocation PDB without starting compiler',()=>{const root=mkdtempSync(join(tmpdir(),'lycheedev-artifact-'));try{const sourceBinary=join(root,'lycheedev.exe'),pdb=join(root,'lycheedev.pdb'),manifest=join(root,'artifact.json');writeFileSync(sourceBinary,'frozen bytes');writeFileSync(pdb,'matching symbols');const record={schema:'lycheedev.rust-build-artifact.v1',profile:'symbols',sourceBinary,binarySHA256:hashFile(sourceBinary),pdb,pdbSHA256:hashFile(pdb),sameInvocation:true};writeFileSync(manifest,JSON.stringify(record));assert.deepEqual(verifyArtifact(root,manifest),record);writeFileSync(pdb,'changed symbols');assert.throws(()=>verifyArtifact(root,manifest),/symbol_integrity/);writeFileSync(pdb,'matching symbols');writeFileSync(sourceBinary,'changed bytes');assert.throws(()=>verifyArtifact(root,manifest),/artifact_integrity/);assert.throws(()=>hashFile(sourceBinary,1),/file_budget/);assert.equal(readFileSync(sourceBinary,'utf8'),'changed bytes');}finally{rmSync(root,{recursive:true,force:true});}});
 
 function sourceFixture(){
@@ -11,6 +12,66 @@ function sourceFixture(){
   for(const path of ['Cargo.toml','Cargo.lock','.cargo/config.toml'])writeFileSync(join(root,path),'fixture');
   return root;
 }
+
+test('root compilation fixtures change the source digest while their runtime state stays ignored',()=>{
+  const root=sourceFixture();
+  try{
+    const absent=build.sourceDigest(root),fixtures=join(root,'tests/fixtures');
+    mkdirSync(fixtures,{recursive:true});
+    writeFileSync(join(fixtures,'compiled-input.lua'),'return 1');
+    const original=build.sourceDigest(root);assert.notEqual(original,absent);
+    writeFileSync(join(fixtures,'compiled-input.lua'),'return 2');
+    const changed=build.sourceDigest(root);assert.notEqual(changed,original);
+    for(const name of ['.lycheedev-locks','.lycheedev','target','target-symbols']){
+      mkdirSync(join(fixtures,name));writeFileSync(join(fixtures,name,'state'),'runtime state');
+    }
+    assert.equal(build.sourceDigest(root),changed);
+    writeFileSync(join(fixtures,'.lycheedev-locks/state'),'another runtime state');
+    assert.equal(build.sourceDigest(root),changed);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('Cargo jobs accept only integer values from one through four',()=>{
+  assert.equal(build.validateCargoJobs(),1);
+  for(const value of [1,2,3,4,'1','2','3','4'])assert.equal(build.validateCargoJobs(value),Number(value));
+  for(const value of [0,5,-1,1.5,NaN,Infinity,'','2.5','NaN','--one-shot',null,true,[]]){
+    assert.throws(()=>build.validateCargoJobs(value),/build.invalid_jobs/);
+  }
+});
+
+test('buildRust sends default or explicit Cargo jobs and refuses invalid jobs before execution',()=>{
+  for(const jobs of [undefined,2]){
+    const root=sourceFixture();
+    try{
+      let calls=0;
+      const record=buildRust(root,join(root,'artifact'),{...(jobs===undefined?{}:{jobs}),execute(command,args,options){
+        calls++;assert.equal(command,'cargo');
+        assert.deepEqual(args,['build','--locked','--offline','-j',String(jobs??1),'--profile','dev','-p','lycheedev-cli']);
+        const directory=join(options.env.CARGO_TARGET_DIR,'debug');mkdirSync(directory,{recursive:true});
+        writeFileSync(join(directory,'lycheedev.exe'),'fixture binary');
+        return {status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
+      }});
+      assert.equal(calls,1);assert.equal(record.command[record.command.indexOf('-j')+1],String(jobs??1));
+    }finally{rmSync(root,{recursive:true,force:true});}
+  }
+  const root=sourceFixture();
+  try{
+    let calls=0;
+    for(const jobs of [0,5,2.5,'bad',null,true])assert.throws(()=>buildRust(root,join(root,'artifact'),{
+      jobs,execute(){calls++;throw new Error('compiler must not start');},
+    }),/build.invalid_jobs/);
+    assert.equal(calls,0);assert.equal(existsSync(join(root,'.tmp')),false);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('build CLI parses explicit jobs with one-shot and rejects unknown, repeated or missing options',()=>{
+  assert.deepEqual(build.parseBuildOptions(['output']),{directory:'output',profile:'dev',oneShot:false,jobs:1});
+  assert.deepEqual(build.parseBuildOptions(['output','release','--jobs','2','--one-shot']),{directory:'output',profile:'release',oneShot:true,jobs:2});
+  assert.deepEqual(build.parseBuildOptions(['output','--one-shot','--jobs','4']),{directory:'output',profile:'dev',oneShot:true,jobs:4});
+  for(const args of [[],['output','--unknown'],['output','--jobs'],['output','--jobs','--one-shot'],['output','--jobs','2','--jobs','3'],['output','--one-shot','--one-shot'],['output','release','dev'],['output','--jobs','2.5'],['output','--jobs','5'],['output','--jobs=2'],['output','--profile','release']]){
+    assert.throws(()=>build.parseBuildOptions(args),/build\.|usage:/,JSON.stringify(args));
+  }
+});
 test('Cargo runner seals exact output bytes and refuses another owner during execution',()=>{
   const root=sourceFixture();
   try{

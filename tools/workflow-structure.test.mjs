@@ -63,7 +63,7 @@ test('only the current Rust CI workflows exist', () => {
 test('ci has the four stages with machine-readable job names', () => {
   const jobs = jobBodies(ci);
   assert.deepEqual([...jobs.keys()], [
-    'static', 'build-test-programs', 'build-release', 'validate-rust',
+    'static', 'build-test-programs', 'build-release-native', 'build-release', 'validate-rust',
     'validate-addon', 'validate-package', 'release-ready', 'ci-required',
   ]);
   assert.match(ci, /^on:\s*$/m);
@@ -150,25 +150,28 @@ test('actual PowerShell toolchain checks accept multiline pinned output and reje
 
 test('build stage compiles each required configuration exactly once', () => {
   const jobs = jobBodies(ci);
-  for (const build of ['build-test-programs', 'build-release']) {
+  for (const build of ['build-test-programs', 'build-release-native', 'build-release']) {
     const body = jobs.get(build);
     assert.match(body, /if: needs\.static\.outputs\.native == 'true'/, `${build} must only run for native change sets`);
     assert.doesNotMatch(body, /continue-on-error/, `${build} must not hide a build failure`);
   }
   const testBuild = jobs.get('build-test-programs');
   assert.equal((testBuild.match(/node tools\/ci-test-programs\.mjs build/g) ?? []).length, 1, 'test configuration must be compiled once');
-  assert.match(testBuild, /--owner ci-test-programs-build/);
-  const releaseBuild = jobs.get('build-release');
+  assert.match(testBuild, /--owner ci-test-programs-build --jobs 2/);
+  const releaseBuild = jobs.get('build-release-native');
   assert.equal((releaseBuild.match(/node tools\/rust-build\.mjs/g) ?? []).length, 1, 'release configuration must be compiled once');
-  assert.match(releaseBuild, /node tools\/rust-build\.mjs \.tmp\/ci\/build-release\/cli release --one-shot/);
-  // Native dependencies and packages are produced in the same build stage.
+  assert.match(releaseBuild, /node tools\/rust-build\.mjs \.tmp\/ci\/build-release\/cli release --one-shot --jobs 2/);
   for (const command of [
     /node tools\/luac\.mjs build \.tmp\/ci\/build-release\/luac/,
     /node tools\/rust-formal-lua\.mjs build \.tmp\/ci\/build-release\/lua51/,
+    /node tools\/rust-dependencies\.mjs \.tmp\/ci\/build-release\/cli\/license-closure/,
+  ]) assert.match(releaseBuild, command);
+  const assembly = jobs.get('build-release');
+  for (const command of [
     /node tools\/addon-package\.mjs build --out \.tmp\/ci\/build-release\/addon/,
     /node tools\/rust-skill\.mjs \.tmp\/ci\/build-release\/skill\/staged \.tmp\/ci\/build-release\/cli\/lycheedev\.exe/,
-    /node tools\/rust-package-smoke\.mjs \.tmp\/ci\/build-release\/npm-package \.tmp\/ci\/build-release\/luac --artifact \.tmp\/ci\/build-release\/cli\/artifact\.json --profile release --assembly-only/,
-  ]) assert.match(releaseBuild, command);
+    /node tools\/rust-package-smoke\.mjs \.tmp\/ci\/build-release\/npm-package \.tmp\/ci\/build-release\/luac --artifact \.tmp\/ci\/build-release\/cli\/artifact\.json --profile release --assembly-only --dependency-closure \.tmp\/ci\/build-release\/cli\/license-closure/,
+  ]) assert.match(assembly, command);
   // The pinned Emmy source is an authenticated external input; both native build
   // jobs prepare it before any Cargo fetch/build rather than relying on a cache.
   for (const body of [testBuild, releaseBuild]) {
@@ -181,6 +184,12 @@ test('build stage seals and uploads its artifacts', () => {
   const jobs = jobBodies(ci);
   const testBuild = jobs.get('build-test-programs');
   const releaseBuild = jobs.get('build-release');
+  const nativeBuild = jobs.get('build-release-native');
+  assert.match(nativeBuild, /ci-artifacts\.mjs seal --out \.tmp\/ci\/build-release\/native-manifest\.json/);
+  for (const kind of ['cli-release', 'luac', 'lua51']) {
+    assert.match(nativeBuild, new RegExp(`--component ${kind}=\\.tmp\\/ci\\/build-release\\/`));
+  }
+  assert.match(nativeBuild, /name: ci-build-release-native/);
   assert.match(testBuild, /ci-artifacts\.mjs seal --out \.tmp\/ci\/build-test\/build-manifest\.json --component test-programs=\.tmp\/ci\/build-test/);
   assert.match(releaseBuild, /ci-artifacts\.mjs seal --out \.tmp\/ci\/build-release\/build-manifest\.json/);
   for (const kind of ['cli-release', 'luac', 'lua51', 'addon-zip', 'skill', 'npm-package']) {
@@ -193,13 +202,14 @@ test('build stage seals and uploads its artifacts', () => {
 test('validate jobs download this run artifacts and verify the sealed manifests', () => {
   const jobs = jobBodies(ci);
   const rust = jobs.get('validate-rust');
-  assert.match(rust, /needs: \[static, build-test-programs, build-release\]/);
+  assert.match(rust, /needs: \[static, build-test-programs, build-release-native\]/);
   assert.equal((rust.match(/name: ci-build-test/g) ?? []).length, 1);
   assert.match(rust, /ci-artifacts\.mjs verify --manifest \.tmp\/ci\/build-test\/build-manifest\.json --require test-programs/);
   assert.match(rust, /ci-test-programs\.mjs run \.tmp\/ci\/build-test\/test-programs\.json/);
   assert.match(rust, /--report \.tmp\/ci\/validate-rust\/report\.json/);
   assert.match(rust, /--formal-lua \.tmp\/ci\/build-release\/lua51\/build-report\.json/);
-  assert.match(rust, /name: ci-build-release/);
+  assert.match(rust, /name: ci-build-release-native/);
+  assert.match(rust, /ci-artifacts\.mjs verify --manifest \.tmp\/ci\/build-release\/native-manifest\.json --require lua51/);
   assert.match(rust, /--require lua51/);
 
   const addon = jobs.get('validate-addon');
@@ -225,7 +235,7 @@ test('downstream jobs never compile, rebuild luac or repack the native binary', 
     /rust-cargo\.mjs --[^\n]*--\s*(?:build|test|check|clippy|fetch|metadata)/,
     /rust-dependencies\.mjs/, /rust-formal-lua\.mjs build/,
   ];
-  for (const job of ['validate-rust', 'validate-addon', 'validate-package', 'release-ready']) {
+  for (const job of ['build-release', 'validate-rust', 'validate-addon', 'validate-package', 'release-ready']) {
     const body = jobs.get(job);
     for (const pattern of forbidden) assert.doesNotMatch(body, pattern, `${job} performs an implicit build: ${pattern}`);
   }
@@ -235,7 +245,59 @@ test('downstream jobs never compile, rebuild luac or repack the native binary', 
     assert.match(line, /--artifact \.tmp\/ci\/build-release\/cli\/artifact\.json/, 'package smoke call must name its build artifact');
   }
   assert.match(jobs.get('validate-package'), /--dependency-closure \.tmp\/ci\/build-release\/npm-package\/license-closure/);
-  assert.doesNotMatch(jobs.get('build-release'), /--dependency-closure/, 'build stage generates the original closure');
+  assert.match(jobs.get('build-release'), /--dependency-closure \.tmp\/ci\/build-release\/cli\/license-closure/);
+});
+
+test('package assembly can retry from preserved native outputs without rebuilding', () => {
+  const jobs = jobBodies(ci), native = jobs.get('build-release-native'), assembly = jobs.get('build-release');
+  assert.match(assembly, /needs: \[static, build-release-native\]/);
+  assert.match(assembly, /name: ci-build-release-native/);
+  const verify = assembly.indexOf('ci-artifacts.mjs verify --manifest .tmp/ci/build-release/native-manifest.json --require cli-release,luac,lua51');
+  assert(verify >= 0 && verify < assembly.indexOf('node tools/addon-package.mjs build'), 'verify the native inputs before any assembly');
+  assert.doesNotMatch(native, /rust-skill\.mjs|rust-package-smoke\.mjs|addon-package\.mjs/, 'packaging cannot prevent the native artifact upload');
+  assert.doesNotMatch(assembly, /actions\/cache|rust-cargo\.mjs|rust-dependencies\.mjs/, 'assembly uses explicit native and license inputs, not the build cache');
+});
+
+test('Cargo caches are separated by configuration and saved after successful compilation', () => {
+  const jobs = jobBodies(ci), compileKeys = [];
+  for (const [job, configuration] of [['build-test-programs', 'test'], ['build-release-native', 'release']]) {
+    const body = jobs.get(job), steps = body.split(/^      - /m);
+    const dependencyRestore = steps.find(step => step.includes('id: cargo-deps'));
+    const targetRestore = steps.find(step => step.includes('id: cargo-target'));
+    const fetchAt = body.indexOf('node tools/rust-cargo.mjs');
+    for (const restore of [dependencyRestore, targetRestore]) {
+      assert.match(restore, /actions\/cache\/restore@[a-f0-9]{40}/);
+      assert(body.indexOf(restore) < fetchAt, 'restore before dependency fetch and compile');
+    }
+    assert.match(dependencyRestore, /hashFiles\('Cargo.lock'\)/);
+    assert.match(dependencyRestore, /~\/\.cargo\/registry\/cache/);
+    assert.doesNotMatch(dependencyRestore, /path: target|\.tmp\/ci|credentials/);
+    assert.match(targetRestore, /path: target/);
+    assert.match(targetRestore, new RegExp(`windows2025-${configuration}-v1-`));
+    assert.match(targetRestore, /hashFiles\('Cargo.lock', 'Cargo.toml', '\.cargo\/config.toml', 'release\/tools\/rust.json'\)/);
+    assert.match(targetRestore, /key: .*\$\{\{ github.sha \}\}/);
+    assert.match(targetRestore, /restore-keys:/);
+    compileKeys.push(/^          key: (.*)$/m.exec(targetRestore)[1]);
+    const save = steps.find(step => step.includes('actions/cache/save@') && step.includes('path: target'));
+    assert.match(save, /if: always\(\) && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'/);
+    assert.match(save, /key: \$\{\{ steps.cargo-target.outputs.cache-primary-key \}\}/);
+    const compile = steps.find(step => step.includes('id: compile'));
+    assert.match(compile, /LYCHEEDEV_BUILD_COMMIT: \$\{\{ github.sha \}\}/, 'cached build.rs must notice a new commit');
+    assert.match(compile, /LYCHEEDEV_BUILD_DIRTY: 'false'/);
+    assert.match(compile, /--jobs 2/);
+  }
+  assert.notEqual(compileKeys[0], compileKeys[1]);
+  for (const job of ['build-release', 'validate-rust', 'validate-addon', 'validate-package', 'release-ready']) {
+    assert.doesNotMatch(jobs.get(job), /actions\/cache\//, `${job} must consume this run's sealed artifacts`);
+  }
+});
+
+test('development pushes use the PR run without a duplicate branch build', () => {
+  const trigger = ci.slice(ci.indexOf('\non:'), ci.indexOf('\npermissions:'));
+  assert.match(trigger, /push:\s*\n\s+branches: \[main\]/);
+  assert.match(trigger, /pull_request:/);
+  assert.match(trigger, /workflow_dispatch:/);
+  assert.doesNotMatch(trigger, /rust-refactor/);
 });
 
 test('release-ready seals the validated artifacts of this run without compiling', () => {
@@ -282,7 +344,7 @@ test('static stage is native-free and documentation-only change sets skip native
 
 test('required aggregations reject failures, skips and cancellation', () => {
   for (const [name, text, required] of [
-    ['ci.yml', ci, ['static', 'build-test-programs', 'build-release', 'validate-rust', 'validate-addon', 'validate-package', 'release-ready']],
+    ['ci.yml', ci, ['static', 'build-test-programs', 'build-release-native', 'build-release', 'validate-rust', 'validate-addon', 'validate-package', 'release-ready']],
     ['release.yml', release, ['identity', 'ci', 'release-ready']],
   ]) {
     const aggregator = jobBodies(text).get(name === 'ci.yml' ? 'ci-required' : 'release-required');
