@@ -184,7 +184,7 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 
 外部独立预期保留其输入与结果含义，不把旧产品的错误当业务规范。Source 编码行为按 N11 的新合同，不能为了与旧参考结果相等继续拒绝合法注释。
 
-## 7. 新架构需要闭合的回归
+## 7. 当前架构的业务回归范围
 
 这些是覆盖要求，不意味着每项都要新建文件。先核对上面的当前测试，已经通过正式路径覆盖的就复用；缺口才增加用例。每项结果进入 handover，未闭合项保留在 todo。
 
@@ -201,7 +201,7 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 | N09 / DELIVERY-01 | 统一 Release/npm 包在隔离 prefix/HOME 安装，包内 Skill/CLI/luac/addon。 | 真正完成 Source/Data/安装任务，路径/版本/许可证与包内容一致；旧 Go install smoke 已删，当前入口 tools/rust-package-smoke + CI validate-package。 |
 | N10 / LIVE-CLIENT | 真实客户端和已授权实例操作。 | 按 handover 最后 H01—H08 记录七产品、当前绑定、500 槽、多实例、恢复和所需性能；离线通过不代替本项。 |
 | N11 / SOURCE-02 | 含非 UTF-8 注释/字符串的固定 Lua 输入；当前 Source query/inspect/context/validate/closure/native。 | 见 7.1；单文件编码告警不能中断全快照或伪造语义。最终已安装 Release 的实际 Forever 冷/热索引、inspect、同提交 diff、受管 luac、完整 native IPC 告警与会话复用均通过。research-material CAS 回归覆盖注释分析视图、不可转换 token/字符串 gap、篡改及普通 UTF-8 快路径；32 MiB+17 文件的超限冷/热索引回归也已通过。 |
-| N12 / CI-01—04 | 实际workflow、构建产物和下游runner；结构检查与真实CI结果。 | 每种配置编译一次，两个命名组共用同一93+1构建记录；汇总逐程序核计划/结果、哈希、提交、覆盖及回收。41051431104已通过两组24/69程序、固定Lua/addon、跨job路径、许可证closure、唯一TGZ生产/审计/安装、包内Source/Data及候选封存。候选只复制原TGZ，输入缺失无隐式重建；完整身份与证明范围见handover。 |
+| N12 / CI-01—04 | 实际workflow、构建产物和下游runner；结构检查与真实CI结果。 | 每种配置编译一次，两个命名组共用同一93+1构建记录；汇总逐程序核计划/结果、哈希、提交、覆盖及回收。41114329228的十二个job全通过：两组24/69程序、222项Lua、两个显式文件symlink、固定资源、跨job路径、许可证closure、Release、唯一TGZ生产/审计/安装、包内Source/Data及候选封存。已独立下载并核全部11项SHA256SUMS和各报告共同身份；候选只复制原TGZ，输入缺失无隐式重建。实际验收commit、哈希与证明范围见handover。 |
 
 ### 7.1 N11：Source 编码回归的具体业务
 
