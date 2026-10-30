@@ -116,13 +116,14 @@
 | 入口 | 验证的业务或边界 |
 | --- | --- |
 | [version.test.mjs](tools/version.test.mjs)、[addon-package.test.mjs](tools/addon-package.test.mjs)、[tar.test.mjs](tools/tar.test.mjs) | 版本源同步、addon TOC/资源打包与归档字节/CJK 路径；addon 打包已去掉旧 Go 用例。 |
-| [skill-contract.test.mjs](tools/skill-contract.test.mjs)、[skill-launcher.test.mjs](tools/skill-launcher.test.mjs)、[rust-package-smoke.test.mjs](tools/rust-package-smoke.test.mjs) | Skill 合同/链接、嵌套staging父目录创建及目标排他、Windows npm 启动、隔离安装 smoke 编排；N09 的实际安装另行验证。 |
-| [workflow-structure.test.mjs](tools/workflow-structure.test.mjs) | CI 四阶段、artifact 消费、无隐式重建、release 复用同一验证内容；原生与打包分离，下载/分配置编译缓存、编译提交身份、成功编译后的缓存保存及PR单次触发。所有action固定提交，validate失败仍上传报告并保持失败。实际PowerShell正反例核对rustc多行版本输出；npm审计消费v1报告内的CLI版本。本地检查不代替Actions运行。 |
-| [ci-test-programs.test.mjs](tools/ci-test-programs.test.mjs) | 预编译程序与support复用，默认/显式编译并发传递与非法参数零启动；普通程序或Lua bridge未回收时保留原失败报告并停止后续启动，已回收的业务失败仍允许后续测试。 |
-| [rust-build.test.mjs](tools/rust-build.test.mjs)、[rust-disk.test.mjs](tools/rust-disk.test.mjs) | owned 构建、60分钟编译期限与独立的依赖查询期限、默认/显式并发、产物/工具链、build cache/scratch 额度（50 GiB/5 GiB）；源码摘要纳入实际嵌入的tests/fixtures，运行时锁文件不误报源码变化，实际源码编辑仍拒绝；不是产品 Data 容量验证。 |
+| [skill-contract.test.mjs](tools/skill-contract.test.mjs)、[skill-launcher.test.mjs](tools/skill-launcher.test.mjs)、[rust-package-smoke.test.mjs](tools/rust-package-smoke.test.mjs) | Skill 合同/链接、嵌套staging父目录及目标排他、Windows npm 启动。package produce一次组装/pack，validate只安装原TGZ；真实归档fixture检查搬运、旧提交/字节篡改、安装CLI和资源、失败报告，不允许消费阶段重建或重打包。N09 的实际安装另行验证。 |
+| [workflow-structure.test.mjs](tools/workflow-structure.test.mjs)、[ci-changes.test.mjs](tools/ci-changes.test.mjs) | 每PR完整Release/包验收的依赖图；固定工具先验、Rust/addon独立消费、唯一TGZ、分配置缓存、失败诊断和报告上传。实际PowerShell执行工具链拒绝与required汇总的成功/失败/取消/跳过分支。嵌入与打包目录中的Markdown仍触发产品验收；普通文档才跳过。结构测试不代替Actions。 |
+| [ci-test-programs.test.mjs](tools/ci-test-programs.test.mjs) | 预编译程序与support复用，默认/显式编译并发、timings传递与非法参数零启动；原生产receipt/日志随产物传递。普通程序或Lua bridge未回收时保留原失败报告并停止后续启动，已回收的业务失败仍允许后续测试。 |
+| [rust-build.test.mjs](tools/rust-build.test.mjs)、[rust-disk.test.mjs](tools/rust-disk.test.mjs) | owned 构建、60分钟编译期限与独立的依赖查询期限、并发、产物/工具链、build cache/scratch 额度（50 GiB/5 GiB）。源码摘要包含实际嵌入fixtures；receipt/日志复制保留原字节，本次Cargo timing报告不能用旧文件冒充，记录真实耗时与重建原因；不是产品Data容量验证。 |
 | [rust-owned-process.test.mjs](tools/rust-owned-process.test.mjs)、[rust-owned-process-atomic-job.test.mjs](tools/rust-owned-process-atomic-job.test.mjs)、[rust-local-owned-process.test.mjs](tools/rust-local-owned-process.test.mjs)、[rust-owned-recovery.test.mjs](tools/rust-owned-recovery.test.mjs)、[rust-owned-memory.test.mjs](tools/rust-owned-memory.test.mjs) | Job/进程创建、启动记录、I/O、取消、资源回收与测量。Cargo helper许可使用固定清单内的精确Rustup启动器哈希，启动与恢复共同验证；未知哈希仍拒绝，Job与root wrapper绑定保持。 |
 | [rust-unsafe-boundaries.test.mjs](tools/rust-unsafe-boundaries.test.mjs)、[rust-license-inventory.test.mjs](tools/rust-license-inventory.test.mjs)、[rust-emmy-identity.test.mjs](tools/rust-emmy-identity.test.mjs)、[luac.test.mjs](tools/luac.test.mjs) | FFI 边界、许可证、固定 Emmy 上游身份与 luac 打包；CI 复用已有原生产物。 |
-| [rust-formal-lua.test.mjs](tools/rust-formal-lua.test.mjs)、[rust-formal-lua-bridge.test.mjs](tools/rust-formal-lua-bridge.test.mjs) | Lua 桥接 runner 准备/结果判断；已改接当前 addon 与受管 Lua 5.1，无旧 rust-parity 依赖。 |
+| [lua-tool-supply.test.mjs](tools/lua-tool-supply.test.mjs)、[rust-formal-lua.test.mjs](tools/rust-formal-lua.test.mjs)、[rust-formal-lua-bridge.test.mjs](tools/rust-formal-lua-bridge.test.mjs) | 固定Lua供应包按清单、原生产记录/receipt、源码/许可证/EXE哈希导入，不依赖旧业务HEAD或绝对路径。原记录不改写；bridge仅为本轮执行生成路径映射并保留原摘要。篡改、目录覆盖及身份不符拒绝；当前addon与Mailbox测试继续使用同一解释器。 |
+| [ci-release.test.mjs](tools/ci-release.test.mjs)、[ci-package-business.test.mjs](tools/ci-package-business.test.mjs) | 生产/安装/内容审计/业务报告必须绑定同一TGZ与CLI；missing、not_run、partial、输入变化或进程未回收不能封存候选。业务入口复用tiny Source与预编译Data输入构造器，实际查询使用安装包内Release；Node边界测试不代替两条真实业务执行。 |
 | [rust-source-pack-evidence.test.mjs](tools/rust-source-pack-evidence.test.mjs) | Source 导出/结果比较辅助逻辑；辅助，不计业务通过。 |
 | `tools/ci-{changes,docs,test-programs,artifacts,release}.mjs` | CI 变更分类、文档检查、测试程序构建/执行、产物 manifest seal/verify、候选封存；纯工具逻辑，需一次真实 CI 才能证明产物复用生效（N12）。 |
 
@@ -213,7 +214,7 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 
 本地按 AGENTS 使用当前 owned runner 与固定任务工作区，不新建并行原生队列。当前 [rust-cargo.mjs](tools/rust-cargo.mjs) 支持 `--owner`、`--one-shot` 和 `-- <cargo arguments>`；需要隔离用户目录的业务 runner 通过 [rust-build.mjs](tools/rust-build.mjs) 的现有 `runCargo(..., {isolateUser: true})` 入口准备产物。单构建通道同时只允许一个 owner；`disk.channel_held` 时等待重试，不直接调用 cargo。
 
-CI 按 DESIGN 的产物流运行：build 阶段一次准备测试程序、Release、luac 和包；validate 下游直接消费已有产物。两个原生 build job 在任何 Cargo fetch/build 前先用 `python third_party/prepare.py --download`（实际路径 `third_party/emmy/prepare.py`）认证并准备固定 Emmy 上游；Windows runner 无 gcc，Lua 5.1 解释器与受管 luac 都由同一固定 MSVC/SDK 身份构建。需要真实依赖的 ignored 测试显式选入，缺依赖记录未运行或环境受阻，不能算 pass；下游缺二进制时不能回退重新构建。
+CI 按 DESIGN 的产物流运行：先验证并导入 [Lua供应包](release/tool-supply/lua-5.1.5-windows-amd64/manifest.json)，生成一次addon ZIP，再并行编译测试与Release配置。两个原生job在Cargo fetch/build前用 `python third_party/emmy/prepare.py --download` 认证固定Emmy上游，保留本次timings与原receipt/日志；编译失败也上传owned证据。Rust/addon检查各自尽早运行；正式npm生产入口只pack一次，安装、独立内容审计和候选封存共用该TGZ。npm脚本路径与检查的固定版本一致。包内Source用tiny本地Git输入验证真实native查询，Data用预编译fixture仅构造DB2/CASC输入，再由安装Release完成query/page/CAP/release/close。缺输入、ignored和实机范围独立记录，下游没有构建回退。
 
 当前默认跳过62个测试实例（Source 38、Data 14、Windows 4、CLI 3、Live 2、Delivery 1）。源码有47处 `#[ignore]`，其中XML宏展开为16个实例，因此不能直接用属性行数统计用例。它们分别需要真实安装/客户端、真实游戏输入、真实固定源码/外部产物或symlink权限，也包含显式输入构造器；CI与默认测试都不把它们当业务通过。逐目标的原因在对应测试内注明。
 

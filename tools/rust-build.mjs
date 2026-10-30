@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {closeSync,copyFileSync,existsSync,lstatSync,mkdirSync,openSync,readFileSync,readSync,readdirSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {dirname,join,resolve} from 'node:path';
+import {basename,dirname,join,resolve} from 'node:path';
 import {homedir} from 'node:os';
 import {acquireChannel,admission,beginFreshCache,beginScratch,contained,sha256,defaults,policy} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
@@ -42,6 +42,48 @@ export function verifyArtifact(root,path){
   const binary=contained(root,record.sourceBinary);if(hashFile(binary,512<<20)!==record.binarySHA256)throw new Error('build.artifact_integrity');
   if(record.pdb){const pdb=contained(root,record.pdb);if(hashFile(pdb)!==record.pdbSHA256||record.sameInvocation!==true)throw new Error('build.symbol_integrity');}
   return record;
+}
+
+// Preserve the terminal producer proof, not its scratch directory or Cargo
+// cache. Original receipt paths remain historical evidence; copied logs are
+// found by basename beside this byte-identical receipt, as for formal Lua.
+export function preserveBuildEvidence(root,receiptPath,artifactDirectory){
+  const source=contained(root,resolve(receiptPath)),receiptBytes=readFileSync(source),receipt=JSON.parse(receiptBytes);
+  assert.equal(receipt.schema,'lycheedev.disk-owner.v1','build.evidence_schema');
+  assert.equal(receipt.category,'scratch','build.evidence_category');
+  assert.equal(receipt.state,'retired','build.evidence_not_retired');
+  assert.equal(receipt.handlesReaped,true,'build.evidence_not_reaped');
+  assert.equal(receipt.activePid,null,'build.evidence_active');
+  assert(Array.isArray(receipt.sealedLogs)&&receipt.sealedLogs.length>0,'build.evidence_logs_missing');
+  const names=new Set(['receipt.json']);
+  const logs=receipt.sealedLogs.map(row=>{
+    const path=contained(dirname(source),row.path),name=basename(path);
+    assert(!names.has(name),'build.evidence_filename_collision');names.add(name);
+    const digest=hashFile(path,16<<20);assert.equal(digest,row.sha256,'build.evidence_log_corrupt');
+    return {path,name,digest};
+  });
+  const directory=contained(root,join(resolve(artifactDirectory),'evidence'));mkdirSync(directory);
+  for(const log of logs){
+    const bytes=readFileSync(log.path);assert.equal(sha256(bytes),log.digest,'build.evidence_log_changed');
+    writeFileSync(join(directory,log.name),bytes,{flag:'wx'});
+    assert.equal(hashFile(join(directory,log.name),16<<20),log.digest,'build.evidence_copy_changed');
+  }
+  const buildEvidence=join(directory,'receipt.json');
+  assert.deepEqual(readFileSync(source),receiptBytes,'build.evidence_receipt_changed');
+  writeFileSync(buildEvidence,receiptBytes,{flag:'wx'});
+  const buildEvidenceSHA256=sha256(receiptBytes);
+  assert.equal(hashFile(buildEvidence,16<<20),buildEvidenceSHA256,'build.evidence_receipt_copy_changed');
+  const preserved={buildEvidence,buildEvidenceSHA256};
+  const timing=logs.find(log=>log.name==='cargo-timing.html');
+  if(timing)preserved.cargoTimings={path:join(directory,timing.name),sha256:timing.digest};
+  return preserved;
+}
+
+function timingSignature(path){
+  if(!existsSync(path))return undefined;
+  const info=lstatSync(path,{bigint:true});
+  if(!info.isFile()||info.isSymbolicLink())throw new Error('build.invalid_cargo_timings');
+  return [info.ino,info.size,info.mtimeNs,info.ctimeNs].map(String).join(':');
 }
 
 // The same lease and terminal rules cover build, test, check and clippy. The
@@ -103,12 +145,24 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
     if(fresh){env.CARGO_HOME=join(job.directory,'cargo-home');mkdirSync(env.CARGO_HOME);env.CARGO_NET_OFFLINE='true';}
     if(oneShot||fresh)env.CARGO_INCREMENTAL='0';
     const environmentSHA256=sha256(Buffer.from(JSON.stringify(Object.entries(env).sort(([a],[b])=>a.localeCompare(b)))));
+    const timingPath=args.includes('--timings')?join(target,'cargo-timings/cargo-timing.html'):undefined;
+    const previousTiming=timingPath?timingSignature(timingPath):undefined;
     terminal={state:'interrupted',handlesReaped:false,logs:[]};
+    const startedAtUtc=new Date().toISOString(),startedTick=performance.now();
     const result=execute('cargo',args,{cwd:sourceRoot,env,evidence:job.evidence,cargoBuild:true,windowsHide:true,shell:false,timeout:timeoutMs,maxBuffer:8<<20});
+    const elapsedMs=Math.round(performance.now()-startedTick),endedAtUtc=new Date().toISOString();
     writeFileSync(stdout,result.stdout||Buffer.alloc(0));writeFileSync(stderr,result.stderr||Buffer.alloc(0));
-    writeFileSync(metadata,JSON.stringify({command:'cargo',args,timeoutMs,cwd:sourceRoot,channel:channel.target,target,cargoHome:fresh?env.CARGO_HOME:undefined,freshCacheReceipt:fresh?.receipt,oneShot,...(isolateUser?{isolatedUserRoot:env.HOME}:{}),environmentSHA256,exit:result.status,signal:result.signal,error:result.error?.message,inputHashes:inputs},null,2)+'\n');
+    writeFileSync(metadata,JSON.stringify({command:'cargo',args,timeoutMs,startedAtUtc,endedAtUtc,elapsedMs,cwd:sourceRoot,channel:channel.target,target,cargoHome:fresh?env.CARGO_HOME:undefined,freshCacheReceipt:fresh?.receipt,oneShot,...(isolateUser?{isolatedUserRoot:env.HOME}:{}),environmentSHA256,exit:result.status,signal:result.signal,error:result.error?.message,inputHashes:inputs},null,2)+'\n');
     terminal={state:result.handlesReaped===true?(result.status===0&&!result.error?'succeeded':'failed'):'interrupted',handlesReaped:result.handlesReaped===true,logs:[metadata,stdout,stderr,...(result.logs||[])]};
     if(result.error||result.status!==0||!terminal.handlesReaped)throw Object.assign(new Error(`build.cargo_failed:${result.error?.message||(!terminal.handlesReaped?'tree_reap_unverified':result.status)}`),{buildEvidence:job.receipt});
+    if(timingPath){
+      const currentTiming=timingSignature(timingPath);
+      if(!currentTiming||currentTiming===previousTiming)throw new Error('build.cargo_timings_not_updated');
+      const digest=hashFile(timingPath,16<<20),preserved=join(job.evidence,'cargo-timing.html');
+      writeFileSync(preserved,readFileSync(timingPath),{flag:'wx'});
+      if(hashFile(preserved,16<<20)!==digest||hashFile(timingPath,16<<20)!==digest)throw new Error('build.cargo_timings_changed');
+      terminal.logs.push(preserved);
+    }
     if(!compiling){
       if(manifestDigest(sourceRoot)!==inputs.manifests)throw new Error('build.manifests_changed_during_fetch');
       inputs.resolvedCargoLock=hashFile(join(sourceRoot,'Cargo.lock'));
@@ -136,27 +190,29 @@ export function validateCargoJobs(value=1){
 }
 
 export function parseBuildOptions(argv){
-  const positional=[],seen=new Set();let oneShot=false,jobs=1;
+  const positional=[],seen=new Set();let oneShot=false,jobs=1,timings=false;
   for(let index=0;index<argv.length;index++){
     const arg=argv[index];
     if(!arg.startsWith('-')){positional.push(arg);continue;}
-    if(!['--one-shot','--jobs'].includes(arg))throw new Error(`build.unknown_option: ${arg}`);
+    if(!['--one-shot','--jobs','--timings'].includes(arg))throw new Error(`build.unknown_option: ${arg}`);
     if(seen.has(arg))throw new Error(`build.duplicate_option: ${arg}`);seen.add(arg);
     if(arg==='--one-shot'){oneShot=true;continue;}
+    if(arg==='--timings'){timings=true;continue;}
     const value=argv[++index];if(value===undefined||value.startsWith('-'))throw new Error('build.option_value_missing: --jobs');
     jobs=validateCargoJobs(value);
   }
-  if(!positional[0])throw new Error('usage: node tools/rust-build.mjs <new-artifact-directory> [dev|release|symbols] [--one-shot] [--jobs 1..4]');
+  if(!positional[0])throw new Error('usage: node tools/rust-build.mjs <new-artifact-directory> [dev|release|symbols] [--one-shot] [--jobs 1..4] [--timings]');
   if(positional.length>2)throw new Error('build.unexpected_argument');
   const [directory,profile='dev']=positional;if(!['dev','release','symbols'].includes(profile))throw new Error('build.invalid_profile');
-  return{directory,profile,oneShot,jobs};
+  return{directory,profile,oneShot,jobs,...(timings?{timings:true}:{})};
 }
 
-export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,jobs=1,isolateUser=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={},execute=ownedSpawnSync}={}){
+export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,jobs=1,timings=false,isolateUser=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={},execute=ownedSpawnSync}={}){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(!['dev','release','symbols'].includes(profile))throw new Error('build.invalid_profile');
   const args=['build','--locked','--offline','-j',String(validateCargoJobs(jobs)),'--profile',profile,'-p',packageName];
-  return runCargo(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot,isolateUser,environment,onSuccess(invocation){
+  if(timings)args.push('--timings');
+  const record=runCargo(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot,isolateUser,environment,onSuccess(invocation){
     const output=profile==='dev'?'debug':profile;
     artifactDirectory=contained(root,resolve(artifactDirectory));
     mkdirSync(dirname(artifactDirectory),{recursive:true});mkdirSync(artifactDirectory);
@@ -173,8 +229,11 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,jo
       record.pdb=join(artifactDirectory,'lycheedev.pdb');record.pdbSHA256=hashFile(original);copyFileSync(original,record.pdb);
       if(hashFile(original)!==record.pdbSHA256||hashFile(record.pdb)!==record.pdbSHA256)throw new Error('build.symbols_changed');
     }
-    writeFileSync(join(artifactDirectory,'artifact.json'),JSON.stringify(record,null,2)+'\n');return record;
+    return record;
   }});
+  Object.assign(record,preserveBuildEvidence(root,record.buildEvidence,artifactDirectory));
+  writeFileSync(join(artifactDirectory,'artifact.json'),JSON.stringify(record,null,2)+'\n',{flag:'wx'});
+  return record;
 }
 if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){
   const {directory,...options}=parseBuildOptions(process.argv.slice(2));

@@ -10,6 +10,7 @@ import { beginScratch, contained } from './rust-disk.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
 import { fixedToolchain, luaSource, selectCompiler, verifySystemImports } from './luac.mjs';
 import { ownedUserEnvironment, sourceDigest, verifyArtifact } from './rust-build.mjs';
+import { IMPORT_SCHEMA, verifyLuaToolImport } from './lua-tool-supply.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_ARGUMENTS = Object.freeze(['/nologo', '/Bv', '/O2', '/MT', '/Brepro', '/TC']);
@@ -130,6 +131,7 @@ export async function buildInterpreter(output, sourceArchive) {
 }
 export function verifyInterpreter(reportPath) {
   const path = contained(root, resolve(reportPath)), bytes = regular(path), report = JSON.parse(bytes);
+  if (report.schema === IMPORT_SCHEMA) return verifyLuaToolImport(path);
   assert.equal(report.schema, INTERPRETER_SCHEMA);
   assert.equal(report.version, '5.1.5'); assert.equal(report.platform, 'windows-amd64');
   assert.equal(report.source.sha256, luaSource.sha256); assert.equal(report.source.url, luaSource.url);

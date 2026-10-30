@@ -248,11 +248,12 @@ function auditCommand(argv) {
   const options = parseOptions(argv);
   const tgz = resolve(requiredOption(options, '--tgz'));
   if (!existsSync(tgz)) throw new Error(`release.tgz_missing: ${tgz}`);
-  const entries = readTgz(readFileSync(tgz));
+  const bytes = readFileSync(tgz), entries = readTgz(bytes);
   const version = typeof options['--version'] === 'string' ? options['--version'] : JSON.parse(readFileSync(join(repository, 'release/version.json'), 'utf8')).version;
   const expectedCommit = typeof options['--commit'] === 'string' ? options['--commit'] : undefined;
   const sourceRoot = options['--source-root'] ? resolve(options['--source-root']) : join(repository, 'packages/npm/lycheedev');
-  const report = auditTgz(entries, { version, expectedCommit, sourceRoot, developmentOnly: options['--development-only'] === true });
+  const report = { ...auditTgz(entries, { version, expectedCommit, sourceRoot, developmentOnly: options['--development-only'] === true }),
+    tgzSHA256: sha256(bytes), tgzBytes: bytes.length };
   if (typeof options['--out'] === 'string') writeFileSync(resolve(options['--out']), `${JSON.stringify(report, null, 2)}\n`);
   if (!report.ok) throw new Error(`release.tgz_audit_failed: ${report.violations.join('; ')}`);
   return report;

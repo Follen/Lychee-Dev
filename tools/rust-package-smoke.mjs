@@ -1,7 +1,7 @@
 // Isolated, unpublished candidate assembly and optional npm smoke. No publishing.
 import {mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {join, resolve, dirname, delimiter} from 'node:path';
+import {join, resolve, dirname, delimiter, relative, isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {homedir} from 'node:os';
 import {stageLuac} from './luac.mjs';
@@ -79,18 +79,16 @@ export function packageSmokeEnvironment(scratch, parent = process.env) {
     npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(user, '.npmrc'), npm_config_globalconfig: join(scratch, 'npm-globalrc')};
 }
 
-export async function packageSmoke(argv, root = process.cwd()) {
-  const {outArg, luacArg, homeArg, pinArg, artifactPath, dependencyClosurePath, profile, assemblyOnly} = parsePackageOptions(argv);
+async function withPackageCommands(argv, root, execute, work) {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('candidate.windows_amd64_required');
   root = resolve(root);
-  const out = contained(root, resolve(outArg)), luacRoot = resolve(luacArg);
   const job = beginScratch(root, 'rust-package-smoke', {command: [process.execPath, fileURLToPath(import.meta.url), ...argv]}), logs = [];
   const isolatedEnvironment = packageSmokeEnvironment(job.directory);
   let state = 'failed', handlesReaped = true, commandSequence = 0;
   function run(command, args, cwd = root, environment = {}) {
     const index = commandSequence++, metadata = join(job.evidence, `command-${index}.json`), stdout = join(job.evidence, `stdout-${index}.bin`), stderr = join(job.evidence, `stderr-${index}.bin`);
     handlesReaped = false;
-    const result = ownedSpawnSync(command, args, {cwd, env: {...isolatedEnvironment, ...environment}, evidence: job.evidence, timeout: 300000});
+    const result = execute(command, args, {cwd, env: {...isolatedEnvironment, ...environment}, evidence: job.evidence, timeout: 300000});
     handlesReaped = result.handlesReaped === true; logs.push(...result.logs);
     writeJson(metadata, {command, args, cwd, exit: result.status, signal: result.signal, error: result.error?.message, handlesReaped});
     writeFileSync(stdout, result.stdout ?? Buffer.alloc(0)); writeFileSync(stderr, result.stderr ?? Buffer.alloc(0)); logs.push(metadata, stdout, stderr);
@@ -101,10 +99,28 @@ export async function packageSmoke(argv, root = process.cwd()) {
   try {
     for (const key of ['HOME', 'TEMP', 'APPDATA', 'LOCALAPPDATA']) mkdirSync(isolatedEnvironment[key], {recursive: true});
     writeFileSync(isolatedEnvironment.npm_config_userconfig, ''); writeFileSync(isolatedEnvironment.npm_config_globalconfig, '');
+    const result = await work({run, npm, logs}); state = 'succeeded'; return result;
+  } catch (error) {
+    if (error.buildEvidence) { const build = JSON.parse(readFileSync(error.buildEvidence)); if (!build.handlesReaped) handlesReaped = false; }
+    const failure = join(job.evidence, 'failure.json'); writeJson(failure, {error: error.message, buildEvidence: error.buildEvidence}); logs.push(failure); throw error;
+  } finally {
+    job.seal({state: handlesReaped ? state : 'interrupted', handlesReaped, logs});
+    if (handlesReaped) job.cleanup();
+  }
+}
+
+async function produceOrSmoke(argv, root, {execute = ownedSpawnSync, stageCompiler = stageLuac, produceOnly = false} = {}) {
+  const options = parsePackageOptions(argv);
+  const {outArg, luacArg, homeArg, pinArg, artifactPath, dependencyClosurePath, profile, assemblyOnly} = options;
+  if (produceOnly && (!artifactPath || !dependencyClosurePath)) throw new Error('candidate.explicit_package_inputs_required');
+  if (produceOnly && (assemblyOnly || homeArg)) throw new Error('candidate.production_does_not_validate');
+  root = resolve(root);
+  const out = contained(root, resolve(root, outArg)), luacRoot = resolve(root, luacArg);
+  return withPackageCommands(produceOnly ? ['produce', ...argv] : argv, root, execute, async ({run, npm, logs}) => {
     mkdirSync(out); const pkgRoot = join(out, 'package'); mkdirSync(pkgRoot);
     // Explicit sealed artifacts are reusable only against their exact current
     // build inputs. Never relabel a historical EXE with today's tree/luac pin.
-    const recordPath = artifactPath ? resolve(artifactPath) : join(out, 'native-artifact/artifact.json');
+    const recordPath = artifactPath ? resolve(root, artifactPath) : join(out, 'native-artifact/artifact.json');
     const artifact = artifactPath ? verifyArtifact(root, recordPath) : buildRust(root, join(out, 'native-artifact'), {profile: profile === 'debug' ? 'dev' : 'release', oneShot: false, isolateUser: true, owner: 'rust-package-smoke'});
     const currentSourceDigest = sourceDigest(root);
     assertArtifactSource(artifact, currentSourceDigest, profile);
@@ -132,7 +148,7 @@ export async function packageSmoke(argv, root = process.cwd()) {
         }
       }
     }
-    copyTree(join(root, 'addon'), 'addon'); copyTree(join(root, 'skills/lycheedev'), 'skill'); stageLuac(pkgRoot, resources, luacRoot);
+    copyTree(join(root, 'addon'), 'addon'); copyTree(join(root, 'skills/lycheedev'), 'skill'); stageCompiler(pkgRoot, resources, luacRoot);
     resources.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
     const binary = readFileSync(artifact.sourceBinary);
     if (hash(binary) !== artifact.binarySHA256) throw new Error('candidate.artifact_changed');
@@ -147,32 +163,20 @@ export async function packageSmoke(argv, root = process.cwd()) {
       commit, workspaceDirty, sourceTreeSHA256: currentSourceDigest, artifactRecordSHA256, binarySHA256: artifact.binarySHA256,
       releaseManifestSHA256: hash(readFileSync(join(pkgRoot, 'release.json'))), resourceInventorySHA256: hash(Buffer.from(JSON.stringify(resources))),
       compilerSHA256: hash(readFileSync(join(pkgRoot, 'payload/tool/luac/luac.exe'))), licenseClosureSHA256: hash(readFileSync(join(closureRoot, 'dependency-closure.json'))),
+      packageVersion: pkg.version, runtimeDependencies: pkg.dependencies || {},
       npmSmoke: 'not_run', validation: {state: 'not_run'}, semanticRuntime: {engine: 'emmy-native', luac: 'pinned_inventory', publicValidation: 'not_run'},
       limitations: [`${profile} unpublished candidate only`, 'business and performance acceptance are separate from package assembly', 'official corresponding-source rebuild and publication gates not run'],
     };
     if (!assemblyOnly) {
       const packed = JSON.parse(npm(['pack', '--ignore-scripts', '--json', '--pack-destination', out], pkgRoot))[0];
-      const installation = join(out, 'installed'); mkdirSync(installation);
-      // This isolated prefix has npm's real Windows global layout and shims;
-      // it never changes the user's configured global prefix.
-      npm(['install', '--global', '--prefix', installation, '--ignore-scripts', '--no-audit', '--no-fund', '--offline', join(out, packed.filename)], out);
-      const installed = join(installation, 'node_modules/lycheedev');
-      const version = JSON.parse(run(process.execPath, [join(installed, 'payload/skill/scripts/lycheedev.mjs'), 'version', '--format', 'json'], out,
-        {PATH: `${installation}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, LYCHEEDEV_BIN: ''}));
-      assertInstalledNativeVersion(version, pkg.version);
-      const payload = join(installed, 'payload/tool/luac'); run(join(payload, 'luac.exe'), ['-v'], out);
-      writeFileSync(join(out, 'valid.lua'), 'local value = 1\nreturn value\n'); run(join(payload, 'luac.exe'), ['-p', join(out, 'valid.lua')], out);
-      if (homeArg && pinArg) {
-        const addon = join(out, 'test-addon'); mkdirSync(addon);
-        writeFileSync(join(addon, 'Test.toc'), '## Interface: 120100\nGood.lua\n'); writeFileSync(join(addon, 'Good.lua'), 'local value = 1\nreturn value\n');
-        const response = JSON.parse(run(process.execPath, [join(installed, 'bin/lycheedev.mjs'), 'source', 'validate', '--home', resolve(homeArg), '--snapshot', pinArg, '--path', addon, '--toc', 'Test.toc', '--format', 'json'], out));
-        writeJson(join(out, 'source-validate.json'), response);
-        assertSourceSyntaxValidation(response, report.compilerSHA256);
-        report.validation = {state: 'passed', compilerSHA256: response.result.syntaxCompilation.compilerSHA256, checkedLua: response.result.syntaxCompilation.checkedLua, captures: response.captures.map(c => c.id)};
+      const tgz = contained(out, resolve(out, packed.filename));
+      if (produceOnly) {
+        Object.assign(report, {schema: 'lycheedev.rust-npm-package.v1', state: 'packed',
+          tgz: relative(out, tgz).replaceAll('\\', '/'), tgzPathBase: 'report', tgzSHA256: hash(readFileSync(tgz))});
+      } else {
+        Object.assign(report, installPackedPackage({root, out, tgz, production: report, homeArg, pinArg, run, npm}),
+          {state: 'partial_passed', npmSmoke: 'passed', tgz, tgzSHA256: hash(readFileSync(tgz))});
       }
-      Object.assign(report, {state: 'partial_passed', npmSmoke: 'passed', ignoreScripts: true, offlineInstall: true,
-        installationKind: 'isolated-global-prefix', installedPrefix: installation, installedRoot: installed, skillLauncherSmoke: 'passed',
-        runtimeDependencies: pkg.dependencies || {}, platform: version.result.platform, tgz: join(out, packed.filename), tgzSHA256: hash(readFileSync(join(out, packed.filename))), version});
     }
     // Staging and optional smoke must not change any compiled input or sealed EXE.
     assertArtifactSource(verifyArtifact(root, recordPath), sourceDigest(root), profile);
@@ -181,14 +185,117 @@ export async function packageSmoke(argv, root = process.cwd()) {
       const bytes = readFileSync(join(pkgRoot, 'payload', resource.path));
       if (bytes.length !== resource.bytes || hash(bytes) !== resource.sha256) throw new Error(`candidate.payload_changed: ${resource.path}`);
     }
-    writeJson(join(out, 'report.json'), report); logs.push(join(out, 'report.json')); state = 'succeeded';
+    writeJson(join(out, 'report.json'), report); logs.push(join(out, 'report.json'));
     return report;
-  } catch (error) {
-    if (error.buildEvidence) { const build = JSON.parse(readFileSync(error.buildEvidence)); if (!build.handlesReaped) handlesReaped = false; }
-    const failure = join(job.evidence, 'failure.json'); writeJson(failure, {error: error.message, buildEvidence: error.buildEvidence}); logs.push(failure); throw error;
-  } finally {
-    job.seal({state: handlesReaped ? state : 'interrupted', handlesReaped, logs});
-    if (handlesReaped) job.cleanup();
-  }
+  });
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) console.log(JSON.stringify(await packageSmoke(process.argv.slice(2))));
+
+export async function packageProduce(argv, root = process.cwd(), options = {}) {
+  return produceOrSmoke(argv, root, {...options, produceOnly: true});
+}
+
+// Local convenience only. CI uses the explicit produce/validate subcommands.
+export async function packageSmoke(argv, root = process.cwd(), options = {}) {
+  return produceOrSmoke(argv, root, options);
+}
+
+export function parsePackageValidationOptions(argv) {
+  const positional = [], values = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg.startsWith('--')) { positional.push(arg); continue; }
+    if (!['--package-report', '--home', '--pin'].includes(arg)) throw new Error(`candidate.unknown_option: ${arg}`);
+    if (values[arg] !== undefined) throw new Error(`candidate.duplicate_option: ${arg}`);
+    const value = argv[++i];
+    if (!value || value.startsWith('--')) throw new Error(`candidate.option_value_missing: ${arg}`);
+    values[arg] = value;
+  }
+  if (positional.length !== 1 || !values['--package-report']) throw new Error('candidate.package_validation_inputs_required');
+  if (Boolean(values['--home']) !== Boolean(values['--pin'])) throw new Error('candidate.home_pin_pair_required');
+  return {outArg: positional[0], packageReportPath: values['--package-report'], homeArg: values['--home'], pinArg: values['--pin']};
+}
+
+function readPackedPackage(root, reportPath) {
+  const path = contained(root, resolve(root, reportPath)), bytes = readFileSync(path), report = JSON.parse(bytes);
+  if (report.schema !== 'lycheedev.rust-npm-package.v1' || report.state !== 'packed') throw new Error('candidate.package_not_packed');
+  if (!['debug', 'release'].includes(report.profile)) throw new Error('candidate.invalid_profile');
+  if (report.sourceTreeSHA256 !== sourceDigest(root)) throw new Error('candidate.artifact_source_mismatch');
+  if (!/^[a-f0-9]{40}$/.test(report.commit)) throw new Error('candidate.invalid_commit');
+  if (report.tgzPathBase !== 'report' || typeof report.tgz !== 'string' || !report.tgz || isAbsolute(report.tgz)) throw new Error('candidate.package_tgz_path');
+  const tgz = contained(dirname(path), resolve(dirname(path), report.tgz));
+  if (hash(readFileSync(tgz)) !== report.tgzSHA256) throw new Error('candidate.package_tgz_changed');
+  return {path, bytes, report, tgz};
+}
+
+function verifyInstalledPackage(installed, report) {
+  const manifestBytes = readFileSync(join(installed, 'release.json'));
+  if (hash(manifestBytes) !== report.releaseManifestSHA256) throw new Error('candidate.installed_release_manifest_changed');
+  const manifest = JSON.parse(manifestBytes), pkg = JSON.parse(readFileSync(join(installed, 'package.json')));
+  if (manifest.schema !== 'lycheedev.release.v1' || manifest.runtime !== 'rust' || manifest.commit !== report.commit
+    || manifest.version !== report.packageVersion || pkg.version !== report.packageVersion) throw new Error('candidate.installed_identity_mismatch');
+  const binary = manifest.binaries?.['windows-amd64'];
+  if (binary?.path !== 'native/windows-amd64/lycheedev.exe' || binary.sha256 !== report.binarySHA256) throw new Error('candidate.installed_binary_identity');
+  const bytes = readFileSync(join(installed, binary.path));
+  if (bytes.length !== binary.bytes || hash(bytes) !== report.binarySHA256) throw new Error('candidate.installed_binary_changed');
+  if (!Array.isArray(manifest.resources) || hash(Buffer.from(JSON.stringify(manifest.resources))) !== report.resourceInventorySHA256) throw new Error('candidate.installed_resource_inventory');
+  for (const resource of manifest.resources) {
+    const path = contained(join(installed, 'payload'), resolve(installed, 'payload', resource.path));
+    const bytes = readFileSync(path);
+    if (bytes.length !== resource.bytes || hash(bytes) !== resource.sha256) throw new Error(`candidate.installed_resource_changed: ${resource.path}`);
+  }
+  if (hash(readFileSync(join(installed, 'payload/tool/luac/luac.exe'))) !== report.compilerSHA256) throw new Error('candidate.installed_compiler_changed');
+  return pkg;
+}
+
+function installPackedPackage({root, out, tgz, production, homeArg, pinArg, run, npm}) {
+  // npm's real Windows global layout and shims, confined to this output prefix.
+  const installation = join(out, 'installed'); mkdirSync(installation);
+  npm(['install', '--global', '--prefix', installation, '--ignore-scripts', '--no-audit', '--no-fund', '--offline', tgz], out);
+  const installed = join(installation, 'node_modules/lycheedev'), pkg = verifyInstalledPackage(installed, production);
+  const version = JSON.parse(run(process.execPath, [join(installed, 'payload/skill/scripts/lycheedev.mjs'), 'version', '--format', 'json'], out,
+    {PATH: `${installation}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, LYCHEEDEV_BIN: ''}));
+  assertInstalledNativeVersion(version, production.packageVersion);
+  const payload = join(installed, 'payload/tool/luac'); run(join(payload, 'luac.exe'), ['-v'], out);
+  writeFileSync(join(out, 'valid.lua'), 'local value = 1\nreturn value\n'); run(join(payload, 'luac.exe'), ['-p', join(out, 'valid.lua')], out);
+  let validation = {state: 'not_run'};
+  if (homeArg) {
+    const addon = join(out, 'test-addon'); mkdirSync(addon);
+    writeFileSync(join(addon, 'Test.toc'), '## Interface: 120100\nGood.lua\n'); writeFileSync(join(addon, 'Good.lua'), 'local value = 1\nreturn value\n');
+    const response = JSON.parse(run(process.execPath, [join(installed, 'bin/lycheedev.mjs'), 'source', 'validate', '--home', resolve(root, homeArg), '--snapshot', pinArg, '--path', addon, '--toc', 'Test.toc', '--format', 'json'], out));
+    writeJson(join(out, 'source-validate.json'), response);
+    assertSourceSyntaxValidation(response, production.compilerSHA256);
+    validation = {state: 'passed', compilerSHA256: response.result.syntaxCompilation.compilerSHA256, checkedLua: response.result.syntaxCompilation.checkedLua, captures: response.captures.map(c => c.id)};
+  }
+  return {validation, ignoreScripts: true, offlineInstall: true, installationKind: 'isolated-global-prefix',
+    installedPrefix: installation, installedRoot: installed, skillLauncherSmoke: 'passed',
+    runtimeDependencies: pkg.dependencies || {}, platform: version.result.platform, version};
+}
+
+export async function packageValidate(argv, root = process.cwd(), {execute = ownedSpawnSync} = {}) {
+  const {outArg, packageReportPath, homeArg, pinArg} = parsePackageValidationOptions(argv);
+  root = resolve(root);
+  const input = readPackedPackage(root, packageReportPath), {report: production, tgz} = input;
+  const out = contained(root, resolve(root, outArg));
+  return withPackageCommands(['validate', ...argv], root, execute, async ({run, npm, logs}) => {
+    if (run('git', ['rev-parse', 'HEAD']).trim() !== production.commit) throw new Error('candidate.package_commit_mismatch');
+    mkdirSync(out);
+    const reportPath = join(out, 'report.json');
+    const report = {...production, schema: 'lycheedev.rust-npm-smoke.v1', assemblyOnly: false, state: 'failed', npmSmoke: 'not_run',
+      validation: {state: 'not_run'}, packageReport: relative(root, input.path).replaceAll('\\', '/'), packageReportSHA256: hash(input.bytes),
+      tgz: relative(root, tgz).replaceAll('\\', '/'), tgzPathBase: 'workspace'};
+    try {
+      const smoke = installPackedPackage({root, out, tgz, production, homeArg, pinArg, run, npm});
+      // Authentication and installation must not modify or replace the input archive.
+      if (hash(readFileSync(tgz)) !== production.tgzSHA256 || hash(readFileSync(input.path)) !== report.packageReportSHA256) throw new Error('candidate.package_input_changed');
+      if (sourceDigest(root) !== production.sourceTreeSHA256) throw new Error('candidate.artifact_source_mismatch');
+      Object.assign(report, smoke, {state: 'partial_passed', npmSmoke: 'passed'});
+      return report;
+    } catch (error) { report.error = error.message; throw error; }
+    finally { writeJson(reportPath, report); logs.push(reportPath); }
+  });
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [mode, ...args] = process.argv.slice(2);
+  console.log(JSON.stringify(await (mode === 'produce' ? packageProduce(args) : mode === 'validate' ? packageValidate(args) : packageSmoke(process.argv.slice(2)))));
+}

@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { sourceDigest, verifyArtifact } from './rust-build.mjs';
 import { verifyAddonZip } from './addon-package.mjs';
+import { verifyInterpreter } from './rust-formal-lua.mjs';
 
 const repository = resolve(import.meta.dirname ?? fileURLToPath(new URL('.', import.meta.url)), '..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -137,13 +138,14 @@ export function componentIdentity(root, kind, directory) {
         executableSHA256: runtime.sha256, bytes: bytes.length, version: runtime.version, platform: runtime.platform };
     }
     case 'lua51': {
-      const reportPath = join(dir, 'build-report.json'), report = readJson(reportPath);
+      const reportPath = join(dir, 'build-report.json'), admitted = verifyInterpreter(reportPath), report = admitted.report;
       const executable = join(dir, 'lua.exe');
       if (!existsSync(executable)) throw new Error('ci-artifacts.lua51_missing');
       const bytes = readFileSync(executable);
       if (hash(bytes) !== report.executableSHA256) throw new Error('ci-artifacts.lua51_integrity');
       if (report.schema !== 'lycheedev.formal-lua-interpreter.v1' || report.version !== '5.1.5' || report.platform !== 'windows-amd64') throw new Error(`ci-artifacts.lua51_version: ${report.version}`);
-      return { dir: relative(root, dir).replaceAll('\\', '/'), reportSHA256: hash(readFileSync(reportPath)),
+      return { dir: relative(root, dir).replaceAll('\\', '/'), reportSHA256: admitted.reportSHA256,
+        buildReceiptSHA256: admitted.buildReceiptSHA256, supplyManifestSHA256: admitted.supplyManifestSHA256 ?? null,
         executableSHA256: report.executableSHA256, bytes: bytes.length, version: '5.1.5' };
     }
     case 'addon-zip': {
@@ -167,13 +169,18 @@ export function componentIdentity(root, kind, directory) {
     }
     case 'npm-package': {
       const reportPath = join(dir, 'report.json'), report = readJson(reportPath);
-      if (report.schema !== 'lycheedev.rust-npm-smoke.v1') throw new Error(`ci-artifacts.npm_report_schema: ${report.schema}`);
-      if (report.assemblyOnly !== true || report.state !== 'assembled') throw new Error('ci-artifacts.npm_package_not_assembly_only');
+      if (report.schema !== 'lycheedev.rust-npm-package.v1') throw new Error(`ci-artifacts.npm_report_schema: ${report.schema}`);
+      if (report.state !== 'packed' || report.tgzPathBase !== 'report') throw new Error('ci-artifacts.npm_package_not_packed');
       if (report.profile !== 'release') throw new Error(`ci-artifacts.npm_profile: ${report.profile}`);
+      if (report.commit !== gitHead(root)) throw new Error('ci-artifacts.npm_commit_mismatch');
       if (report.sourceTreeSHA256 !== sourceTree) throw new Error('ci-artifacts.npm_source_mismatch');
+      if (typeof report.tgz !== 'string' || isAbsolute(report.tgz)) throw new Error('ci-artifacts.npm_tgz_path');
+      const tgz = contained(dir, report.tgz), tgzBytes = readFileSync(tgz);
+      if (hash(tgzBytes) !== report.tgzSHA256) throw new Error('ci-artifacts.npm_tgz_changed');
       if (!existsSync(join(dir, 'package', 'release.json'))) throw new Error('ci-artifacts.npm_package_missing');
       return { dir: relative(root, dir).replaceAll('\\', '/'), reportSHA256: hash(readFileSync(reportPath)),
-        binarySHA256: report.binarySHA256, sourceTree: report.sourceTreeSHA256, state: report.state };
+        binarySHA256: report.binarySHA256, sourceTree: report.sourceTreeSHA256, state: report.state,
+        tgz: relative(root, tgz).replaceAll('\\', '/'), tgzSHA256: report.tgzSHA256, tgzBytes: tgzBytes.length };
     }
     default: throw new Error(`ci-artifacts.unknown_component: ${kind}`);
   }

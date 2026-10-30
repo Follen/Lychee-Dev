@@ -1,30 +1,11 @@
 name: ci
 
-# Unified Rust product CI (DESIGN §8 "CI：统一构建，复用本轮产物").
-#
-#   static  -> build (once per configuration) -> validate -> release-ready
-#
-# Native compilation happens only in the two build jobs:
-#   * build-test-programs  compiles the test configuration once
-#                          (`cargo test --no-run`) and records the harness
-#                          executables plus the binary targets their
-#                          compile-time CARGO_BIN_EXE_* paths point at.
-#   * build-release-native builds the release CLI, the pinned managed luac and
-#                          Lua 5.1 interpreter, and records the license closure.
-# build-release assembles the addon, Skill and npm payload from the sealed
-# native artifact. A packaging failure can rerun without recompiling.
-#
-# Every downstream job downloads this run's artifacts, verifies the sealed
-# build manifest (`tools/ci-artifacts.mjs verify --require ...`) and then uses
-# the recorded paths. A missing component, a changed byte, a stale source tree
-# or a different toolchain fails explicitly. Validate/release jobs perform no
-# Cargo build or dependency resolution and never invoke luac.mjs,
-# the Lua builder or rust-build.mjs. Manifest verification retains the
-# read-only cargo -V toolchain probe. There is no "not found -> build" fallback;
-# caches are not part of artifact transfer.
-#
-# Documentation-only change sets skip the native stages (the static job still
-# checks links/paths); `ci-required` is the single required status.
+# Each PR produces the test configuration and optimized Release once.
+# Fixed Lua tools are verified/imported, and the addon ZIP is made before Rust.
+# Rust tests and addon checks do not wait for Release. Package installation,
+# content audit and candidate sealing consume one producer TGZ by hash.
+# Cargo caches accelerate builds; only explicit run artifacts feed consumers.
+# Failed stages retain finished outputs/reports. No consumer rebuilds inputs.
 
 on:
   push:
@@ -84,6 +65,9 @@ jobs:
           [pscustomobject]@{ path = $cargo; sha256 = (Get-FileHash -LiteralPath $cargo -Algorithm SHA256).Hash.ToLowerInvariant(); fileVersion = $cargoVersion.FileVersion; productVersion = $cargoVersion.ProductVersion } | ConvertTo-Json -Compress
       - name: Documentation links and paths
         run: node tools/ci-docs.mjs check
+      - name: Verify the fixed Lua supply before any native work
+        if: steps.changes.outputs.native == 'true'
+        run: node tools/lua-tool-supply.mjs verify
       - name: Version source consistency
         if: steps.changes.outputs.native == 'true'
         run: node tools/version.mjs --check
@@ -98,6 +82,10 @@ jobs:
         run: |
           node --test `
             tools/version.test.mjs `
+            tools/ci-changes.test.mjs `
+            tools/ci-release.test.mjs `
+            tools/ci-package-business.test.mjs `
+            tools/lua-tool-supply.test.mjs `
             tools/tar.test.mjs `
             tools/addon-package.test.mjs `
             tools/skill-contract.test.mjs `
@@ -121,9 +109,51 @@ jobs:
         if: steps.changes.outputs.native == 'true'
         run: node tools/rust-unsafe-boundaries.mjs --check
 
+  prepare-resources:
+    name: prepare - fixed Lua tools and addon ZIP
+    needs: [static]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Install pinned Rust toolchain for this run manifest
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Import the authenticated fixed Lua tools (no compilation)
+        run: node tools/lua-tool-supply.mjs import .tmp/ci/build-release
+      - name: Produce the addon ZIP once before Rust compilation
+        run: node tools/addon-package.mjs build --out .tmp/ci/build-release/addon
+      - name: Seal this run resource inputs
+        run: |
+          node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/resources-manifest.json `
+            --component luac=.tmp/ci/build-release/luac `
+            --component lua51=.tmp/ci/build-release/lua51 `
+            --component addon-zip=.tmp/ci/build-release/addon
+      - name: Preserve resource outputs and import records
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-resources
+          path: .tmp/ci/build-release
+          if-no-files-found: error
+
   build-test-programs:
     name: build - test programs (test configuration, compiled once)
-    needs: [static]
+    needs: [static, prepare-resources]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     timeout-minutes: 90
@@ -190,15 +220,24 @@ jobs:
         env:
           LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
           LYCHEEDEV_BUILD_DIRTY: 'false'
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
           CARGO_INCREMENTAL: '0'
-        run: node tools/ci-test-programs.mjs build .tmp/ci/build-test --owner ci-test-programs-build --jobs 2
+        run: node tools/ci-test-programs.mjs build .tmp/ci/build-test --owner ci-test-programs-build --jobs 2 --timings
       - name: Seal the build artifact manifest
         run: node tools/ci-artifacts.mjs seal --out .tmp/ci/build-test/build-manifest.json --component test-programs=.tmp/ci/build-test
       - name: Preserve this run's test programs
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-build-test
           path: .tmp/ci/build-test
+          if-no-files-found: error
+      - name: Preserve owned failure diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-test-diagnostics
+          path: .tmp/rust-disk/evidence
           if-no-files-found: error
       - name: Save successful test compilation even if later sealing or upload fails
         if: always() && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'
@@ -209,7 +248,7 @@ jobs:
 
   build-release-native:
     name: build - release native artifacts (compiled once)
-    needs: [static]
+    needs: [static, prepare-resources]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     timeout-minutes: 90
@@ -276,29 +315,27 @@ jobs:
         env:
           LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
           LYCHEEDEV_BUILD_DIRTY: 'false'
-        run: node tools/rust-build.mjs .tmp/ci/build-release/cli release --one-shot --jobs 2
-      - name: Build the managed luac with the pinned MSVC/SDK identity
-        run: |
-          $pinned = Get-Content release/tools/luac.json | ConvertFrom-Json
-          node tools/luac.mjs build .tmp/ci/build-release/luac --msvc-version $pinned.toolchain.version --sdk-version $pinned.toolchain.sdkVersion
-          if ($LASTEXITCODE -ne 0) { throw 'managed luac build failed' }
-      - name: Build the checksum-pinned Lua 5.1.5 interpreter for the addon suites
-        run: |
-          node tools/rust-formal-lua.mjs build .tmp/ci/build-release/lua51
-          if ($LASTEXITCODE -ne 0) { throw 'Lua 5.1 interpreter build failed' }
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
+        run: node tools/rust-build.mjs .tmp/ci/build-release/cli release --one-shot --jobs 2 --timings
       - name: Record the dependency license closure once beside the CLI
         run: node tools/rust-dependencies.mjs .tmp/ci/build-release/cli/license-closure
       - name: Seal native outputs before package assembly
         run: |
           node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/native-manifest.json `
-            --component cli-release=.tmp/ci/build-release/cli `
-            --component luac=.tmp/ci/build-release/luac `
-            --component lua51=.tmp/ci/build-release/lua51
+            --component cli-release=.tmp/ci/build-release/cli
       - name: Preserve native artifacts independently of packaging
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-build-release-native
           path: .tmp/ci/build-release
+          if-no-files-found: error
+      - name: Preserve owned failure diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-release-diagnostics
+          path: .tmp/rust-disk/evidence
           if-no-files-found: error
       - name: Save successful release compilation even if later packaging fails
         if: always() && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'
@@ -309,7 +346,7 @@ jobs:
 
   build-release:
     name: build - release packaging (reuse native artifacts)
-    needs: [static, build-release-native]
+    needs: [static, build-release-native, prepare-resources]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     defaults:
@@ -325,6 +362,16 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.18.1'
+      - name: Pin the npm build tool
+        run: |
+          npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
+          $npmRoot = npm root --global
+          if ($LASTEXITCODE -ne 0) { throw 'npm global root lookup failed' }
+          $npmCli = Join-Path $npmRoot 'npm/bin/npm-cli.js'
+          $actual = node $npmCli --version
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
+          "npm_execpath=$npmCli" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install pinned Rust toolchain for manifest verification
         run: |
           rustup toolchain install 1.99.0 --profile minimal
@@ -336,14 +383,19 @@ jobs:
         with:
           name: ci-build-release-native
           path: .tmp/ci/build-release
+      - name: Download this run's sealed Lua tools
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-resources
+          path: .tmp/ci/build-release
       - name: Verify native inputs before assembly (no rebuild fallback)
-        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/native-manifest.json --require cli-release,luac,lua51
-      - name: Build the addon release ZIP (structure verified)
-        run: node tools/addon-package.mjs build --out .tmp/ci/build-release/addon
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/native-manifest.json --require cli-release
+      - name: Verify Lua inputs before assembly (no rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/resources-manifest.json --require luac,lua51,addon-zip
       - name: Stage the exact Skill against the release CLI
         run: node tools/rust-skill.mjs .tmp/ci/build-release/skill/staged .tmp/ci/build-release/cli/lycheedev.exe
       - name: Assemble the npm package payload from the verified build inputs
-        run: node tools/rust-package-smoke.mjs .tmp/ci/build-release/npm-package .tmp/ci/build-release/luac --artifact .tmp/ci/build-release/cli/artifact.json --profile release --assembly-only --dependency-closure .tmp/ci/build-release/cli/license-closure
+        run: node tools/rust-package-smoke.mjs produce .tmp/ci/build-release/npm-package .tmp/ci/build-release/luac --artifact .tmp/ci/build-release/cli/artifact.json --profile release --dependency-closure .tmp/ci/build-release/cli/license-closure
       - name: Seal the build artifact manifest
         run: |
           node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/build-manifest.json `
@@ -354,6 +406,7 @@ jobs:
             --component skill=.tmp/ci/build-release/skill `
             --component npm-package=.tmp/ci/build-release/npm-package
       - name: Preserve this run's release artifacts
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-build-release
@@ -362,7 +415,7 @@ jobs:
 
   validate-rust:
     name: validate - Rust workspace test programs (from build artifact)
-    needs: [static, build-test-programs, build-release-native]
+    needs: [static, build-test-programs, prepare-resources]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     defaults:
@@ -394,10 +447,10 @@ jobs:
       - name: Download this run's Lua interpreter and original build evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: ci-build-release-native
+          name: ci-resources
           path: .tmp/ci/build-release
       - name: Verify the Lua build component (no interpreter rebuild fallback)
-        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/native-manifest.json --require lua51
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/resources-manifest.json --require lua51
       - name: Run the compiled test programs directly
         run: |
           node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --report .tmp/ci/validate-rust/report.json --formal-lua .tmp/ci/build-release/lua51/build-report.json
@@ -412,7 +465,7 @@ jobs:
 
   validate-addon:
     name: validate - addon Lua suites and release ZIP (from build artifact)
-    needs: [static, build-release]
+    needs: [static, prepare-resources]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     defaults:
@@ -437,10 +490,10 @@ jobs:
       - name: Download this run's release artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: ci-build-release
+          name: ci-resources
           path: .tmp/ci/build-release
       - name: Verify the build manifest (no rebuild fallback)
-        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/build-manifest.json --require lua51,addon-zip
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/resources-manifest.json --require lua51,addon-zip
       - name: Verify the addon release ZIP structure
         run: |
           $zip = Get-ChildItem .tmp/ci/build-release/addon -Filter *.zip | Select-Object -First 1
@@ -465,7 +518,7 @@ jobs:
 
   validate-package:
     name: validate - Skill surface and isolated npm install (from build artifact)
-    needs: [static, build-release]
+    needs: [static, build-release, build-test-programs]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     defaults:
@@ -485,8 +538,12 @@ jobs:
         run: |
           npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
-          $actual = npm --version
+          $npmRoot = npm root --global
+          if ($LASTEXITCODE -ne 0) { throw 'npm global root lookup failed' }
+          $npmCli = Join-Path $npmRoot 'npm/bin/npm-cli.js'
+          $actual = node $npmCli --version
           if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
+          "npm_execpath=$npmCli" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install pinned Rust toolchain for manifest verification
         run: |
           rustup toolchain install 1.99.0 --profile minimal
@@ -505,27 +562,74 @@ jobs:
           New-Item -ItemType Directory -Force .tmp/ci/validate-package | Out-Null
           node tools/skill-contract.mjs --skill-root .tmp/ci/build-release/skill/staged --bin .tmp/ci/build-release/cli/lycheedev.exe | Out-File -Encoding utf8 .tmp/ci/validate-package/skill-contract.json
           if ($LASTEXITCODE -ne 0) { throw 'Skill/CLI surface contract failed' }
-      - name: Isolated npm pack/install smoke of the same release inputs
+      - name: Install and inspect the exact produced TGZ
         run: |
-          node tools/rust-package-smoke.mjs .tmp/ci/validate-package/npm .tmp/ci/build-release/luac --artifact .tmp/ci/build-release/cli/artifact.json --profile release --dependency-closure .tmp/ci/build-release/npm-package/license-closure
+          node tools/rust-package-smoke.mjs validate .tmp/ci/validate-package/npm --package-report .tmp/ci/build-release/npm-package/report.json
           if ($LASTEXITCODE -ne 0) { throw 'isolated npm install smoke failed' }
-      - name: Audit the packed tarball whitelist and payload identity
-        # tools/release.mjs only audits bytes here; it never builds or re-packs.
+      - name: Download the already compiled fixture producer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-test
+          path: .tmp/ci/build-test
+      - name: Verify the fixture producer and run installed Release business checks
         run: |
-          $report = Get-Content .tmp/ci/validate-package/npm/report.json | ConvertFrom-Json
-          node tools/release.mjs audit-tgz --tgz $report.tgz --version $report.version.result.version --commit $report.commit --development-only --out .tmp/ci/validate-package/package-audit.json
-          if ($LASTEXITCODE -ne 0) { throw 'npm tarball audit failed' }
-      - name: Preserve the npm smoke report and tarball
+          node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-test/build-manifest.json --require test-programs
+          if ($LASTEXITCODE -ne 0) { throw 'fixture producer identity failed' }
+          node tools/ci-package-business.mjs --npm-report .tmp/ci/validate-package/npm/report.json --test-record .tmp/ci/build-test/test-programs.json --out .tmp/ci/validate-package/business
+          if ($LASTEXITCODE -ne 0) { throw 'installed Release business checks failed' }
+      - name: Preserve package reports without duplicating the installation
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-validate-package
-          path: .tmp/ci/validate-package
+          path: |
+            .tmp/ci/validate-package/npm/report.json
+            .tmp/ci/validate-package/skill-contract.json
+            .tmp/ci/validate-package/business
+          if-no-files-found: error
+
+  audit-package:
+    name: validate - exact TGZ content and payload identity
+    needs: [static, build-release]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Download this run produced package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-release
+          path: .tmp/ci/build-release
+      - name: Audit the original producer TGZ (no pack or installation)
+        run: |
+          $producer = '.tmp/ci/build-release/npm-package/report.json'
+          $report = Get-Content $producer | ConvertFrom-Json
+          $tgz = Join-Path (Split-Path $producer) $report.tgz
+          New-Item -ItemType Directory -Force .tmp/ci/audit-package | Out-Null
+          node tools/release.mjs audit-tgz --tgz $tgz --version $report.packageVersion --commit $report.commit --development-only --out .tmp/ci/audit-package/report.json
+          if ($LASTEXITCODE -ne 0) { throw 'npm tarball audit failed' }
+      - name: Preserve the content audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-audit-package
+          path: .tmp/ci/audit-package
           if-no-files-found: error
 
   release-ready:
     name: release-ready - sealed candidate from the validated run
-    needs: [static, build-test-programs, build-release, validate-rust, validate-addon, validate-package]
+    needs: [static, build-test-programs, build-release, validate-rust, validate-addon, validate-package, audit-package]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
     defaults:
@@ -572,6 +676,11 @@ jobs:
         with:
           name: ci-validate-package
           path: .tmp/ci/validate-package
+      - name: Download the independent content audit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-audit-package
+          path: .tmp/ci/audit-package
       - name: Assemble the release candidate from the same verified artifacts
         run: |
           $version = (Get-Content release/version.json | ConvertFrom-Json).version
@@ -585,7 +694,8 @@ jobs:
             --report addon-lua=.tmp/ci/validate-addon/addon-lua.json `
             --report addon-zip=.tmp/ci/validate-addon/addon-zip-verify.json `
             --report skill=.tmp/ci/validate-package/skill-contract.json `
-            --report package-audit=.tmp/ci/validate-package/package-audit.json `
+            --report package-audit=.tmp/ci/audit-package/report.json `
+            --report package-business=.tmp/ci/validate-package/business/report.json `
             --out .tmp/ci/release-candidate
           if ($LASTEXITCODE -ne 0) { throw 'release candidate assembly failed' }
       - name: Preserve the release candidate
@@ -598,7 +708,7 @@ jobs:
   ci-required:
     name: ci-required
     if: always()
-    needs: [static, build-test-programs, build-release-native, build-release, validate-rust, validate-addon, validate-package, release-ready]
+    needs: [static, prepare-resources, build-test-programs, build-release-native, build-release, validate-rust, validate-addon, validate-package, audit-package, release-ready]
     runs-on: windows-2025
     defaults:
       run:
@@ -613,12 +723,14 @@ jobs:
         env:
           NATIVE: ${{ needs.static.outputs.native }}
           STATIC_RESULT: ${{ needs.static.result }}
+          BUILD_LUA_RESULT: ${{ needs.prepare-resources.result }}
           BUILD_TEST_RESULT: ${{ needs.build-test-programs.result }}
           BUILD_NATIVE_RESULT: ${{ needs.build-release-native.result }}
           BUILD_RELEASE_RESULT: ${{ needs.build-release.result }}
           VALIDATE_RUST_RESULT: ${{ needs.validate-rust.result }}
           VALIDATE_ADDON_RESULT: ${{ needs.validate-addon.result }}
           VALIDATE_PACKAGE_RESULT: ${{ needs.validate-package.result }}
+          AUDIT_PACKAGE_RESULT: ${{ needs.audit-package.result }}
           RELEASE_READY_RESULT: ${{ needs.release-ready.result }}
         run: |
           if ($env:STATIC_RESULT -ne 'success') { throw "required job static finished with $env:STATIC_RESULT" }
@@ -627,12 +739,14 @@ jobs:
             exit 0
           }
           $required = [ordered]@{
+            'prepare-resources' = $env:BUILD_LUA_RESULT
             'build-test-programs' = $env:BUILD_TEST_RESULT
             'build-release-native' = $env:BUILD_NATIVE_RESULT
             'build-release' = $env:BUILD_RELEASE_RESULT
             'validate-rust' = $env:VALIDATE_RUST_RESULT
             'validate-addon' = $env:VALIDATE_ADDON_RESULT
             'validate-package' = $env:VALIDATE_PACKAGE_RESULT
+            'audit-package' = $env:AUDIT_PACKAGE_RESULT
             'release-ready' = $env:RELEASE_READY_RESULT
           }
           $failed = @()

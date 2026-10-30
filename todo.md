@@ -10,9 +10,10 @@
 
 ## 2. CI 构建一次，后续复用（剩余验证）
 
-`ci.yml`/`release.yml` 与 `tools/ci-*.mjs` 已实现四阶段产物流并在本机通过结构/静态/纯函数验证；以下未闭合：
+`ci.yml`/`release.yml` 与 `tools/ci-*.mjs` 已按每PR完整Release和正式包验收重设计；以下未闭合：
 
-- [ ] **CI-04｜一次真实 CI 运行核实。** 需要GitHub Actions日志核实每种配置只编译一次、validate只消费本轮artifact。41008314464已完成静态/测试构建，但Skill嵌套目录ENOENT阻断Release上传。CI-SKILL-STAGE现已修复并通过7项回归；缓存、CI双job、原生/打包分离、单次PR触发及完整编译输入摘要已实现，工具/结构检查通过，待推送真实runner验证。旧测试产物绑定原提交，未改写身份复用；旧Release未上传，无法从已结束runner取回。
+- [ ] **CI-REDESIGN｜每PR完整验收与准确复用。** 固定Lua供应/导入、唯一TGZ生产/安装/审计、独立消费者、失败诊断及候选哈希汇总已实现。包内Source/Data真实业务入口已接当前Release与既有固定输入；需本轮Actions实际运行，不能以Node边界测试计作业务通过。本地导入解释器已通过35套×6配置addon回归。
+- [ ] **CI-04｜一次真实 CI 运行核实。** 40e21c2626的Actions运行41034790784完成静态、测试程序和Release编译，两类编译缓存保存成功；封存失败于luac身份差异，后续未运行。重设计完成后核实实际跨job复用和缓存重建原因，不因旧产物存在就改写其提交身份。旧Release未上传，只保留了编译缓存。
 - [ ] **CI 产物的跨 job 路径。** build artifact 记录含构建时绝对 workspace 路径；当前 workflow 依赖 hosted Windows 默认 checkout 路径一致，须在真实 CI 核实。validate-package 已改为显式复用 build 封存的完整许可证 closure，移除下游 fetch/metadata；纯 Node 回归及本批实际新包复用均通过。只读 `cargo -V` 工具链探针保留，不声称完全没有 Cargo 进程。
 
 ## 3. 当前路径测试与交付

@@ -1,11 +1,11 @@
 // Sealed build-artifact manifests: component identity, self-manifest handling,
 // tamper detection and reuse-only verification. No Cargo or product build runs.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { sealArtifacts, verifyArtifacts } from './ci-artifacts.mjs';
+import { importLuaToolSupply } from './lua-tool-supply.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const bases = [];
@@ -13,19 +13,7 @@ function fixture() {
   const base = join(root, '.tmp', `ci-artifacts-test-${process.pid}-${Date.now()}-${bases.length}`);
   bases.push(base);
   const component = join(base, 'lua51');
-  mkdirSync(component, { recursive: true });
-  const executable = Buffer.from('MZ synthetic Lua 5.1.5 interpreter bytes\n');
-  writeFileSync(join(component, 'lua.exe'), executable);
-  writeFileSync(join(component, 'build-report.json'), JSON.stringify({
-    schema: 'lycheedev.formal-lua-interpreter.v1',
-    sourceURL: 'https://www.lua.org/ftp/lua-5.1.5.tar.gz',
-    sourceSHA256: '2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333',
-    compiler: 'synthetic', compilerVersion: 'synthetic',
-    executable: join(component, 'lua.exe'),
-    executableSHA256: createHash('sha256').update(executable).digest('hex'),
-    version: '5.1.5',
-    platform: 'windows-amd64',
-  }, null, 2));
+  importLuaToolSupply(base);
   return { base, component, manifest: join(component, 'build-manifest.json') };
 }
 after(() => { for (const base of bases) rmSync(base, { recursive: true, force: true }); });
@@ -36,7 +24,8 @@ test('seal then verify accepts a manifest sealed inside its own component direct
   assert.deepEqual(sealed.components, ['lua51']);
   const verified = verifyArtifacts({ manifestPath: manifest, require: ['lua51'] });
   assert.equal(verified.ok, true);
-  assert.equal(verified.files, 2, 'the manifest itself must not count as a component file');
+  assert.equal(verified.files, sealed.files, 'the manifest itself must not count as a component file');
+  assert(!JSON.parse(readFileSync(manifest)).files.some(row => row.path.endsWith('/build-manifest.json')));
   assert.equal(lstatSync(manifest).isFile(), true);
 });
 
@@ -47,7 +36,7 @@ test('verify rejects a changed component byte instead of relabeling it', () => {
   const changed = readFileSync(executable);
   changed[0] ^= 0xff;
   writeFileSync(executable, changed);
-  assert.throws(() => verifyArtifacts({ manifestPath: manifest, require: ['lua51'] }), /lua51|lua51_integrity/);
+  assert.throws(() => verifyArtifacts({ manifestPath: manifest, require: ['lua51'] }), /import_integrity/);
 });
 
 test('verify rejects an extra file added after sealing', () => {
@@ -67,5 +56,5 @@ test('verify requires every requested component and refuses an unknown kind', ()
 test('Lua component rejects retired untyped report spelling',()=>{
  const {component,manifest}=fixture(),path=join(component,'build-report.json'),report=JSON.parse(readFileSync(path));
  report.version='Lua 5.1.5 Copyright';report.platform='win32';delete report.schema;writeFileSync(path,JSON.stringify(report));
- assert.throws(()=>sealArtifacts({output:manifest,components:[{kind:'lua51',directory:component}]}),/lua51_version/);
+ assert.throws(()=>sealArtifacts({output:manifest,components:[{kind:'lua51',directory:component}]}),/lycheedev.formal-lua-interpreter/);
 });

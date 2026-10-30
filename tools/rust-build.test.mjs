@@ -68,8 +68,73 @@ test('build CLI parses explicit jobs with one-shot and rejects unknown, repeated
   assert.deepEqual(build.parseBuildOptions(['output']),{directory:'output',profile:'dev',oneShot:false,jobs:1});
   assert.deepEqual(build.parseBuildOptions(['output','release','--jobs','2','--one-shot']),{directory:'output',profile:'release',oneShot:true,jobs:2});
   assert.deepEqual(build.parseBuildOptions(['output','--one-shot','--jobs','4']),{directory:'output',profile:'dev',oneShot:true,jobs:4});
+  assert.deepEqual(build.parseBuildOptions(['output','release','--timings','--jobs','2']),{directory:'output',profile:'release',oneShot:false,jobs:2,timings:true});
   for(const args of [[],['output','--unknown'],['output','--jobs'],['output','--jobs','--one-shot'],['output','--jobs','2','--jobs','3'],['output','--one-shot','--one-shot'],['output','release','dev'],['output','--jobs','2.5'],['output','--jobs','5'],['output','--jobs=2'],['output','--profile','release']]){
     assert.throws(()=>build.parseBuildOptions(args),/build\.|usage:/,JSON.stringify(args));
+  }
+  assert.throws(()=>build.parseBuildOptions(['output','--timings','--timings']),/build.duplicate_option/);
+});
+
+test('build artifact preserves the retired receipt, exact logs and this invocation timing HTML',()=>{
+  const root=sourceFixture();let originalEvidence;
+  try{
+    const output=join(root,'artifact'),stdout=Buffer.from([0,255,128,13,10]),stderr=Buffer.from('fingerprint: dependency dirty because input changed\r\n');
+    const html=Buffer.from('<!doctype html>\r\n本次 Cargo timings\r\n');
+    const record=buildRust(root,output,{timings:true,environment:{CARGO_LOG:'cargo::core::compiler::fingerprint=info'},execute(command,args,options){
+      assert.equal(command,'cargo');assert.equal(args.at(-1),'--timings');assert.equal(options.env.CARGO_LOG,'cargo::core::compiler::fingerprint=info');
+      originalEvidence=options.evidence;
+      const target=options.env.CARGO_TARGET_DIR;mkdirSync(join(target,'debug'),{recursive:true});writeFileSync(join(target,'debug/lycheedev.exe'),'fixture executable');
+      mkdirSync(join(target,'cargo-timings'));writeFileSync(join(target,'cargo-timings/cargo-timing.html'),html);writeFileSync(join(target,'cargo-timings/unrelated-old.html'),'old report');
+      writeFileSync(join(target,'do-not-copy-object'),'unrelated target object');
+      return {status:0,handlesReaped:true,stdout,stderr};
+    }});
+    assert.equal(record.buildEvidence,join(output,'evidence/receipt.json'));
+    const originalReceipt=readFileSync(join(originalEvidence,'receipt.json')),copy=readFileSync(record.buildEvidence);
+    assert.deepEqual(copy,originalReceipt);assert.equal(record.buildEvidenceSHA256,hashFile(record.buildEvidence));
+    const receipt=JSON.parse(copy);assert.equal(receipt.state,'retired');assert.equal(existsSync(receipt.directory),false);
+    assert.deepEqual(readFileSync(join(output,'evidence/stdout.bin')),stdout);assert.deepEqual(readFileSync(join(output,'evidence/stderr.bin')),stderr);
+    for(const log of receipt.sealedLogs)assert.equal(hashFile(join(output,'evidence',log.path.split(/[\\/]/).at(-1))),log.sha256);
+    assert.deepEqual(readFileSync(record.cargoTimings.path),html);assert.equal(record.cargoTimings.sha256,hashFile(record.cargoTimings.path));
+    const metadata=JSON.parse(readFileSync(join(output,'evidence/command.json')));
+    assert(Number.isInteger(metadata.elapsedMs)&&metadata.elapsedMs>=0);assert(Date.parse(metadata.endedAtUtc)>=Date.parse(metadata.startedAtUtc));
+    assert.equal(existsSync(join(output,'evidence/unrelated-old.html')),false);assert.equal(existsSync(join(output,'target')),false);
+    assert.deepEqual(verifyArtifact(root,join(output,'artifact.json')),record);
+    // The uploaded output remains self-contained after the original evidence
+    // has gone; the original receipt's historical paths are never rewritten.
+    rmSync(originalEvidence,{recursive:true});assert.deepEqual(readFileSync(record.buildEvidence),copy);
+    for(const log of receipt.sealedLogs)assert.equal(hashFile(join(output,'evidence',log.path.split(/[\\/]/).at(-1))),log.sha256);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('evidence copy rejects a changed sealed log and a filename collision without replacing output',()=>{
+  const root=sourceFixture();
+  try{
+    const invocation=runCargo(root,['build'],{execute(){return {status:0,handlesReaped:true,stdout:Buffer.from('original'),stderr:Buffer.alloc(0)};}});
+    const receipt=JSON.parse(readFileSync(invocation.buildEvidence)),log=receipt.sealedLogs.find(row=>row.path.endsWith('stdout.bin'));
+    const output=join(root,'artifact');mkdirSync(output);
+    writeFileSync(log.path,'changed');assert.throws(()=>build.preserveBuildEvidence(root,invocation.buildEvidence,output),/build.evidence_log_corrupt/);
+    assert.equal(existsSync(join(output,'evidence')),false);
+    writeFileSync(log.path,'original');
+    receipt.sealedLogs.push({...log});writeFileSync(invocation.buildEvidence,JSON.stringify(receipt));
+    assert.throws(()=>build.preserveBuildEvidence(root,invocation.buildEvidence,output),/build.evidence_filename_collision/);
+    assert.equal(existsSync(join(output,'evidence')),false);
+    receipt.sealedLogs.pop();writeFileSync(invocation.buildEvidence,JSON.stringify(receipt));
+    build.preserveBuildEvidence(root,invocation.buildEvidence,output);
+    const bytes=readFileSync(join(output,'evidence/receipt.json'));
+    assert.throws(()=>build.preserveBuildEvidence(root,invocation.buildEvidence,output),/EEXIST/);
+    assert.deepEqual(readFileSync(join(output,'evidence/receipt.json')),bytes);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('explicit timings refuses a missing or unchanged old HTML instead of adopting cached timing evidence',()=>{
+  for(const stale of [false,true]){
+    const root=sourceFixture();
+    try{
+      if(stale){mkdirSync(join(root,'target/cargo-timings'),{recursive:true});writeFileSync(join(root,'target/cargo-timings/cargo-timing.html'),'previous invocation');}
+      assert.throws(()=>buildRust(root,join(root,'artifact'),{timings:true,execute(){return {status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};}}),/build.cargo_timings_not_updated/);
+      assert.equal(existsSync(join(root,'artifact/artifact.json')),false);
+      assert.equal(existsSync(join(root,'.tmp/rust-disk/channels/ordinary.lease')),false);
+    }finally{rmSync(root,{recursive:true,force:true});}
   }
 });
 test('Cargo runner seals exact output bytes and refuses another owner during execution',()=>{

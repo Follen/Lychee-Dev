@@ -9,10 +9,11 @@ import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repository = resolve(import.meta.dirname ?? fileURLToPath(new URL('.', import.meta.url)), '..');
-// Documentation-only inputs: markdown files anywhere plus the docs tree. The
-// five shared documents, product READMEs and packaged reference links all stay
-// in the static stage only.
-const documentation = path => /\.md$/i.test(path) || /^docs\//i.test(path);
+// Embedded fixtures and packaged Markdown are product inputs. Check their
+// directories before file extensions so a README/SKILL edit cannot skip the
+// build or package that actually contains it.
+const productDirectory = /^(?:crates|release|vendor|tests|skills|packages|addon|third_party)\//i;
+const documentation = path => !productDirectory.test(path) && (/\.md$/i.test(path) || /^docs\//i.test(path));
 
 function parseArgs(argv) {
   const options = { event: process.env.GITHUB_EVENT_PATH, githubOutput: undefined, files: undefined, root: repository };

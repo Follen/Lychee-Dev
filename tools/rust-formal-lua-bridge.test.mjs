@@ -3,9 +3,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { join, resolve } from 'node:path';
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { BRIDGE_INPUTS, SUPPORT, bridgePaths, selectTestExecutable, verifyBridgeInputs, verifyHostParity, verifyPeerLifetimes, verifyTestOutput } from './rust-formal-lua-bridge.mjs';
+import { BRIDGE_INPUTS, SUPPORT, admitInterpreter, bridgePaths, selectTestExecutable, verifyBridgeInputs, verifyHostParity, verifyPeerLifetimes, verifyTestOutput } from './rust-formal-lua-bridge.mjs';
+import { importLuaToolSupply } from './lua-tool-supply.mjs';
+import { hash, verifyInterpreter } from './rust-formal-lua.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const target = resolve('target');
@@ -39,6 +41,26 @@ test('bridge paths require a report, an artifact record and a fresh directory', 
   assert.throws(() => bridgePaths(['one', 'two'], root), /path_arguments/);
   assert.throws(() => bridgePaths(['a', 'b', 'c', 'd'], root), /path_arguments/);
   assert.throws(() => bridgePaths(['x/report.json', 'x/artifact.json', 'x/out'], root), /interpreter_record_required/);
+});
+
+test('portable interpreter admission maps runtime paths while preserving original production records', () => {
+  const directory = resolve(root, '.tmp', `bridge-import-test-${process.pid}`);
+  try {
+    const imported = importLuaToolSupply(join(directory, 'supply'));
+    const runtimePath = imported.lua51.report, runtime = verifyInterpreter(runtimePath);
+    const original = readFileSync(runtimePath), producer = readFileSync(join(imported.lua51.directory, 'producer/build-report.json'));
+    const execution = join(directory, 'execution'); mkdirSync(execution);
+    const admitted = admitInterpreter(runtimePath, runtime, execution), bytes = readFileSync(admitted.report), report = JSON.parse(bytes);
+    assert.equal(report.schema, 'lycheedev.formal-lua-interpreter.v1');
+    assert.equal(hash(bytes), admitted.reportSHA256);
+    assert.equal(hash(readFileSync(report.executable)), report.executableSHA256);
+    assert.equal(hash(readFileSync(report.buildEvidence)), admitted.buildReceiptSHA256);
+    assert.equal(report.admissionProjection.importRecordSHA256, hash(original));
+    assert.equal(report.admissionProjection.producerReportSHA256, hash(producer));
+    assert.deepEqual(readFileSync(runtimePath), original);
+    assert.deepEqual(readFileSync(join(imported.lua51.directory, 'producer/build-report.json')), producer);
+    assert.deepEqual(verifyInterpreter(runtimePath), runtime);
+  } finally { rmSync(directory, {recursive: true, force: true}); }
 });
 
 test('selects exactly the current named integration artifact', () => {
@@ -94,7 +116,7 @@ test('precompiled CI bridge uses the recorded test target and never builds a rep
  assert.match(body,/lycheedev\.ci-test-programs\.v1/);assert.match(body,/formal_lua_bridge/);assert.match(body,/test_record_changed/);assert.match(body,/program.bytes/);assert.match(body,/program.sha256/);
  assert.doesNotMatch(body,/runCargo\(|buildTest\(|verifyCandidateArtifact\(/);
  const execution=source.slice(source.indexOf('function executeBridge'));
- assert.match(execution,/buildReceiptSHA256: runtime.buildReceiptSHA256/);
+ assert.match(execution,/admitInterpreter\(runtimePath, runtime, job.evidence\)/);
  assert.doesNotMatch(execution,/buildReceipt: /);
  assert.match(execution,/verifyTestOutput\(result.stdout\)/);assert.match(execution,/verifyPeerLifetimes/);assert.match(execution,/verifyHostParity/);
 });

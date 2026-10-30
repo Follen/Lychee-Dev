@@ -5,14 +5,16 @@
 ## 工作区、目标与分工
 
 - 2026-10-30用户要求将Go 3.2.6变更同步到Rust，继续此前修复、业务回归和审计，暂时不占用Live。main版本与本机npm包均为3.2.6，参考HEAD `15f4db7a05`、实现`0e04ef6690`；Rust仍为3.5.0。此次只做代码、离线/隔离业务与CI，不连接游戏、不发送Live输入或更改实际游戏安装；历史性能结果不重跑或改写。
-- 当前任务是修复CI并避免重复构建。go326_delivery已修复Skill staging并交回只读复核，无新增确认问题；go326_native已交回两类构建入口的jobs参数及编译fixture摘要。只有协调者持有写权限，负责workflow、文档、Git和真实Actions。本轮未运行本机原生构建或操作游戏。
+- 当前任务为CI整体重设计。用户明确要求每个PR继续完成Release与正式包验收，不接受后移手动流程。协调者完成workflow、manifest/候选汇总、变更分类、bridge导入映射和文档；go326_delivery完成TGZ生产/消费拆分及Cargo计时/生产证据传递；go326_native完成固定Lua供应包、导入和workflow实质合同测试；go326_doctor完成包内Source/Data业务入口。各代理已交回并停止写入。整合验证后统一推送，不操作游戏；本轮没有本机Rust重编，先前仅单独重建小型luac核实差异。
 - GO-326实现及离线回归已完成：Delivery持久归档重置与精确退休、Doctor原CON关闭/默认归档续走/hard-reset及统一CLI入口已接通；旧schema须有实际双键INPUT才允许升级Reload，业务回执和新runtime证明保持当前协议。审查补齐旧代与迁移槽清单拒绝退休、进程结束后hard-reset保留原槽字节两处边界。旧测试将可升级协议一律拒绝的断言已改为拒绝未知协议，保留独立的升级正反例。
 - 最新all-targets构建通过（93个测试程序、1个支持程序），源码`d6bd7d7796dc199c47eb47377e45066612281c4294ae594f666cd19983a0cfc0`，receipt `cb41e4fd-dc72-4a40-93fc-37c0c94963f6`；Live完整库516项通过、2项ignored，报告`.tmp/business-regression/go326-audit-report.json`。新增四项激活身份回归先复现漏检，修复后全部通过。其余11个受影响程序此前已通过且后续路径未改：CLI215、实际CLI两组各3、自有窗口2、Delivery166、Delivery集成23（1 ignored）、Mailbox合同7、Lua桥接11；报告为`go326-regression-report.json`中前四项及`go326-regression-rest-report.json`中七项。原失败保留，测试与辅助进程均已回收。
 - 用户要求的本任务Retail Live占用已释放。手动reload后，原CON `CON-6dba6d65e83c8fd4bcbbcc6fff011684`通过正式resume退出0、`closed=true / complete=true`；新runtime连续新鲜样本证明旧运行时已结束，原not_sent/0及期限不变。报告`.tmp/business-regression/live-retail-audit/release-live-after-reload.stdout.json`，receipt `e2e1ee40-5cd1-4aac-add9-c5a06bd537bc`。本任务未建立后续连接，原记录保留；该结论不描述其他任务当前的Live归属。
 - 工作区：`.worktrees/pr14-local-dev`；分支：`rust-refactor`；既有 [draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。本批本地验证基线为`9fbfd1d84568f7ec92b5656dbd7c63d337c6696d`加任务改动；当前提交以分支为准。版本以 `release/version.json` 为准，当前3.5.0。
 - 用户目标：完成设计文档全部设计；当前性能已接受，先回归全部业务，再循环审计。最新要求是先统一梳理Source调用语义，集中修改、集中验证，再恢复完整业务回归。停止性能优化和补跑，保留已有测量事实。
 - 已有提交/推送本任务、更新draft PR #14及运行真实CI的授权继续有效。最新要求暂停Live占用，之前Retail实机授权本轮不使用；全局Skill安装、合并、发布及渠道变更均不在本轮范围。
-- 本批业务实现已推送至`7ff4bacbd01ff9d591e0e9d52f38e26125a51fc7`，PR保持draft。[旧CI 41008314464](https://github.com/Follen/Lychee-Dev/actions/runs/41008314464)静态/测试构建与上传通过，Release构建后因Skill嵌套父目录ENOENT失败，未上传Release。当前CI修复已完成待提交：完整Node工具222项、workflow22项、actionlint、版本/Skill/文档与差异检查全部通过，Skill目录和jobs/fixture回归均已包含；没有重复本机原生构建。原生Release与许可证closure提前封存，打包独立复用；下载与两种配置的编译缓存分离，CI显式双job且传入当前提交身份；PR与开发分支push重复触发已移除。旧测试产物绑定旧提交，未改写身份复用，旧Release不可取回。真实Actions待本轮推送后验证。
+- CI修复已推送至`40e21c262641e2fe17ffdcef8fa83408c4f43bc0`，PR保持draft。[CI 41034790784](https://github.com/Follen/Lychee-Dev/actions/runs/41034790784)静态检查、93+1测试程序构建/上传通过（编译11分32秒），Release编译成功（28分18秒），两类编译缓存和依赖缓存均保存。后续封存失败于`ci-artifacts.luac_identity_mismatch`，下游未运行。CI luac为a9af904c…、本机pin为5aa1605b…，源码/大小/目录版本相同；本机新目录重建仍得pin并通过seal。CI原report未上传，实际MSVC/CRT补丁差异仍未确认；不修改pin掩盖差异。
+- 当前重设计实现和本地验证已完成，尚未提交/执行新Actions：静态先认证约994 KiB固定Lua供应包，资源job导入原字节并生成addon ZIP；测试/Release各编译一次且分配置缓存，测试/addon各自尽早运行。包只生产一个TGZ，安装、独立内容审计、包内Source/Data业务及候选封存比较同一哈希。实际npm-cli路径由固定版本安装后导出；编译失败也保留owned诊断。原receipt/日志和本次Cargo timing随成功原生产物传递，不把缓存命中当作业务通过。
+- 本批集中Node工具测试280/280通过（含18项workflow实质合同）；actionlint、文档47项/0违规、版本/Skill/FFI及diff检查通过。固定Lua实际导入→addon ZIP→seal/verify通过（98文件）；同一导入解释器运行35套×6配置共210项addon回归通过。新包内Source/Data控制器只有Node边界检查，须Actions运行同一新TGZ中的Release；此前本机业务结果不替代本轮跨job验证。
 - LIVE-01已定位到INPUT采样后的两次500槽准备耗时，两项真实DiskPublications回归曾复现发送前拒绝，receipt `3d3c6e38-00dd-47d0-b0ba-b9507d21eac2`。Invoke准备后重新采样、Reload独立于槽池均已通过本批Live完整库；原目标、持久意图、one-use、profile、最终publication与deadline约束保持。临时计时已删除，实机复验按用户当前要求暂缓；诊断dev CLI仅保留原问题证据用途。
 - 主分支核对确认当前addon已包含main代码，只有3.5.0版本号不同；Go3.2.6相关行为完成移植后，以ours策略接入main历史，已核实整合前后Rust tree完全相同。2026-10-30只读`npm view lycheedev dist-tags --json`确认latest=3.2.6、next=3.1.2，本地发布清单`preserveLatest`已更新为3.2.6，不改beta目标或远程标签。此前已删除无消费者且调用退役EncodeSignal的`tests/protocol/writer.lua`，当前正式bridge的四项输入与精确数值覆盖不变。
 - 两轮审计修改及本批安装包的受影响验证全部通过。安装包基线源码`3ff2a83c4a0e5f03f5d70883a564423bad53bdbbce70ab7d39f7618053f936be`的`audit-2` all-targets构建通过（93+1，receipt `de1e643f-a86d-41ec-828b-dea633a36178`）；adapter全部19个测试程序、Source完整库712项（5项ignored）、真实checker families及nominal通过。CLI库211项及两实际CLI程序各3项、Data transport101项、CI工具回归和18项workflow结构检查通过。新Release、隔离npm安装、包内receiver/发现信息及Retail/Forever均通过。这些结果不覆盖后续Live修复；其余Actions、symlink权限和实机缺口见下文。
@@ -92,7 +94,7 @@ Forever缺失key ID为`0da4670db36fb2a9`、`d2c028cb7ac14d0b`、`da0e7785727a0a6
 ## 下一步
 
 1. 本地完整业务回归与两轮审计已完成，修复已在本批安装包验证。后续只因新改动、实际失败或明确未解决的问题补验。
-2. 完成本轮CI静态检查与只读复核后提交推送，验证Actions下游与跨job产物复用。后续失败只重跑受影响job，保留已编译产物和缓存。两项symlink测试需要创建文件符号链接的权限；当前令牌没有该权限，系统未读取到开发者模式启用标记，环境设置未变更。
+2. 按DESIGN完成CI重设计后集中验证、提交及真实Actions验收，避免继续零散推送。固定luac远程供应当前缺失：正式3.2.6 npm/发行物没有该工具，本地原产物和fresh复验均为固定5aa；可按设计以小型受版本控制供应包保留源码、许可与来源，再严格导入，不能把缓存当唯一来源或重写生产记录。两项symlink测试仍受本机Windows权限限制。
 3. Go 3.2.6业务同步和Live修复的离线验证已完成；本任务两个Retail CON均已正式关闭。用户当前要求暂不占用Live；再次实机工作前核对当时安装版本、实例与归属。
 
 ## 最后执行：需要真实客户端或用户配合的验证

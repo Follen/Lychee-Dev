@@ -104,6 +104,18 @@ export function assertNpmSmokeVersion(report, expectedVersion) {
   if (report.version?.result?.version !== expectedVersion) throw new Error('ci-release.npm_version_mismatch');
 }
 
+export function assertPackageReports({ production, installation, audit, business, productionSHA256, installationSHA256 }) {
+  if (production.schema !== 'lycheedev.rust-npm-package.v1' || production.state !== 'packed') throw new Error('ci-release.package_not_produced');
+  if (installation.packageReportSHA256 !== productionSHA256) throw new Error('ci-release.installation_producer_mismatch');
+  if (!/^[a-f0-9]{64}$/.test(production.tgzSHA256 ?? '') || installation.tgzSHA256 !== production.tgzSHA256
+    || audit?.tgzSHA256 !== production.tgzSHA256 || business?.tgzSHA256 !== production.tgzSHA256) throw new Error('ci-release.package_tgz_mismatch');
+  if (audit.ok !== true || !Array.isArray(audit.violations) || audit.violations.length) throw new Error('ci-release.package_audit_failed');
+  if (business.packageReportSHA256 !== productionSHA256 || business.npmReportSHA256 !== installationSHA256
+    || business.binarySHA256 !== production.binarySHA256) throw new Error('ci-release.package_business_identity');
+  if (business.state !== 'passed' || business.source?.state !== 'passed' || business.data?.state !== 'passed'
+    || business.inputsStable !== true || business.handlesReaped !== true) throw new Error('ci-release.package_business_incomplete');
+}
+
 export function releaseCandidate(options = {}) {
   if (!options.identity) throw new Error('ci-release.identity_required');
   if (!options.buildManifest) throw new Error('ci-release.build_manifest_required');
@@ -129,7 +141,17 @@ export function releaseCandidate(options = {}) {
   if (npm.binarySHA256 !== buildManifest.components['cli-release'].binarySHA256) throw new Error('ci-release.npm_binary_mismatch');
   const assembly = readJson(join(repository, buildManifest.components['npm-package'].dir, 'report.json'));
   if (assembly.binarySHA256 !== npm.binarySHA256) throw new Error('ci-release.build_assembly_binary_mismatch');
-  const tgz = resolve(repository, npm.tgz);
+  const validationReports = reportEntries(options), reportMap = new Map(validationReports.map(row => [row.name, readJson(row.path)]));
+  if (reportMap.size !== validationReports.length) throw new Error('ci-release.duplicate_validation_report');
+  for (const name of ['rust', 'addon-lua', 'addon-zip', 'skill', 'package-audit', 'package-business']) {
+    if (!reportMap.has(name)) throw new Error(`ci-release.validation_report_required: ${name}`);
+  }
+  assertPackageReports({ production: assembly, installation: npm, audit: reportMap.get('package-audit'), business: reportMap.get('package-business'),
+    productionSHA256: buildManifest.components['npm-package'].reportSHA256, installationSHA256: hash(readFileSync(resolve(repository, options.npmReport))) });
+  // The candidate copies the producer's archive. Installation and audit must
+  // refer to its hash; neither consumer is allowed to supply a replacement.
+  const tgz = resolve(repository, buildManifest.components['npm-package'].tgz);
+  if (resolve(repository, npm.tgz) !== tgz) throw new Error('ci-release.installation_tgz_path_mismatch');
   if (!existsSync(tgz)) throw new Error(`ci-release.tgz_missing: ${npm.tgz}`);
   if (hash(readFileSync(tgz)) !== npm.tgzSHA256) throw new Error('ci-release.tgz_changed');
   const addonZip = resolve(repository, buildManifest.components['addon-zip'].zip);
@@ -141,7 +163,9 @@ export function releaseCandidate(options = {}) {
   const tgzRecord = copyArtifact(tgz, join(out, `lycheedev-${identity.version}.tgz`), npm.tgzSHA256, 'npm_tgz');
   const addonRecord = copyArtifact(addonZip, join(out, `lycheedev-${identity.version}-addon.zip`), buildManifest.components['addon-zip'].zipSHA256, 'addon_zip');
   const reports = [];
-  for (const report of reportEntries(options)) {
+  for (const report of [...validationReports,
+    {name: 'npm-production.json', path: join(repository, buildManifest.components['npm-package'].dir, 'report.json')},
+    {name: 'npm-installation.json', path: resolve(repository, options.npmReport)}]) {
     const destination = join(out, 'reports', report.name);
     mkdirSync(dirname(destination), { recursive: true });
     copyFileSync(report.path, destination);
@@ -158,7 +182,8 @@ export function releaseCandidate(options = {}) {
       lua51: { executableSHA256: buildManifest.components.lua51.executableSHA256 },
       testPrograms: { programs: testManifest.components['test-programs'].programs, support: testManifest.components['test-programs'].support },
     },
-    validation: { reports, npmSmoke: npm.state, installationKind: npm.installationKind, offlineInstall: npm.offlineInstall === true },
+    validation: { reports, npmSmoke: npm.state, packageBusiness: reportMap.get('package-business').state,
+      installationKind: npm.installationKind, offlineInstall: npm.offlineInstall === true },
     buildManifest: { path: options.buildManifest, files: build.files, sourceTree: build.sourceTree },
     testManifest: { path: options.testManifest, files: tests.files, sourceTree: tests.sourceTree },
     publication: 'not_performed',

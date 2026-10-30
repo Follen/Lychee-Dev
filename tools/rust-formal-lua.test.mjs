@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ownedUserEnvironment } from './rust-build.mjs';
 import { SUPPORT, cleanLuaEnvironment, hash, regular, verifyCandidateArtifact, verifyInterpreter, preserveInterpreterEvidence, verifyInterpreterEvidence } from './rust-formal-lua.mjs';
+import { importLuaToolSupply } from './lua-tool-supply.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const scratch = join(root, '.tmp', `formal-lua-tool-test-${process.pid}`);
@@ -81,4 +82,18 @@ test('portable interpreter evidence preserves original bytes and verifies withou
  assert.equal(verifyInterpreterEvidence(report,bytes).buildReceiptSHA256,hash(originalReceipt));
  appendFileSync(join(output,'evidence/process.stdout.bin'),'changed');
  assert.throws(()=>verifyInterpreterEvidence(report,bytes),/sealed_log_corrupt/);
+}));
+
+test('fixed interpreter imports use portable paths and historical producer identity through the existing admission API', () => withScratch(directory => {
+  const imported = importLuaToolSupply(join(directory, 'tools'));
+  const admitted = verifyInterpreter(imported.lua51.report);
+  assert.equal(admitted.report.executable, join(imported.lua51.directory, 'lua.exe'));
+  assert.equal(admitted.report.executableSHA256, imported.lua51.executableSHA256);
+  assert.equal(admitted.report.schema, 'lycheedev.formal-lua-interpreter.v1');
+  assert.equal(admitted.report.interpreterProbe, 'formal-lua-interpreter-ok');
+  assert.equal(admitted.supplyManifestSHA256, imported.manifestSHA256);
+  assert.notEqual(admitted.reportSHA256, admitted.producerReportSHA256);
+  assert.equal(hash(regular(admitted.report.buildEvidence)), admitted.buildReceiptSHA256);
+  appendFileSync(join(imported.lua51.directory, 'producer/evidence/interpreter-report.json'), 'changed');
+  assert.throws(() => verifyInterpreter(imported.lua51.report), /import_integrity/);
 }));

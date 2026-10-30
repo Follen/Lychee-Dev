@@ -58,6 +58,28 @@ test('invalid build jobs refuse admission before creating output or launching Ca
   assert.equal(calls,0);assert.equal(existsSync(output),false);assert.equal(existsSync(join(directory,'.tmp')),false);
 });
 
+test('test-program artifact preserves producer receipt, fingerprint logs and explicit Cargo timings',()=>{
+  const directory=buildFixture('timings-evidence'),output=join(directory,'artifact');let originalEvidence;
+  const html=Buffer.from('<html>test compilation timings\r\n</html>'),stderr=Buffer.from('fingerprint: crate is fresh\r\n');
+  const record=buildTestPrograms({root:directory,output,timings:true,execute(command,args,options){
+    assert.equal(command,'cargo');assert.equal(args.at(-1),'--timings');originalEvidence=options.evidence;
+    const target=options.env.CARGO_TARGET_DIR;mkdirSync(join(target,'debug/deps'),{recursive:true});mkdirSync(join(target,'cargo-timings'));
+    writeFileSync(join(target,'cargo-timings/cargo-timing.html'),html);writeFileSync(join(target,'cargo-timings/old.html'),'not this build');
+    const executable=join(target,'debug/deps/fixture.exe');writeFileSync(executable,'mock libtest executable');
+    const messages=[{reason:'compiler-artifact',executable,package_id:'path+file:///fixture#fixture@0.1.0',target:{kind:['lib'],name:'fixture'},profile:{test:true}},{reason:'build-finished',success:true}];
+    return {status:0,handlesReaped:true,stdout:Buffer.from(messages.map(row=>JSON.stringify(row)).join('\n')),stderr};
+  }});
+  assert.equal(record.buildEvidence,join(output,'evidence/receipt.json'));
+  const original=readFileSync(join(originalEvidence,'receipt.json'));assert.deepEqual(readFileSync(record.buildEvidence),original);
+  assert.equal(record.buildEvidenceSHA256,createHash('sha256').update(original).digest('hex'));
+  assert.deepEqual(readFileSync(join(output,'evidence/stderr.bin')),stderr);assert.deepEqual(readFileSync(record.cargoTimings.path),html);
+  const receipt=JSON.parse(original);assert.equal(receipt.state,'retired');assert.equal(existsSync(receipt.directory),false);
+  assert.equal(existsSync(join(output,'evidence/old.html')),false);assert.equal(record.command.at(-1),'--timings');
+  rmSync(originalEvidence,{recursive:true});
+  for(const log of receipt.sealedLogs)assert.equal(createHash('sha256').update(readFileSync(join(output,'evidence',log.path.split(/[\\/]/).at(-1)))).digest('hex'),log.sha256);
+  assert.deepEqual(JSON.parse(readFileSync(join(output,'test-programs.json'))),record);
+});
+
 test('build CLI rejects invalid, missing and repeated jobs without enabling jobs on run',()=>{
   const script=join(root,'tools/ci-test-programs.mjs'),output=join(base,'cli-invalid-output');
   for(const [args,expected] of [
@@ -67,6 +89,8 @@ test('build CLI rejects invalid, missing and repeated jobs without enabling jobs
     [['build',output,'--jobs','--owner','fixture'],/ci-test-programs.option_value_missing/],
     [['build',output,'--jobs','2','--jobs','3'],/ci-test-programs.duplicate_option/],
     [['run',recordPath,'--jobs','2'],/ci-test-programs.unknown_option/],
+    [['run',recordPath,'--timings'],/ci-test-programs.unknown_option/],
+    [['build',output,'--timings','--timings'],/ci-test-programs.duplicate_option/],
   ]){
     const result=spawnSync(process.execPath,[script,...args],{cwd:root,encoding:'utf8',windowsHide:true,shell:false});
     assert.equal(result.status,1);assert.match(result.stderr,expected);

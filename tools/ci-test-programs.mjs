@@ -15,7 +15,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSy
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { runCargo, sourceDigest, ownedUserEnvironment, validateCargoJobs } from './rust-build.mjs';
+import { runCargo, sourceDigest, ownedUserEnvironment, validateCargoJobs, preserveBuildEvidence } from './rust-build.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
 import { runPrebuiltBridge } from './rust-formal-lua-bridge.mjs';
 
@@ -77,9 +77,10 @@ function copyProgram(root, source, destination, bytes) {
   if (hash(readFileSync(destination)) !== hash(bytes)) throw new Error(`ci-test-programs.copy_changed: ${destination}`);
 }
 
-export function buildTestPrograms({ root = repository, output, owner = 'ci-test-programs-build', jobs = 1, execute = ownedSpawnSync } = {}) {
+export function buildTestPrograms({ root = repository, output, owner = 'ci-test-programs-build', jobs = 1, timings = false, execute = ownedSpawnSync } = {}) {
   root = resolve(root);
   const args = [...CARGO_ARGS, '-j', String(validateCargoJobs(jobs))];
+  if (timings) args.push('--timings');
   if (!output) throw new Error('ci-test-programs.output_required');
   const out = contained(root, output);
   if (existsSync(out)) throw new Error(`ci-test-programs.output_exists: ${output}`);
@@ -132,11 +133,12 @@ export function buildTestPrograms({ root = repository, output, owner = 'ci-test-
         command: ['cargo', ...args], environmentSHA256: invocation.environmentSHA256, buildEvidence: invocation.buildEvidence,
         programs: tests, support, excluded, producedAtUtc: new Date().toISOString(),
       };
-      writeFileSync(join(out, 'test-programs.json'), `${JSON.stringify(value, null, 2)}\n`);
       return value;
     },
   });
   if (record.schema !== RECORD_SCHEMA) throw new Error('ci-test-programs.invalid_record');
+  Object.assign(record, preserveBuildEvidence(root, record.buildEvidence, out));
+  writeFileSync(join(out, 'test-programs.json'), `${JSON.stringify(record, null, 2)}\n`, {flag: 'wx'});
   return record;
 }
 
@@ -270,12 +272,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         if (value === undefined || value.startsWith('--')) throw new Error('ci-test-programs.option_value_missing: --jobs');
         options.jobs = validateCargoJobs(value); index++;
       }
+      else if (arg === '--timings' && command === 'build') {
+        if (options.timings) throw new Error('ci-test-programs.duplicate_option: --timings');
+        options.timings = true;
+      }
       else if (arg.startsWith('--')) throw new Error(`ci-test-programs.unknown_option: ${arg}`);
       else rest.push(arg);
     }
     if (command === 'build') {
-      if (rest.length !== 1) throw new Error('usage: node tools/ci-test-programs.mjs build <new-output-directory> [--owner name] [--jobs 1..4]');
-      const record = buildTestPrograms({ output: rest[0], ...(options.owner ? { owner: options.owner } : {}), ...(options.jobs !== undefined ? { jobs: options.jobs } : {}) });
+      if (rest.length !== 1) throw new Error('usage: node tools/ci-test-programs.mjs build <new-output-directory> [--owner name] [--jobs 1..4] [--timings]');
+      const record = buildTestPrograms({ output: rest[0], ...(options.owner ? { owner: options.owner } : {}), ...(options.jobs !== undefined ? { jobs: options.jobs } : {}), ...(options.timings ? {timings: true} : {}) });
       process.stdout.write(`${JSON.stringify({ schema: record.schema, programs: record.programs.length, support: record.support.length, excluded: record.excluded, sourceTree: record.sourceTree }, null, 2)}\n`);
     } else if (command === 'run') {
       if (rest.length !== 1) throw new Error('usage: node tools/ci-test-programs.mjs run <test-programs.json> [--package a,b] [--target a,b] [--report path] [--formal-lua build-report.json] [--arguments --test-threads=1]');

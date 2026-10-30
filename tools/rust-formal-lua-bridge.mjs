@@ -25,7 +25,7 @@ export const BRIDGE_INPUTS = Object.freeze([
 const TOC_INTERFACES = Object.freeze(['120105', '120100', '50504', '38002', '16001', '11509', '20506']);
 const EVENT_CATALOGS = Object.freeze(['Anniversary', 'Era', 'Forever', 'Mainline', 'Mists', 'Titan'].map(name => `Modules\\Events\\CatalogData_${name}.lua`).sort());
 export const SUPPORT = Object.freeze(['tools/rust-formal-lua-bridge.mjs', 'tools/rust-formal-lua.mjs', 'tools/rust-build.mjs', 'tools/rust-cargo.mjs',
-  'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1']);
+  'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/lua-tool-supply.mjs', 'tools/tgz.mjs']);
 const TEST_SUPPORT = Object.freeze(['crates/lycheedev-live/tests/formal_lua_bridge.rs', 'crates/lycheedev-live/tests/support/formal_lua_fixture.rs',
   'crates/lycheedev-live/tests/support/formal_lua_peer.rs']);
 const supportIdentity = () => Object.fromEntries([...SUPPORT, ...TEST_SUPPORT].map(path => [path, hash(regular(join(root, path)))]));
@@ -196,6 +196,20 @@ export function runPrebuiltBridge({runtimePath, recordPath, record, program}) {
   checkTest();
   return executeBridge({runtimePath, test, testIdentity, checkTest, command: ['node', 'tools/ci-test-programs.mjs', 'run', recordPath]});
 }
+// The Rust fixture consumes resolved paths in its current execution admission.
+// This projection is not a new production report: the original import record,
+// producer report and receipt remain unchanged and are checked around the run.
+export function admitInterpreter(runtimePath, runtime, directory) {
+  if (!runtime.supplyManifestSHA256) return { report: runtimePath, reportSHA256: runtime.reportSHA256, buildReceiptSHA256: runtime.buildReceiptSHA256 };
+  const path = join(directory, 'interpreter-admission.json');
+  const projection = { ...runtime.report, admissionProjection: {
+    importRecord: runtimePath, importRecordSHA256: runtime.reportSHA256,
+    producerReportSHA256: runtime.producerReportSHA256, supplyManifestSHA256: runtime.supplyManifestSHA256,
+  } };
+  save(path, projection);
+  return { report: path, reportSHA256: hash(regular(path)), buildReceiptSHA256: runtime.buildReceiptSHA256 };
+}
+
 export function main(argv = []) {
   const paths = bridgePaths(argv), {runtimePath, candidatePath} = paths;
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
@@ -218,7 +232,8 @@ function executeBridge({runtimePath, test, testIdentity, checkTest, candidate = 
   try {
     mkdirSync(caseRoot);
     const fixture = { root, files: verifyBridgeInputs(root) };
-    save(admissionPath, { schema: ADMISSION_SCHEMA, interpreter: { report: runtimePath, reportSHA256: runtime.reportSHA256, buildReceiptSHA256: runtime.buildReceiptSHA256 },
+    const interpreterAdmission = admitInterpreter(runtimePath, runtime, job.evidence);
+    save(admissionPath, { schema: ADMISSION_SCHEMA, interpreter: interpreterAdmission,
       fixture, scratch: { receipt: job.receipt, cases: caseRoot } });
     save(join(job.evidence, 'identity.json'), { runtime, candidate, test, testIdentity, support, fixture });
     const checkIdentity = () => {
