@@ -195,7 +195,7 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 | N09 / DELIVERY-01 | 统一 Release/npm 包在隔离 prefix/HOME 安装，包内 Skill/CLI/luac/addon。 | 真正完成 Source/Data/安装任务，路径/版本/许可证与包内容一致；旧 Go install smoke 已删，当前入口 tools/rust-package-smoke + CI validate-package。 |
 | N10 / LIVE-CLIENT | 真实客户端和已授权实例操作。 | 按 handover 最后 H01—H08 记录七产品、当前绑定、500 槽、多实例、恢复和所需性能；离线通过不代替本项。 |
 | N11 / SOURCE-02 | 含非 UTF-8 注释/字符串的固定 Lua 输入；当前 Source query/inspect/context/validate/closure/native。 | 见 7.1；单文件编码告警不能中断全快照或伪造语义。最终已安装 Release 的实际 Forever 冷/热索引、inspect、同提交 diff、受管 luac、完整 native IPC 告警与会话复用均通过。research-material CAS 回归覆盖注释分析视图、不可转换 token/字符串 gap、篡改及普通 UTF-8 快路径；32 MiB+17 文件的超限冷/热索引回归也已通过。 |
-| N12 / CI-01—04 | 实际 workflow、构建产物和下游 runner；结构检查与一次真实 CI 结果。 | 每种必要目标/配置编译一次；测试、Lua bridge、npm smoke、发布准备消费同一轮匹配产物；缺产物明确失败，无隐式重建、旧 Go job 或失效引用。validate-package复用已封存许可证closure，所有包消费者核同一TGZ。41045064696已实际通过93个Rust程序、固定Lua/addon、跨job传递、npm安装和Data业务，Source暴露渠道合同错误；修复、两组并行及候选封存的最终结果见handover，不以此前单机结果替代。只读cargo -V仍用于工具链身份核对。 |
+| N12 / CI-01—04 | 实际workflow、构建产物和下游runner；结构检查与真实CI结果。 | 每种配置编译一次，两个命名组共用同一93+1构建记录；汇总逐程序核计划/结果、哈希、提交、覆盖及回收。41051431104已通过两组24/69程序、固定Lua/addon、跨job路径、许可证closure、唯一TGZ生产/审计/安装、包内Source/Data及候选封存。候选只复制原TGZ，输入缺失无隐式重建；完整身份与证明范围见handover。 |
 
 ### 7.1 N11：Source 编码回归的具体业务
 
