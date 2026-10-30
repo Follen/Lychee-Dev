@@ -27,6 +27,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+#[path = "doctor_repair_tests.rs"]
+mod doctor_repair_tests;
+#[path = "protocol_upgrade_activation_tests.rs"]
+mod protocol_upgrade_activation_tests;
 struct Fixture {
     root: PathBuf,
     target: ConnectionTarget,
@@ -693,30 +698,11 @@ impl crate::mailbox::connection::doctor_repair::RepairEnvironment for Env {
         target: &ConnectionTarget,
         owner: &WindowOwner,
         _: &str,
+        _: bool,
         c: &OperationControl,
     ) -> ChannelResult<Model> {
         self.open(target, Some(owner), c)
     }
-}
-#[test]
-fn top_level_doctor_requires_explicit_target_and_caps_original_control() {
-    let f = Fixture::new();
-    let counts = Rc::new(RefCell::new(Counts::default()));
-    let clock = Rc::new(Cell::new(1000));
-    let mut service = service(&f, &counts, &clock);
-    assert!(
-        service
-            .top_level_live_doctor(&TargetRequest::default(), "", &OperationControl::default())
-            .is_none()
-    );
-    assert_eq!(counts.borrow().opens, 0);
-    let report = service
-        .top_level_live_doctor(&f.request(), "", &OperationControl::default())
-        .unwrap();
-    assert!(!report.healthy);
-    assert_eq!(counts.borrow().opens, 1);
-    assert!(!f.root.join(".lycheedev").exists());
-    assert_eq!(counts.borrow().inputs, 0);
 }
 #[test]
 fn doctor_fix_delivery_failure_stops_before_activation_and_foreign_owner_stops_before_delivery() {
@@ -728,6 +714,15 @@ fn doctor_fix_delivery_failure_stops_before_activation_and_foreign_owner_stops_b
         calls: usize,
     }
     impl RepairDelivery for Delivery {
+        fn reset_slots(
+            &mut self,
+            _: &ConnectionTarget,
+            _: &Path,
+            _: &str,
+            _: &OperationControl,
+        ) -> ChannelResult<bool> {
+            panic!("this installation-repair fixture must not reset slot resources")
+        }
         fn apply(
             &mut self,
             _: &ConnectionTarget,
@@ -805,6 +800,15 @@ fn repair_closes_original_prepared_business_before_delivery_without_preparing_it
         calls: usize,
     }
     impl RepairDelivery for Delivery {
+        fn reset_slots(
+            &mut self,
+            _: &ConnectionTarget,
+            _: &Path,
+            _: &str,
+            _: &OperationControl,
+        ) -> ChannelResult<bool> {
+            panic!("this installation-repair fixture must not reset slot resources")
+        }
         fn apply(
             &mut self,
             target: &ConnectionTarget,
@@ -1130,6 +1134,15 @@ fn repair_unknown_business_never_republishes_or_dispatches_before_delivery() {
     };
     struct NeverDelivery;
     impl RepairDelivery for NeverDelivery {
+        fn reset_slots(
+            &mut self,
+            _: &ConnectionTarget,
+            _: &Path,
+            _: &str,
+            _: &OperationControl,
+        ) -> ChannelResult<bool> {
+            panic!("this installation-repair fixture must not reset slot resources")
+        }
         fn apply(
             &mut self,
             _: &ConnectionTarget,
@@ -1448,10 +1461,9 @@ fn repair_finalization_requires_durable_exact_operation_and_release_artifact() {
             current.report_checksum = crate::mailbox::checksum(&current.result_bytes.0);
             let mut artifact = current.clone();
             artifact.stage = OperationStage::ResultVerified;
-            let encoded = crate::mailbox::journal::raw_json_bytes(
-                &serde_json::to_vec(&artifact).unwrap(),
-            )
-            .unwrap();
+            let encoded =
+                crate::mailbox::journal::raw_json_bytes(&serde_json::to_vec(&artifact).unwrap())
+                    .unwrap();
             assert!(encoded.len() > crate::mailbox::journal::MAX_EVENT_BYTES);
             fs::write(&artifact_path, encoded).unwrap();
             let e = &mut record.state.transaction.as_mut().unwrap().envelope;

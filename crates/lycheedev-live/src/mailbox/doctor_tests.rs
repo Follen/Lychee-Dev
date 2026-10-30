@@ -1,12 +1,12 @@
 use super::*;
 use crate::{
+    mailbox::lookup::Record,
     mailbox::{
         InputDiagnostic,
         admission::{ClientRecord, WindowRecord},
         checksum,
         recovery::test_support::identity,
     },
-    mailbox::lookup::Record,
 };
 use std::collections::VecDeque;
 fn record(kind: Kind, runtime: &str, payload: &impl Serialize) -> Record {
@@ -248,6 +248,43 @@ fn doctor_accepts_new_sample_after_stale_without_effects() {
     assert_eq!(scheduler.waits, 1);
     assert_eq!(r.input.unwrap().sample_millis, 1000);
 }
+
+#[test]
+fn doctor_previous_schema_requires_actual_two_key_input_and_still_waits_for_current_readiness() {
+    let mut i = identity('2');
+    i.schema = lycheedev_core::mailbox::PREVIOUS_SCHEMA.into();
+    i.input_state = lycheedev_core::mailbox::PREVIOUS_SCHEMA.into();
+    i.inventory = Some(SLOT_COUNT);
+    let mut reader = Reader::new();
+    reader.identity = vec![record(Kind::Identity, &i.runtime, &i)];
+    reader.inputs = [
+        vec![record(Kind::Input, &i.runtime, &input(&i, 100))],
+        vec![record(Kind::Input, &i.runtime, &input(&i, 1000))],
+    ]
+    .into();
+    let report = run(&mut reader, &mut Schedule::default());
+    assert!(!report.healthy);
+    assert_eq!(report.input.unwrap().sample_millis, 1000);
+    assert!(report.checks.iter().any(|check| check.id == "live.runtime"
+        && check.state == "blocked"
+        && check.detail.contains("protocol-name update")));
+    assert_eq!(reader.closes, 1);
+
+    let mut reader = Reader::new();
+    reader.identity = vec![record(Kind::Identity, &i.runtime, &i)];
+    let mut legacy = serde_json::to_value(input(&i, 1000)).unwrap();
+    legacy["bindings"]["off"] = "ALT-CTRL-F10".into();
+    legacy["escapeLimit"] = 3.into();
+    reader.inputs = [vec![record(Kind::Input, &i.runtime, &legacy)]].into();
+    let report = run(&mut reader, &mut Schedule::default());
+    assert!(!report.healthy);
+    assert!(report.input.is_none());
+    assert!(
+        report.checks.iter().any(|check| check.id == "live.runtime"
+            && check.detail == "older runtime requires activation")
+    );
+    assert_eq!(reader.closes, 1);
+}
 #[test]
 fn doctor_disabled_slot_failure_survives_ready_input_and_is_not_a_receipt() {
     for (stage, reason) in [
@@ -339,13 +376,22 @@ fn doctor_preserves_close_failure_even_after_successful_reads() {
 }
 #[test]
 fn doctor_validates_mutating_flags_before_target_discovery() {
-    use crate::mailbox::connection::{
-        TargetRequest, doctor_service::validate_doctor_options,
-    };
+    use crate::mailbox::connection::{TargetRequest, doctor_service::validate_doctor_options};
+    assert!(
+        validate_doctor_options(&TargetRequest::default(), "", false, true, "", "", "").is_err()
+    );
     for args in [("release", "", ""), ("", "archive", ""), ("", "", "repair")] {
         assert!(
-            validate_doctor_options(&TargetRequest::default(), "", false, args.0, args.1, args.2)
-                .is_err()
+            validate_doctor_options(
+                &TargetRequest::default(),
+                "",
+                false,
+                false,
+                args.0,
+                args.1,
+                args.2
+            )
+            .is_err()
         );
     }
     assert!(
@@ -355,6 +401,7 @@ fn doctor_validates_mutating_flags_before_target_discovery() {
                 ..Default::default()
             },
             "CON-test",
+            false,
             false,
             "",
             "",
@@ -366,6 +413,7 @@ fn doctor_validates_mutating_flags_before_target_discovery() {
         validate_doctor_options(
             &TargetRequest::default(),
             "",
+            true,
             true,
             "release",
             "archive",

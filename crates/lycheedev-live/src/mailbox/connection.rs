@@ -541,6 +541,14 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         SessionOwner::leased(journal)
     }
     fn disconnect_ended(&mut self, id: &str, control: &OperationControl) -> ServiceOutcome {
+        self.disconnect_ended_mode(id, false, control)
+    }
+    fn disconnect_ended_mode(
+        &mut self,
+        id: &str,
+        slot_reset: bool,
+        control: &OperationControl,
+    ) -> ServiceOutcome {
         let before = match self.book.status(id, control) {
             Ok(record) => record,
             Err(e) => return ServiceOutcome::failure(e),
@@ -582,7 +590,10 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             .flatten()
             .map(|tx| tx.envelope.clone())
             .collect();
-            if !envelopes.is_empty() {
+            // A doctor reset archives the entire original pool after this
+            // process-end proof. Preserve reservation and pending payload bytes
+            // for that archive rather than reconciling them first.
+            if !slot_reset && !envelopes.is_empty() {
                 self.environment.retire_process(
                     &record.metadata.target,
                     &record.state.identity.release,

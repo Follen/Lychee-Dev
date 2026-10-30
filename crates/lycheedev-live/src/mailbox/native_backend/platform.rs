@@ -13,6 +13,7 @@ pub(super) struct DiskPublications {
     parent: String,
     release: String,
     repair: Option<RepairAuthorization>,
+    preserve_retirement: bool,
 }
 impl DiskPublications {
     pub(super) fn verified(installation: &VerifiedInstallation, release: &str) -> Self {
@@ -27,6 +28,7 @@ impl DiskPublications {
                 .to_string(),
             release: release.into(),
             repair: None,
+            preserve_retirement: false,
         }
     }
     pub(super) fn recorded(path: PathBuf, release: &str) -> ChannelResult<Self> {
@@ -38,6 +40,7 @@ impl DiskPublications {
             parent,
             release: release.into(),
             repair: None,
+            preserve_retirement: false,
         })
     }
 }
@@ -48,11 +51,20 @@ struct DiskLease<'a> {
     control: &'a OperationControl,
 }
 impl Publications for DiskPublications {
+    fn preserve_retirement(&self) -> bool {
+        self.preserve_retirement
+    }
     fn acquire<'a>(
         &self,
         control: &'a OperationControl,
     ) -> ChannelResult<Box<dyn Publication + 'a>> {
-        self.acquire_identity(&self.identity, control)
+        self.acquire_identity(&self.identity, control, false)
+    }
+    fn acquire_retirement<'a>(
+        &self,
+        control: &'a OperationControl,
+    ) -> ChannelResult<Box<dyn Publication + 'a>> {
+        self.acquire_identity(&self.identity, control, true)
     }
     fn acquire_for<'a>(
         &self,
@@ -76,7 +88,11 @@ impl Publications for DiskPublications {
         if verified.canonical_path != self.addon {
             return Err(error("live.channel_repair_publication_invalid"));
         }
-        self.acquire_identity(&RecordedInstallationIdentity::from(&verified), control)
+        self.acquire_identity(
+            &RecordedInstallationIdentity::from(&verified),
+            control,
+            false,
+        )
     }
 }
 impl DiskPublications {
@@ -84,8 +100,14 @@ impl DiskPublications {
         &self,
         identity: &RecordedInstallationIdentity,
         control: &'a OperationControl,
+        retirement: bool,
     ) -> ChannelResult<Box<dyn Publication + 'a>> {
-        match PublicationLease::acquire_recorded(identity, &self.release, control) {
+        let acquired = if retirement {
+            PublicationLease::acquire_retirement_recorded(identity, &self.release, control)
+        } else {
+            PublicationLease::acquire_recorded(identity, &self.release, control)
+        };
+        match acquired {
             Ok(lease) => Ok(Box::new(DiskLease {
                 lease,
                 parent: self.parent.clone(),
@@ -117,9 +139,6 @@ impl DiskPublications {
     }
 }
 impl Publication for DiskLease<'_> {
-    fn inspect(&mut self) -> ChannelResult<SlotPool> {
-        self.lease.inspect().map_err(publication_error)
-    }
     fn publish(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()> {
         let result = match &self.repair {
             Some(authority)

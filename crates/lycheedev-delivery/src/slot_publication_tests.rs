@@ -1537,6 +1537,267 @@ fn recorded(f: &DiskFixture) -> RecordedInstallationIdentity {
     RecordedInstallationIdentity::from_authenticated_record(f.identity.canonical_path.clone())
         .unwrap()
 }
+
+#[test]
+fn disk_retirement_lost_manifest_preserves_unknown_bytes_without_authorizing_publication() {
+    for process in [false, true] {
+        for damaged in [
+            None,
+            Some(b"{broken".to_vec()),
+            Some(b"{\"schema\":4}".to_vec()),
+            Some(b"{}".to_vec()),
+            Some(vec![b' '; (256 << 10) + 1]),
+        ] {
+            let f = DiskFixture::without_slot_pool();
+            let c = OperationControl::default();
+            let marker = f.root.join(slots::MARKER);
+            if let Some(bytes) = &damaged {
+                fs::write(&marker, bytes).unwrap();
+            }
+            fs::create_dir(slots::directory(&f.root, 1)).unwrap();
+            let path = slots::directory(&f.root, 1).join("Payload.lua");
+            let unknown = b"unknown payload\0\xff\n";
+            fs::write(&path, unknown).unwrap();
+            for _ in 0..2 {
+                let mut lease =
+                    PublicationLease::acquire_retirement_recorded(&recorded(&f), "3.2.0", &c)
+                        .unwrap();
+                if process {
+                    lease.retire_process("123/456", &envelope()).unwrap();
+                } else {
+                    lease
+                        .retire_runtime("123/456", &envelope(), &"9".repeat(32))
+                        .unwrap();
+                }
+                lease.close().unwrap();
+            }
+            if let Some(bytes) = damaged {
+                assert_eq!(fs::read(&marker).unwrap(), bytes);
+            } else {
+                assert!(!marker.exists());
+            }
+            assert_eq!(fs::read(path).unwrap(), unknown);
+            assert!(PublicationLease::acquire_recorded(&recorded(&f), "3.2.0", &c).is_err());
+            assert_disk_locks_available(&f);
+        }
+    }
+}
+
+#[test]
+fn disk_retirement_ignores_unrelated_static_damage_and_keeps_exact_reservation_checks() {
+    for process in [false, true] {
+        for damage in [
+            "static",
+            "consumer",
+            "runtime",
+            "payload",
+            "new-nonce",
+            "version",
+        ] {
+            let f = DiskFixture::without_slot_pool();
+            let c = OperationControl::default();
+            let e = envelope();
+            let bytes = payload(&e).unwrap();
+            let mut pool = empty_pool();
+            pool.files[0] = SlotFile {
+                payload_hash: storage::sha256(&bytes),
+                consumer: "123/456".into(),
+                nonce: e.nonce.clone(),
+                runtime: e.runtime.clone(),
+                ..Default::default()
+            };
+            match damage {
+                "consumer" => pool.files[0].consumer = "foreign".into(),
+                "runtime" => pool.files[0].runtime = "8".repeat(32),
+                "new-nonce" => pool.files[0].nonce = "7".repeat(32),
+                "version" => pool.version = "other-version".into(),
+                _ => {}
+            }
+            slots::save_pool(&f.root, &pool, &c).unwrap();
+            fs::create_dir(slots::directory(&f.root, 1)).unwrap();
+            let path = slots::directory(&f.root, 1).join("Payload.lua");
+            fs::write(
+                path,
+                if damage == "payload" {
+                    b"unjournaled".as_slice()
+                } else {
+                    &bytes
+                },
+            )
+            .unwrap();
+            fs::create_dir(slots::directory(&f.root, 2)).unwrap();
+            let unrelated = slots::directory(&f.root, 2).join("Loader.lua");
+            fs::write(&unrelated, b"unknown static damage").unwrap();
+            let before = fs::read(f.root.join(slots::MARKER)).unwrap();
+            let mut lease =
+                PublicationLease::acquire_retirement_recorded(&recorded(&f), "3.2.0", &c).unwrap();
+            let result = if process {
+                lease.retire_process("123/456", &e)
+            } else {
+                lease.retire_runtime("123/456", &e, &"9".repeat(32))
+            };
+            assert_eq!(
+                result.is_ok(),
+                matches!(damage, "static" | "new-nonce"),
+                "{damage}: {result:?}"
+            );
+            lease.close().unwrap();
+            let after = fs::read(f.root.join(slots::MARKER)).unwrap();
+            if damage == "static" {
+                let retired = slots::read_pool(&f.root).unwrap();
+                assert_eq!(retired.files[0].retired_process, process);
+                assert_eq!(!retired.files[0].retired_runtime.is_empty(), !process);
+                assert!(!retired.files[0].consumed);
+            } else {
+                assert_eq!(before, after);
+            }
+            assert_eq!(fs::read(unrelated).unwrap(), b"unknown static damage");
+            assert!(slots::inspect_typed(&f.root, "3.2.0", &c).is_err());
+        }
+    }
+}
+
+#[test]
+fn disk_retirement_recognized_previous_generations_fail_without_changing_original_bytes() {
+    let mut generations = vec![
+        ("lycheedev.slots.v1", 64, "ready", "", ""),
+        ("lycheedev.slots.v2", 200, "ready", "", ""),
+        (slots::SCHEMA, 200, "ready", "", ""),
+        (slots::SCHEMA, 200, "installing", "", ""),
+        (slots::SCHEMA, 500, "unrecognized-state", "", ""),
+    ];
+    for schema in [
+        "lycheedev.slots.migration.v3",
+        "lycheedev.slots.migration.v4",
+    ] {
+        for (source, count) in [
+            ("lycheedev.slots.v1", 64),
+            ("lycheedev.slots.v2", 200),
+            (slots::SCHEMA, 200),
+            (slots::SCHEMA, 500),
+        ] {
+            generations.push((schema, count, "upgrading", source, "next-version"));
+        }
+    }
+    for process in [false, true] {
+        for (schema, count, state, source, pending) in &generations {
+            let f = DiskFixture::without_slot_pool();
+            let control = OperationControl::default();
+            let e = envelope();
+            let bytes = payload(&e).unwrap();
+            let mut pool = empty_pool();
+            pool.schema = (*schema).into();
+            pool.files.truncate(*count);
+            pool.state = (*state).into();
+            pool.source_schema = (*source).into();
+            pool.pending_version = (*pending).into();
+            pool.files[0] = SlotFile {
+                payload_hash: storage::sha256(&bytes),
+                nonce: e.nonce.clone(),
+                runtime: e.runtime.clone(),
+                consumer: "123/456".into(),
+                ..Default::default()
+            };
+            let marker = f.root.join(slots::MARKER);
+            let original = serde_json::to_vec(&pool).unwrap();
+            fs::write(&marker, &original).unwrap();
+            fs::create_dir(slots::directory(&f.root, 1)).unwrap();
+            let payload_path = slots::directory(&f.root, 1).join("Payload.lua");
+            fs::write(&payload_path, &bytes).unwrap();
+            let mut lease =
+                PublicationLease::acquire_retirement_recorded(&recorded(&f), "3.2.0", &control)
+                    .unwrap();
+            let result = if process {
+                lease.retire_process("123/456", &e)
+            } else {
+                lease.retire_runtime("123/456", &e, &"9".repeat(32))
+            };
+            code(result, "delivery.invalid_installation");
+            lease.close().unwrap();
+            assert_eq!(
+                fs::read(&marker).unwrap(),
+                original,
+                "{schema}/{count}/{state}/{source}"
+            );
+            assert_eq!(fs::read(payload_path).unwrap(), bytes);
+            assert_disk_locks_available(&f);
+        }
+    }
+}
+
+#[test]
+fn disk_retirement_malformed_previous_generation_metadata_is_left_unavailable() {
+    for process in [false, true] {
+        for (schema, count, state, source, pending) in [
+            ("lycheedev.slots.v1", 65, "ready", "", ""),
+            ("lycheedev.slots.v1", 64, "installing", "", ""),
+            ("lycheedev.slots.v2", 64, "ready", "", ""),
+            (
+                "lycheedev.slots.migration.v3",
+                64,
+                "upgrading",
+                "lycheedev.slots.v1",
+                "",
+            ),
+            (
+                "lycheedev.slots.migration.v4",
+                200,
+                "upgrading",
+                "unknown-schema",
+                "next-version",
+            ),
+        ] {
+            let f = DiskFixture::without_slot_pool();
+            let control = OperationControl::default();
+            let mut pool = empty_pool();
+            pool.schema = schema.into();
+            pool.files.truncate(count);
+            pool.state = state.into();
+            pool.source_schema = source.into();
+            pool.pending_version = pending.into();
+            let marker = f.root.join(slots::MARKER);
+            let original = serde_json::to_vec(&pool).unwrap();
+            fs::write(&marker, &original).unwrap();
+            fs::create_dir(slots::directory(&f.root, 1)).unwrap();
+            let payload_path = slots::directory(&f.root, 1).join("Payload.lua");
+            let unknown = b"unknown original payload\0\xff";
+            fs::write(&payload_path, unknown).unwrap();
+            let mut lease =
+                PublicationLease::acquire_retirement_recorded(&recorded(&f), "3.2.0", &control)
+                    .unwrap();
+            if process {
+                lease.retire_process("123/456", &envelope()).unwrap();
+            } else {
+                lease
+                    .retire_runtime("123/456", &envelope(), &"9".repeat(32))
+                    .unwrap();
+            }
+            lease.close().unwrap();
+            assert_eq!(fs::read(&marker).unwrap(), original);
+            assert_eq!(fs::read(payload_path).unwrap(), unknown);
+        }
+    }
+}
+
+#[test]
+fn disk_retirement_preserves_cancellation_and_non_file_metadata_errors() {
+    let f = DiskFixture::without_slot_pool();
+    let c = OperationControl::default();
+    c.tracked_cancel_handle().unwrap().cancel();
+    match PublicationLease::acquire_retirement_recorded(&recorded(&f), "3.2.0", &c) {
+        Err(error) => assert!(error.is_code("command.cancelled")),
+        Ok(_) => panic!("cancelled retirement acquired a lease"),
+    }
+    let c = OperationControl::default();
+    fs::create_dir(f.root.join(slots::MARKER)).unwrap();
+    let mut lease =
+        PublicationLease::acquire_retirement_recorded(&recorded(&f), "3.2.0", &c).unwrap();
+    assert!(lease.retire_process("123/456", &envelope()).is_err());
+    lease.close().unwrap();
+    let path = f.root.join("regular-parent");
+    fs::write(&path, b"not a directory").unwrap();
+    assert!(slots::retirement_pool(&path, "3.2.0", &c).is_err());
+}
 fn repair(f: &DiskFixture, e: &SlotEnvelope) -> RepairPublication {
     RepairPublication::from_authenticated_record(&recorded(f), "3.2.0", "123/456", e).unwrap()
 }

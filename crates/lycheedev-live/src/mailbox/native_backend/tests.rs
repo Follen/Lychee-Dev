@@ -1,6 +1,7 @@
 use super::*;
 use crate::mailbox::{InputBindings, InputDiagnostic, MAX_EXACT_INTEGER, checksum};
 use lycheedev_core::control::TrackedCancellation;
+use lycheedev_delivery::slots::SlotPool;
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 pub(super) type Events = Rc<RefCell<Vec<String>>>;
@@ -46,7 +47,6 @@ struct PublicationState {
     publish_error: Option<ChannelError>,
     verify_error: Option<ChannelError>,
     route_error: Option<ChannelError>,
-    inspect_error: Option<ChannelError>,
     close_error: Option<ChannelError>,
     consumed: usize,
     retired: usize,
@@ -78,15 +78,6 @@ impl Publications for FakePublications {
     }
 }
 impl Publication for FakeLease<'_> {
-    fn inspect(&mut self) -> ChannelResult<SlotPool> {
-        log(&self.events, "inspect");
-        check_control(self.control)?;
-        self.state
-            .borrow()
-            .inspect_error
-            .clone()
-            .map_or_else(|| Ok(SlotPool::default()), Err)
-    }
     fn publish(&mut self, _: &str, _: &SlotEnvelope) -> ChannelResult<()> {
         log(&self.events, "publish");
         check_control(self.control)?;
@@ -379,7 +370,7 @@ fn events(core: &Core) -> Vec<String> {
 fn native_invoke_holds_exact_publication_through_burst_and_consumes_no_claim() {
     let e = envelope("prepare");
     let r = input_record(&e, 10_000, 1);
-    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
     let c = control();
     let a = action(&mut core, &c, &e);
     let out = core.input(&c, &a);
@@ -388,29 +379,33 @@ fn native_invoke_holds_exact_publication_through_burst_and_consumes_no_claim() {
     let events = events(&core);
     let at = |s: &str| events.iter().position(|e| e == s).unwrap();
     assert!(at("verify") < at("route") && at("route") < at("send") && at("send") < at("close"));
-    assert_eq!(events.iter().filter(|e| e.as_str() == "read:5").count(), 2);
+    assert_eq!(events.iter().filter(|e| e.as_str() == "read:5").count(), 3);
     assert_eq!(core.publications.state.borrow().consumed, 0);
     core.consumed(&c, &e).unwrap();
     assert_eq!(core.publications.state.borrow().consumed, 1);
 }
 #[test]
-fn native_reload_checks_pool_and_closes_before_sender() {
+fn native_reload_is_independent_of_slot_pool_and_publication_lease() {
     let e = envelope("reload");
     let r = input_record(&e, 10_000, 1);
-    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
     let c = control();
     let a = action(&mut core, &c, &e);
+    core.publications.state.borrow_mut().acquire_error = Some(external("pool-failed"));
     let out = core.input(&c, &a);
     assert!(out.error.is_none());
     let events = events(&core);
-    assert!(events.iter().position(|e| e == "inspect") < events.iter().position(|e| e == "close"));
-    assert!(events.iter().position(|e| e == "close") < events.iter().position(|e| e == "send"));
-    assert!(!events.iter().any(|e| e == "verify" || e == "route"));
+    assert!(!core.publications.state.borrow().held);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e.as_str(), "acquire" | "verify" | "route" | "close"))
+    );
 }
 #[test]
-fn native_publication_route_and_reload_close_failures_never_send() {
-    for failure in 0..3 {
-        let e = envelope(if failure == 2 { "reload" } else { "prepare" });
+fn native_publication_and_route_failures_never_send() {
+    for failure in 0..2 {
+        let e = envelope("prepare");
         let mut core = make_core(vec![Ok(vec![input_record(&e, 10_000, 1)])]);
         let c = control();
         let a = action(&mut core, &c, &e);
@@ -419,7 +414,7 @@ fn native_publication_route_and_reload_close_failures_never_send() {
             match failure {
                 0 => s.verify_error = Some(external("bytes-changed")),
                 1 => s.route_error = Some(external("route-changed")),
-                _ => s.close_error = Some(external("close-failed")),
+                _ => unreachable!(),
             }
         }
         let out = core.input(&c, &a);
@@ -449,7 +444,7 @@ fn native_input_witness_is_one_use_even_after_zero_or_partial_send() {
     for queued in [0, 2, 6] {
         let e = envelope("prepare");
         let r = input_record(&e, 10_000, 1);
-        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
         let c = control();
         let a = action(&mut core, &c, &e);
         core.sender.queued = queued;
@@ -499,7 +494,7 @@ fn native_changed_current_publication_or_binding_blocks_before_messages() {
             }
             _ => unreachable!(),
         }
-        let mut core = make_core(vec![Ok(vec![r]), Ok(vec![changed])]);
+        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r]), Ok(vec![changed])]);
         let c = control();
         let a = action(&mut core, &c, &e);
         let out = core.input(&c, &a);
@@ -527,7 +522,7 @@ fn native_input_refresh_lookup_preserves_path_and_cancellation_causes() {
 fn native_partial_input_and_publication_close_errors_are_joined() {
     let e = envelope("prepare");
     let r = input_record(&e, 10_000, 1);
-    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
     let c = control();
     let a = action(&mut core, &c, &e);
     core.sender.queued = 3;
@@ -671,11 +666,10 @@ fn native_retirement_retained_or_stale_input_never_proves_destruction() {
     let current = identity(&"2".repeat(32));
     for (first, latest) in [(9000, 11_100), (10_000, 10_000)] {
         let mut core = make_core(replacement_records(&current, first, latest));
-        assert!(
-            core.observe_runtime_replacement(&control(), &old)
-                .unwrap()
-                .is_none()
-        );
+        match core.observe_runtime_replacement(&control(), &old) {
+            Ok(proof) => assert!(proof.is_none()),
+            Err(cause) => assert!(cause.is_pending()),
+        }
         assert_eq!(core.publications.state.borrow().retired, 0);
     }
 }
@@ -697,6 +691,70 @@ fn native_retirement_invalid_process_and_shape_stop_before_wait() {
             .is_none()
     );
     assert!(!events(&core).iter().any(|e| e.starts_with("wait:")));
+}
+#[test]
+fn native_retirement_stale_wait_keeps_cancellation_and_unknown_read_failures() {
+    let old = identity(&"1".repeat(32));
+    let current = identity(&"2".repeat(32));
+    let mut core = make_core(replacement_records(&current, 9_000, 11_100));
+    core.clock.wait_error = Some(ChannelError::Cancelled);
+    assert_eq!(
+        core.observe_runtime_replacement(&control(), &old)
+            .unwrap_err(),
+        ChannelError::Cancelled
+    );
+    assert!(!events(&core).iter().any(|e| e == "send" || e == "acquire"));
+
+    let mut records = replacement_records(&current, 9_000, 11_100);
+    records[2] = Err(external("unknown-reader-failure"));
+    let mut core = make_core(records);
+    let cause = core
+        .observe_runtime_replacement(&control(), &old)
+        .unwrap_err();
+    assert!(contains(&cause, "unknown-reader-failure"));
+    assert!(!cause.is_pending());
+    assert_eq!(events(&core).iter().filter(|e| *e == "wait:100").count(), 1);
+
+    let mut core = make_core(replacement_records(&old, 9_000, 11_100));
+    assert!(
+        core.observe_runtime_replacement(&control(), &old)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!events(&core).iter().any(|e| e.starts_with("wait:")));
+}
+
+#[test]
+fn native_retirement_waits_for_periodic_input_in_both_observations() {
+    let old = identity(&"1".repeat(32));
+    let current = identity(&"2".repeat(32));
+    let mut records = Vec::new();
+    // The current named publications arrive once per second; both initial
+    // lookups fall outside their 500ms windows before the next publication.
+    for (sample_millis, sequence) in [(10_000, 1), (11_000, 2), (11_000, 2), (12_000, 3)] {
+        records.push(Ok(vec![record(
+            Kind::Identity,
+            &current,
+            &current.runtime,
+            1,
+        )]));
+        records.push(Ok(vec![record(
+            Kind::Input,
+            &sample(&current, sample_millis),
+            &current.runtime,
+            sequence,
+        )]));
+    }
+    let mut core = make_core(records);
+    *core.clock.uptime.borrow_mut() = 10_950;
+    let proof = core
+        .observe_runtime_replacement(&control(), &old)
+        .unwrap()
+        .unwrap();
+    assert_eq!(proof.witness.first.sample_millis, 11_000);
+    assert_eq!(proof.witness.observation.sample_millis, 12_000);
+    assert_eq!(events(&core).iter().filter(|e| *e == "wait:100").count(), 2);
+    assert!(!events(&core).iter().any(|e| e == "send" || e == "acquire"));
 }
 #[test]
 fn native_retirement_publication_gap_and_wait_stop_keep_original_causes() {
@@ -928,6 +986,11 @@ fn native_retirement_discriminator_matrix_and_relocation() {
             assert!(result.is_err(), "{mode}");
             continue;
         }
+        if mode == "latest_expired" {
+            assert!(result.unwrap_err().is_pending());
+            assert!(events(&core).iter().any(|e| e == "wait:100"));
+            continue;
+        }
         let proof = result.unwrap_or_else(|e| panic!("{mode}: {e}"));
         if matches!(mode, "valid" | "freshness_boundary" | "future_boundary") {
             let proof = proof.unwrap_or_else(|| panic!("{mode}: missing proof"));
@@ -996,7 +1059,7 @@ fn native_guard_failure_during_cancellation_retains_both_causes() {
     );
     let e = envelope("prepare");
     let r = input_record(&e, 10_000, 1);
-    let mut core = make_core(vec![Ok(vec![r])]);
+    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
     let a = action(&mut core, &c, &e);
     let mut calls = 0;
     core.guard = Box::new(move |_| {
@@ -1024,7 +1087,7 @@ fn native_cancel_between_admission_and_first_post_is_still_known_zero() {
     );
     let e = envelope("prepare");
     let r = input_record(&e, 10_000, 1);
-    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
     let a = action(&mut core, &c, &e);
     core.sender.after_first = Some(Box::new(move || cancellation.cancel()));
     let out = core.input(&c, &a);
@@ -1097,7 +1160,7 @@ fn native_driver_recovery_watermark_can_tighten_same_witness_at_exact_future_bou
     i.owner = e.owner.clone();
     i.fence = e.fence;
     let r = input_record(&e, 10_100, 1);
-    let core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+    let core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
     let trace = core.clock.events.clone();
     let state = State {
         schema: CHANNEL_SCHEMA.into(),
@@ -1184,11 +1247,22 @@ fn retirement_driver(
 }
 #[test]
 fn continuation_to_actual_native_retirement_keeps_ordered_parent_and_shortest_deadline() {
-    use crate::mailbox::{
-        recovery::test_support::Schedule, runtime_retirement::RetirementTarget,
-    };
+    use crate::mailbox::{recovery::test_support::Schedule, runtime_retirement::RetirementTarget};
     let current = identity(&"2".repeat(32));
-    let mut core = make_core(replacement_records(&current, 10_000, 11_100));
+    let mut records = replacement_records(&current, 9_000, 10_000);
+    records.push(Ok(vec![record(
+        Kind::Identity,
+        &current,
+        &current.runtime,
+        1,
+    )]));
+    records.push(Ok(vec![record(
+        Kind::Input,
+        &sample(&current, 11_100),
+        &current.runtime,
+        3,
+    )]));
+    let mut core = make_core(records);
     let parent = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
     let deadline = parent.deadline();
     let observed = Rc::new(std::cell::Cell::new(0));
@@ -1222,6 +1296,11 @@ fn continuation_to_actual_native_retirement_keeps_ordered_parent_and_shortest_de
     );
     assert!(observed.get() >= 2);
     assert!(
+        events(&driver.backend)
+            .iter()
+            .any(|event| event == "wait:100")
+    );
+    assert!(
         !events(&driver.backend)
             .iter()
             .any(|event| event == "send" || event == "acquire")
@@ -1230,9 +1309,7 @@ fn continuation_to_actual_native_retirement_keeps_ordered_parent_and_shortest_de
 }
 #[test]
 fn continuation_native_retirement_observes_original_parent_cancellation() {
-    use crate::mailbox::{
-        recovery::test_support::Schedule, runtime_retirement::RetirementTarget,
-    };
+    use crate::mailbox::{recovery::test_support::Schedule, runtime_retirement::RetirementTarget};
     let current = identity(&"2".repeat(32));
     let mut core = make_core(replacement_records(&current, 10_000, 11_100));
     let signal = TrackedCancellation::new();
@@ -1267,9 +1344,7 @@ fn continuation_native_retirement_observes_original_parent_cancellation() {
 }
 #[test]
 fn continuation_native_retirement_keeps_deadline_before_late_parent_cancellation() {
-    use crate::mailbox::{
-        recovery::test_support::Schedule, runtime_retirement::RetirementTarget,
-    };
+    use crate::mailbox::{recovery::test_support::Schedule, runtime_retirement::RetirementTarget};
     let current = identity(&"2".repeat(32));
     let mut core = make_core(replacement_records(&current, 10_000, 11_100));
     let signal = TrackedCancellation::new();
@@ -1309,12 +1384,15 @@ fn continuation_native_retirement_keeps_deadline_before_late_parent_cancellation
 #[path = "tests/repair.rs"]
 mod repair;
 
+#[path = "tests/protocol_upgrade.rs"]
+mod protocol_upgrade;
+
 #[test]
 fn native_keyboard_activity_is_retryable_only_for_known_zero_and_consumes_witness() {
     for queued in [0, 2, 6] {
         let e = envelope("prepare");
         let r = input_record(&e, 10_000, 1);
-        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
         let c = control();
         let a = action(&mut core, &c, &e);
         core.sender.queued = queued;
@@ -1378,7 +1456,7 @@ fn native_slot_flag_blocks_invoke_but_allows_reload() {
             serde_json::from_slice(&input_record(&e, 10_000, 1).payload).unwrap();
         s.slot_reload_required = true;
         let r = record(Kind::Input, &s, &e.runtime, 1);
-        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
         let c = control();
         let a = action(&mut core, &c, &e);
         let out = core.input(&c, &a);
@@ -1404,12 +1482,67 @@ fn native_equal_timestamp_changed_slot_flag_loses_authority() {
             let original = record(Kind::Input, &s, &e.runtime, 1);
             s.slot_reload_required = !initial;
             let changed = record(Kind::Input, &s, &e.runtime, 1);
-            let mut core = make_core(vec![Ok(vec![original]), Ok(vec![changed])]);
+            let mut core = make_core(vec![
+                Ok(vec![original.clone()]),
+                Ok(vec![original]),
+                Ok(vec![changed]),
+            ]);
             let c = control();
             let a = action(&mut core, &c, &e);
             let out = core.input(&c, &a);
             assert_eq!(out.outcome.messages_queued, 0);
             assert!(out.error.unwrap().is_pending());
         }
+    }
+}
+
+#[test]
+fn native_invoke_close_failure_keeps_submitted_messages_and_releases_lease() {
+    let e = envelope("prepare");
+    let r = input_record(&e, 10_000, 1);
+    let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r.clone()]), Ok(vec![r])]);
+    let c = control();
+    let a = action(&mut core, &c, &e);
+    core.publications.state.borrow_mut().close_error = Some(external("lease-close-failed"));
+    let out = core.input(&c, &a);
+    assert_eq!(out.outcome.disposition, InputDisposition::Submitted);
+    assert_eq!(out.outcome.messages_queued, 6);
+    assert!(contains(out.error.as_ref().unwrap(), "lease-close-failed"));
+    assert!(!core.publications.state.borrow().held);
+    let trace = events(&core);
+    assert!(trace.iter().position(|e| e == "send") < trace.iter().position(|e| e == "close"));
+}
+
+#[test]
+fn native_prepared_input_rejects_changed_profile_blocker_or_regressed_sample() {
+    for change in ["binding", "blocked", "slot_flag", "time_regression"] {
+        let e = envelope("prepare");
+        let original = input_record(&e, 10_000, 1);
+        let mut sample: InputObservation = serde_json::from_slice(&original.payload).unwrap();
+        match change {
+            "binding" => sample.bindings.as_mut().unwrap().wake = "ALT-CTRL-F10".into(),
+            "blocked" => {
+                sample.input_blocked = Some(true);
+                sample.reason = "combat".into();
+            }
+            "slot_flag" => sample.slot_reload_required = true,
+            "time_regression" => sample.sample_millis -= 1,
+            _ => unreachable!(),
+        }
+        let changed = record(Kind::Input, &sample, &e.runtime, 2);
+        let mut core = make_core(vec![Ok(vec![original]), Ok(vec![changed])]);
+        let c = control();
+        let a = action(&mut core, &c, &e);
+        let out = core.input(&c, &a);
+        assert_eq!(
+            out.outcome.disposition,
+            InputDisposition::NotSent,
+            "{change}"
+        );
+        assert_eq!(out.outcome.messages_queued, 0, "{change}");
+        assert!(out.error.unwrap().is_pending(), "{change}");
+        assert!(!events(&core).iter().any(|e| e == "send"), "{change}");
+        assert!(!core.publications.state.borrow().held);
+        assert!(core.witness.is_none());
     }
 }

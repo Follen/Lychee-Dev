@@ -2,6 +2,7 @@
 //! NativeReader and no publication store, native sender, trace path or claim.
 #![forbid(unsafe_code)]
 use super::*;
+use crate::mailbox::lookup::Record;
 use crate::mailbox::{
     Selector,
     connection::doctor_service::DoctorEnvironment,
@@ -9,7 +10,6 @@ use crate::mailbox::{
     native_reader::NativeReader,
     observations::RecordReader,
 };
-use crate::mailbox::lookup::Record;
 
 pub struct NativeDiagnostic {
     reader: Option<NativeReader>,
@@ -158,12 +158,15 @@ impl<L: ProcessLifetimeObserver> crate::mailbox::connection::doctor_repair::Repa
         target: &ConnectionTarget,
         owner: &WindowOwner,
         runtime_release: &str,
+        slot_reset: bool,
         control: &OperationControl,
     ) -> ChannelResult<Self::Backend> {
         confirm(target, control)?;
         // CloseForRepair deliberately does not require clean current main
         // bytes. Only the authenticated original unbind receives the narrow
         // Delivery capability; ordinary business publication remains closed.
+        // Slot-reset close preserves damaged members after authenticated
+        // runtime destruction so Delivery can archive their original bytes.
         let addon = lycheedev_delivery::deploy::destination(&recorded_addon_directory(target))
             .map_err(durable_journal::storage_error)?;
         check_control(control)?;
@@ -204,6 +207,7 @@ impl<L: ProcessLifetimeObserver> crate::mailbox::connection::doctor_repair::Repa
                     control,
                 )
             },
+            slot_reset,
             control,
         )?;
         Ok(NativeConnectionBackend {

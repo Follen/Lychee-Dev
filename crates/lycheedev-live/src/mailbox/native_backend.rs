@@ -1,4 +1,4 @@
-//! Fixed-Go 3.2.0 native adapter. All reads resolve the current named field;
+//! Native adapter. All reads resolve the current named field;
 //! neither a persisted INPUT DTO nor a historical address authorizes input.
 //! The coordinator owns the exact CON lease, persists intent before `input`,
 //! and durably records the exact receipt before `consumed`. This adapter never
@@ -20,12 +20,12 @@ use super::state::{
 };
 use super::{
     ContractError, Identity, InputDisposition, InputFreshness, InputObservation, InputOutcome,
-    Kind, SCHEMA, SLOT_COUNT, Selector, ZERO_TOKEN, decode_identity, decode_input, inspect_input,
-    parse_token,
+    Kind, PREVIOUS_SCHEMA, SCHEMA, SLOT_COUNT, Selector, ZERO_TOKEN, decode_identity, decode_input,
+    inspect_input, parse_token,
 };
 use crate::mailbox::lookup::Record;
 use lycheedev_core::{control::OperationControl, storage};
-use lycheedev_delivery::{installation::VerifiedInstallation, slots::SlotPool};
+use lycheedev_delivery::installation::VerifiedInstallation;
 use lycheedev_windows::mailbox_input::{
     InputError, InputFailure, InputReceipt, MailboxAction, MailboxBindings, MailboxControl,
     MailboxWindow,
@@ -40,6 +40,7 @@ use trace::{ReaderEvidence, TracedReader};
 const INPUT_GRACE: Duration = Duration::from_secs(2);
 const REPLACEMENT_LIMIT: Duration = Duration::from_secs(15);
 const REPLACEMENT_PAUSE: Duration = Duration::from_millis(1100);
+const REPLACEMENT_FRESH_PAUSE: Duration = Duration::from_millis(100);
 const DIAGNOSTIC_FLUSH_LIMIT: Duration = Duration::from_secs(10);
 
 fn error(code: &'static str) -> ChannelError {
@@ -75,7 +76,6 @@ trait Source: RecordReader {
     fn close(self) -> ChannelResult<()>;
 }
 trait Publication {
-    fn inspect(&mut self) -> ChannelResult<SlotPool>;
     fn publish(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()>;
     fn verify(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()>;
     fn verify_route(&mut self, envelope: &SlotEnvelope) -> ChannelResult<()>;
@@ -89,11 +89,20 @@ trait Publication {
     fn close(self: Box<Self>) -> ChannelResult<()>;
 }
 trait Publications {
+    fn preserve_retirement(&self) -> bool {
+        false
+    }
     // The production lease borrows only the ORIGINAL control, never this store.
     fn acquire<'a>(
         &self,
         control: &'a OperationControl,
     ) -> ChannelResult<Box<dyn Publication + 'a>>;
+    fn acquire_retirement<'a>(
+        &self,
+        control: &'a OperationControl,
+    ) -> ChannelResult<Box<dyn Publication + 'a>> {
+        self.acquire(control)
+    }
     /// Action-aware acquisition lets repair retain ordinary clean-manifest
     /// admission for non-unbind cleanup, before taking the same short lease.
     fn acquire_for<'a>(
@@ -213,8 +222,8 @@ impl NativeBackend {
     }
     /// Cleanup/recovery can retain the authenticated recorded installation even
     /// after unrelated addon drift. This path cannot publish or verify Invoke bytes: delivery requires a
-    /// verified manifest for those operations. Reload still requires a valid
-    /// pool, fresh two-key INPUT and the original coordinator guard.
+    /// verified manifest for those operations. Reload requires fresh two-key
+    /// INPUT and the original coordinator guard, independently of the pool.
     pub fn open_recorded(
         target: MailboxWindow,
         authenticated_addon: PathBuf,
@@ -349,6 +358,23 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> NativeCore<R, P, S, C> {
         }
         Ok((current, records.into_iter().next().unwrap()))
     }
+    fn fresh_replacement_read(
+        &mut self,
+        control: &OperationControl,
+        old: &Identity,
+    ) -> ChannelResult<(Identity, Record)> {
+        loop {
+            let (current, record) = self.replacement_read(control)?;
+            // Only an otherwise eligible stale publication permits waiting.
+            // Invalid identity, protocol or reader failures keep their result.
+            if !replacement_inspection(old, &current, &record, self.clock.uptime())
+                .is_some_and(|sample| sample.freshness == InputFreshness::Stale)
+            {
+                return Ok((current, record));
+            }
+            self.clock.wait(control, REPLACEMENT_FRESH_PAUSE)?;
+        }
+    }
 }
 fn selector(kind: Kind, runtime: super::Token) -> Selector {
     Selector {
@@ -366,8 +392,8 @@ fn input_selector(runtime: &str) -> ChannelResult<Selector> {
         ..selector(Kind::Input, runtime)
     })
 }
-fn capability(capability: &str) -> ChannelResult<()> {
-    if capability == SCHEMA {
+fn capability(capability: &str, reload: bool) -> ChannelResult<()> {
+    if capability == SCHEMA || reload && capability == PREVIOUS_SCHEMA {
         Ok(())
     } else {
         Err(error("live.channel_input_capability_unsupported"))
@@ -498,7 +524,7 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
         input_capability: &str,
     ) -> ChannelResult<InputObservation> {
         self.witness = None;
-        capability(input_capability)?;
+        capability(input_capability, envelope.action == "reload")?;
         self.check(control)?;
         let records = self
             .reader
@@ -547,9 +573,20 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
             InputKind::Invoke => MailboxAction::Invoke,
             InputKind::Reload => MailboxAction::Reload,
         };
-        if let Err(cause) = capability(&action.capability) {
+        if let Err(cause) = capability(&action.capability, action.kind == InputKind::Reload) {
             return not_sent("input_capability_unsupported", cause, false);
         }
+        let Some(sample) = action.observation.as_ref().filter(|o| o.valid_bindings()) else {
+            return not_sent("input_bindings_invalid", pending(), false);
+        };
+        let Some(original_witness) = witness.filter(|w| {
+            w.envelope == action.envelope
+                && action.after_millis >= w.after
+                && w.capability == action.capability
+                && w.sample == *sample
+        }) else {
+            return not_sent("input_observation_unavailable", pending(), true);
+        };
         if let Err(cause) = self.check(control) {
             return not_sent("guard_failed", cause, false);
         }
@@ -557,42 +594,44 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
         if let Err(cause) = finish(monitor, check_control(control)) {
             return not_sent("keyboard_monitor", cause, false);
         }
-        let acquired = if kind == MailboxAction::Invoke {
-            self.publications.acquire_for(control, &action.envelope)
-        } else {
-            self.publications.acquire(control)
-        };
+        if kind == MailboxAction::Reload {
+            return match self.refresh_input(control, action, &original_witness) {
+                Ok(witness) => self.send_prepared(control, action, witness, kind),
+                Err(cause) => {
+                    let retryable = retryable_input(&cause);
+                    not_sent("input_observation_unavailable", cause, retryable)
+                }
+            };
+        }
+        let acquired = self.publications.acquire_for(control, &action.envelope);
         let mut lease = match acquired {
-            Ok(lease) => Some(lease),
+            Ok(lease) => lease,
             Err(cause) => {
                 let retryable = cause.is_pending();
                 return not_sent("shared_publication", cause, retryable);
             }
         };
-        let prepared = if kind == MailboxAction::Invoke {
-            let lease = lease.as_mut().unwrap();
-            lease
-                .verify(&self.consumer, &action.envelope)
-                .map_err(|e| ("slot_publication_changed", e))
-                .and_then(|_| {
-                    lease
-                        .verify_route(&action.envelope)
-                        .map_err(|e| ("slot_route_changed", e))
-                })
-        } else {
-            let mut lease = lease.take().unwrap();
-            let result = lease.inspect().map(|_| ());
-            finish(result, lease.close()).map_err(|e| ("slot_pool_invalid", e))
-        };
+        let prepared = lease
+            .verify(&self.consumer, &action.envelope)
+            .map_err(|e| ("slot_publication_changed", e))
+            .and_then(|_| {
+                lease
+                    .verify_route(&action.envelope)
+                    .map_err(|e| ("slot_route_changed", e))
+            });
         let mut dispatch = if let Err((reason, cause)) = prepared {
             not_sent(reason, cause, false)
         } else {
-            self.send_prepared(control, action, witness, kind)
-        };
-        if let Some(lease) = lease {
-            if let Err(close) = lease.close() {
-                dispatch.error = Some(dispatch.error.map_or(close.clone(), |e| join(e, close)));
+            match self.refresh_input(control, action, &original_witness) {
+                Ok(witness) => self.send_prepared(control, action, witness, kind),
+                Err(cause) => {
+                    let retryable = retryable_input(&cause);
+                    not_sent("input_observation_unavailable", cause, retryable)
+                }
             }
+        };
+        if let Err(close) = lease.close() {
+            dispatch.error = Some(dispatch.error.map_or(close.clone(), |e| join(e, close)));
         }
         dispatch
     }
@@ -627,7 +666,7 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
             return Err(error("live.channel_runtime_retirement_invalid"));
         }
         self.check(control)?;
-        let mut lease = self.publications.acquire(control)?;
+        let mut lease = self.publications.acquire_retirement(control)?;
         let result = (|| {
             self.check(control)?;
             lease.retire(&self.consumer, envelope, &replacement.runtime)
@@ -648,16 +687,63 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
     }
 }
 impl<R: Source, P: Publications, S: Sender, C: Clock> NativeCore<R, P, S, C> {
+    /// Publication preparation may outlive the first INPUT sample. The original
+    /// one-use witness admits only this action; a new named read must authorize
+    /// the burst, under the same short lease for Invoke. send_prepared rechecks it.
+    fn refresh_input(
+        &mut self,
+        control: &OperationControl,
+        action: &InputAction,
+        original: &InputWitness,
+    ) -> ChannelResult<InputWitness> {
+        let records = self.reader.find(
+            control,
+            &input_selector(&action.envelope.runtime)?,
+            None,
+            true,
+        )?;
+        check_control(control)?;
+        let Some(record) = records
+            .first()
+            .filter(|r| records.len() == 1 && r.address != 0)
+        else {
+            return Err(pending());
+        };
+        let current = record.contract().ok().and_then(|record| {
+            decode_input(
+                &record,
+                &action.envelope.expected(),
+                action.after_millis,
+                self.clock.uptime(),
+            )
+            .ok()
+        });
+        let Some(sample) = current.filter(|sample| {
+            sample.sample_millis >= original.sample.sample_millis
+                && sample.same_input_profile(&original.sample)
+                && sample.input_blocked == Some(false)
+                && !(action.kind == InputKind::Invoke && sample.slot_reload_required)
+        }) else {
+            return Err(pending());
+        };
+        let witness = InputWitness {
+            envelope: action.envelope.clone(),
+            after: action.after_millis,
+            capability: action.capability.clone(),
+            sample: sample.clone(),
+            address: record.address,
+        };
+        Ok(witness)
+    }
+
     fn send_prepared(
         &mut self,
         control: &OperationControl,
         action: &InputAction,
-        witness: Option<InputWitness>,
+        witness: InputWitness,
         kind: MailboxAction,
     ) -> InputDispatch {
-        let Some(sample) = action.observation.as_ref().filter(|o| o.valid_bindings()) else {
-            return not_sent("input_bindings_invalid", pending(), false);
-        };
+        let sample = &witness.sample;
         let bindings = match sample
             .bindings
             .as_ref()
@@ -665,14 +751,6 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> NativeCore<R, P, S, C> {
         {
             Some(bindings) => bindings,
             None => return not_sent("input_bindings_invalid", pending(), false),
-        };
-        let Some(witness) = witness.filter(|w| {
-            w.envelope == action.envelope
-                && action.after_millis >= w.after
-                && w.capability == action.capability
-                && w.sample == *sample
-        }) else {
-            return not_sent("input_observation_unavailable", pending(), true);
         };
         let reader = &mut self.reader;
         let clock = &self.clock;
@@ -765,14 +843,14 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> RuntimeRetirementBackend
         let bounded = control
             .ordered_child(self.clock.now() + REPLACEMENT_LIMIT)
             .map_err(toolkit_error)?;
-        let (current, before) = self.replacement_read(&bounded)?;
+        let (current, before) = self.fresh_replacement_read(&bounded, old)?;
         let Some(first) = replacement_sample(old, &current, &before, self.clock.uptime()) else {
             return Ok(None);
         };
         self.clock
             .wait(&bounded, REPLACEMENT_PAUSE)
             .map_err(|e| join(pending(), e))?;
-        let (next, after) = self.replacement_read(&bounded)?;
+        let (next, after) = self.fresh_replacement_read(&bounded, old)?;
         let Some(latest) = replacement_sample(old, &next, &after, self.clock.uptime()) else {
             return Ok(None);
         };
@@ -825,7 +903,12 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> RuntimeRetirementBackend
         // proof.validate(old), exact target comparison and durable proof save are
         // the driver's boundary. This historical proof must survive later reload.
         self.check(control)?;
-        let mut lease = self.publications.acquire(control)?;
+        if self.publications.preserve_retirement() {
+            // The authenticated doctor reset archives the entire original pool
+            // after runtime destruction. Preserve even malformed bytes for it.
+            return Ok(());
+        }
+        let mut lease = self.publications.acquire_retirement(control)?;
         let result = (|| {
             self.check(control)?;
             lease.retire(&self.consumer, envelope, &proof.current.runtime)
@@ -839,6 +922,15 @@ fn replacement_sample(
     record: &Record,
     now: i64,
 ) -> Option<InputObservation> {
+    let sample = replacement_inspection(old, current, record, now)?;
+    (sample.freshness == InputFreshness::Current).then_some(sample.observation)
+}
+fn replacement_inspection(
+    old: &Identity,
+    current: &Identity,
+    record: &Record,
+    now: i64,
+) -> Option<super::InputInspection> {
     if current.validate().is_err()
         || current.input_state != SCHEMA
         || current.runtime == old.runtime
@@ -858,8 +950,9 @@ fn replacement_sample(
         build: current.build.clone(),
         ..SlotEnvelope::default()
     };
-    let observation =
-        decode_input(&record.contract().ok()?, &envelope.expected(), -100, now).ok()?;
+    let inspected =
+        inspect_input(&record.contract().ok()?, &envelope.expected(), -100, now).ok()?;
+    let observation = &inspected.observation;
     if observation.schema != SCHEMA
         || observation.owner != current.owner
         || observation.fence != current.fence
@@ -878,7 +971,7 @@ fn replacement_sample(
     {
         return None;
     }
-    Some(observation)
+    Some(inspected)
 }
 
 impl Backend for NativeBackend {
@@ -965,3 +1058,4 @@ mod toolkit_error_tests {
 
 #[path = "activation_backend.rs"]
 mod activation_backend;
+pub(crate) use activation_backend::activation_input_capability;

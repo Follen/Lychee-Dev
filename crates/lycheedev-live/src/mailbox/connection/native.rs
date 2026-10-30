@@ -396,11 +396,12 @@ impl<L: ProcessLifetimeObserver> ConnectionEnvironment for NativeEnvironment<L> 
         control: &OperationControl,
     ) -> ChannelResult<()> {
         let identity = RecordedInstallationIdentity::from_authenticated_record(
-            recorded_addon_directory(target),
+            lycheedev_delivery::deploy::destination(&recorded_addon_directory(target))
+                .map_err(durable_journal::storage_error)?,
         )
         .map_err(publication)?;
-        let mut lease =
-            PublicationLease::acquire_recorded(&identity, release, control).map_err(publication)?;
+        let mut lease = PublicationLease::acquire_retirement_recorded(&identity, release, control)
+            .map_err(publication)?;
         let consumer = format!(
             "{}/{}",
             target.window.process_id, target.window.process_started_at

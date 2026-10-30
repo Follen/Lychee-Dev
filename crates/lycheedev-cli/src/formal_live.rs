@@ -36,13 +36,21 @@ pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
 pub enum LiveResult {
     Connection(ProjectResult),
     Doctor(DoctorResult),
+    DoctorAggregate(DoctorAggregate),
+}
+#[derive(Debug, Serialize)]
+pub struct DoctorAggregate {
+    healthy: bool,
+    checks: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live: Option<DoctorResult>,
 }
 #[derive(Debug, Default)]
 pub struct Response {
     pub result: Option<LiveResult>,
     pub context: BTreeMap<String, Value>,
     pub operation_id: String,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Value>,
     pub error: Option<ToolkitError>,
 }
 impl Response {
@@ -59,7 +67,7 @@ impl Response {
 
 pub fn handles(inv: &Invocation) -> bool {
     !inv.flag_bool("--help")
-        && inv.command.starts_with("live ")
+        && (inv.command == "doctor" || inv.command.starts_with("live "))
         && !matches!(
             inv.command.as_str(),
             "live instances"
@@ -118,10 +126,10 @@ pub trait Services {
     ) -> DoctorResult;
     fn fix(
         &mut self,
-        report: &DoctorResult,
+        report: DoctorResult,
         inv: &Invocation,
         control: &OperationControl,
-    ) -> ServiceOutcome;
+    ) -> (DoctorResult, ServiceOutcome);
 }
 type NativeService = ConnectionService<
     NativeEnvironment<WindowsProcessLifetime>,
@@ -154,10 +162,10 @@ impl Services for NativeService {
     }
     fn fix(
         &mut self,
-        report: &DoctorResult,
+        mut report: DoctorResult,
         inv: &Invocation,
         control: &OperationControl,
-    ) -> ServiceOutcome {
+    ) -> (DoctorResult, ServiceOutcome) {
         use lycheedev_live::mailbox::connection::{
             doctor_delivery::ManagedDoctorDelivery, doctor_repair::DoctorFixOptions,
         };
@@ -165,13 +173,19 @@ impl Services for NativeService {
         {
             Ok(delivery) => delivery,
             Err(error) => {
-                return ServiceOutcome::Failed(error.into());
+                report.add(
+                    "live.repair",
+                    "blocked",
+                    error.to_string(),
+                    "resolve the repair error, then run doctor --fix for the same target",
+                );
+                return (report, ServiceOutcome::Failed(error.into()));
             }
         };
         let bundled = bundled_doctor_release();
         let release = inv.flag("--release").map(|s| absolute(inv, Path::new(s)));
         let output = inv.flag("--output").map(|s| absolute(inv, Path::new(s)));
-        self.doctor_fix(
+        self.doctor_fix_report(
             report,
             &DoctorFixOptions {
                 session: flag(inv, "--session"),
@@ -179,6 +193,7 @@ impl Services for NativeService {
                 bundled_release: bundled.as_deref(),
                 output: output.as_deref(),
                 request: flag(inv, "--request"),
+                hard_reset: inv.flag_bool("--hard-reset"),
             },
             &mut delivery,
             control,
@@ -256,7 +271,15 @@ fn open_native(project: &Path) -> Result<NativeService> {
     .map_err(|e| ToolkitError::arguments(e.to_string()))
 }
 pub fn dispatch(inv: &Invocation) -> Response {
-    dispatch_with(inv, open_native)
+    if inv.command == "doctor" {
+        aggregate_doctor_with(
+            inv,
+            || crate::dispatch_doctor(inv),
+            || dispatch_with(inv, open_native),
+        )
+    } else {
+        dispatch_with(inv, open_native)
+    }
 }
 
 fn route_admission(inv: &Invocation) -> Result<()> {
@@ -272,7 +295,7 @@ fn route_admission(inv: &Invocation) -> Result<()> {
             | "live reload"
             | "live reload fallback"
             | "live bugs"
-            | "live doctor"
+            | "doctor"
     ) {
         return Err(ToolkitError::arguments("unknown Live command"));
     }
@@ -304,36 +327,20 @@ pub fn dispatch_with<S: Services>(
     if let Err(e) = route_admission(inv) {
         return Response::failure(e);
     }
-    if inv.command == "live doctor" {
-        if let Err(e) =
-            lycheedev_live::mailbox::connection::doctor_service::validate_doctor_options(
-                &target(inv),
-                flag(inv, "--session"),
-                inv.flag_bool("--fix"),
-                flag(inv, "--release"),
-                flag(inv, "--output"),
-                flag(inv, "--request"),
-            )
-        {
-            return Response::failure(ToolkitError::arguments(channel_message(&e)));
-        }
+    if inv.command == "doctor"
+        && let Err(error) = validate_doctor(inv)
+    {
+        return Response::failure(error);
     }
     let mut services = match factory(&project_path(inv)) {
         Ok(s) => s,
         Err(e) => return Response::failure(e),
     };
-    let control = match wait_control(
-        inv,
-        if inv.command == "live doctor" {
-            30
-        } else {
-            120
-        },
-    ) {
+    let control = match wait_control(inv, if inv.command == "doctor" { 30 } else { 120 }) {
         Ok(c) => c,
         Err(e) => return Response::failure(super::command_fault(inv, e)),
     };
-    if inv.command == "live doctor" {
+    if inv.command == "doctor" {
         return run_doctor(inv, &mut services, &control);
     }
     let outcome = match prepare_and_run(inv, &mut services, &control) {
@@ -431,7 +438,9 @@ fn prepare_and_run(
                 read_probe_file(inv, Path::new(file))?
             } else {
                 lycheedev_core::workspace::open(&inv.home)
-                    .and_then(|_| lycheedev_live::probes::code(&crate::live_aux::context(inv), probe))
+                    .and_then(|_| {
+                        lycheedev_live::probes::code(&crate::live_aux::context(inv), probe)
+                    })
                     .map_err(probe_admission_error)?
             };
             // Preserve the file/probe's exact bytes through request identity.
@@ -621,6 +630,106 @@ fn unhealthy() -> ToolkitError {
     ToolkitError::new("doctor.check_failed", "doctor.check_failed", 3)
         .with_details(json!({"stage":"query"}))
 }
+fn validate_doctor(inv: &Invocation) -> Result<()> {
+    lycheedev_live::mailbox::connection::doctor_service::validate_doctor_options(
+        &target(inv),
+        flag(inv, "--session"),
+        inv.flag_bool("--fix"),
+        inv.flag_bool("--hard-reset"),
+        flag(inv, "--release"),
+        flag(inv, "--output"),
+        flag(inv, "--request"),
+    )
+    .map_err(|error| ToolkitError::arguments(channel_message(&error)))
+}
+fn has_doctor_target(inv: &Invocation) -> bool {
+    ["--installation", "--pid", "--session"]
+        .iter()
+        .any(|key| !flag(inv, key).is_empty())
+}
+/// Keep the optional live report typed through rendering. Workspace/provider
+/// checks use Values, but a connection's RawReport must never pass through one.
+fn aggregate_doctor_with(
+    inv: &Invocation,
+    inspect: impl FnOnce() -> Result<lycheedev_core::Outcome>,
+    live: impl FnOnce() -> Response,
+) -> Response {
+    if let Err(error) = validate_doctor(inv) {
+        return Response::failure(error);
+    }
+    let mut response = Response::default();
+    let value = match inspect() {
+        Ok(outcome) => {
+            if let Some(context) = outcome.selection.as_object() {
+                response.context.extend(
+                    context
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
+            }
+            response.warnings = outcome.warnings;
+            outcome.data
+        }
+        Err(mut error) => {
+            let value = error.details["result"].clone();
+            if let Some(context) = error.details["context"].as_object() {
+                response.context.extend(
+                    context
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
+            }
+            if let Some(details) = error.details.as_object_mut() {
+                details.remove("result");
+                details.remove("context");
+            }
+            response.error = Some(error);
+            value
+        }
+    };
+    let mut checks = value["checks"].as_array().cloned().unwrap_or_default();
+    let can_continue = response
+        .error
+        .as_ref()
+        .is_none_or(|error| error.code == "doctor.unhealthy");
+    let mut report = None;
+    if can_continue && (has_doctor_target(inv) || inv.flag_bool("--fix")) {
+        let mut selected = live();
+        response.context.extend(selected.context);
+        response.operation_id = selected.operation_id;
+        response.warnings.extend(selected.warnings);
+        if let Some(LiveResult::Doctor(live)) = selected.result.take() {
+            checks.extend(project_doctor_checks(&live));
+            report = Some(live);
+        } else if let Some(error) = &selected.error {
+            checks.push(
+                json!({"id":"live.project","ok":false,"status":"error","detail":error.message}),
+            );
+        }
+        if let Some(mut error) = selected.error {
+            if error.code == "doctor.check_failed" {
+                error.code = "doctor.unhealthy".into();
+                error.message = "doctor has error-status health checks".into();
+            }
+            response.error = Some(error);
+        }
+    }
+    let healthy = response.error.is_none() && checks.iter().all(|check| check["status"] != "error");
+    if !healthy && response.error.is_none() {
+        response.error = Some(ToolkitError::new(
+            "doctor.unhealthy",
+            "doctor has error-status health checks",
+            3,
+        ));
+    }
+    response.result = Some(LiveResult::DoctorAggregate(DoctorAggregate {
+        healthy,
+        checks,
+        live: report,
+    }));
+    merge_context(&mut response);
+    response
+}
 fn run_doctor(
     inv: &Invocation,
     services: &mut impl Services,
@@ -637,25 +746,20 @@ fn run_doctor(
     );
     response.context.insert("protocol".into(), json!(TRANSPORT));
     if inv.flag_bool("--fix") {
-        let result = match services.fix(&report, inv, control) {
-            ServiceOutcome::Completed(result) => {
-                response.operation_id = result.session.clone();
-                report = services.doctor(&target, &response.operation_id, control);
-                Some(result)
-            }
+        let (repaired, outcome) = services.fix(report, inv, control);
+        report = repaired;
+        match outcome {
+            ServiceOutcome::Completed(_) => {}
             ServiceOutcome::Failed(error) => {
-                record_repair_failure(&mut report, &mut response, error);
-                None
+                response.error = Some(public_error(&error));
             }
-            ServiceOutcome::ReportedWithFailure { result, error } => {
-                response.operation_id = result.session.clone();
-                record_repair_failure(&mut report, &mut response, error);
-                Some(result)
+            ServiceOutcome::ReportedWithFailure { error, .. } => {
+                response.error = Some(public_error(&error));
             }
-        };
-        if let Some(result) = result.filter(|r| !r.session.is_empty()) {
-            report.connection = Some(result);
         }
+    }
+    if let Some(connection) = &report.connection {
+        response.operation_id.clone_from(&connection.session);
     }
     if response.error.is_none() && !report.healthy {
         response.error = Some(unhealthy());
@@ -665,59 +769,10 @@ fn run_doctor(
     response
 }
 
-fn record_repair_failure(
-    report: &mut DoctorResult,
-    response: &mut Response,
-    error: AdmissionError,
-) {
-    report.healthy = false;
-    let next = if response.operation_id.is_empty() {
-        "resolve the repair error, then run live doctor --fix for the same target".into()
-    } else {
-        format!(
-            "live resume {} --project <original-project>",
-            response.operation_id
-        )
-    };
-    report.add("live.repair", "blocked", error.to_string(), &next);
-    response.error = Some(public_error(&error));
-}
-
-/// Compose the same read-only checks into ordinary doctor. No selected target
-/// means no project open, native capability probe, or claim read at all.
-pub fn doctor_checks(inv: &Invocation) -> Vec<Value> {
-    if flag(inv, "--installation").is_empty()
-        && flag(inv, "--pid").is_empty()
-        && flag(inv, "--session").is_empty()
-    {
-        return vec![];
-    }
-    let mut service = match open_native(&project_path(inv)) {
-        Ok(s) => s,
-        Err(e) => {
-            return vec![
-                json!({"id":"live.project","status":"error","ok":false,"detail":e.message}),
-            ];
-        }
-    };
-    let control = match inv
-        .control
-        .ordered_child(Instant::now() + Duration::from_secs(10))
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return vec![
-                json!({"id":"live.project","status":"error","ok":false,"detail":e.message}),
-            ];
-        }
-    };
-    let report = service.doctor(&target(inv), flag(inv, "--session"), &control);
-    project_doctor_checks(report)
-}
-fn project_doctor_checks(report: DoctorResult) -> Vec<Value> {
+fn project_doctor_checks(report: &DoctorResult) -> Vec<Value> {
     report
         .checks
-        .into_iter()
+        .iter()
         .map(|c| {
             let status = if c.state == "blocked" {
                 "error"

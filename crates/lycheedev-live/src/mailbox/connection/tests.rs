@@ -24,6 +24,7 @@ use std::{
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 mod session;
+mod slot_reset_end;
 struct Fixture {
     root: PathBuf,
     target: ConnectionTarget,

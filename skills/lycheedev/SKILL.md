@@ -20,7 +20,7 @@ interprets results.
 | TOC/XML/Lua load order, syntax, client compatibility | [Addon validation](references/addon-validation.md) |
 | Behavior of the running game, connection, retained errors, performance | [Live investigation](references/live-investigation.md) |
 | Pending/interrupted CON, reload or cleanup | [Live recovery](references/live-recovery.md) |
-| First contact, readiness or activation failure | [Live doctor and startup](references/live-startup.md) |
+| First contact, readiness or activation failure | [Doctor and Live startup](references/live-startup.md) |
 | Skill/addon/npm install, update or removal | [Installation](references/installation.md) |
 
 A static declaration or row can answer a static question; carry an unresolved

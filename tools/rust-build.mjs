@@ -136,7 +136,8 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,is
   const args=['build','--locked','--offline','-j','1','--profile',profile,'-p',packageName];
   return runCargo(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot,isolateUser,environment,onSuccess(invocation){
     const output=profile==='dev'?'debug':profile;
-    artifactDirectory=contained(root,resolve(artifactDirectory));mkdirSync(artifactDirectory);
+    artifactDirectory=contained(root,resolve(artifactDirectory));
+    mkdirSync(dirname(artifactDirectory),{recursive:true});mkdirSync(artifactDirectory);
     const source=join(invocation.target,output,'lycheedev.exe'),binary=join(artifactDirectory,'lycheedev.exe');
     // 128 MiB no longer covers the current debug binary (134,360,576 B); the
     // cap only rejects runaway outputs, so keep a fixed 512 MiB bound for both

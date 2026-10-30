@@ -7,6 +7,11 @@ use super::*;
 use crate::mailbox::doctor::{DoctorDeployment, DoctorResult};
 use std::path::{Path, PathBuf};
 
+#[path = "doctor_close.rs"]
+mod doctor_close;
+#[path = "doctor_reset.rs"]
+mod doctor_reset;
+
 pub trait RepairEnvironment: DoctorEnvironment {
     /// Original runtime version and exact existing CON claim stay authoritative.
     /// A repair adapter must not downgrade validation for arbitrary business.
@@ -15,15 +20,23 @@ pub trait RepairEnvironment: DoctorEnvironment {
         target: &ConnectionTarget,
         owner: &WindowOwner,
         runtime_release: &str,
+        slot_reset: bool,
         control: &OperationControl,
     ) -> ChannelResult<Self::Backend>;
 }
 /// Adapter contract for the existing Delivery install/upgrade operation. Its
-/// implementation must hold formal installation admission and the existing
-/// deployment exclusion, reject a preexisting archive, retain all errors and
-/// use the caller's control. It cannot resume any Live business transaction.
+/// implementation holds formal installation admission and Delivery's existing
+/// exclusion. Installation replacement rejects a preexisting archive; slot
+/// reset resumes its exact durable archive. It cannot resume Live business.
 /// No permissive/no-op production implementation is provided.
 pub trait RepairDelivery {
+    fn reset_slots(
+        &mut self,
+        target: &ConnectionTarget,
+        archive: &Path,
+        version: &str,
+        control: &OperationControl,
+    ) -> ChannelResult<bool>;
     fn apply(
         &mut self,
         target: &ConnectionTarget,
@@ -210,6 +223,7 @@ pub struct DoctorFixOptions<'a> {
     pub bundled_release: Option<&'a Path>,
     pub output: Option<&'a Path>,
     pub request: &'a str,
+    pub hard_reset: bool,
 }
 /// Exact Go VolumeName policy, independent of the host running fixture tests.
 /// It intentionally does not infer volume identity from directory contents.
@@ -251,11 +265,81 @@ impl<E: RepairEnvironment, C: Clock, T: TokenSource, S: ContinuationScheduler>
 where
     E::Backend: ActivationBackend,
 {
+    /// Diagnose again only after a successful repair, retaining the exact
+    /// connection projection and selected recovery archive on every outcome.
+    pub fn doctor_fix_report(
+        &mut self,
+        mut report: DoctorResult,
+        options: &DoctorFixOptions<'_>,
+        delivery: &mut impl RepairDelivery,
+        control: &OperationControl,
+    ) -> (DoctorResult, ServiceOutcome) {
+        let mut archive = String::new();
+        let mut outcome = self.doctor_fix_inner(&report, options, delivery, &mut archive, control);
+        let original_connection = report.connection.clone();
+        let result = match &outcome {
+            ServiceOutcome::Completed(result)
+            | ServiceOutcome::ReportedWithFailure { result, .. } => Some(result.clone()),
+            ServiceOutcome::Failed(_) => None,
+        }
+        .filter(|result| !result.session.is_empty());
+        if outcome.error().is_none() {
+            if let Some(target) = &report.target {
+                report = self.doctor(
+                    &TargetRequest {
+                        installation: target.client.directory.clone(),
+                        pid: target.window.process_id,
+                        ..Default::default()
+                    },
+                    result.as_ref().map_or("", |result| result.session.as_str()),
+                    control,
+                );
+            }
+            if !report.healthy {
+                outcome = outcome.join(Err(ChannelError::from(lycheedev_core::ToolkitError::new(
+                    "doctor.check_failed",
+                    "doctor.check_failed",
+                    3,
+                ))
+                .into()));
+            }
+        } else {
+            let next = result
+                .as_ref()
+                .map(|r| format!("live resume {} --project <original-project>", r.session))
+                .unwrap_or_else(|| {
+                    "resolve the repair error, then run doctor --fix for the same target".into()
+                });
+            report.add(
+                "live.repair",
+                "blocked",
+                outcome.error().unwrap().to_string(),
+                &next,
+            );
+        }
+        if let Some(result) = result {
+            report.connection = Some(result);
+        } else if report.connection.is_none() {
+            report.connection = original_connection;
+        }
+        report.repair_archive = archive;
+        (report, outcome)
+    }
     pub fn doctor_fix(
         &mut self,
         report: &DoctorResult,
         options: &DoctorFixOptions<'_>,
         delivery: &mut impl RepairDelivery,
+        control: &OperationControl,
+    ) -> ServiceOutcome {
+        self.doctor_fix_inner(report, options, delivery, &mut String::new(), control)
+    }
+    fn doctor_fix_inner(
+        &mut self,
+        report: &DoctorResult,
+        options: &DoctorFixOptions<'_>,
+        delivery: &mut impl RepairDelivery,
+        archive_result: &mut String,
         control: &OperationControl,
     ) -> ServiceOutcome {
         let (Some(target), Some(deployment)) = (&report.target, &report.deployment) else {
@@ -265,7 +349,28 @@ where
                 3,
             )));
         };
+        let pending_reset = (|| {
+            let (path, client) = doctor_reset::reference_path(
+                self.book.root(),
+                Path::new(&target.client.directory),
+            )?;
+            doctor_reset::read_reference(
+                &path,
+                &client,
+                &deployment.version,
+                options.output,
+                archive_result,
+                control,
+            )
+        })();
+        let pending_reset = match pending_reset {
+            Ok(reference) => reference,
+            Err(error) => return ServiceOutcome::failure(error),
+        };
         let needs_install = deployment.needs_install(self.environment.release());
+        let needs_reset =
+            pending_reset.is_some() || deployment.needs_slot_reset(options.hard_reset);
+        let needs_change = needs_install || needs_reset || options.release.is_some();
         if let Some(owner) = &report.owner {
             if owner.workspace_id != self.book.workspace_id() {
                 return ServiceOutcome::failure(AdmissionError::Occupied {
@@ -280,54 +385,71 @@ where
                     ],
                 });
             }
-            if !needs_install && options.release.is_none() {
+            if !needs_change {
                 return self.resume_with_activation(&owner.operation_id, control);
             }
-            // Close intent is persisted before any ordinary continuation. A
-            // pending opaque/unknown operation is never executed as pre-repair.
-            let closed = self.close_for_repair(&owner.operation_id, control);
+            let closed = self.close_for_repair_mode(&owner.operation_id, needs_reset, control);
             if !matches!(&closed, ServiceOutcome::Completed(_)) {
                 return closed;
             }
         }
-        if needs_install || options.release.is_some() {
-            let Some(release) = options.release.or(options.bundled_release) else {
+        if needs_change {
+            let release = options
+                .release
+                .or_else(|| needs_install.then_some(options.bundled_release).flatten());
+            if needs_install && release.is_none() {
                 return ServiceOutcome::failure(ChannelError::External { causes: vec!["live.channel_release_required: supply --release with the current distribution".into()] });
-            };
-            let stamp = chrono::DateTime::from_timestamp_millis(self.clock.unix_millis())
-                .map(|now| now.format("%Y%m%dT%H%M%S.%9f").to_string());
-            let Some(stamp) = stamp else {
+            }
+            let Some(stamp) = chrono::DateTime::from_timestamp_millis(self.clock.unix_millis())
+                .map(|now| now.format("%Y%m%dT%H%M%S.%9f").to_string())
+            else {
                 return ServiceOutcome::failure(error("live.channel_budget_invalid"));
             };
-            let default_archive;
-            let archive = if deployment.state == "absent" {
-                None
-            } else if let Some(output) = options.output {
-                Some(output)
-            } else {
-                default_archive = default_repair_archive(
+            let archive = if needs_reset {
+                match doctor_reset::reset(
                     self.book.root(),
-                    Path::new(&target.client.directory),
+                    target,
+                    &deployment.version,
+                    options.output,
                     &stamp,
-                );
-                Some(default_archive.as_path())
-            };
-            // Only the generated default's parent is created. An explicit
-            // output remains byte-for-byte the caller's requested destination.
-            if deployment.state != "absent" && options.output.is_none() {
-                let prepare = check_control(control).and_then(|_| {
-                    let parent = archive
-                        .and_then(Path::parent)
-                        .ok_or_else(|| error("live.channel_project_invalid"))?;
-                    std::fs::create_dir_all(parent).map_err(durable_journal::io_error)?;
-                    check_control(control)
-                });
-                if let Err(e) = prepare {
-                    return ServiceOutcome::failure(e);
+                    archive_result,
+                    delivery,
+                    control,
+                ) {
+                    Ok(archive) => Some(archive),
+                    Err(error) => return ServiceOutcome::failure(error),
                 }
-            }
-            if let Err(e) = delivery.apply(target, deployment, release, archive, control) {
-                return ServiceOutcome::failure(e);
+            } else if deployment.state != "absent" && release.is_some() {
+                let archive = options.output.map(Path::to_path_buf).unwrap_or_else(|| {
+                    default_repair_archive(
+                        self.book.root(),
+                        Path::new(&target.client.directory),
+                        &stamp,
+                    )
+                });
+                if options.output.is_none() {
+                    if let Err(error) = check_control(control).and_then(|_| {
+                        std::fs::create_dir_all(
+                            archive
+                                .parent()
+                                .ok_or_else(|| error("live.channel_project_invalid"))?,
+                        )
+                        .map_err(durable_journal::io_error)?;
+                        check_control(control)
+                    }) {
+                        return ServiceOutcome::failure(error);
+                    }
+                }
+                Some(archive)
+            } else {
+                None
+            };
+            if let Some(release) = release {
+                if let Err(error) =
+                    delivery.apply(target, deployment, release, archive.as_deref(), control)
+                {
+                    return ServiceOutcome::failure(error);
+                }
             }
             let key = if options.request.is_empty() {
                 format!("doctor-{stamp}")
@@ -358,6 +480,21 @@ where
         }
     }
     pub fn close_for_repair(&mut self, id: &str, control: &OperationControl) -> ServiceOutcome {
+        self.close_for_repair_mode(id, false, control)
+    }
+    pub fn close_for_slot_repair(
+        &mut self,
+        id: &str,
+        control: &OperationControl,
+    ) -> ServiceOutcome {
+        self.close_for_repair_mode(id, true, control)
+    }
+    fn close_for_repair_mode(
+        &mut self,
+        id: &str,
+        slot_repair: bool,
+        control: &OperationControl,
+    ) -> ServiceOutcome {
         let before = match self.read_recover(id, control) {
             Ok(v) => v,
             Err(AdmissionError::Channel(e)) if e.all_causes(&|e| matches!(e, ChannelError::Contract(c) if c.0 == "live.channel_journal_missing")) => return self.disconnect_activation(id, control),
@@ -371,7 +508,7 @@ where
             .process_end(&before.metadata.target, control)
         {
             Ok(ProcessEnd::None) => (),
-            Ok(_) => return self.disconnect_ended(id, control),
+            Ok(_) => return self.disconnect_ended_mode(id, slot_repair, control),
             Err(e) => {
                 return ServiceOutcome::with_result(self.project(&before, "", ""), Err(e.into()));
             }
@@ -402,6 +539,7 @@ where
             &record.metadata.target,
             &record.metadata.owner,
             &state.identity.release,
+            slot_repair,
             control,
         ) {
             Ok(v) => v,
@@ -424,9 +562,13 @@ where
             process_id: record.metadata.target.window.process_id,
             process_started_at: record.metadata.target.window.process_started_at,
         };
-        let result = driver
-            .request_close(control)
-            .and_then(|_| driver.continue_or_retire(control, target, true, &mut self.scheduler));
+        let result = driver.request_close(control).and_then(|_| {
+            if slot_repair {
+                driver.close_slot_repair(control, target, &mut self.scheduler)
+            } else {
+                driver.continue_or_retire(control, target, true, &mut self.scheduler)
+            }
+        });
         let retire = result.is_ok() && driver.state.closed;
         let projected = present_owned(
             driver.state,

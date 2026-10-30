@@ -1,4 +1,4 @@
-# Live doctor and startup
+# Doctor and Live startup
 
 Read for first contact, changed addon files or readiness failure. Disk installation
 and loaded runtime are separate. Native Live uses Lycheedev mailbox protocol v1,
@@ -6,9 +6,10 @@ a named Mailbox, 500 managed slots and effective execute/reload bindings.
 
 ## Diagnose the selected target
 
-Use the selected CLI's real help. If live doctor is absent, top-level doctor is
-an alternative only when its actual contract includes the needed live checks.
-A version label alone does not establish commit, protocol or slot inventory.
+Use `lycheedev doctor` for workspace, Data, Source and selected Live checks.
+Add `--installation`/`--pid`, or `--session CON_ID --project ORIGINAL_PROJECT`
+to diagnose the exact target. A version label alone does not establish commit,
+protocol or slot inventory.
 Keep old CON evidence with matching-version diagnosis; do not replace journals.
 
 Retain installation/PID or original project/CON. Passive discovery is for missing
@@ -19,9 +20,16 @@ explains startup, while fresh INPUT governs machine input.
 ## Complete the authorized repair
 
 Necessary deployment/activation/recovery can already be covered by the live task;
-use doctor fix within that scope. Modified/unmanaged files need
+use `doctor --fix` within that scope. Modified/unmanaged files need
 [installation diagnosis](installation.md), not overlay copies. Continue existing
 connections and returned activation IDs, never replace pending business.
+
+Use `doctor --fix --hard-reset` when the fixed slot pool needs an explicit
+rebuild. It archives the original slot manifest and all 500 fixed slot paths,
+including unknown payloads and reservations, before initializing the pool.
+Keep the returned repair archive and original CON for interrupted recovery;
+retry the same repair rather than choosing a new archive. A slot reset does
+not settle or replay the original connection's pending input or report cleanup.
 
 - Clean ready runtime: connect or resume as appropriate
 - slotReloadRequired: let connect/resume perform its guarded reload; the flag

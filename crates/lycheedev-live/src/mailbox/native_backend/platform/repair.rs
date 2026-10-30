@@ -41,12 +41,14 @@ impl DiskPublications {
         consumer: String,
         authenticate: impl Fn(&SlotEnvelope, &OperationControl) -> ChannelResult<RepairPublication>
         + 'static,
+        slot_reset: bool,
     ) -> ChannelResult<Self> {
         let mut store = Self::recorded(addon, release)?;
         store.repair = Some(RepairAuthorization {
             consumer,
             authenticate: Rc::new(authenticate),
         });
+        store.preserve_retirement = slot_reset;
         Ok(store)
     }
 }
@@ -65,6 +67,7 @@ impl NativeBackend {
         guard: impl FnMut(&OperationControl) -> ChannelResult<()> + 'static,
         authenticate: impl Fn(&SlotEnvelope, &OperationControl) -> ChannelResult<RepairPublication>
         + 'static,
+        slot_reset: bool,
         control: &OperationControl,
     ) -> ChannelResult<Self> {
         let window = target.identity();
@@ -73,6 +76,7 @@ impl NativeBackend {
             release,
             format!("{}/{}", window.process.pid, window.process.created),
             authenticate,
+            slot_reset,
         )?;
         Self::open_with_store(
             target,

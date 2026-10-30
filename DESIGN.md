@@ -180,7 +180,9 @@ SessionOwner 固定安装、PID、进程创建时间和 HWND，再绑定 GUID/ru
 
 已提交或结果未知的输入不重放。恢复使用原 project/CON/request/deadline；经认证的 observation 按原恢复策略处理。报告已经验证与 cleanup pending 是两个独立事实：保存可用报告，继续完成允许的清理，不能把清理失败改写成报告丢失。
 
-Delivery 沿用当前 500 槽受管安装。doctor 默认只读，doctor --fix 经 Delivery 和原连接恢复；没有兼容的新鲜 INPUT 时首次激活需要手动 reload。现有 addon 的禁用零开销约束、bootstrap/INPUT 明确例外、locale 配对和 Compat/ClientGate 边界继续有效。
+Delivery 沿用当前 500 槽受管安装。统一的 doctor 默认只读，doctor --fix 经 Delivery 和原连接恢复；doctor --fix --hard-reset 先保留原清单和全部固定槽路径的原字节，再初始化500槽。归档与初始化的中断沿原意图继续，已完成重试保留后续预约。损坏槽池下先完成原连接的关闭与运行时退休，未知业务结果不提升为成功。
+
+独立重载使用实际 Reload 绑定，不依赖槽池完整性或占用业务槽。INPUT 在耗时的发布准备后重新读取，发送仍受原目标、持久意图和新鲜采样约束。旧协议名称仅在身份与 INPUT 的升级识别中接受；自动升级须确认实际双键配置，旧 INPUT 仅可用于重载，业务回执和新运行时证明保持当前协议。没有兼容的新鲜 INPUT 时首次激活需要手动 reload。退休观察可在原只读期限内等候新鲜 INPUT，不续期原业务预算。现有 addon 的禁用零开销约束、bootstrap/INPUT 明确例外、locale 配对和 Compat/ClientGate 边界继续有效。
 
 Live 的持久化与恢复机制服务于实际输入副作用；普通只读 Source/Data 查询不复制这套业务状态机。
 

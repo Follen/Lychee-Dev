@@ -1,13 +1,12 @@
-//! Included as connection::doctor_service. Both public doctor entrypoints use
-//! this same read-only service. Repair is an explicit, separately typed call.
+//! Included as connection::doctor_service. The unified doctor command uses
+//! this read-only service. Repair is an explicit, separately typed call.
 #![forbid(unsafe_code)]
 use super::activation_service::{ActivationBackend, ActivationEnvironment};
 use super::*;
 use crate::mailbox::{
     admission::inspect_window_owner,
-    doctor::{DoctorDeployment, DoctorResult, DoctorRuntime, TOP_LEVEL_LIMIT, inspect_runtime},
+    doctor::{DoctorDeployment, DoctorResult, DoctorRuntime, inspect_runtime},
 };
-use std::time::Instant;
 
 pub trait DoctorEnvironment: ActivationEnvironment {
     type Diagnostic: DoctorRuntime;
@@ -28,19 +27,20 @@ pub trait DoctorEnvironment: ActivationEnvironment {
         control: &OperationControl,
     ) -> ChannelResult<Self::Diagnostic>;
 }
-/// Existing CLI options, with no new flag or command. Validate before any IO.
+/// Validate repair and target options before any IO.
 pub fn validate_doctor_options(
     request: &TargetRequest,
     session: &str,
     fix: bool,
+    hard_reset: bool,
     release: &str,
     output: &str,
     key: &str,
 ) -> ChannelResult<()> {
     let message = if !session.is_empty() && (!request.installation.is_empty() || request.pid != 0) {
         Some("use --session with its original --project, or select --installation/--pid")
-    } else if !fix && (!release.is_empty() || !output.is_empty() || !key.is_empty()) {
-        Some("--release, --output and --request require --fix")
+    } else if !fix && (hard_reset || !release.is_empty() || !output.is_empty() || !key.is_empty()) {
+        Some("--hard-reset, --release, --output and --request require --fix")
     } else {
         None
     };
@@ -185,38 +185,5 @@ where
             &mut self.scheduler,
         );
         report
-    }
-    /// Top-level `doctor` performs active reads only for an explicit selection,
-    /// always inside a child of the original control capped at ten seconds.
-    pub fn top_level_live_doctor(
-        &mut self,
-        request: &TargetRequest,
-        session: &str,
-        control: &OperationControl,
-    ) -> Option<DoctorResult> {
-        if request.installation.is_empty() && request.pid == 0 && session.is_empty() {
-            return None;
-        }
-        let bounded = match control.ordered_child(Instant::now() + TOP_LEVEL_LIMIT) {
-            Ok(c) => c,
-            Err(e) => {
-                let mut r = DoctorResult::default();
-                r.failure(
-                    "live.project",
-                    "error",
-                    e.into(),
-                    "retry diagnosis for the selected client",
-                );
-                return Some(r);
-            }
-        };
-        let mut report = self.doctor(request, session, &bounded);
-        // The top-level vault representation calls blocked checks errors.
-        for check in &mut report.checks {
-            if check.state == "blocked" {
-                check.state = "error".into();
-            }
-        }
-        Some(report)
     }
 }

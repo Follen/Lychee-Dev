@@ -51,11 +51,11 @@ test('generated reference check detects drift without repairing it', t => {
 });
 test('staging preserves the whole Skill and reports actual missing capabilities', t => {
   const root = fixture(t), destination = join(root, 'skill');
-  stageSkill(destination, commands.filter(command => command.path !== 'live doctor'));
+  stageSkill(destination, commands.filter(command => command.path !== 'doctor'));
   assert.deepEqual(readFileSync(join(destination, 'SKILL.md')), readFileSync(resolve('skills/lycheedev/SKILL.md')));
   for (const name of readdirSync(resolve('skills/lycheedev/references'))) assert.deepEqual(readFileSync(join(destination, 'references', name)), readFileSync(resolve('skills/lycheedev/references', name)));
   const receipt = JSON.parse(readFileSync(destination + '.contract.json'));
-  assert.deepEqual(receipt.missingCommands, ['live doctor']);
+  assert.deepEqual(receipt.missingCommands, ['doctor']);
   assert.deepEqual(receipt.missingFlags, []);
   assert.throws(() => stageSkill(destination, commands), /receipt_exists|EEXIST/);
 });

@@ -140,7 +140,7 @@ empty success.
 
 ```powershell
 lycheedev live instances --format json
-lycheedev live doctor --pid <pid> --format json        # read-only readiness
+lycheedev doctor --pid <pid> --format json             # read-only readiness
 lycheedev live connect --installation $client --format json
 lycheedev live probe put --name <name> --file <probe.lua>
 lycheedev live execute --session <CON-id> --probe <name> --request <key> --format json
@@ -148,7 +148,7 @@ lycheedev live disconnect <CON-id>
 ```
 
 Live work binds one verified process/runtime and keeps durable ownership, request
-identity and recovery journals. `live doctor --fix` repairs within the authorized
+identity and recovery journals. `doctor --fix` repairs within the authorized
 installation/target scope; when no current input protocol is loaded, first
 activation can require one manual reload. Submitted or unknown input is never
 replayed. `live status`, `live resume` and `live session` inspect and recover the

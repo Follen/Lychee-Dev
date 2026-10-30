@@ -609,8 +609,8 @@
   },
   {
     "path": "doctor",
-    "summary": "Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check",
-    "mutates": false,
+    "summary": "Diagnose workspace, data, embedded Emmy worker smoke, source and a selected live target or original CON; read-only by default; --fix repairs managed installation and recovers the original connection; --fix --hard-reset archives and initializes all 500 slots; exit 3 means an unhealthy check",
+    "mutates": true,
     "arguments": [],
     "flags": [
       "--home <root>",
@@ -619,44 +619,23 @@
       "--pid <pid>",
       "--session <CON-id>",
       "--project <directory>",
-      "--offline"
+      "--offline",
+      "--fix",
+      "--hard-reset (requires --fix)",
+      "--release <distribution-root>",
+      "--output <upgrade-archive>",
+      "--request <idempotency-key>",
+      "--wait-seconds <1-600> (default 30)",
+      "--no-cache"
     ],
     "examples": [
       "lycheedev doctor --home EXAMPLE_HOME --offline --format json"
     ],
     "constraints": [
-      "Inspects the workspace and installed local providers/runtimes, reporting their availability and any required corrections."
-    ],
-    "effects": {
-      "gameProcess": true,
-      "gameInput": false
-    }
-  },
-  {
-    "path": "live doctor",
-    "summary": "Diagnose one PID or retained CON without input; --fix installs a clean release when needed and resumes or activates that same target under Lycheedev mailbox protocol v1; missing runtime requires one manual reload",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--format text|json|jsonl",
-      "--installation <client>",
-      "--pid <pid>",
-      "--session <CON-id>",
-      "--project <directory>",
-      "--fix",
-      "--release <distribution-root>",
-      "--output <upgrade-archive>",
-      "--request <idempotency-key>",
-      "--wait-seconds <1-600> (default 30)"
-    ],
-    "defaults": {
-      "--wait-seconds": "30"
-    },
-    "examples": [
-      "lycheedev live doctor --project PROJECT_DIR --session CON_ID --format json"
-    ],
-    "constraints": [
-      "CON_ID is the retained connection in PROJECT_DIR whose installation, runtime and recovery state will be diagnosed."
+      "Inspects the workspace and installed local providers/runtimes, reporting their availability and any required corrections.",
+      "Select --installation/--pid, or --session CON_ID with its original --project; these target forms cannot be combined.",
+      "--hard-reset, --release, --output and --request require --fix. A repair requires a selected target or original CON.",
+      "--fix --hard-reset archives the original slot manifest and fixed 500 slot paths before initializing the pool; retained CON input and reports follow their original recovery state."
     ],
     "effects": {
       "gameProcess": true,
@@ -664,6 +643,9 @@
       "gameInputWhen": {
         "--fix": true
       }
+    },
+    "defaults": {
+      "--wait-seconds": "30"
     }
   },
   {

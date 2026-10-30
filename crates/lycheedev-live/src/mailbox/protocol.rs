@@ -26,7 +26,9 @@ pub struct Identity {
 
 impl Identity {
     pub fn validate(&self) -> Result<()> {
-        if self.schema != SCHEMA {
+        if self.schema != SCHEMA
+            && !(self.schema == PREVIOUS_SCHEMA && self.input_state == PREVIOUS_SCHEMA)
+        {
             return Err(ContractError("live.channel_identity_schema_invalid"));
         }
         self.validate_fields(SLOT_COUNT)

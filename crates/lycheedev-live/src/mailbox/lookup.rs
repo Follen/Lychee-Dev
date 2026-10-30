@@ -698,6 +698,12 @@ impl<M: Memory> Reader<'_, M> {
             }
             let actual = a.string(v, 64, &format!("mailbox.{name}.value"))?;
             if actual != want.as_bytes() {
+                if name == "schema"
+                    && actual == v1::PREVIOUS_SCHEMA.as_bytes()
+                    && matches!(selector.kind, v1::Kind::Identity | v1::Kind::Input)
+                {
+                    continue;
+                }
                 return Err(format!(
                     "memory.mailbox_incompatible: mailbox_{name}_mismatch"
                 ));

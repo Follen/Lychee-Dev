@@ -369,6 +369,82 @@ pub(crate) fn read_pool_controlled(parent: &Path, control: &OperationControl) ->
     Ok(pool)
 }
 
+/// Read only reservation metadata after the caller proved its process/runtime
+/// ended. Missing or undecodable metadata stays untouched. Filesystem failures
+/// and a readable inventory for another generation remain real failures.
+pub(crate) fn retirement_pool(
+    parent: &Path,
+    version: &str,
+    control: &OperationControl,
+) -> Result<Option<SlotPool>> {
+    control.check()?;
+    match fs::symlink_metadata(parent) {
+        Ok(metadata) => {
+            storage::guard_path(parent, parent)?;
+            if !metadata.is_dir() {
+                return Err(invalid("slot parent is not a plain directory"));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    let marker = parent.join(MARKER);
+    storage::guard_path(parent, &marker)?;
+    let metadata = match fs::symlink_metadata(&marker) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.is_file() {
+        return Err(invalid("slot manifest is not a plain file"));
+    }
+    if metadata.len() > MANIFEST_LIMIT as u64 {
+        return Ok(None);
+    }
+    let raw = read_bounded_controlled(&marker, MANIFEST_LIMIT, control)?;
+    let Ok(pool) = serde_json::from_slice::<SlotPool>(&raw) else {
+        return Ok(None);
+    };
+    // Recognize installation metadata at this retirement boundary only. Older
+    // inventories and migration records are readable evidence of a different
+    // generation, not lost metadata and never business-operation authority.
+    let recognized = !pool.version.is_empty()
+        && match pool.schema.as_str() {
+            SCHEMA => matches!(pool.files.len(), 200 | 500) && pool.source_schema.is_empty(),
+            "lycheedev.slots.v1" => {
+                pool.files.len() == 64 && pool.state == "ready" && pool.source_schema.is_empty()
+            }
+            "lycheedev.slots.v2" => {
+                pool.files.len() == 200 && pool.state == "ready" && pool.source_schema.is_empty()
+            }
+            MIGRATION | "lycheedev.slots.migration.v3" => {
+                pool.state == "upgrading"
+                    && !pool.pending_version.is_empty()
+                    && match pool.source_schema.as_str() {
+                        "lycheedev.slots.v1" => pool.files.len() == 64,
+                        "lycheedev.slots.v2" => pool.files.len() == 200,
+                        SCHEMA => matches!(pool.files.len(), 200 | 500),
+                        _ => false,
+                    }
+            }
+            _ => false,
+        };
+    if !recognized {
+        return Ok(None);
+    }
+    if pool.schema != SCHEMA
+        || pool.files.len() != COUNT as usize
+        || pool.state != "ready"
+        || pool.version != version
+    {
+        return Err(invalid(
+            "slot inventory is not ready for the original version",
+        ));
+    }
+    control.check()?;
+    Ok(Some(pool))
+}
+
 pub(crate) fn save_pool(parent: &Path, pool: &SlotPool, control: &OperationControl) -> Result<()> {
     control.check()?;
     let bytes = serde_json::to_vec_pretty(pool)?;

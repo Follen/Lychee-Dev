@@ -68,7 +68,9 @@ test('buildRust forwards requested user isolation while preserving its default e
   for(const isolateUser of [undefined,true]){
     const root=sourceFixture();
     try{
-      const record=buildRust(root,join(root,'artifact'),{profile:'release',...(isolateUser===undefined?{}:{isolateUser}),
+      const artifactDirectory=join(root,'.tmp/ci/build-release/cli');
+      assert.equal(existsSync(dirname(artifactDirectory)),false);
+      const buildOptions={profile:'release',...(isolateUser===undefined?{}:{isolateUser}),
         environment:{HOME:'foreign-home',USERPROFILE:'foreign-user',CODEX_HOME:'foreign-agent',CARGO_HOME:'compiler-cache',RUSTUP_HOME:'compiler-tools'},
         execute(command,args,options){
           assert.equal(command,'cargo');assert.equal(options.timeout,3600000);
@@ -82,10 +84,15 @@ test('buildRust forwards requested user isolation while preserving its default e
           assert.equal(options.env.CARGO_HOME,'compiler-cache');assert.equal(options.env.RUSTUP_HOME,'compiler-tools');
           const directory=join(options.env.CARGO_TARGET_DIR,'release');mkdirSync(directory,{recursive:true});writeFileSync(join(directory,'lycheedev.exe'),'fixture binary');
           return{status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
-        }});
+        }};
+      const record=buildRust(root,artifactDirectory,buildOptions);
       const receipt=JSON.parse(readFileSync(record.buildEvidence)),command=JSON.parse(readFileSync(join(dirname(record.buildEvidence),'command.json')));
       assert.equal(command.isolatedUserRoot,isolateUser?join(receipt.directory,'user'):undefined);
       assert.equal(command.oneShot,false);assert.equal(receipt.state,'retired');
+      const artifactBytes=readFileSync(join(artifactDirectory,'artifact.json'));
+      assert.throws(()=>buildRust(root,artifactDirectory,buildOptions),{code:'EEXIST'});
+      assert.deepEqual(readFileSync(join(artifactDirectory,'artifact.json')),artifactBytes);
+      assert.deepEqual(verifyArtifact(root,join(artifactDirectory,'artifact.json')),record);
     }finally{rmSync(root,{recursive:true,force:true});}
   }
 });

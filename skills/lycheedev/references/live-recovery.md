@@ -62,7 +62,7 @@ Native input relies on fresh Mailbox identity/readiness and effective bindings.
 Combat, loading, minimized targets, stale evidence or restricted editors remain
 blockers. Keyboard activity pauses new chords; wait for the condition to change
 and retain the request/deadline. Submitted input still waits for its own receipt.
-For input_binding_unavailable, use read-only live doctor on the same CON; do not
+For input_binding_unavailable, use read-only `doctor` on the same CON; do not
 change bindings, choose a chord or repeat wake as a test. Input diagnostics and
 UI activity are not execution receipts. Ordinary editor text/focus need not be
 cleared; never simulate chat input. For a returned manual reload wait, follow

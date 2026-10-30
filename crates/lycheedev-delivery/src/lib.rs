@@ -11,6 +11,7 @@ pub mod npm_update;
 pub mod release;
 pub mod removal;
 pub mod slot_publication;
+pub mod slot_reset;
 #[cfg(test)]
 mod slot_test_diagnostics;
 pub mod slots;

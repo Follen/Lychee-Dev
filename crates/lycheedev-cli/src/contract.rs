@@ -60,10 +60,10 @@ impl Flag {
         // `--scan (dbcache: ...)` does not. Fixture tests cover every entry.
         match self.name() {
             "--allow-partial" | "--cdn" | "--data" | "--data-derived" | "--dry-run" | "--fix"
-            | "--flow" | "--fresh" | "--include-removed" | "--latest" | "--no-cache"
-            | "--offline" | "--overwrite" | "--passive" | "--plan" | "--remote" | "--replace"
-            | "--resume" | "--scan" | "--semantic" | "--session-reuse" | "--static-only"
-            | "--stdin" | "--uncommitted" => false,
+            | "--hard-reset" | "--flow" | "--fresh" | "--include-removed" | "--latest"
+            | "--no-cache" | "--offline" | "--overwrite" | "--passive" | "--plan" | "--remote"
+            | "--replace" | "--resume" | "--scan" | "--semantic" | "--session-reuse"
+            | "--static-only" | "--stdin" | "--uncommitted" => false,
             "--after-id"
             | "--after-index"
             | "--budget-seconds"

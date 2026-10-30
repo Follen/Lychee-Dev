@@ -89,6 +89,9 @@ impl<'de> Deserialize<'de> for InputObservation {
     }
 }
 impl InputObservation {
+    fn valid_schema(&self, action: &str) -> bool {
+        self.schema == SCHEMA || action == "reload" && self.schema == PREVIOUS_SCHEMA
+    }
     /// An equal timestamp does not authorize a changed activation/key profile.
     pub fn same_input_profile(&self, stored: &Self) -> bool {
         self.valid_bindings()
@@ -162,7 +165,7 @@ pub fn inspect_input(
         return Err(invalid);
     }
     let mut s: InputObservation = serde_json::from_slice(record.payload).map_err(|_| invalid)?;
-    if s.schema != SCHEMA || !s.valid_readiness() || !s.valid_bindings() {
+    if !s.valid_schema(&e.action) || !s.valid_readiness() || !s.valid_bindings() {
         return Err(invalid);
     }
     let runtime = parse_token(&s.runtime).map_err(|_| invalid)?;

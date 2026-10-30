@@ -504,7 +504,6 @@ fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
             },
             |inv, request| lycheedev_source::native_research::one_shot(&source_cli::context(inv), request),
         )?;
-        providers.extend(formal_live::doctor_checks(inv));
         let project = lycheedev_core::selection::find_project_controlled(&inv.cwd, &inv.control)
             .and_then(|directory| {
                 lycheedev_core::selection::inspect_project_controlled(&directory, &inv.control)

@@ -23,6 +23,30 @@ impl<V: lycheedev_delivery::formal_repair::AddonValidator> ManagedDoctorDelivery
 impl<V: lycheedev_delivery::formal_repair::AddonValidator> RepairDelivery
     for ManagedDoctorDelivery<V>
 {
+    fn reset_slots(
+        &mut self,
+        target: &ConnectionTarget,
+        archive: &Path,
+        version: &str,
+        control: &OperationControl,
+    ) -> ChannelResult<bool> {
+        // The diagnostic owner is only an observation. Recheck every shared
+        // installation CON under the formal maintenance gate before Delivery.
+        let mut admission = acquire_installation_maintenance(&target.addon_parent(), control)?;
+        let reset = lycheedev_delivery::slot_reset::reset(
+            Path::new(&target.client.directory),
+            archive,
+            version,
+            control,
+        )
+        .map(|result| result.complete)
+        .map_err(durable_journal::storage_error);
+        match (reset, admission.close()) {
+            (Ok(complete), Ok(())) => Ok(complete),
+            (Err(a), Err(b)) => Err(ChannelError::Joined { causes: vec![a, b] }),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
+    }
     fn apply(
         &mut self,
         target: &ConnectionTarget,

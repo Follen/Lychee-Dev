@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 pub const INPUT_SAMPLE_LIMIT: Duration = Duration::from_millis(1500);
-pub const TOP_LEVEL_LIMIT: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DoctorCheck {
@@ -69,10 +68,14 @@ pub struct DoctorDeployment {
 }
 impl DoctorDeployment {
     pub fn needs_install(&self, release: &str) -> bool {
-        self.state != "managed"
-            || self.version != release
-            || self.slots.as_ref().is_none_or(|s| {
-                s.count != SLOT_COUNT || !matches!(s.state.as_str(), "managed" | "pending")
+        self.state != "managed" || self.version != release || self.slots.is_none()
+    }
+    pub fn needs_slot_reset(&self, hard_reset: bool) -> bool {
+        self.state == "managed"
+            && self.slots.as_ref().is_some_and(|s| {
+                hard_reset
+                    || s.count != SLOT_COUNT
+                    || !matches!(s.state.as_str(), "managed" | "pending")
             })
     }
 }
@@ -96,6 +99,8 @@ pub struct DoctorResult {
     pub owner: Option<WindowOwner>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection: Option<ProjectResult>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub repair_archive: String,
     /// Internal typed causes accompany public checks. Do not erase an original
     /// control/read/close error by reconstructing it from a diagnostic string.
     #[serde(skip)]
@@ -114,6 +119,7 @@ impl Default for DoctorResult {
             input: None,
             owner: None,
             connection: None,
+            repair_archive: String::new(),
             errors: vec![],
         }
     }
@@ -136,7 +142,7 @@ impl DoctorResult {
     }
     pub fn inspect_deployment(&mut self, deployment: DoctorDeployment, release: &str) {
         if deployment.state != "managed" || deployment.version != release {
-            self.add("live.installation", "blocked", &deployment.state, "live doctor --fix --release <current distribution> installs or upgrades a clean managed addon");
+            self.add("live.installation", "blocked", &deployment.state, "doctor --fix --release <current distribution> installs or upgrades a clean managed addon");
         } else {
             self.add(
                 "live.installation",
@@ -441,7 +447,21 @@ fn inspect_runtime_open(
         );
         return;
     }
-    let can_reload = identity.input_state == SCHEMA;
+    let now = runtime.uptime_millis();
+    let can_reload = match super::native_backend::activation_input_capability(
+        runtime, &identity, now, control,
+    ) {
+        Ok(capable) => capable,
+        Err(error) => {
+            report.failure(
+                "live.runtime",
+                "blocked",
+                error,
+                "retry diagnosis for the selected client",
+            );
+            return;
+        }
+    };
     if !can_reload || identity.slots != SLOT_COUNT {
         report.add(
             "live.runtime",
@@ -451,7 +471,16 @@ fn inspect_runtime_open(
         );
         return;
     }
-    report.add("live.runtime", "ok", &identity.runtime, "");
+    if identity.input_state == lycheedev_core::mailbox::PREVIOUS_SCHEMA {
+        report.add(
+            "live.runtime",
+            "blocked",
+            "loaded runtime needs the protocol-name update",
+            "doctor --fix reloads once using its verified two-key INPUT",
+        );
+    } else {
+        report.add("live.runtime", "ok", &identity.runtime, "");
+    }
     if identity.inventory != Some(SLOT_COUNT) {
         report.add(
             "live.inventory",

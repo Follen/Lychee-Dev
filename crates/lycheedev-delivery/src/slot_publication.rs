@@ -19,7 +19,7 @@ use lycheedev_core::{
     storage::{self, ExclusiveLock},
 };
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::PathBuf,
     time::Duration,
@@ -262,6 +262,24 @@ impl<'a> PublicationLease<'a> {
         version: &str,
         control: &'a OperationControl,
     ) -> Result<Self> {
+        Self::acquire_recorded_with_pool_check(identity, version, control, true)
+    }
+    /// Cleanup-only acquisition after the caller has proved the exact process
+    /// or runtime ended. Lost reservation metadata cannot authorize input; it
+    /// also cannot prevent retiring that caller's durable transaction.
+    pub fn acquire_retirement_recorded(
+        identity: &RecordedInstallationIdentity,
+        version: &str,
+        control: &'a OperationControl,
+    ) -> Result<Self> {
+        Self::acquire_recorded_with_pool_check(identity, version, control, false)
+    }
+    fn acquire_recorded_with_pool_check(
+        identity: &RecordedInstallationIdentity,
+        version: &str,
+        control: &'a OperationControl,
+        inspect_pool: bool,
+    ) -> Result<Self> {
         control.check()?;
         let maintenance = wait_lock(
             control,
@@ -301,7 +319,9 @@ impl<'a> PublicationLease<'a> {
                             manifest_sha256: identity.manifest_sha256.clone(),
                             _receipt_file: None,
                         };
-                        store.inspect(control)?;
+                        if inspect_pool {
+                            store.inspect(control)?;
+                        }
                         Ok(store)
                     },
                     ExclusiveLock::close,
@@ -525,6 +545,12 @@ pub fn next_free_slot(pool: &SlotPool, after: i32) -> Option<i32> {
 // A failed writer may have committed; never repair or roll it back on error.
 trait Store {
     fn inspect(&mut self, control: &OperationControl) -> lycheedev_core::Result<SlotPool>;
+    fn retirement_pool(
+        &mut self,
+        control: &OperationControl,
+    ) -> lycheedev_core::Result<Option<SlotPool>> {
+        self.inspect(control).map(Some)
+    }
     fn read_payload(
         &mut self,
         index: i32,
@@ -552,15 +578,27 @@ impl Store for DiskStore {
         control.check()?;
         slots::inspect_typed(&self.parent, &self.version, control)
     }
+    fn retirement_pool(
+        &mut self,
+        control: &OperationControl,
+    ) -> lycheedev_core::Result<Option<SlotPool>> {
+        slots::retirement_pool(&self.parent, &self.version, control)
+    }
     fn read_payload(
         &mut self,
         index: i32,
         control: &OperationControl,
     ) -> lycheedev_core::Result<Vec<u8>> {
         control.check()?;
-        let bytes = slots::read_bounded(
+        let directory = slots::directory(&self.parent, index as u16);
+        storage::guard_path(&self.parent, &directory)?;
+        if !fs::symlink_metadata(&directory)?.is_dir() {
+            return Err(invalid("retirement payload parent is not a directory"));
+        }
+        let bytes = slots::read_bounded_controlled(
             &slots::directory(&self.parent, index as u16).join("Payload.lua"),
             PAYLOAD_LIMIT,
+            control,
         )?;
         control.check()?;
         Ok(bytes)
@@ -798,7 +836,9 @@ fn retire_process(
     {
         return Err(invalid("ended-process retirement identity is incomplete").into());
     }
-    let mut pool = store.inspect(control)?;
+    let Some(mut pool) = store.retirement_pool(control)? else {
+        return Ok(());
+    };
     let index = slot_index(&pool, envelope.index)?;
     let entry = &mut pool.files[index];
     if entry.nonce != envelope.nonce {
@@ -832,7 +872,9 @@ fn retire_runtime(
     {
         return Err(invalid("replacement-runtime retirement identity is incomplete").into());
     }
-    let mut pool = store.inspect(control)?;
+    let Some(mut pool) = store.retirement_pool(control)? else {
+        return Ok(());
+    };
     let index = slot_index(&pool, envelope.index)?;
     let entry = &mut pool.files[index];
     if entry.nonce != envelope.nonce {

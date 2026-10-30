@@ -272,6 +272,34 @@ fn complete_named_lookup_no_heap_scan() {
     );
     assert!(f.calls.get() < 512);
 }
+
+#[test]
+fn previous_mailbox_root_exposes_only_identity_and_input_upgrade_evidence() {
+    for (kind, selector, allowed) in [
+        (1, Selector::Identity, true),
+        (5, Selector::Input, true),
+        (6, Selector::Bootstrap, false),
+        (
+            2,
+            Selector::Receipt {
+                nonce: "1".repeat(32),
+            },
+            false,
+        ),
+    ] {
+        let r = record(kind, b"upgrade-evidence".to_vec());
+        let mut f = Fixture::new();
+        f.publication(&r, None);
+        let previous = f.string(lycheedev_live::mailbox::PREVIOUS_SCHEMA.as_bytes());
+        f.replace_pointer(f.mailbox_nodes["schema"], previous);
+        let found = f.reader().lookup_admitted(&selector);
+        if allowed {
+            assert_eq!(found.unwrap().unwrap().payload, r.payload);
+        } else {
+            assert!(found.unwrap_err().contains("mailbox_schema_mismatch"));
+        }
+    }
+}
 #[test]
 fn path_mutation_discards_sample() {
     let r = record(5, b"input".to_vec());
@@ -632,12 +660,12 @@ fn bootstrap_uses_separate_namespace_and_confirmation_uses_kind_four() {
     );
 }
 #[test]
-fn non_current_publication_schema_is_rejected_for_all_record_kinds() {
+fn unsupported_publication_schema_is_rejected_for_all_record_kinds() {
     for kind in [1, 5] {
         let r = record(kind, b"incompatible publication".to_vec());
         let mut fixture = Fixture::new();
         fixture.publication(&r, None);
-        let schema = fixture.string(b"lycheedev.mailbox.v1");
+        let schema = fixture.string(b"unsupported.mailbox.schema");
         fixture.replace_pointer(fixture.mailbox_nodes["schema"], schema);
         for selector in [
             Selector::Identity,

@@ -22,7 +22,9 @@ mod protocol;
 mod wire;
 
 pub use input::*;
-pub use lycheedev_core::mailbox::{ContractError, MAX_EXACT_INTEGER, Result, SCHEMA, SLOT_COUNT};
+pub use lycheedev_core::mailbox::{
+    ContractError, MAX_EXACT_INTEGER, PREVIOUS_SCHEMA, Result, SCHEMA, SLOT_COUNT,
+};
 pub use protocol::*;
 pub use wire::*;
 

@@ -51,6 +51,7 @@ struct Fake {
     calls: Rc<RefCell<Vec<Call>>>,
     outcome: Option<ServiceOutcome>,
     report: DoctorResult,
+    fixed_report: Option<DoctorResult>,
     cancellation: Option<TrackedCancellation>,
 }
 impl Services for Fake {
@@ -103,11 +104,18 @@ impl Services for Fake {
         self.calls.borrow_mut().push(Call::Doctor(session.into()));
         self.report.clone()
     }
-    fn fix(&mut self, _: &DoctorResult, _: &Invocation, _: &OperationControl) -> ServiceOutcome {
+    fn fix(
+        &mut self,
+        report: DoctorResult,
+        _: &Invocation,
+        _: &OperationControl,
+    ) -> (DoctorResult, ServiceOutcome) {
         self.calls.borrow_mut().push(Call::Fix);
-        self.outcome
+        let outcome = self
+            .outcome
             .take()
-            .unwrap_or(ServiceOutcome::Completed(project_result()))
+            .unwrap_or(ServiceOutcome::Completed(project_result()));
+        (self.fixed_report.take().unwrap_or(report), outcome)
     }
 }
 fn fake(root: &Path, calls: Rc<RefCell<Vec<Call>>>) -> Fake {
@@ -116,6 +124,7 @@ fn fake(root: &Path, calls: Rc<RefCell<Vec<Call>>>) -> Fake {
         calls,
         outcome: None,
         report: DoctorResult::default(),
+        fixed_report: None,
         cancellation: None,
     }
 }
@@ -421,13 +430,23 @@ fn execute_reuses_exact_stored_probe_revision_without_reput() {
     let path = f.0.join("probe.lua");
     fs::write(&path, bytes).unwrap();
     let put = invocation(
-        &["live", "probe", "put", "--name", "reusable", "--file", "probe.lua"],
+        &[
+            "live",
+            "probe",
+            "put",
+            "--name",
+            "reusable",
+            "--file",
+            "probe.lua",
+        ],
         &f.0,
     );
     lycheedev_core::workspace::initialize(&put.home).unwrap();
     crate::dispatch(&put).unwrap();
     let registry = crate::live_aux::context(&put);
-    let before = lycheedev_live::probes::show(&registry, "reusable").unwrap().data;
+    let before = lycheedev_live::probes::show(&registry, "reusable")
+        .unwrap()
+        .data;
     let inv = invocation(
         &[
             "live",
@@ -457,7 +476,9 @@ fn execute_reuses_exact_stored_probe_revision_without_reput() {
     );
     assert_eq!(
         before,
-        lycheedev_live::probes::show(&registry, "reusable").unwrap().data
+        lycheedev_live::probes::show(&registry, "reusable")
+            .unwrap()
+            .data
     );
 }
 #[test]
@@ -574,7 +595,7 @@ fn cancelled_main_never_opens_service_or_restarts_budget() {
 #[test]
 fn doctor_retains_typed_connection_and_uses_protocol_context() {
     let f = Fixture::new();
-    let inv = invocation(&["live", "doctor", "--session", "CON-original"], &f.0);
+    let inv = invocation(&["doctor", "--session", "CON-original"], &f.0);
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls.clone());
     services.report.healthy = false;
@@ -585,22 +606,28 @@ fn doctor_retains_typed_connection_and_uses_protocol_context() {
     assert_eq!(response.error.as_ref().unwrap().code, "doctor.check_failed");
     assert_eq!(response.context["protocol"], TRANSPORT);
     assert!(!response.context.contains_key("transport"));
-    assert!(response.operation_id.is_empty());
+    assert_eq!(response.operation_id, "CON-original");
     assert!(rendered(&response, "json").contains("\"same\":1,\"same\":2"));
 }
 #[test]
 fn doctor_fix_preserves_result_on_error_and_does_not_reinspect_after_failure() {
     let f = Fixture::new();
-    let inv = invocation(
-        &["live", "doctor", "--session", "CON-original", "--fix"],
-        &f.0,
-    );
+    let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls.clone());
     services.outcome = Some(ServiceOutcome::ReportedWithFailure {
         result: project_result(),
         error: ChannelError::Pending { causes: vec![] }.into(),
     });
+    let mut repaired = services.report.clone();
+    repaired.add(
+        "live.repair",
+        "blocked",
+        "pending",
+        "live resume CON-original --project <original-project>",
+    );
+    repaired.connection = Some(project_result());
+    services.fixed_report = Some(repaired);
     let response = run(&inv, services);
     assert_eq!(
         *calls.borrow(),
@@ -617,7 +644,7 @@ fn doctor_fix_preserves_result_on_error_and_does_not_reinspect_after_failure() {
 fn doctor_validation_precedes_project_io_and_top_level_unselected_is_quiet() {
     let f = Fixture::new();
     let inv = invocation(
-        &["live", "doctor", "--session", "CON-original", "--pid", "17"],
+        &["doctor", "--session", "CON-original", "--pid", "17"],
         &f.0,
     );
     let response = dispatch_with::<Fake>(&inv, |_| panic!("invalid options opened project"));
@@ -626,8 +653,187 @@ fn doctor_validation_precedes_project_io_and_top_level_unselected_is_quiet() {
         "use --session with its original --project, or select --installation/--pid"
     );
     let inv = invocation(&["doctor"], &f.0);
-    assert!(doctor_checks(&inv).is_empty());
+    assert!(handles(&inv));
+    let warning = json!({"code":"fixture.warning","details":{"pending":true}});
+    let response = aggregate_doctor_with(
+        &inv,
+        || {
+            let mut outcome = lycheedev_core::Outcome::new(json!({"healthy":true,"checks":[]}));
+            outcome.warnings.push(warning.clone());
+            Ok(outcome)
+        },
+        || panic!("unselected doctor opened project"),
+    );
+    assert_eq!(response.exit_code(), 0);
+    let output: Value = serde_json::from_str(&rendered(&response, "json")).unwrap();
+    assert_eq!(output["warnings"], json!([warning]));
+}
+
+#[test]
+fn doctor_aggregate_keeps_workspace_checks_and_typed_retained_report_on_repair_failure() {
+    let f = Fixture::new();
+    let inv = invocation(
+        &[
+            "doctor",
+            "--session",
+            "CON-original",
+            "--fix",
+            "--hard-reset",
+        ],
+        &f.0,
+    );
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    let mut repaired = DoctorResult::default();
+    repaired.add(
+        "live.repair",
+        "blocked",
+        "pending cleanup",
+        "live resume CON-original --project <original-project>",
+    );
+    repaired.connection = Some(project_result());
+    repaired.repair_archive = "original-archive.slots".into();
+    services.fixed_report = Some(repaired);
+    services.outcome = Some(ServiceOutcome::ReportedWithFailure {
+        result: project_result(),
+        error: ChannelError::Pending { causes: vec![] }.into(),
+    });
+    let response = crate::dispatch_formal_entry_with(&inv, |inv| aggregate_doctor_with(inv,
+        || Err(ToolkitError::new("doctor.unhealthy", "workspace check failed", 3).with_details(json!({"context":{"workspace":"fixed-home"},"result":{"healthy":false,"checks":[{"id":"vault.workspace","ok":false,"status":"error","detail":"missing workspace"}]}}))),
+        || dispatch_with(inv, |_| Ok(services)))).unwrap();
+    assert_eq!(
+        *calls.borrow(),
+        [Call::Doctor("CON-original".into()), Call::Fix]
+    );
+    assert_eq!(response.exit_code(), 6);
+    assert_eq!(response.operation_id, "CON-original");
+    assert_eq!(response.context["workspace"], "fixed-home");
+    for format in ["json", "jsonl"] {
+        let output = rendered(&response, format);
+        assert!(output.contains("\"same\":1,\"same\":2"), "{output}");
+        let frame: Value = serde_json::from_str(output.lines().last().unwrap()).unwrap();
+        let envelope = if format == "jsonl" {
+            &frame["envelope"]
+        } else {
+            &frame
+        };
+        assert_eq!(envelope["result"]["healthy"], false);
+        assert_eq!(envelope["result"]["checks"][0]["id"], "vault.workspace");
+        assert_eq!(envelope["result"]["checks"][1]["id"], "live.repair");
+        assert_eq!(
+            envelope["result"]["live"]["repairArchive"],
+            "original-archive.slots"
+        );
+        assert_eq!(
+            envelope["result"]["live"]["connection"]["session"],
+            "CON-original"
+        );
+    }
+}
+
+#[test]
+fn doctor_repair_flags_are_validated_before_workspace_checks_and_native_open() {
+    let f = Fixture::new();
+    for flags in [
+        vec!["--hard-reset"],
+        vec!["--release", "release"],
+        vec!["--output", "archive"],
+        vec!["--request", "key"],
+        vec!["--session", "CON-original", "--pid", "17"],
+    ] {
+        let mut words = vec!["doctor"];
+        words.extend(flags);
+        let inv = invocation(&words, &f.0);
+        let response = aggregate_doctor_with(
+            &inv,
+            || panic!("invalid doctor options inspected workspace"),
+            || panic!("invalid doctor options opened native project"),
+        );
+        assert_eq!(response.exit_code(), 2);
+        assert_eq!(response.error.unwrap().code, "command.invalid_arguments");
+    }
+    let inv = invocation(
+        &[
+            "doctor",
+            "--fix",
+            "--hard-reset",
+            "--installation",
+            "client",
+            "--offline",
+            "--no-cache",
+            "--wait-seconds",
+            "600",
+        ],
+        &f.0,
+    );
+    assert!(validate_doctor(&inv).is_ok());
+    assert!(inv.flag_bool("--hard-reset"));
+    assert!(crate::parse(&["live".into(), "doctor".into()]).is_err());
+}
+
+#[test]
+fn doctor_help_and_schema_advertise_the_single_conditional_repair_entry() {
+    let f = Fixture::new();
+    let inv = invocation(&["schema", "doctor"], &f.0);
+    let schema = crate::agent_cli::discover(&inv).unwrap().unwrap().data;
+    assert_eq!(schema["command"], "doctor");
+    assert_eq!(schema["effects"]["gameInputWhen"], json!({"--fix":true}));
+    assert_eq!(schema["input"]["defaults"]["--wait-seconds"], "30");
+    let reset = schema["input"]["flags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|flag| flag["name"] == "--hard-reset")
+        .unwrap();
+    assert_eq!(reset["type"], "boolean");
+    assert_eq!(reset["arity"], 0);
+    assert!(
+        schema["input"]["constraints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|constraint| constraint
+                .as_str()
+                .unwrap()
+                .contains("--hard-reset, --release, --output and --request require --fix"))
+    );
+    let inv = invocation(&["doctor", "--help"], &f.0);
     assert!(!handles(&inv));
+    let help = crate::agent_cli::discover(&inv).unwrap().unwrap().data;
+    assert_eq!(help["command"], "doctor");
+    let inv = invocation(&["schema", "live", "doctor"], &f.0);
+    assert!(crate::agent_cli::discover(&inv).unwrap().is_err());
+}
+
+#[test]
+fn doctor_selected_unhealthy_checks_use_the_aggregate_error_contract() {
+    let f = Fixture::new();
+    let inv = invocation(&["doctor", "--session", "CON-original"], &f.0);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls);
+    services.report.add(
+        "live.input",
+        "blocked",
+        "no fresh input",
+        "wait for fresh input",
+    );
+    let response = aggregate_doctor_with(
+        &inv,
+        || {
+            Ok(lycheedev_core::Outcome::new(
+                json!({"healthy":true,"checks":[{"id":"source.emmy","ok":true,"status":"ok","detail":"verified"}]}),
+            ))
+        },
+        || dispatch_with(&inv, |_| Ok(services)),
+    );
+    assert_eq!(response.exit_code(), 3);
+    assert_eq!(response.error.unwrap().code, "doctor.unhealthy");
+    let Some(LiveResult::DoctorAggregate(report)) = response.result else {
+        panic!("missing aggregate")
+    };
+    assert_eq!(report.checks.len(), 2);
+    assert!(!report.healthy);
+    assert!(report.live.is_some());
 }
 #[test]
 fn finish_flush_failure_is_not_reported_as_success() {
@@ -669,11 +875,12 @@ fn default_cli_advertises_only_the_connected_formal_routes() {
         "live disconnect",
         "live reload",
         "live reload fallback",
-        "live doctor",
+        "doctor",
     ] {
         assert!(implemented.iter().any(|d| d.path == route), "{route}");
     }
     assert!(!implemented.iter().any(|d| d.path == "live report"));
+    assert!(!implemented.iter().any(|d| d.path == "live doctor"));
     for route in ["live cancel", "live abandon"] {
         assert!(
             !implemented.iter().any(|d| d.path == route),
@@ -690,7 +897,7 @@ fn seed_completed_history(root: &Path) -> (String, PathBuf) {
         SCHEMA,
         admission::{ClientRecord, ConnectionBook, ConnectionTarget, WindowRecord},
         driver::TokenSource,
-        journal::{StateJournal, save_state},
+        journal::save_state,
         observations::ChannelResult,
         state::{Operation, OperationStage, ResultBytes},
     };
@@ -1096,7 +1303,7 @@ fn main_file_preparation_does_not_turn_cancellation_into_arguments_or_invoke_ser
 #[test]
 fn doctor_fix_without_target_projects_check_failed_at_query_stage() {
     let f = Fixture::new();
-    let inv = invocation(&["live", "doctor", "--fix"], &f.0);
+    let inv = invocation(&["doctor", "--fix"], &f.0);
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls);
     services.outcome = Some(ServiceOutcome::Failed(
@@ -1123,7 +1330,7 @@ fn top_level_doctor_omits_empty_next_step_and_retains_nonempty_guidance() {
         "not ready",
         "wait for fresh sample",
     );
-    let checks = project_doctor_checks(report);
+    let checks = project_doctor_checks(&report);
     assert!(checks[0].get("nextStep").is_none());
     assert_eq!(checks[0]["ok"], true);
     assert_eq!(checks[1]["status"], "error");
@@ -1190,21 +1397,26 @@ fn non_connection_recovery_is_rejected_before_workspace_or_native_factory() {
 #[test]
 fn doctor_failed_without_result_preserves_prior_report_and_skips_reinspection() {
     let f = Fixture::new();
-    let inv = invocation(
-        &["live", "doctor", "--session", "CON-original", "--fix"],
-        &f.0,
-    );
+    let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls.clone());
     services.report.connection = Some(project_result());
     services.outcome = Some(ServiceOutcome::Failed(ChannelError::Cancelled.into()));
+    let mut repaired = services.report.clone();
+    repaired.add(
+        "live.repair",
+        "blocked",
+        "cancelled",
+        "resolve the repair error, then run doctor --fix for the same target",
+    );
+    services.fixed_report = Some(repaired);
     let response = run(&inv, services);
     assert_eq!(
         *calls.borrow(),
         [Call::Doctor("CON-original".into()), Call::Fix]
     );
     assert_eq!(response.exit_code(), 7);
-    assert!(response.operation_id.is_empty());
+    assert_eq!(response.operation_id, "CON-original");
     let Some(LiveResult::Doctor(report)) = response.result else {
         panic!("doctor report lost");
     };
@@ -1212,45 +1424,40 @@ fn doctor_failed_without_result_preserves_prior_report_and_skips_reinspection() 
     assert_eq!(report.connection.unwrap().session, "CON-original");
     assert_eq!(
         report.checks.last().unwrap().next_step,
-        "resolve the repair error, then run live doctor --fix for the same target"
+        "resolve the repair error, then run doctor --fix for the same target"
     );
 }
 
 #[test]
-fn doctor_completed_reinspects_and_retains_original_repair_projection() {
+fn doctor_completed_keeps_service_reinspection_without_repeating_it() {
     let f = Fixture::new();
-    let inv = invocation(
-        &["live", "doctor", "--session", "CON-original", "--fix"],
-        &f.0,
-    );
+    let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls.clone());
     services.report.healthy = true;
     services.outcome = Some(ServiceOutcome::Completed(project_result()));
+    let mut repaired = services.report.clone();
+    repaired.connection = Some(project_result());
+    repaired.repair_archive = "original-repair.slots".into();
+    services.fixed_report = Some(repaired);
     let response = run(&inv, services);
     assert_eq!(
         *calls.borrow(),
-        [
-            Call::Doctor("CON-original".into()),
-            Call::Fix,
-            Call::Doctor("CON-original".into())
-        ]
+        [Call::Doctor("CON-original".into()), Call::Fix]
     );
     assert_eq!(response.exit_code(), 0);
     let Some(LiveResult::Doctor(report)) = response.result else {
         panic!("doctor report lost");
     };
     assert_eq!(report.connection.unwrap().stage, "result_verified");
+    assert_eq!(report.repair_archive, "original-repair.slots");
 }
 
 #[test]
 fn doctor_empty_session_projection_does_not_replace_previous_connection() {
     for failed in [false, true] {
         let f = Fixture::new();
-        let inv = invocation(
-            &["live", "doctor", "--session", "CON-original", "--fix"],
-            &f.0,
-        );
+        let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
         let calls = Rc::new(RefCell::new(vec![]));
         let mut services = fake(&f.0, calls.clone());
         services.report.connection = Some(project_result());
@@ -1265,17 +1472,9 @@ fn doctor_empty_session_projection_does_not_replace_previous_connection() {
             ServiceOutcome::Completed(result)
         });
         let response = run(&inv, services);
-        assert!(response.operation_id.is_empty());
+        assert_eq!(response.operation_id, "CON-original");
         assert_eq!(response.exit_code(), if failed { 7 } else { 0 });
-        let expected = if failed {
-            vec![Call::Doctor("CON-original".into()), Call::Fix]
-        } else {
-            vec![
-                Call::Doctor("CON-original".into()),
-                Call::Fix,
-                Call::Doctor(String::new()),
-            ]
-        };
+        let expected = vec![Call::Doctor("CON-original".into()), Call::Fix];
         assert_eq!(*calls.borrow(), expected);
         let Some(LiveResult::Doctor(report)) = response.result else {
             panic!("doctor report lost");

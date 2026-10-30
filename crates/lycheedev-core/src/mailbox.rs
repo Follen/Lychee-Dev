@@ -10,6 +10,9 @@ mod code_bytes;
 pub use code_bytes::CodeBytes;
 
 pub const SCHEMA: &str = "Lycheedev mailbox protocol v1";
+/// Read-only identity/INPUT evidence for reloading the preceding two-key runtime.
+/// Current producers and business publications always use SCHEMA.
+pub const PREVIOUS_SCHEMA: &str = "lycheedev.mailbox.v1";
 pub const SLOT_COUNT: i32 = 500;
 pub const MAX_EXACT_INTEGER: u64 = 9_007_199_254_740_991;
 pub type Token = [u8; 16];

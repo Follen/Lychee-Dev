@@ -25,7 +25,7 @@ struct Envelope<'a> {
     context: &'a BTreeMap<String, Value>,
     result: &'a Option<LiveResult>,
     captures: [Value; 0],
-    warnings: &'a [String],
+    warnings: &'a [Value],
     error: Option<Fault>,
 }
 fn envelope(response: &Response) -> Envelope<'_> {

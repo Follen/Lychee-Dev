@@ -15,7 +15,7 @@ result to establish what it actually completed.
 
 The `effects` fields describe possible effects. `gameInput: true` includes
 connection, recovery and cleanup exchanges; it does not mean input was already
-sent. `gameInputWhen` lists required options: `live doctor` can send input only
+sent. `gameInputWhen` lists required options: `doctor` can send input only
 with `--fix`. Its default diagnosis, `live status` and `live session` send none.
 
 For Data, `data agent schema` gives the authoritative versioned task contract.

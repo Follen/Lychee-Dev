@@ -190,6 +190,9 @@ where
             {
                 return Err(contract("live.channel_runtime_build_mismatch"));
             }
+            if identity.input_state == super::super::PREVIOUS_SCHEMA {
+                return Ok(Selected::Activation("connect-upgrade"));
+            }
             if identity.inventory.is_some_and(|n| n != identity.slots) {
                 return Err(contract("live.channel_slot_inventory_incomplete"));
             }
@@ -445,9 +448,16 @@ where
                     };
                 if let Some(candidate) = candidates.first() {
                     let can_reload = native.activation_capability(candidate, &bounded)?;
-                    if can_reload && a.phase == ActivationPhase::Prepared {
+                    if can_reload
+                        && (a.phase == ActivationPhase::Prepared
+                            || candidate.input_state == super::super::PREVIOUS_SCHEMA)
+                    {
                         if !candidate.owner.is_empty() {
                             return Err(error("live.channel_ownership_changed"));
+                        }
+                        if a.phase == ActivationPhase::WaitingManualReload {
+                            a.budget =
+                                Some(budget(self.clock.unix_millis(), DEFAULT_RECOVERY_MILLIS)?);
                         }
                         let mut state = selected_state(id, candidate.clone(), a.budget.clone());
                         state.reload = Some(ReloadAttempt {

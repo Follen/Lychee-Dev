@@ -259,11 +259,11 @@ mod tests {
             assert_eq!(row["gameInput"], true, "{path}");
             assert!(row["gameInputWhen"].is_null(), "{path}");
         }
-        let repair = effect("live doctor");
+        let repair = effect("doctor");
         assert_eq!(repair["gameProcess"], true);
         assert_eq!(repair["gameInput"], true);
         assert_eq!(repair["gameInputWhen"], json!({"--fix": true}));
-        for path in ["doctor", "live instances"] {
+        for path in ["live instances"] {
             assert_eq!(effect(path)["gameProcess"], true, "{path}");
             assert_eq!(effect(path)["gameInput"], false, "{path}");
         }

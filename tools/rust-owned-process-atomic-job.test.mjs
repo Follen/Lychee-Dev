@@ -86,10 +86,14 @@ test('startup hash ordering is checkout-line-ending independent and rejects miss
 
 test('Windows hashes the actual startup block in an empty runspace with no Get-FileHash or module autoload', windows, t => {
   const f = fixture(t, 'hash-no-modules'), script = join(f.evidence, 'hash-no-modules.ps1');
+  const isolatedWrapper = join(f.evidence, 'rust-owned-process.ps1'), wrapperBytes = readFileSync(wrapper);
   const binary = join(f.evidence, 'raw hash [literal].bin'), empty = join(f.evidence, 'empty.bin');
+  // Other Node suites may be reading the production script. Prove exclusive
+  // reopen on our own copy of its exact bytes, not on that shared source path.
+  writeFileSync(isolatedWrapper, wrapperBytes);
   writeFileSync(binary, Buffer.from([0xef, 0xbb, 0xbf, 0, 0xff, 0x80, 10, 13, 0x61]));
   writeFileSync(empty, Buffer.alloc(0));
-  const inputs = [wrapper, binary, empty];
+  const inputs = [isolatedWrapper, binary, empty];
   const literal = value => "'" + value.replaceAll("'", "''") + "'";
   writeFileSync(script, '\uFEFF' + `$ErrorActionPreference='Stop'
 # A fresh runspace has no cmdlets or imported modules. Disable module autoload
@@ -133,7 +137,8 @@ $wrapperObservedSHA256
   writeFileSync(join(f.evidence, 'wrapper-result.json'), JSON.stringify({status: execution.status, error: execution.error?.message,
     stdout: execution.stdout, stderr: execution.stderr}, null, 2));
   assert.equal(execution.error, undefined); assert.equal(execution.status, 0, execution.stderr);
-  assert.deepEqual(execution.stdout.trim().split(/\r?\n/), inputs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex')));
+  assert.deepEqual(execution.stdout.trim().split(/\r?\n/), [wrapperBytes, readFileSync(binary), readFileSync(empty)]
+    .map(bytes => createHash('sha256').update(bytes).digest('hex')));
 });
 
 test('atomic startup retains the handle list and persists exact root before Resume', () => {
