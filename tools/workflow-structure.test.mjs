@@ -1,10 +1,11 @@
 // CI graph and artifact contracts; these checks do not run native builds.
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TEST_SHARDS } from './ci-test-programs.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const directory = join(repository, '.github/workflows');
@@ -25,7 +26,8 @@ function oneStep(body, pattern) {
   const matches = steps(body).filter(step => pattern.test(step)); assert.equal(matches.length, 1, String(pattern)); return matches[0];
 }
 function action(body, kind, artifact) {
-  return oneStep(body, new RegExp(`actions/${kind}-artifact@[\\s\\S]*?^          name: ${artifact}$`, 'm'));
+  const escaped = artifact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return oneStep(body, new RegExp(`actions/${kind}-artifact@[\\s\\S]*?^          name: ${escaped}$`, 'm'));
 }
 function requireNeeds(job, dependencies) {
   assert.deepEqual(needs(jobs.get(job)).sort(), [...dependencies].sort(), `${job} dependency graph`);
@@ -38,6 +40,25 @@ function directDependencies(map) {
 function verifiedBefore(body, manifest, required, command) {
   const text = commands(body), verify = `ci-artifacts.mjs verify --manifest ${manifest} --require ${required}`;
   assert(text.indexOf(verify) >= 0 && text.indexOf(verify) < text.indexOf(command), `${verify} must precede ${command}`);
+}
+function rustShards(body) {
+  const values = /^        shard:\s*\[([^\]]+)\]/m.exec(body)?.[1];
+  assert(values, 'Rust matrix must declare its named shard axis');
+  return values.split(',').map(value => value.trim().replace(/^(['"])(.*)\1$/, '$2'));
+}
+function workspacePackages() {
+  const manifest = readFileSync(join(repository, 'Cargo.toml'), 'utf8');
+  const members = /^members\s*=\s*\[([^\]]+)\]/m.exec(manifest)?.[1]; assert(members);
+  return [...members.matchAll(/"([^"]+)"/g)].map(([, path]) => {
+    const name = /^name\s*=\s*"([^"]+)"/m.exec(readFileSync(join(repository, path, 'Cargo.toml'), 'utf8'))?.[1];
+    assert(name, path); return name;
+  }).sort();
+}
+
+function checkPartition(groups, expected) {
+  const packages = Object.values(groups).flat();
+  assert.equal(new Set(packages).size, packages.length, 'a workspace package appears in multiple Rust shards');
+  assert.deepEqual([...packages].sort(), [...expected].sort(), 'Rust shards must cover every workspace package exactly once');
 }
 
 test('only current workflows, immutable actions and read-only release permissions remain', () => {
@@ -95,6 +116,7 @@ test('native configurations compile once with timing and explicit cached build i
     const body = jobs.get(name), compile = oneStep(body, /id: compile/);
     assert.equal((ci.match(new RegExp(`node tools/${command.replaceAll('.', '\\.')}`, 'g')) ?? []).length, 1);
     assert.match(compile, /--jobs 2\b/); assert.match(compile, /--timings\b/);
+    assert.match(compile, /CARGO_LOG: cargo::compiler::fingerprint=info/);
     assert.match(compile, /LYCHEEDEV_BUILD_COMMIT: \$\{\{ github.sha \}\}/);
     assert.match(compile, /LYCHEEDEV_BUILD_DIRTY: 'false'/);
     assert(body.includes('python third_party/emmy/prepare.py --download'));
@@ -155,6 +177,56 @@ test('validation verifies the producer manifests before execution', () => {
   assert.match(pkg, /skill-contract.mjs --skill-root \S+ --bin \.tmp\/ci\/build-release\/cli\/lycheedev.exe/);
 });
 
+test('Rust shard artifacts remain distinct after merging and aggregation precedes candidate sealing', () => {
+  const rust = jobs.get('validate-rust'), ready = jobs.get('release-ready'), shards = rustShards(rust);
+  assert.match(rust, /^      fail-fast: false$/m, 'one failed shard must not cancel the other runner');
+  const run = commands(oneStep(rust, /ci-test-programs.mjs run /));
+  const record = /ci-test-programs.mjs run (\S+)/.exec(run)?.[1]; assert(record);
+  assert.match(run, /--shard \$\{\{ matrix.shard \}\}/);
+  assert.doesNotMatch(run, /--package\b|--target\b/, 'named groups cannot be narrowed in the workflow');
+  const reportTemplate = /--report (.+?) --formal-lua/.exec(run)?.[1]; assert(reportTemplate);
+  const upload = action(rust, 'upload', 'ci-validate-rust-${{ matrix.shard }}');
+  const artifactTemplate = /^          name: (.+)$/m.exec(upload)?.[1];
+  const uploadRoot = /^          path: (.+)$/m.exec(upload)?.[1]; assert(uploadRoot);
+  assert.match(upload, /^        if: always\(\)$/m);
+  const download = oneStep(ready, /actions\/download-artifact@[\s\S]*pattern: ci-validate-rust-\*/);
+  assert.match(download, /^          merge-multiple: true$/m);
+  const downloadRoot = /^          path: (.+)$/m.exec(download)?.[1]; assert(downloadRoot);
+  const reports = shards.map(shard => {
+    const expand = value => value.replaceAll('${{ matrix.shard }}', shard);
+    const report = expand(reportTemplate), pathInArtifact = relative(resolve(repository, expand(uploadRoot)), resolve(repository, report));
+    assert.equal(pathInArtifact, join(shard, 'report.json'), 'upload must retain each shard directory instead of flattening report.json');
+    return resolve(repository, downloadRoot, pathInArtifact);
+  });
+  assert.equal(new Set(shards.map(shard => artifactTemplate.replaceAll('${{ matrix.shard }}', shard))).size, shards.length);
+  const aggregateStep = oneStep(ready, /ci-test-programs.mjs aggregate /), aggregate = commands(aggregateStep);
+  assert.equal(/ci-test-programs.mjs aggregate (\S+)/.exec(aggregate)?.[1], record, 'aggregate the same sealed record that each runner consumed');
+  const shardReports = [...aggregate.matchAll(/--shard-report (\S+)/g)].map(([, path]) => resolve(repository, path));
+  assert.deepEqual(shardReports.sort(), reports.sort(), 'aggregate must consume all and only the produced shard reports');
+  assert.match(aggregateStep, /if \(\$LASTEXITCODE -ne 0\) \{ throw /);
+  const candidateStep = oneStep(ready, /ci-release.mjs candidate/), candidate = commands(candidateStep);
+  assert(ready.indexOf(aggregateStep) < ready.indexOf(candidateStep));
+  const unified = /--report (\S+)/.exec(aggregate)?.[1]; assert(unified);
+  assert.equal(/--report rust=(\S+)/.exec(candidate)?.[1], unified);
+  assert(needs(ready).includes('validate-rust'), 'candidate remains gated on success of the complete matrix');
+});
+
+test('the workflow uses the shared Rust partition and every workspace package belongs to exactly one runner', () => {
+  const shards = rustShards(jobs.get('validate-rust'));
+  assert.deepEqual([...shards].sort(), Object.keys(TEST_SHARDS).sort());
+  assert.equal(new Set(shards).size, shards.length, 'matrix must not schedule a named group twice');
+  assert.equal(shards.length, 2, 'the measured split uses two independent runners');
+  assert(Object.isFrozen(TEST_SHARDS));
+  for (const packages of Object.values(TEST_SHARDS)) assert(Object.isFrozen(packages) && packages.length > 0);
+  const expected = workspacePackages();
+  checkPartition(TEST_SHARDS, expected);
+  const missing = structuredClone(TEST_SHARDS); missing[shards[0]].pop();
+  assert.throws(() => checkPartition(missing, expected), /cover every workspace package/);
+  const overlapping = structuredClone(TEST_SHARDS); overlapping[shards[1]].push(overlapping[shards[0]][0]);
+  assert.throws(() => checkPartition(overlapping, expected), /appears in multiple Rust shards/);
+  assert.doesNotMatch(jobs.get('validate-rust'), /^\s+packages:/m, 'workflow must not duplicate the package partition');
+});
+
 test('package install and business checks consume the producer TGZ and precompiled seed', () => {
   const body = jobs.get('validate-package');
   assert.match(body, /rust-package-smoke.mjs validate \.tmp\/ci\/validate-package\/npm --package-report \.tmp\/ci\/build-release\/npm-package\/report.json/);
@@ -173,7 +245,7 @@ test('independent audit and release candidate share producer and validation iden
   assert.match(audit, /Join-Path \(Split-Path \$producer\) \$report.tgz/);
   assert.match(audit, /release.mjs audit-tgz --tgz \$tgz --version \$report.packageVersion --commit \$report.commit/);
   for (const name of ['build-test-programs', 'build-release', 'validate-rust', 'validate-addon', 'validate-package', 'audit-package']) assert(needs(ready).includes(name));
-  for (const artifact of ['ci-build-test', 'ci-build-release', 'ci-validate-rust', 'ci-validate-addon', 'ci-validate-package', 'ci-audit-package']) action(ready, 'download', artifact);
+  for (const artifact of ['ci-build-test', 'ci-build-release', 'ci-validate-addon', 'ci-validate-package', 'ci-audit-package']) action(ready, 'download', artifact);
   const candidate = commands(oneStep(ready, /ci-release.mjs candidate/));
   assert.match(candidate, /--build-manifest \.tmp\/ci\/build-release\/build-manifest.json/);
   assert.match(candidate, /--test-manifest \.tmp\/ci\/build-test\/build-manifest.json/);
@@ -194,7 +266,7 @@ test('consumers never compile, resolve dependencies, rebuild Lua or reproduce pa
 });
 
 test('finished outputs and reports survive failures without hiding job failures', () => {
-  for (const [name, artifact] of [['prepare-resources', 'ci-resources'], ['build-test-programs', 'ci-build-test'], ['build-release-native', 'ci-build-release-native'], ['build-release', 'ci-build-release'], ['validate-rust', 'ci-validate-rust'], ['validate-addon', 'ci-validate-addon'], ['validate-package', 'ci-validate-package'], ['audit-package', 'ci-audit-package']]) {
+  for (const [name, artifact] of [['prepare-resources', 'ci-resources'], ['build-test-programs', 'ci-build-test'], ['build-release-native', 'ci-build-release-native'], ['build-release', 'ci-build-release'], ['validate-rust', 'ci-validate-rust-${{ matrix.shard }}'], ['validate-addon', 'ci-validate-addon'], ['validate-package', 'ci-validate-package'], ['audit-package', 'ci-audit-package']]) {
     const upload = action(jobs.get(name), 'upload', artifact);
     assert.match(upload, /^        if: always\(\)$/m, name); assert.doesNotMatch(upload, /overwrite:/);
   }

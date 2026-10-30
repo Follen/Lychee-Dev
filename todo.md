@@ -12,9 +12,8 @@
 
 `ci.yml`/`release.yml` 与 `tools/ci-*.mjs` 已按每PR完整Release和正式包验收重设计；以下未闭合：
 
-- [ ] **CI-REDESIGN｜每PR完整验收与准确复用。** 固定Lua供应/导入、唯一TGZ生产/安装/审计、独立消费者、失败诊断及候选哈希汇总已实现。包内Source/Data真实业务入口已接当前Release与既有固定输入；需本轮Actions实际运行，不能以Node边界测试计作业务通过。本地导入解释器已通过35套×6配置addon回归。
-- [ ] **CI-04｜一次真实 CI 运行核实。** 40e21c2626的Actions运行41034790784完成静态、测试程序和Release编译，两类编译缓存保存成功；封存失败于luac身份差异，后续未运行。重设计完成后核实实际跨job复用和缓存重建原因，不因旧产物存在就改写其提交身份。旧Release未上传，只保留了编译缓存。
-- [ ] **CI 产物的跨 job 路径。** build artifact 记录含构建时绝对 workspace 路径；当前 workflow 依赖 hosted Windows 默认 checkout 路径一致，须在真实 CI 核实。validate-package 已改为显式复用 build 封存的完整许可证 closure，移除下游 fetch/metadata；纯 Node 回归及本批实际新包复用均通过。只读 `cargo -V` 工具链探针保留，不声称完全没有 Cargo 进程。
+- [ ] **CI-REDESIGN｜每PR完整验收与准确复用。** 8713f892的Actions41045064696已通过固定工具、addon、两类原生构建、唯一TGZ生产/审计/安装、Data业务和93个Rust程序。Source被硬编码旧preserveLatest拒绝；本批已修复两处合同并补真实清单回归，新增实测均衡的两组测试和精确覆盖汇总。70项受影响Node检查通过，等待集中提交后的完整Actions与新TGZ业务/候选验收。
+- [ ] **CI-04｜一次真实 CI 运行核实。** 跨job路径、预编译程序、许可证closure及同一TGZ安装已通过。旧轮Cargo测试456.817秒、Release963.108秒；本批修正Cargo1.99日志模块名，需新运行核具体重编原因与两组实际耗时。本机新构建因既有缓存额度在admission停止，未执行Cargo；编译验证交本批Actions，不清缓存或换target绕过。
 
 ## 3. 当前路径测试与交付
 

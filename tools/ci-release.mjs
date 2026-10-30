@@ -104,6 +104,15 @@ export function assertNpmSmokeVersion(report, expectedVersion) {
   if (report.version?.result?.version !== expectedVersion) throw new Error('ci-release.npm_version_mismatch');
 }
 
+export function assertRustCoverage(report, {commit, sourceTree, recordSHA256, programs}) {
+  if (report?.schema !== 'lycheedev.ci-test-run.v1' || report.commit !== commit
+    || report.sourceTree !== sourceTree || report.testRecordSHA256 !== recordSHA256) throw new Error('ci-release.rust_report_identity');
+  if (report.state !== 'passed' || report.handlesReaped !== true || report.programs !== programs
+    || report.passed !== programs || report.failed !== 0 || report.coverage?.complete !== true
+    || report.coverage.expectedPrograms !== programs || report.coverage.observedPrograms !== programs
+    || report.coverage.shards !== 2) throw new Error('ci-release.rust_coverage_incomplete');
+}
+
 export function assertPackageReports({ production, installation, audit, business, productionSHA256, installationSHA256 }) {
   if (production.schema !== 'lycheedev.rust-npm-package.v1' || production.state !== 'packed') throw new Error('ci-release.package_not_produced');
   if (installation.packageReportSHA256 !== productionSHA256) throw new Error('ci-release.installation_producer_mismatch');
@@ -146,6 +155,9 @@ export function releaseCandidate(options = {}) {
   for (const name of ['rust', 'addon-lua', 'addon-zip', 'skill', 'package-audit', 'package-business']) {
     if (!reportMap.has(name)) throw new Error(`ci-release.validation_report_required: ${name}`);
   }
+  const testPrograms = testManifest.components['test-programs'];
+  assertRustCoverage(reportMap.get('rust'), {commit: identity.commit, sourceTree: testManifest.sourceTree,
+    recordSHA256: testPrograms.recordSHA256, programs: testPrograms.programs});
   assertPackageReports({ production: assembly, installation: npm, audit: reportMap.get('package-audit'), business: reportMap.get('package-business'),
     productionSHA256: buildManifest.components['npm-package'].reportSHA256, installationSHA256: hash(readFileSync(resolve(repository, options.npmReport))) });
   // The candidate copies the producer's archive. Installation and audit must

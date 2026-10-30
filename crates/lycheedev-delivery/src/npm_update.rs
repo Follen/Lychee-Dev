@@ -76,18 +76,42 @@ fn read(path: &Path, max: u64) -> Result<Value> {
 pub(crate) fn release_channel(version: &str) -> &'static str {
     if version == "3.5.0" { "beta" } else { "next" }
 }
+/// Match the published channel manifest contract. preserveLatest records the
+/// publisher's protected stable tag; runtime admission does not pin its value.
+pub(crate) fn valid_channel_binding(channel: &Value, version: &str) -> bool {
+    let Some(fields) = channel.as_object() else {
+        return false;
+    };
+    let (Some(bound_version), Some(preserved)) = (
+        fields.get("version").and_then(Value::as_str),
+        fields.get("preserveLatest").and_then(Value::as_str),
+    ) else {
+        return false;
+    };
+    let stable = |value: &str| {
+        let mut parts = value.split('.');
+        (0..3).all(|_| {
+            parts.next().is_some_and(|part| {
+                !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
+            })
+        }) && parts.next().is_none()
+    };
+    fields.len() == 4
+        && fields.get("schema").and_then(Value::as_str) == Some("lycheedev.npm-channel.v1")
+        && fields.get("distTag").and_then(Value::as_str) == Some(release_channel(bound_version))
+        && bound_version == version
+        && stable(bound_version)
+        && stable(preserved)
+        && preserved != bound_version
+}
 pub fn binding(root: &Path, version: &str) -> Result<()> {
     let manifest = read(&root.join("release.json"), 1 << 20)?;
-    let channel = &manifest["npmChannel"];
     if manifest["runtime"] != "rust"
-        || channel["schema"] != "lycheedev.npm-channel.v1"
-        || channel["version"] != version
-        || channel["distTag"] != release_channel(version)
-        || channel["preserveLatest"] != "2.5.1"
+        || !valid_channel_binding(&manifest["npmChannel"], version)
     {
         return Err(fault(
             "update.runtime_incompatible",
-            "self-update requires the version-bound Rust release channel; latest remains 2.5.1",
+            "self-update requires the version-bound Rust release channel",
             3,
         ));
     }

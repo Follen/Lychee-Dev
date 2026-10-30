@@ -80,8 +80,8 @@ test('build artifact preserves the retired receipt, exact logs and this invocati
   try{
     const output=join(root,'artifact'),stdout=Buffer.from([0,255,128,13,10]),stderr=Buffer.from('fingerprint: dependency dirty because input changed\r\n');
     const html=Buffer.from('<!doctype html>\r\n本次 Cargo timings\r\n');
-    const record=buildRust(root,output,{timings:true,environment:{CARGO_LOG:'cargo::core::compiler::fingerprint=info'},execute(command,args,options){
-      assert.equal(command,'cargo');assert.equal(args.at(-1),'--timings');assert.equal(options.env.CARGO_LOG,'cargo::core::compiler::fingerprint=info');
+    const record=buildRust(root,output,{timings:true,environment:{CARGO_LOG:'cargo::compiler::fingerprint=info'},execute(command,args,options){
+      assert.equal(command,'cargo');assert.equal(args.at(-1),'--timings');assert.equal(options.env.CARGO_LOG,'cargo::compiler::fingerprint=info');
       originalEvidence=options.evidence;
       const target=options.env.CARGO_TARGET_DIR;mkdirSync(join(target,'debug'),{recursive:true});writeFileSync(join(target,'debug/lycheedev.exe'),'fixture executable');
       mkdirSync(join(target,'cargo-timings'));writeFileSync(join(target,'cargo-timings/cargo-timing.html'),html);writeFileSync(join(target,'cargo-timings/unrelated-old.html'),'old report');

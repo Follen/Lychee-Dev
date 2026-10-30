@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
-import { RECORD_SCHEMA, buildTestPrograms, readTestRecord, runTestPrograms, packageName, isFormalBridge } from './ci-test-programs.mjs';
+import { RECORD_SCHEMA, TEST_SHARDS, aggregateTestReports, buildTestPrograms, readTestRecord, runTestPrograms, packageName, isFormalBridge } from './ci-test-programs.mjs';
 import { sourceDigest } from './rust-build.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -165,4 +165,171 @@ test('reaped ordinary business failure still continues and reports the actual la
  assert.throws(()=>runTestPrograms({recordPath:write(record({programs:[program,next]})),reportPath,executor(){return {status:launches++===0?101:0,handlesReaped:true};}}),/tests_failed: 1 program/);
  assert.equal(launches,2);
  const report=JSON.parse(readFileSync(reportPath));assert.equal(report.state,'failed');assert.equal(report.attempted,2);assert.equal(report.failed,1);assert.equal(report.passed,1);assert.deepEqual(report.results.map(result=>result.handlesReaped),[true,true]);
+});
+
+let shardFixtureId = 0;
+function shardFixture() {
+  const directory = buildFixture(`shards-${shardFixtureId++}`), recordPath = join(directory, 'test-programs.json');
+  const packages = Object.values(TEST_SHARDS).flat();
+  const programs = packages.map((package_, index) => {
+    const path = join(directory, `program-${index}.exe`), bytes = Buffer.from(`sealed program ${package_}`); writeFileSync(path, bytes);
+    return {package: package_, target: `target-${index}`, kinds: ['lib'], path, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length};
+  });
+  const record = {schema: RECORD_SCHEMA, root: directory, commit: gitHead(), sourceTree: sourceDigest(directory), cargoTargetDir: join(directory, 'target'), programs, support: []};
+  writeFileSync(recordPath, JSON.stringify(record));
+  const reports = Object.keys(TEST_SHARDS).map(shard => {
+    const path = join(directory, `${shard}.json`);
+    const report = runTestPrograms({root: directory, recordPath, shard, reportPath: path, executor() {return {status: 0, handlesReaped: true};}});
+    return {shard, path, report};
+  });
+  const output = join(directory, 'aggregate.json');
+  return {directory, recordPath, record, reports, output, aggregate: (paths = reports.map(report => report.path)) => aggregateTestReports({root: directory, recordPath, reportPaths: paths, reportPath: output})};
+}
+function updateShard(fixture, index, change) {
+  const value = JSON.parse(readFileSync(fixture.reports[index].path)); change(value);
+  writeFileSync(fixture.reports[index].path, JSON.stringify(value));
+}
+
+test('fixed shards are immutable, disjoint and retain the intended package ownership', () => {
+  assert(Object.isFrozen(TEST_SHARDS));
+  for (const packages of Object.values(TEST_SHARDS)) assert(Object.isFrozen(packages));
+  assert.deepEqual(TEST_SHARDS['data-delivery'], ['lycheedev-data', 'lycheedev-delivery', 'lycheedev-binding-contracts']);
+  const all = Object.values(TEST_SHARDS).flat(); assert.equal(new Set(all).size, 9); assert.equal(all.length, 9);
+});
+
+test('named shard execution records its exact plan and record identity; pure aggregate proves full coverage', () => {
+  const f = shardFixture(), digest = createHash('sha256').update(readFileSync(f.recordPath)).digest('hex');
+  for (const group of f.reports) {
+    assert.equal(group.report.commit, f.record.commit); assert.equal(group.report.testRecordSHA256, digest);
+    assert.equal(group.report.plannedPrograms.length, TEST_SHARDS[group.shard].length);
+    assert(group.report.plannedPrograms.every(program => TEST_SHARDS[group.shard].includes(program.package)));
+    assert.equal(group.report.handlesReaped, true);
+  }
+  const summary = f.aggregate();
+  assert.equal(summary.schema, 'lycheedev.ci-test-run.v1'); assert.equal(summary.state, 'passed'); assert.equal(summary.handlesReaped, true);
+  assert.equal(summary.commit, f.record.commit); assert.equal(summary.sourceTree, f.record.sourceTree); assert.equal(summary.testRecordSHA256, digest);
+  assert.deepEqual(summary.coverage, {complete: true, expectedPrograms: 9, observedPrograms: 9, shards: 2});
+  assert.equal(summary.programs, 9); assert.equal(summary.attempted, 9); assert.equal(summary.passed, 9); assert.equal(summary.failed, 0);
+  assert.deepEqual(new Set(summary.results.map(row => row.executable)), new Set(f.record.programs.map(row => row.path)));
+  for (const group of summary.shardReports) {
+    assert.equal(group.sha256, createHash('sha256').update(readFileSync(join(f.directory, group.path))).digest('hex'));
+  }
+  assert.deepEqual(JSON.parse(readFileSync(f.output)), summary);
+});
+
+test('aggregate rejects missing and duplicated groups and writes failed incomplete coverage', () => {
+  for (const select of [reports => [reports[0].path], reports => [reports[0].path, reports[0].path]]) {
+    const f = shardFixture(); assert.throws(() => f.aggregate(select(f.reports)), /aggregate_shard_count|aggregate_duplicate_shard/);
+    const summary = JSON.parse(readFileSync(f.output)); assert.equal(summary.state, 'failed'); assert.equal(summary.coverage.complete, false); assert.equal(summary.handlesReaped, false);
+  }
+});
+
+test('aggregate rejects a different record, commit, source tree or shard identity', () => {
+  for (const [field, value, expected] of [
+    ['testRecordSHA256', 'f'.repeat(64), /aggregate_record_identity/], ['commit', '0'.repeat(40), /aggregate_record_identity/],
+    ['sourceTree', 'f'.repeat(64), /aggregate_record_identity/], ['shard', 'all', /aggregate_unknown_shard/], ['schema', 'other', /aggregate_schema/],
+  ]) {
+    const f = shardFixture(); updateShard(f, 0, report => {report[field] = value;});
+    assert.throws(() => f.aggregate(), expected); assert.equal(JSON.parse(readFileSync(f.output)).coverage.complete, false);
+  }
+});
+
+test('aggregate checks plan and actual identities instead of trusting successful counts', () => {
+  for (const [change, expected] of [
+    [report => report.plannedPrograms.pop(), /aggregate_plan_count/],
+    [report => {report.plannedPrograms[1] = report.plannedPrograms[0];}, /aggregate_plan_program/],
+    [report => {report.plannedPrograms[0].package = 'other';}, /aggregate_plan_identity/],
+    [report => report.results.pop(), /aggregate_result_count/],
+    [report => {report.results[1] = report.results[0];}, /aggregate_result_program/],
+    [report => {report.results[0].executable = 'another.exe';}, /aggregate_result_program/],
+    [report => {report.results[0].sha256 = 'f'.repeat(64);}, /aggregate_result_identity/],
+    [report => {report.results[0].package = 'other';}, /aggregate_result_identity/],
+    [report => {report.results[0].target = 'other';}, /aggregate_result_identity/],
+  ]) {
+    const f = shardFixture(); updateShard(f, 0, change); assert.throws(() => f.aggregate(), expected);
+  }
+});
+
+test('aggregate rejects unexecuted, failed or unreaped results and dishonest report totals', () => {
+  for (const [change, expected] of [
+    [report => {report.results[0].exit = null;}, /aggregate_result_not_passed/],
+    [report => {report.results[0].exit = 1;}, /aggregate_result_not_passed/],
+    [report => {report.results[0].ok = false;}, /aggregate_result_not_passed/],
+    [report => {report.results[0].handlesReaped = false;}, /aggregate_result_not_passed/],
+    [report => {delete report.results[0].handlesReaped;}, /aggregate_result_not_passed/],
+    [report => {report.results[0].signal = 'SIGTERM';}, /aggregate_result_not_passed/],
+    [report => {report.results[0].error = 'failed';}, /aggregate_result_not_passed/],
+    [report => {report.results[0].millis = -1;}, /aggregate_result_millis/],
+    [report => {report.state = 'failed';}, /aggregate_summary_not_passed/],
+    [report => {report.handlesReaped = false;}, /aggregate_summary_not_passed/],
+    [report => {report.failed = 1;}, /aggregate_summary_not_passed/],
+    [report => {report.attempted = 0;}, /aggregate_summary_not_passed/],
+    [report => {report.programs += 1;}, /aggregate_summary_not_passed/],
+    [report => {report.passed -= 1;}, /aggregate_summary_not_passed/],
+    [report => {report.arguments = ['--list'];}, /aggregate_arguments/],
+    [report => {report.packages = ['lycheedev-data'];}, /aggregate_shard_filters/],
+  ]) {
+    const f = shardFixture(); updateShard(f, 0, change); assert.throws(() => f.aggregate(), expected);
+    assert.equal(JSON.parse(readFileSync(f.output)).state, 'failed');
+  }
+});
+
+test('full-record coverage rejects a newly added package omitted from both fixed shards', () => {
+  const f = shardFixture(); f.record.programs.push({...f.record.programs[0], package: 'lycheedev-new', path: join(f.directory, 'new.exe')});
+  writeFileSync(f.recordPath, JSON.stringify(f.record));
+  const digest = createHash('sha256').update(readFileSync(f.recordPath)).digest('hex');
+  for (let i = 0; i < f.reports.length; i++) updateShard(f, i, report => {report.testRecordSHA256 = digest;});
+  assert.throws(() => f.aggregate(), /aggregate_coverage_incomplete/);
+  assert.deepEqual(JSON.parse(readFileSync(f.output)).coverage, {complete: false, expectedPrograms: 10, observedPrograms: 9, shards: 2});
+});
+
+test('named shard refuses filters and test-list arguments before launching anything', () => {
+  const f = shardFixture(); let calls = 0;
+  for (const options of [{shard: 'unknown'}, {shard: 'data-delivery', packages: ['lycheedev-data']},
+    {shard: 'source-runtime', targets: ['one']}, {shard: 'source-runtime', arguments: ['--list']}]) {
+    assert.throws(() => runTestPrograms({root: f.directory, recordPath: f.recordPath, ...options, executor() {calls++;}}), /unknown_shard|shard_filters_conflict|shard_arguments/);
+  }
+  assert.equal(calls, 0);
+});
+
+test('default local run keeps shard all and captures an incomplete launch failure in its report', () => {
+  const f = shardFixture(), path = join(f.directory, 'default.json'); rmSync(f.record.programs[0].path);
+  assert.throws(() => runTestPrograms({root: f.directory, recordPath: f.recordPath, reportPath: path, executor() {assert.fail('missing executable must never launch');}}), /program_missing/);
+  const report = JSON.parse(readFileSync(path)); assert.equal(report.shard, 'all'); assert.equal(report.state, 'failed');
+  assert.equal(report.plannedPrograms.length, 9); assert.equal(report.attempted, 0); assert.equal(report.passed, 0);
+});
+
+test('formal bridge with passed false is a business failure even when its process was reaped', () => {
+  const program = formalProgram(), reportPath = join(base, 'bridge-false.json');
+  assert.throws(() => runTestPrograms({recordPath: write(record({programs: [program]})), reportPath, formalLuaReport: 'unused', formalBridge() {return {passed: false};}}), /tests_failed/);
+  const report = JSON.parse(readFileSync(reportPath)); assert.equal(report.state, 'failed'); assert.equal(report.failed, 1); assert.equal(report.passed, 0);
+});
+
+test('aggregate matches program sets regardless of report order and rejects a duplicated record executable', () => {
+  const f = shardFixture(); updateShard(f, 0, report => {report.plannedPrograms.reverse(); report.results.reverse();});
+  assert.equal(f.aggregate([...f.reports].reverse().map(row => row.path)).coverage.complete, true);
+  f.record.programs.push({...f.record.programs[0]}); writeFileSync(f.recordPath, JSON.stringify(f.record));
+  assert.throws(() => f.aggregate(), /aggregate_record_program_duplicate/);
+  assert.equal(JSON.parse(readFileSync(f.output)).coverage.complete, false);
+});
+
+test('aggregate CLI consumes existing reports without running programs and fails closed on invalid flags', () => {
+  const f = shardFixture(), script = join(root, 'tools/ci-test-programs.mjs');
+  // CLI uses the repository root. Bind the same fixture program identities to
+  // that root without running them again or modifying their bytes.
+  f.record.root = root; f.record.sourceTree = sourceDigest(root); writeFileSync(f.recordPath, JSON.stringify(f.record));
+  const digest = createHash('sha256').update(readFileSync(f.recordPath)).digest('hex');
+  for (let i = 0; i < f.reports.length; i++) updateShard(f, i, report => {report.sourceTree = f.record.sourceTree; report.testRecordSHA256 = digest;});
+  const args = ['aggregate', f.recordPath, ...f.reports.flatMap(row => ['--shard-report', row.path]), '--report', f.output];
+  const result = spawnSync(process.execPath, [script, ...args], {cwd: root, encoding: 'utf8', windowsHide: true, shell: false});
+  assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).coverage.complete, true);
+  for (const [invalid, expected] of [
+    [['aggregate', f.recordPath], /usage:/], [['aggregate', f.recordPath, '--shard', 'data-delivery'], /unknown_option/],
+    [['aggregate', f.recordPath, '--shard-report'], /option_value_missing/], [['aggregate', f.recordPath, '--report'], /option_value_missing/],
+    [['run', f.recordPath, '--shard'], /option_value_missing/], [['run', f.recordPath, '--shard', 'all', '--shard', 'all'], /duplicate_option/],
+    [['run', f.recordPath, '--shard', 'data-delivery', '--package'], /option_value_missing/],
+  ]) {
+    const failed = spawnSync(process.execPath, [script, ...invalid], {cwd: root, encoding: 'utf8', windowsHide: true, shell: false});
+    assert.equal(failed.status, 1); assert.match(failed.stderr, expected);
+  }
 });

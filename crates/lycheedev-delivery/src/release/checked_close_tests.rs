@@ -346,3 +346,128 @@ fn manifest_runtime_channel_uses_the_same_version_binding_as_update() {
         assert_released(&path);
     }
 }
+
+const CURRENT_CHANNEL: &[u8] = include_bytes!("../../../../release/npm-channel.json");
+
+fn write_channel_manifest(fixture: &Fixture, version: &str, channel: &[u8]) -> PathBuf {
+    let path = fixture.manifest();
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    manifest["version"] = json!(version);
+    manifest["runtime"] = json!("rust");
+    // Embed the repository channel's original bytes, so the actual shipped
+    // release policy is exercised rather than a hand-written historic value.
+    let mut raw = serde_json::to_vec(&manifest).unwrap();
+    assert_eq!(raw.pop(), Some(b'}'));
+    raw.extend_from_slice(b",\"npmChannel\":");
+    raw.extend_from_slice(channel);
+    raw.push(b'}');
+    fs::write(&path, raw).unwrap();
+    path
+}
+
+fn assert_channel_readers(fixture: &Fixture, version: &str, accepted: bool, case: &str) {
+    let manifest = read_manifest_with_control(&fixture.0, version, &OperationControl::default());
+    let update = crate::npm_update::binding(&fixture.0, version);
+    assert_eq!(manifest.is_ok(), accepted, "manifest {case}: {manifest:?}");
+    assert_eq!(update.is_ok(), accepted, "update {case}: {update:?}");
+    if !accepted {
+        assert_eq!(manifest.unwrap_err().code, "delivery.invalid_release");
+        let error = update.unwrap_err();
+        assert_eq!(error.code, "update.runtime_incompatible");
+        assert_eq!(error.exit_code, 3);
+    }
+}
+
+#[test]
+fn current_npm_channel_bytes_are_accepted_by_release_and_update() {
+    let channel: Value = serde_json::from_slice(CURRENT_CHANNEL).unwrap();
+    let version = channel["version"].as_str().unwrap();
+    let fixture = Fixture::new();
+    let path = write_channel_manifest(&fixture, version, CURRENT_CHANNEL);
+    assert_channel_readers(&fixture, version, true, "current release/npm-channel.json");
+    assert_released(&path);
+}
+
+#[test]
+fn npm_channel_preserved_latest_is_a_distinct_stable_version_not_a_fixed_release() {
+    let current: Value = serde_json::from_slice(CURRENT_CHANNEL).unwrap();
+    let version = current["version"].as_str().unwrap();
+    for preserved in ["0.0.0", "3.2.5", "4.100.999", "01.02.003"] {
+        let fixture = Fixture::new();
+        let mut channel = current.clone();
+        channel["preserveLatest"] = json!(preserved);
+        let path = write_channel_manifest(&fixture, version, &serde_json::to_vec(&channel).unwrap());
+        assert_channel_readers(&fixture, version, true, preserved);
+        assert_released(&path);
+    }
+    for preserved in [
+        "", "3.2", "3.2.6-rc.1", "v3.2.6", "3.2.6+build", " 3.2.6", "3.2.6\n", "3.2.6x",
+        ".2.6", version,
+    ] {
+        let fixture = Fixture::new();
+        let mut channel = current.clone();
+        channel["preserveLatest"] = json!(preserved);
+        let path = write_channel_manifest(&fixture, version, &serde_json::to_vec(&channel).unwrap());
+        assert_channel_readers(&fixture, version, false, preserved);
+        assert_released(&path);
+    }
+}
+
+#[test]
+fn npm_channel_binding_rejects_incomplete_fields_wrong_types_and_original_identity_conflicts() {
+    let current: Value = serde_json::from_slice(CURRENT_CHANNEL).unwrap();
+    let version = current["version"].as_str().unwrap();
+    let mut cases = vec![
+        ("array", json!([])),
+        ("string", json!("channel")),
+        ("null", Value::Null),
+    ];
+    for field in ["schema", "version", "distTag", "preserveLatest"] {
+        let mut missing = current.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        cases.push((field, missing));
+        let mut wrong_type = current.clone();
+        wrong_type[field] = json!(326);
+        cases.push((field, wrong_type));
+    }
+    for (field, value) in [
+        ("schema", json!("lycheedev.npm-channel.v2")),
+        ("version", json!(if version == "0.0.0" { "0.0.1" } else { "0.0.0" })),
+        ("version", json!("3.5.0-dev")),
+        ("distTag", json!(if current["distTag"] == "beta" { "next" } else { "beta" })),
+        ("distTag", json!("latest")),
+        ("extra", json!(true)),
+    ] {
+        let mut channel = current.clone();
+        channel[field] = value;
+        cases.push((field, channel));
+    }
+    for (case, channel) in cases {
+        let fixture = Fixture::new();
+        let path = write_channel_manifest(&fixture, version, &serde_json::to_vec(&channel).unwrap());
+        assert_channel_readers(&fixture, version, false, case);
+        assert_released(&path);
+    }
+    for runtime in [Value::Null, json!("go")] {
+        let fixture = Fixture::new();
+        let path = write_channel_manifest(&fixture, version, CURRENT_CHANNEL);
+        let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        manifest["runtime"] = runtime;
+        fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert_channel_readers(&fixture, version, false, "runtime");
+        assert_released(&path);
+    }
+    for invalid_version in ["3.5.0-dev", "3.5", "3.5.0+build", "3.5.0\n"] {
+        let fixture = Fixture::new();
+        let mut channel = current.clone();
+        channel["version"] = json!(invalid_version);
+        channel["distTag"] = json!(crate::npm_update::release_channel(invalid_version));
+        let path = write_channel_manifest(
+            &fixture,
+            invalid_version,
+            &serde_json::to_vec(&channel).unwrap(),
+        );
+        assert_channel_readers(&fixture, invalid_version, false, "nonstable version");
+        assert_released(&path);
+    }
+}

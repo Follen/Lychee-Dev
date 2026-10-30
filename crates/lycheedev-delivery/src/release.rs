@@ -82,10 +82,7 @@ fn read_manifest_with_finish(
                 .as_deref()
                 .is_some_and(|runtime| runtime != "rust")
             || release.npm_channel.as_ref().is_some_and(|channel| {
-                channel["schema"] != "lycheedev.npm-channel.v1"
-                    || channel["version"] != release.version
-                    || channel["distTag"] != crate::npm_update::release_channel(&release.version)
-                    || channel["preserveLatest"] != "2.5.1"
+                !crate::npm_update::valid_channel_binding(channel, &release.version)
             })
         {
             return Err(ToolkitError::new(

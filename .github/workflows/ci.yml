@@ -220,7 +220,7 @@ jobs:
         env:
           LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
           LYCHEEDEV_BUILD_DIRTY: 'false'
-          CARGO_LOG: cargo::core::compiler::fingerprint=info
+          CARGO_LOG: cargo::compiler::fingerprint=info
           CARGO_INCREMENTAL: '0'
         run: node tools/ci-test-programs.mjs build .tmp/ci/build-test --owner ci-test-programs-build --jobs 2 --timings
       - name: Seal the build artifact manifest
@@ -315,7 +315,7 @@ jobs:
         env:
           LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
           LYCHEEDEV_BUILD_DIRTY: 'false'
-          CARGO_LOG: cargo::core::compiler::fingerprint=info
+          CARGO_LOG: cargo::compiler::fingerprint=info
         run: node tools/rust-build.mjs .tmp/ci/build-release/cli release --one-shot --jobs 2 --timings
       - name: Record the dependency license closure once beside the CLI
         run: node tools/rust-dependencies.mjs .tmp/ci/build-release/cli/license-closure
@@ -414,10 +414,14 @@ jobs:
           if-no-files-found: error
 
   validate-rust:
-    name: validate - Rust workspace test programs (from build artifact)
+    name: validate - Rust ${{ matrix.shard }} (from build artifact)
     needs: [static, build-test-programs, prepare-resources]
     if: needs.static.outputs.native == 'true'
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [data-delivery, source-runtime]
     defaults:
       run:
         shell: pwsh
@@ -453,13 +457,13 @@ jobs:
         run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/resources-manifest.json --require lua51
       - name: Run the compiled test programs directly
         run: |
-          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --report .tmp/ci/validate-rust/report.json --formal-lua .tmp/ci/build-release/lua51/build-report.json
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --shard ${{ matrix.shard }} --report .tmp/ci/validate-rust/${{ matrix.shard }}/report.json --formal-lua .tmp/ci/build-release/lua51/build-report.json
           if ($LASTEXITCODE -ne 0) { throw 'workspace test programs failed' }
       - name: Preserve the validation report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ci-validate-rust
+          name: ci-validate-rust-${{ matrix.shard }}
           path: .tmp/ci/validate-rust
           if-no-files-found: error
 
@@ -664,8 +668,9 @@ jobs:
       - name: Download the Rust validation report
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: ci-validate-rust
+          pattern: ci-validate-rust-*
           path: .tmp/ci/validate-rust
+          merge-multiple: true
       - name: Download the addon validation reports
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -681,6 +686,20 @@ jobs:
         with:
           name: ci-audit-package
           path: .tmp/ci/audit-package
+      - name: Verify complete, non-overlapping Rust test coverage
+        run: |
+          node tools/ci-test-programs.mjs aggregate .tmp/ci/build-test/test-programs.json `
+            --shard-report .tmp/ci/validate-rust/data-delivery/report.json `
+            --shard-report .tmp/ci/validate-rust/source-runtime/report.json `
+            --report .tmp/ci/validate-rust/report.json
+          if ($LASTEXITCODE -ne 0) { throw 'Rust test coverage aggregation failed' }
+      - name: Preserve Rust coverage and group identities
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-rust-coverage
+          path: .tmp/ci/validate-rust/report.json
+          if-no-files-found: error
       - name: Assemble the release candidate from the same verified artifacts
         run: |
           $version = (Get-Content release/version.json | ConvertFrom-Json).version

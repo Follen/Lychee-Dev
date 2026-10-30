@@ -1,6 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertPackageReports } from './ci-release.mjs';
+import { assertPackageReports, assertRustCoverage } from './ci-release.mjs';
+
+test('candidate requires complete Rust coverage for the same built program record', () => {
+  const identity = {commit: 'a'.repeat(40), sourceTree: 'b'.repeat(64), recordSHA256: 'c'.repeat(64), programs: 93};
+  const report = {schema: 'lycheedev.ci-test-run.v1', commit: identity.commit, sourceTree: identity.sourceTree,
+    testRecordSHA256: identity.recordSHA256, state: 'passed', handlesReaped: true,
+    programs: 93, passed: 93, failed: 0, coverage: {complete: true, expectedPrograms: 93, observedPrograms: 93, shards: 2}};
+  assert.doesNotThrow(() => assertRustCoverage(report, identity));
+  for (const key of ['commit', 'sourceTree', 'testRecordSHA256']) {
+    assert.throws(() => assertRustCoverage({...report, [key]: 'd'.repeat(64)}, identity), /rust_report_identity/);
+  }
+  for (const change of [
+    value => { value.state = 'failed'; }, value => { value.handlesReaped = false; },
+    value => { value.passed = 92; value.failed = 1; }, value => { value.programs = 92; },
+    value => { value.coverage.complete = false; }, value => { value.coverage.observedPrograms = 92; },
+    value => { value.coverage.shards = 1; }, value => { delete value.coverage; },
+  ]) { const value = structuredClone(report); change(value); assert.throws(() => assertRustCoverage(value, identity), /rust_coverage_incomplete/); }
+});
 
 function fixture() {
   const tgzSHA256 = '1'.repeat(64), binarySHA256 = '2'.repeat(64), productionSHA256 = '3'.repeat(64), installationSHA256 = '4'.repeat(64);

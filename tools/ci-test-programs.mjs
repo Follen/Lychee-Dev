@@ -22,6 +22,10 @@ import { runPrebuiltBridge } from './rust-formal-lua-bridge.mjs';
 const repository = resolve(import.meta.dirname ?? fileURLToPath(new URL('.', import.meta.url)), '..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const RECORD_SCHEMA = 'lycheedev.ci-test-programs.v1';
+export const TEST_SHARDS = Object.freeze({
+  'data-delivery': Object.freeze(['lycheedev-data', 'lycheedev-delivery', 'lycheedev-binding-contracts']),
+  'source-runtime': Object.freeze(['lycheedev-source', 'lycheedev-live', 'lycheedev-cli', 'lycheedev-core', 'lycheedev-windows', 'lycheedev-emmy-adapter']),
+});
 const CARGO_ARGS = Object.freeze(['test', '--locked', '--offline', '--workspace', '--all-targets', '--no-run', '--message-format=json-render-diagnostics']);
 // Only real libtest harnesses are executed. Benches/examples are not business
 // tests, and targets that declare `harness = false` are helper programs for a
@@ -188,12 +192,27 @@ function prepareSupport(root, record) {
 
 export const isFormalBridge = program => program.target === 'formal_lua_bridge' && program.kinds.includes('test');
 
-export function runTestPrograms({ root = repository, recordPath, packages, targets, reportPath, formalLuaReport, formalBridge = runPrebuiltBridge, executor = ownedSpawnSync, arguments: extraArguments = ['--test-threads=1'] } = {}) {
+const programIdentity = program => ({package: program.package, target: program.target, executable: program.path, sha256: program.sha256});
+const defaultTestArguments = Object.freeze(['--test-threads=1']);
+function selectedPrograms(record, shard, packages, targets) {
+  if (shard !== 'all' && !Object.hasOwn(TEST_SHARDS, shard)) throw new Error(`ci-test-programs.unknown_shard: ${shard}`);
+  if (shard !== 'all' && (packages !== undefined || targets !== undefined)) throw new Error('ci-test-programs.shard_filters_conflict');
+  return record.programs.filter(program => (shard === 'all' || TEST_SHARDS[shard].includes(program.package))
+    && (!packages?.length || packages.includes(program.package)) && (!targets?.length || targets.includes(program.target)));
+}
+function saveRunReport(root, path, report) {
+  if (!path) return;
+  path = contained(root, path); mkdirSync(dirname(path), {recursive: true});
+  writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function runTestPrograms({ root = repository, recordPath, shard = 'all', packages, targets, reportPath, formalLuaReport, formalBridge = runPrebuiltBridge, executor = ownedSpawnSync, arguments: extraArguments = defaultTestArguments } = {}) {
   root = resolve(root);
   const record = readTestRecord(root, recordPath);
+  const testRecordSHA256 = hash(readFileSync(contained(root, recordPath)));
+  const selected = selectedPrograms(record, shard, packages, targets);
+  if (shard !== 'all' && JSON.stringify(extraArguments) !== JSON.stringify(defaultTestArguments)) throw new Error('ci-test-programs.shard_arguments');
   prepareSupport(root, record);
-  const selected = record.programs.filter(program =>
-    (!packages?.length || packages.includes(program.package)) && (!targets?.length || targets.includes(program.target)));
   if (!selected.length) throw new Error(`ci-test-programs.no_selected_programs: packages=${(packages ?? []).join(',') || '*'} targets=${(targets ?? []).join(',') || '*'}`);
   if(selected.some(isFormalBridge) && !formalLuaReport) throw new Error('ci-test-programs.formal_lua_report_required');
   const runRoot = join(root, '.tmp', 'ci', 'run');
@@ -202,7 +221,7 @@ export function runTestPrograms({ root = repository, recordPath, packages, targe
   mkdirSync(evidence, { recursive: true });
   const environment = ownedUserEnvironment(join(runRoot, 'user'));
   const results = [];
-  let handlesReaped = true, failed = 0, unreapedError;
+  let handlesReaped = true, failed = 0, unreapedError, runError, report;
   try {
     for (const program of selected) {
       const executable = verifyEntry(root, program);
@@ -212,7 +231,9 @@ export function runTestPrograms({ root = repository, recordPath, packages, targe
         try {
           const bridge = formalBridge({runtimePath: contained(root, formalLuaReport), recordPath: contained(root, recordPath), record, program});
           handlesReaped = true;
-          results.push({package: program.package, target: program.target, executable: program.path, sha256: program.sha256, exit: 0, ok: bridge.passed, handlesReaped, millis: Date.now() - started, bridgeReport: bridge.report});
+          const ok = bridge.passed === true;
+          results.push({package: program.package, target: program.target, executable: program.path, sha256: program.sha256, exit: 0, ok, handlesReaped, millis: Date.now() - started, bridgeReport: bridge.report});
+          if (!ok) failed++;
         } catch(error) {
           handlesReaped = error.handlesReaped === true;
           failed++;
@@ -231,21 +252,90 @@ export function runTestPrograms({ root = repository, recordPath, packages, targe
       if (!ok) failed++;
       if (!handlesReaped) { unreapedError = result.error; break; }
     }
-    const report = {
-      schema: 'lycheedev.ci-test-run.v1', state: failed ? 'failed' : 'passed', sourceTree: record.sourceTree,
-      packages: packages ?? [], targets: targets ?? [], arguments: extraArguments,
-      programs: selected.length, attempted: results.length, passed: results.filter(row => row.ok).length, failed, results,
-    };
-    if (reportPath) {
-      const path = contained(root, reportPath);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
-    }
     if (unreapedError) throw unreapedError;
     if (failed) throw new Error(`ci-test-programs.tests_failed: ${failed} program(s)`);
-    return report;
-  } finally {
+  } catch (error) { runError = error; throw error; }
+  finally {
+    report = {
+      schema: 'lycheedev.ci-test-run.v1', state: runError || failed || results.length !== selected.length ? 'failed' : 'passed', sourceTree: record.sourceTree,
+      commit: record.commit, testRecordSHA256, shard, plannedPrograms: selected.map(programIdentity),
+      handlesReaped,
+      packages: packages ?? [], targets: targets ?? [], arguments: extraArguments,
+      programs: selected.length, attempted: results.length, passed: results.filter(row => row.ok === true).length, failed, results,
+      ...(runError ? {error: runError.message} : {}),
+    };
+    saveRunReport(root, reportPath, report);
     if (!handlesReaped) process.stderr.write('ci-test-programs.warning: a test program tree was not reaped\n');
+  }
+  return report;
+}
+
+export function aggregateTestReports({root = repository, recordPath, reportPaths = [], reportPath} = {}) {
+  root = resolve(root);
+  const record = readTestRecord(root, recordPath), testRecordSHA256 = hash(readFileSync(contained(root, recordPath)));
+  const results = [], shardReports = [], observed = new Set(), seenShards = new Set();
+  const report = {schema: 'lycheedev.ci-test-run.v1', state: 'failed', commit: record.commit, sourceTree: record.sourceTree, testRecordSHA256,
+    shard: 'aggregate', plannedPrograms: record.programs.map(programIdentity), packages: [], targets: [], arguments: [],
+    programs: record.programs.length, attempted: 0, passed: 0, failed: 0, handlesReaped: false, results, shardReports,
+    coverage: {complete: false, expectedPrograms: record.programs.length, observedPrograms: 0, shards: 0}};
+  const check = (condition, reason) => { if (!condition) throw new Error(`ci-test-programs.aggregate_${reason}`); };
+  try {
+    const all = new Map();
+    for (const program of record.programs) {
+      check(typeof program.path === 'string' && program.path.length > 0 && /^[a-f0-9]{64}$/.test(program.sha256)
+        && typeof program.package === 'string' && program.package.length > 0 && typeof program.target === 'string' && program.target.length > 0, 'record_program_identity');
+      contained(root, program.path);
+      check(!all.has(program.path), 'record_program_duplicate'); all.set(program.path, programIdentity(program));
+    }
+    check(all.size > 0, 'empty_record');
+    check(reportPaths.length === Object.keys(TEST_SHARDS).length, 'shard_count');
+    let sharedArguments;
+    for (const input of reportPaths) {
+      const path = contained(root, input), bytes = readFileSync(path), group = JSON.parse(bytes);
+      check(group.schema === report.schema, 'schema');
+      check(group.commit === record.commit && group.sourceTree === record.sourceTree && group.testRecordSHA256 === testRecordSHA256, 'record_identity');
+      check(Object.hasOwn(TEST_SHARDS, group.shard), 'unknown_shard');
+      check(!seenShards.has(group.shard), 'duplicate_shard'); seenShards.add(group.shard);
+      const expected = new Map(selectedPrograms(record, group.shard).map(program => [program.path, programIdentity(program)]));
+      check(expected.size > 0, 'empty_shard');
+      check(Array.isArray(group.packages) && group.packages.length === 0 && Array.isArray(group.targets) && group.targets.length === 0, 'shard_filters');
+      check(JSON.stringify(group.arguments) === JSON.stringify(defaultTestArguments), 'arguments');
+      if (sharedArguments === undefined) sharedArguments = group.arguments;
+      check(JSON.stringify(group.arguments) === JSON.stringify(sharedArguments), 'arguments_differ');
+      check(Array.isArray(group.plannedPrograms) && group.plannedPrograms.length === expected.size, 'plan_count');
+      const planned = new Set();
+      for (const entry of group.plannedPrograms) {
+        check(expected.has(entry.executable) && !planned.has(entry.executable), 'plan_program'); planned.add(entry.executable);
+        const identity = expected.get(entry.executable);
+        check(entry.package === identity.package && entry.target === identity.target && entry.sha256 === identity.sha256, 'plan_identity');
+      }
+      check(Array.isArray(group.results) && group.results.length === expected.size, 'result_count');
+      const actual = new Set();
+      for (const row of group.results) {
+        check(expected.has(row.executable) && !actual.has(row.executable) && !observed.has(row.executable), 'result_program'); actual.add(row.executable);
+        const identity = expected.get(row.executable);
+        check(row.package === identity.package && row.target === identity.target && row.sha256 === identity.sha256, 'result_identity');
+        check(row.exit === 0 && row.ok === true && row.handlesReaped === true && !row.error && !row.signal, 'result_not_passed');
+        check(Number.isSafeInteger(row.millis) && row.millis >= 0, 'result_millis');
+      }
+      check(group.state === 'passed' && group.handlesReaped === true && group.programs === expected.size && group.attempted === expected.size
+        && group.passed === expected.size && group.failed === 0, 'summary_not_passed');
+      for (const key of actual) observed.add(key);
+      results.push(...group.results);
+      shardReports.push({shard: group.shard, path: relative(root, path).replaceAll('\\', '/'), sha256: hash(bytes),
+        programs: group.programs, attempted: group.attempted, passed: group.passed, failed: group.failed, state: group.state});
+    }
+    check(Object.keys(TEST_SHARDS).every(shard => seenShards.has(shard)), 'shard_missing');
+    check(observed.size === all.size && [...all.keys()].every(key => observed.has(key)), 'coverage_incomplete');
+    report.arguments = sharedArguments;
+    report.state = 'passed'; report.handlesReaped = true; report.coverage.complete = true;
+    return report;
+  } catch (error) { report.error = error.message; throw error; }
+  finally {
+    report.attempted = results.length; report.passed = results.filter(row => row.ok === true).length;
+    report.failed = results.filter(row => row.ok !== true).length;
+    report.coverage.observedPrograms = observed.size; report.coverage.shards = shardReports.length;
+    saveRunReport(root, reportPath, report);
   }
 }
 
@@ -261,12 +351,29 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const rest = [];
     for (let index = 1; index < argv.length; index++) {
       const arg = argv[index], value = argv[index + 1];
-      if (arg === '--package') { options.packages = parseList(value); index++; }
-      else if (arg === '--target') { options.targets = parseList(value); index++; }
-      else if (arg === '--report') { options.reportPath = value; index++; }
-      else if (arg === '--arguments') { options.arguments = parseList(value); index++; }
-      else if (arg === '--formal-lua') { options.formalLuaReport = value; index++; }
-      else if (arg === '--owner') { options.owner = value; index++; }
+      if ((command === 'run' && ['--package', '--target', '--arguments', '--formal-lua'].includes(arg)
+        || command === 'build' && arg === '--owner') && (!value || arg !== '--arguments' && value.startsWith('--'))) {
+        throw new Error(`ci-test-programs.option_value_missing: ${arg}`);
+      }
+      if (arg === '--shard-report' && command === 'aggregate') {
+        if (!value || value.startsWith('--')) throw new Error('ci-test-programs.option_value_missing: --shard-report');
+        (options.reportPaths ??= []).push(value); index++;
+      }
+      else if (arg === '--shard' && command === 'run') {
+        if (options.shard !== undefined) throw new Error('ci-test-programs.duplicate_option: --shard');
+        if (!value || value.startsWith('--')) throw new Error('ci-test-programs.option_value_missing: --shard');
+        options.shard = value; index++;
+      }
+      else if (arg === '--package' && command === 'run') { options.packages = parseList(value); index++; }
+      else if (arg === '--target' && command === 'run') { options.targets = parseList(value); index++; }
+      else if (arg === '--report' && ['run', 'aggregate'].includes(command)) {
+        if (!value || value.startsWith('--')) throw new Error('ci-test-programs.option_value_missing: --report');
+        if (options.reportPath !== undefined) throw new Error('ci-test-programs.duplicate_option: --report');
+        options.reportPath = value; index++;
+      }
+      else if (arg === '--arguments' && command === 'run') { options.arguments = parseList(value); index++; }
+      else if (arg === '--formal-lua' && command === 'run') { options.formalLuaReport = value; index++; }
+      else if (arg === '--owner' && command === 'build') { options.owner = value; index++; }
       else if (arg === '--jobs' && command === 'build') {
         if (options.jobs !== undefined) throw new Error('ci-test-programs.duplicate_option: --jobs');
         if (value === undefined || value.startsWith('--')) throw new Error('ci-test-programs.option_value_missing: --jobs');
@@ -284,9 +391,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const record = buildTestPrograms({ output: rest[0], ...(options.owner ? { owner: options.owner } : {}), ...(options.jobs !== undefined ? { jobs: options.jobs } : {}), ...(options.timings ? {timings: true} : {}) });
       process.stdout.write(`${JSON.stringify({ schema: record.schema, programs: record.programs.length, support: record.support.length, excluded: record.excluded, sourceTree: record.sourceTree }, null, 2)}\n`);
     } else if (command === 'run') {
-      if (rest.length !== 1) throw new Error('usage: node tools/ci-test-programs.mjs run <test-programs.json> [--package a,b] [--target a,b] [--report path] [--formal-lua build-report.json] [--arguments --test-threads=1]');
+      if (rest.length !== 1) throw new Error('usage: node tools/ci-test-programs.mjs run <test-programs.json> [--shard data-delivery|source-runtime] [--package a,b] [--target a,b] [--report path] [--formal-lua build-report.json] [--arguments --test-threads=1]');
       const report = runTestPrograms({ recordPath: rest[0], ...options });
       process.stdout.write(`${JSON.stringify({ state: report.state, programs: report.programs, passed: report.passed, failed: report.failed }, null, 2)}\n`);
+    } else if (command === 'aggregate') {
+      if (rest.length !== 1 || !options.reportPath) throw new Error('usage: node tools/ci-test-programs.mjs aggregate <test-programs.json> --shard-report <report.json> --shard-report <report.json> --report <summary.json>');
+      const report = aggregateTestReports({recordPath: rest[0], ...options});
+      process.stdout.write(`${JSON.stringify({state: report.state, coverage: report.coverage})}\n`);
     } else throw new Error('usage: node tools/ci-test-programs.mjs build <new-directory> | run <test-programs.json> [options]');
   } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }
