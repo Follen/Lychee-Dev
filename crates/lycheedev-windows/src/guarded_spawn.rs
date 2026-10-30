@@ -461,6 +461,15 @@ pub fn spawn_suspended_guarded(
 ) -> Result<(Child, JobGuard), StartupFailure> {
     spawn_with_probe(command, limit, deadline, cancel, |_, _, _| Ok(()))
 }
+/// Keep inherited limits without adding a child commit ceiling. The suspended
+/// root still joins its exact Job before its first instruction executes.
+pub fn spawn_suspended_job_guarded(
+    command: Command,
+    deadline: Instant,
+    cancel: impl FnMut() -> bool,
+) -> Result<(Child, JobGuard), StartupFailure> {
+    spawn_optional_limit_with_probe_until(command, None, deadline, None, cancel, |_, _, _| Ok(()))
+}
 /// Same suspended/assigned launch, but all failure retirement uses this existing
 /// absolute boundary. An unfinished child is returned as owned pending custody.
 pub fn spawn_suspended_guarded_until(
@@ -530,8 +539,25 @@ fn spawn_with_probe(
     spawn_with_probe_until(command, limit, deadline, None, cancel, probe)
 }
 fn spawn_with_probe_until(
-    mut command: Command,
+    command: Command,
     limit: usize,
+    deadline: Instant,
+    retirement_deadline: Option<Instant>,
+    cancel: impl FnMut() -> bool,
+    probe: impl FnMut(PrepareStage, &Child, Option<&JobGuard>) -> Result<(), String>,
+) -> Result<(Child, JobGuard), StartupFailure> {
+    spawn_optional_limit_with_probe_until(
+        command,
+        Some(limit),
+        deadline,
+        retirement_deadline,
+        cancel,
+        probe,
+    )
+}
+fn spawn_optional_limit_with_probe_until(
+    mut command: Command,
+    limit: Option<usize>,
     deadline: Instant,
     retirement_deadline: Option<Instant>,
     mut cancel: impl FnMut() -> bool,
@@ -545,7 +571,7 @@ fn spawn_with_probe_until(
             pending: None,
         });
     }
-    if !(1 << 20..=4usize << 30).contains(&limit) {
+    if limit.is_some_and(|limit| !(1 << 20..=4usize << 30).contains(&limit)) {
         return Err(StartupFailure {
             stage: "prepare",
             cause: "job.commit_budget_invalid".into(),
@@ -571,7 +597,10 @@ fn spawn_with_probe_until(
         let created = creation(child)?;
         probe(PrepareStage::CreatedSuspended, child, None)?;
         check(deadline, &mut cancel)?;
-        custody.job = Some(JobGuard::attach_with_commit_limit(child, limit)?);
+        custody.job = Some(match limit {
+            Some(limit) => JobGuard::attach_with_commit_limit(child, limit)?,
+            None => JobGuard::attach(child)?,
+        });
         let members = custody.job.as_ref().unwrap().membership()?;
         if members.member_pids != vec![child.id()] {
             return Err("startup.job_membership_changed".into());

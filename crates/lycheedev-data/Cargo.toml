@@ -7,7 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 async-trait = "=0.1.92"
-datafusion = { version = "=54.0.0", default-features = false, features = ["sql", "recursive_protection"] }
+datafusion = { version = "=54.0.0", default-features = false, features = ["recursive_protection"] }
 arrow-array = { version = "=58.3.0", features = ["pool"] }
 arrow-buffer = "=58.3.0"
 flatbuffers = "=25.12.19"

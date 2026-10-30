@@ -176,7 +176,10 @@ pub fn verify_inventory_with_control(
     control: &OperationControl,
 ) -> Result<()> {
     verify_inventory_with_finish(root, resources, component, control, |file, result| {
-        storage::finish_file(file, result, control)
+        let result = storage::finish_file(file, result, control);
+        #[cfg(test)]
+        let result = crate::status_control_tests::after_inventory_finish(result, control);
+        result
     })
 }
 fn verify_inventory_with_finish(

@@ -754,12 +754,13 @@ fn doctor_fix_delivery_failure_stops_before_activation_and_foreign_owner_stops_b
     let mut delivery = Delivery { calls: 0 };
     assert!(
         service
-            .doctor_fix(
-                &report,
+            .doctor_fix_report(
+                report.clone(),
                 &options,
                 &mut delivery,
                 &OperationControl::default()
             )
+            .1
             .error()
             .is_some()
     );
@@ -776,12 +777,13 @@ fn doctor_fix_delivery_failure_stops_before_activation_and_foreign_owner_stops_b
     });
     assert!(
         service
-            .doctor_fix(
-                &report,
+            .doctor_fix_report(
+                report.clone(),
                 &options,
                 &mut delivery,
                 &OperationControl::default()
             )
+            .1
             .error()
             .is_some()
     );
@@ -864,8 +866,8 @@ fn repair_closes_original_prepared_business_before_delivery_without_preparing_it
         ..Default::default()
     };
     let mut delivery = Delivery { calls: 0 };
-    let outcome = service.doctor_fix(
-        &report,
+    let (_, outcome) = service.doctor_fix_report(
+        report,
         &DoctorFixOptions {
             session: &id,
             release: Some(Path::new("release")),
@@ -1219,8 +1221,8 @@ fn repair_unknown_business_never_republishes_or_dispatches_before_delivery() {
         ..Default::default()
     };
     let before = counts.borrow().actions.len();
-    let result = service.doctor_fix(
-        &report,
+    let (_, result) = service.doctor_fix_report(
+        report,
         &DoctorFixOptions {
             session: &id,
             release: Some(Path::new("fixture-release")),

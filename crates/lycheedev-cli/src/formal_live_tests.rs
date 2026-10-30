@@ -760,7 +760,6 @@ fn doctor_repair_flags_are_validated_before_workspace_checks_and_native_open() {
             "--installation",
             "client",
             "--offline",
-            "--no-cache",
             "--wait-seconds",
             "600",
         ],
@@ -768,6 +767,8 @@ fn doctor_repair_flags_are_validated_before_workspace_checks_and_native_open() {
     );
     assert!(validate_doctor(&inv).is_ok());
     assert!(inv.flag_bool("--hard-reset"));
+    let unsupported = crate::parse(&["doctor".into(), "--no-cache".into()]).unwrap_err();
+    assert_eq!(unsupported.code, "command.invalid_arguments");
     assert!(crate::parse(&["live".into(), "doctor".into()]).is_err());
 }
 

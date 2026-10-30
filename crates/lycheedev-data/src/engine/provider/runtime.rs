@@ -3,7 +3,7 @@
 //! allocator guarantee: DF's infallible grow() and unregistered transient
 //! buffers require the formal worker process memory/time boundary. Result and
 //! source lifetimes have separate conservative session admissions.
-use super::super::{QueryOwner, aggregate, external, numeric, unsupported};
+use super::super::{QueryOwner, aggregate, external, unsupported};
 use crate::resource::{Budget, OwnedRetainedReservation};
 use datafusion::{
     common::Result,
@@ -57,15 +57,6 @@ pub(crate) fn context(
                 .with_target_partitions(1)
                 .with_batch_size(batch_rows),
         )
-        // Registering COUNT's UDAF alone does not lower SQL COUNT(*) in
-        // DataFusion 54. Keep its upstream aggregate planner without enabling
-        // unrelated default functions, file formats, or table factories.
-        .with_expr_planners(vec![
-            Arc::new(numeric::NumericPlanner {
-                owner: owner.clone(),
-            }),
-            Arc::new(datafusion::functions_aggregate::planner::AggregateFunctionPlanner),
-        ])
         .with_aggregate_functions(functions)
         .build();
     Ok((SessionContext::new_with_state(state), owner))

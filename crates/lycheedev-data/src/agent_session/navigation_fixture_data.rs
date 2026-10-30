@@ -402,15 +402,37 @@ pub(super) mod spell {
             vec![U(30),Text("self $@spellname30".into()),Text("".into())],
         ]),
         effects(&[trigger,effect(1,100,96,0,0),stun,effect(4,10,64,20,20),effect(5,20,64,10,0),effect(6,30,64,30,30),effect(7,40,64,10,20),effect(8,50,6,0,77)]),
-        table("SpellMisc",304,&[("ID","uint"),("SpellID","uint"),("Attributes","array3"),("SchoolMask","signed"),("Speed","signed"),("SpellIconFileDataID","signed"),("CastingTimeIndex","uint"),("DurationIndex","uint"),("RangeIndex","uint")],&[
-            vec![U(3),U(100),Array(vec![U(1),U(2),U(3)]),I(7),I(9),I(999),U(0),U(0),U(0)],
-            vec![U(1),U(100),Array(vec![U(805634064),U(1024),U(0)]),I(1),I(0),I(132337),U(1),U(0),U(1)],
-            vec![U(2),U(7922),Array(vec![U(327696),U(512),U(0)]),I(1),I(0),I(135860),U(1),U(2),U(1)],
+        table("SpellMisc",304,&[("ID","uint"),("SpellID","uint"),("Attributes","array3"),("SchoolMask","signed"),("Speed","float"),("SpellIconFileDataID","signed"),("CastingTimeIndex","uint"),("DurationIndex","uint"),("RangeIndex","uint")],&[
+            vec![U(3),U(100),Array(vec![U(1),U(2),U(3)]),I(7),F(9.0),I(999),U(0),U(0),U(0)],
+            vec![U(1),U(100),Array(vec![U(805634064),U(1024),U(0)]),I(1),F(1.25),I(132337),U(1),U(0),U(1)],
+            vec![U(2),U(7922),Array(vec![U(327696),U(512),U(0)]),I(1),F(2.5),I(135860),U(1),U(2),U(1)],
         ]),
         table("SpellCastTimes",305,&[("ID","uint"),("Base","signed"),("Minimum","signed")],&[vec![U(1),I(0),I(0)]]),
         table("SpellDuration",306,&[("ID","uint"),("Duration","signed"),("MaxDuration","signed")],&[vec![U(2),I(1000),I(1000)]]),
-        table("SpellRange",307,&[("ID","uint"),("DisplayName_lang","text"),("RangeMin","array2signed"),("RangeMax","array2signed")],&[vec![U(1),Text("Charge".into()),ints(8,8),ints(25,25)]]),
+        table("SpellRange",307,&[("ID","uint"),("DisplayName_lang","text"),("RangeMin","array2float"),("RangeMax","array2float")],&[vec![U(1),Text("Charge".into()),Array(vec![F(8.5),F(8.25)]),Array(vec![F(25.75),F(25.5)])]]),
     ]
+    }
+    pub(crate) fn closure_tables() -> Vec<Table> {
+        let mut tables = tables();
+        tables[0] = names(&[
+            vec![U(10), Text("A".into())], vec![U(20), Text("B".into())],
+            vec![U(77), Text("Description child".into())], vec![U(12345), Text("Numeric child".into())],
+        ]);
+        tables[1] = spells(&[
+            vec![U(10), Text("see $12345x and $@spellname77; twice $@spellname77; self $@spellname10; not $1234d or $4294967296x".into()), Text("$@spellname77".into())],
+            vec![U(20), Text("".into()), Text("from $@spellname10".into())],
+            vec![U(77), Text("".into()), Text("".into())], vec![U(12345), Text("".into()), Text("".into())],
+        ]);
+        tables
+    }
+    pub(crate) fn summon_tables() -> Vec<Table> {
+        let mut first = effect(9, 300, 28, 0, 500);
+        first[2] = U(1);
+        let mut repeated = effect(10, 300, 28, 0, 500);
+        repeated[2] = U(2);
+        let mut other = effect(11, 300, 28, 0, 600);
+        other[2] = U(3);
+        vec![effects(&[other, first, effect(12, 300, 6, 0, 500), repeated])]
     }
 }
 // creature_navigation_parity.rs SHA256 ece31da1128eab50a6fcf33861d65229527923503ba48ecde31780b3ff8407bd

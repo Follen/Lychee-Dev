@@ -212,7 +212,7 @@ fn reader(
             continue;
         }
         match request.task {
-            Task::Close => {
+            Task::Close {} => {
                 stop(&state, Some(id));
                 break;
             }

@@ -1,22 +1,16 @@
-//! DataFusion expression-planner extension over the existing numeric primitives.
+//! Exact numeric expressions for the typed DataFusion plan frontend.
 use super::{QueryOwner, external, unsupported, values};
 use crate::query_value::{self as scalar, Binary};
 use arrow_schema::DataType;
 use datafusion::{
     common::{DFSchema, Result, ScalarValue},
     logical_expr::{
-        ColumnarValue, Expr, ExprSchemable, Operator, Volatility,
-        expr::BinaryExpr,
+        ColumnarValue, Expr, ExprSchemable, Operator, Volatility, expr::BinaryExpr,
         expr_fn::create_udf,
-        planner::{ExprPlanner, PlannerResult, RawBinaryExpr},
     },
 };
 use std::sync::Arc;
 
-#[derive(Debug)]
-pub(super) struct NumericPlanner {
-    pub owner: Arc<QueryOwner>,
-}
 fn operation(name: &str) -> Option<Binary> {
     Some(match name {
         "+" => Binary::Add,
@@ -39,33 +33,6 @@ fn scalar_at(value: &ColumnarValue, row: usize) -> Result<ScalarValue> {
         ColumnarValue::Array(array) => ScalarValue::try_from_array(array, row),
     }
 }
-impl ExprPlanner for NumericPlanner {
-    fn plan_binary_op(
-        &self,
-        expression: RawBinaryExpr,
-        schema: &DFSchema,
-    ) -> Result<PlannerResult<RawBinaryExpr>> {
-        self.owner.check()?;
-        let Some(op) = operation(&expression.op.to_string()) else {
-            return Ok(PlannerResult::Original(expression));
-        };
-        let kinds = vec![
-            expression.left.get_type(schema)?,
-            expression.right.get_type(schema)?,
-        ];
-        if !needs_exact(op, &kinds) {
-            return Ok(PlannerResult::Original(expression));
-        }
-        Ok(PlannerResult::Planned(exact_binary(
-            expression.left,
-            op,
-            expression.right,
-            kinds,
-            &self.owner,
-        )?))
-    }
-}
-
 fn needs_exact(op: Binary, kinds: &[DataType]) -> bool {
     // The pinned native comparator widens signed/UInt64 pairs to Decimal128
     // without losing bits. Keep integer equality visible to hash join planning.
@@ -82,8 +49,7 @@ fn needs_exact(op: Binary, kinds: &[DataType]) -> bool {
     true
 }
 
-/// Both SQL and the typed frontend use this seam. DataFrame expressions do not
-/// pass through SQL ExprPlanner extensions, so raw arithmetic is not equivalent.
+/// Typed plans use the exact numeric seam before constructing native expressions.
 pub(super) fn binary(
     left: Expr,
     operator: Operator,

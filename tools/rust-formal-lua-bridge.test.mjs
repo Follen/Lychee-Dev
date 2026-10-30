@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { join, resolve } from 'node:path';
-import { lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { BRIDGE_INPUTS, SUPPORT, admitInterpreter, bridgePaths, selectTestExecutable, verifyBridgeInputs, verifyHostParity, verifyPeerLifetimes, verifyTestOutput } from './rust-formal-lua-bridge.mjs';
 import { importLuaToolSupply } from './lua-tool-supply.mjs';
@@ -96,10 +96,88 @@ test('rejects incomplete peer lifetime evidence', () => {
   assert.throws(() => verifyPeerLifetimes([lifetime('normal')]), /peer_case_set/);
   assert.throws(() => verifyPeerLifetimes(cases.map(name => ({ ...lifetime(name), forced: true }))));
 });
-test('host parity proofs remain exact for bytes, numbers and recovery', () => {
-  const proof = rows => rows.map(({ case: name, proof }) => ({ case: name, evidence: join(root, name), evidenceSHA256: 'unused', proof }));
-  assert.throws(() => verifyHostParity([]), /host_case_set/);
-  assert.throws(() => verifyHostParity(proof([{ case: 'memory', proof: { schema: 'lycheedev.formal-lua-host-parity.v1', passed: true, case: 'memory', payload: 'hello', sequence: 17, nonce: '1'.repeat(32), runtime: '2'.repeat(32), ticket: '3'.repeat(32), kind: 3, state: 3, recordSHA256: 'a'.repeat(64) } }])), /host_case_set/);
+function sealHostProof(row) {
+  const bytes = Buffer.from(JSON.stringify(row.proof, null, 2) + '\r\n');
+  writeFileSync(row.evidence, bytes); row.evidenceSHA256 = hash(bytes);
+  // Production reads the same exact file as both proof JSON and hash input.
+  row.proof = JSON.parse(bytes);
+  return bytes;
+}
+function hostProofs(t) {
+  mkdirSync(join(root, '.tmp'), {recursive: true});
+  const directory = mkdtempSync(join(root, '.tmp', 'host-parity-test-'));
+  t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const float64Bits = Array.from({length: 30}, (_, index) => {
+    const bytes = Buffer.alloc(8); bytes.writeDoubleBE(index === 1 ? -0 : index === 0 ? 0 : index - 1); return bytes.toString('hex');
+  });
+  const rows = [
+    {case: 'memory', proof: {schema: 'lycheedev.formal-lua-host-parity.v1', passed: true, case: 'memory',
+      payload: 'hello', sequence: 17, nonce: '1'.repeat(32), runtime: '2'.repeat(32), ticket: '3'.repeat(32), kind: 3, state: 3, recordSHA256: 'a'.repeat(64)}},
+    {case: 'numeric', proof: {schema: 'lycheedev.formal-lua-host-parity.v1', passed: true, case: 'numeric', valueCount: 30, float64Bits,
+      recoveredBytesEqual: true, completedRetryInputCountUnchanged: true, resourcesReleased: true, disconnected: true, executions: 1, reportSHA256: 'b'.repeat(64)}},
+  ].map(row => ({...row, evidence: join(directory, `${row.case}.json`)}));
+  for (const row of rows) sealHostProof(row);
+  return rows;
+}
+test('host parity admits both complete proofs and their original evidence bytes', t => {
+  const rows = hostProofs(t), original = rows.map(row => readFileSync(row.evidence));
+  const admitted = verifyHostParity(rows);
+  assert.deepEqual(admitted.map(row => row.testCase), cases.slice(9));
+  assert.deepEqual(admitted.map(row => row.proof), rows.map(row => row.proof));
+  for (let index = 0; index < rows.length; index++) {
+    assert.deepEqual(readFileSync(rows[index].evidence), original[index]);
+    assert.equal(admitted[index].evidenceSHA256, hash(original[index]));
+  }
+});
+test('host parity rejects missing or duplicate cases before field validation', t => {
+  const rows = hostProofs(t);
+  for (const missing of [[], rows.slice(0, 1), [rows[0], rows[0]]]) assert.throws(() => verifyHostParity(missing), /host_case_set/);
+});
+for (const [name, index, change] of [
+  ['schema', 0, proof => {proof.schema = 'unknown';}],
+  ['failed proof', 0, proof => {proof.passed = false;}],
+  ['proof case identity', 0, proof => {proof.case = 'numeric';}],
+  ['memory payload', 0, proof => {proof.payload = 'changed';}],
+  ['memory sequence', 0, proof => {proof.sequence = 18;}],
+  ['memory nonce', 0, proof => {proof.nonce = '0'.repeat(32);}],
+  ['memory runtime', 0, proof => {proof.runtime = '0'.repeat(32);}],
+  ['memory ticket', 0, proof => {proof.ticket = '0'.repeat(32);}],
+  ['memory kind', 0, proof => {proof.kind = 4;}],
+  ['memory state', 0, proof => {proof.state = 4;}],
+  ['memory record hash format', 0, proof => {proof.recordSHA256 = 'bad';}],
+  ['numeric value count', 1, proof => {proof.valueCount = 29;}],
+  ['numeric bit count', 1, proof => {proof.float64Bits.pop();}],
+  ['numeric bit format', 1, proof => {proof.float64Bits[2] = 'g'.repeat(16);}],
+  ['positive zero bits', 1, proof => {proof.float64Bits[0] = '3ff0000000000000';}],
+  ['negative zero bits', 1, proof => {proof.float64Bits[1] = '0000000000000000';}],
+  ...['recoveredBytesEqual', 'completedRetryInputCountUnchanged', 'resourcesReleased', 'disconnected']
+    .map(field => [field, 1, proof => {proof[field] = false;}]),
+  ['replayed execution', 1, proof => {proof.executions = 2;}],
+  ['numeric report hash format', 1, proof => {proof.reportSHA256 = 'bad';}],
+]) test(`host parity rejects ${name} after admitting the complete case set`, t => {
+  const rows = hostProofs(t); change(rows[index].proof); sealHostProof(rows[index]);
+  assert.throws(() => verifyHostParity(rows), error => {
+    assert.equal(error.code, 'ERR_ASSERTION');
+    assert(!error.message.includes('host_case_set'), 'negative fixture stopped before its field check');
+    return true;
+  });
+});
+for (const index of [0, 1]) test(`host parity checks ${index === 0 ? 'memory' : 'numeric'} evidence hash after all proof fields`, t => {
+  const rows = hostProofs(t), path = rows[index].evidence, before = readFileSync(path);
+  writeFileSync(path, Buffer.concat([before, Buffer.from('changed evidence bytes')]));
+  assert.throws(() => verifyHostParity(rows), error => {
+    assert.equal(error.code, 'ERR_ASSERTION');
+    assert.equal(error.actual, rows[index].evidenceSHA256);
+    assert.equal(error.expected, hash(readFileSync(path)));
+    return true;
+  });
+});
+test('host parity rejects an incorrect declared evidence hash and a missing original file', t => {
+  const rows = hostProofs(t), original = rows[0].evidenceSHA256;
+  rows[0].evidenceSHA256 = 'f'.repeat(64);
+  assert.throws(() => verifyHostParity(rows), error => error.code === 'ERR_ASSERTION' && error.expected === original);
+  rows[0].evidenceSHA256 = original; rmSync(rows[0].evidence);
+  assert.throws(() => verifyHostParity(rows), {code: 'ENOENT'});
 });
 test('current addon TOC and peer inputs are the admitted fixture', () => {
   const files = verifyBridgeInputs(root);

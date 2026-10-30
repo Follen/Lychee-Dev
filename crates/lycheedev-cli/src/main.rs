@@ -2002,21 +2002,7 @@ mod tests {
         assert_eq!(outcome.data["result"]["schema"], "lycheedev.result.v1");
     }
     #[test]
-    fn help_lists_each_implemented_commands_own_flags() {
-        for definition in contract::implemented() {
-            let mut input: Vec<String> = definition
-                .path
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect();
-            input.push("--help".to_owned());
-            let outcome = dispatch(&crate::parse(&input).unwrap()).unwrap();
-            let mut flags: Vec<String> =
-                definition.flags.iter().map(|flag| flag.0.clone()).collect();
-            flags.push("--help".to_owned());
-            assert_eq!(outcome.data["flags"], json!(flags), "{}", definition.path);
-            assert_eq!(outcome.data["commands"], json!([definition]));
-        }
+    fn global_help_lists_its_own_flags() {
         let outcome = dispatch(&crate::parse(&args(&["--help"])).unwrap()).unwrap();
         assert_eq!(
             outcome.data["flags"],

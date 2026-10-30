@@ -4,6 +4,7 @@
 mod handles;
 mod domain;
 mod navigation;
+mod wire_schema;
 #[path = "agent_tasks.rs"]
 pub mod tasks;
 
@@ -48,7 +49,7 @@ pub enum Task {
     Capture {
         handle: String,
     },
-    Catalog,
+    Catalog {},
     Fields {
         table: TableRequest,
     },
@@ -80,7 +81,7 @@ pub enum Task {
     Cancel {
         request_id: u64,
     },
-    Close,
+    Close {},
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,12 +91,19 @@ pub enum ExportFormat {
 }
 
 pub fn schema() -> Value {
-    json!({"protocol":PROTOCOL,"transport":"stdin/stdout JSONL", "worker":"caller-owned supervisor plus one isolated reusable engine worker; no installed daemon", "processMemory":{"windows":"Job aggregate commit ceiling: --max-bytes plus 268435456 runtime/ingress bytes; not RSS", "otherTargets":"production worker unavailable: no equivalent OS allocation ceiling; schema discovery remains available"},
-        "request":{"protocol":PROTOCOL,"id":"strictly increasing positive u64; never replayed","timeout_ms":"1..3600000, includes queue wait; default 30000","task":["navigate","item_get","semantics","explain","capture","catalog","discover","fields","business","query","page","export","release","cancel","close"]},
+    let query = crate::engine::query_schema();
+    let business = tasks::schema();
+    let navigate = navigation::schema();
+    let request_schema = wire_schema::request_schema(&query, &business, &navigate);
+    let task_names: Vec<_> = request_schema["oneOf"].as_array().unwrap().iter()
+        .map(|variant| variant["properties"]["task"]["const"].clone()).collect();
+    json!({"protocol":PROTOCOL,"transport":"stdin/stdout JSONL", "worker":"caller-owned supervisor plus one isolated reusable engine worker; no installed daemon", "processMemory":{"windows":"Job aggregate commit ceiling: --max-bytes plus 268435456 runtime/ingress bytes; not RSS", "otherTargets":"not shipped; Windows amd64 is required"},
+        "request":{"protocol":PROTOCOL,"id":"strictly increasing positive u64; never replayed","timeout_ms":"1..3600000, includes queue wait; default 30000","task":task_names},
+        "requestSchema":request_schema,
         "identity":"one immutable invocation snapshot/product/build/locale; explicit ordered Hotfix capture history is bound per table; handles do not survive worker restart",
-        "query":crate::engine::query_schema(),
-        "business":tasks::schema(),
-        "navigate":navigation::schema(),
+        "query":query,
+        "business":business,
+        "navigate":navigate,
         "semantics":{"required":["table"],"source":"static with no captures only","output":"owned pin-bound DBD flags and conditions, not Hotfix row coverage"},
         "explain":{"required":["query"],"verbose":{"type":"boolean","default":false},"analyze":{"type":"boolean","default":false},"output":"normal owned result handle; page/export/capture apply","execution":"analyze=true executes under the same Engine pool and supervised deadline; provenance labels explain/analyze"},
         "item_get":{"alias":"navigate item_get","output":"owned domain report and automatic CAP"},
@@ -262,7 +270,7 @@ impl Session {
                 let owner = self.handles.get(&handle, Instant::now())?;
                 Ok(Response::Capture(self.engine.capture(owner, control)?))
             }
-            Task::Catalog => Ok(Response::Catalog(self.engine.catalog(control).await?)),
+            Task::Catalog {} => Ok(Response::Catalog(self.engine.catalog(control).await?)),
             Task::Business { request } => {
                 let plans = tasks::compile(request)?;
                 // All source/result owners survive until every component is ready.
@@ -342,7 +350,7 @@ impl Session {
                 self.handles.release(&handle, Instant::now())?;
                 Ok(Response::Value(json!({"released":handle})))
             }
-            Task::Cancel { .. } | Task::Close => Err(fault(
+            Task::Cancel { .. } | Task::Close {} => Err(fault(
                 "data.session.transport_task",
                 8,
                 "Transport must own cancellation and close",
@@ -363,6 +371,9 @@ fn validate_page(offset: usize, limit: usize) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod schema_tests;
 
 #[cfg(test)]
 #[path="agent_session/navigation_tests.rs"]

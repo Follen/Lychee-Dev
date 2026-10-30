@@ -30,6 +30,7 @@ struct Access<'a> {
     partial: Vec<&'static str>,
     truncation: Option<&'static str>,
     required_lookup: Option<(&'static str, u32)>,
+    required_scan_tables: &'static [&'static str],
 }
 fn overflow() -> lycheedev_core::ToolkitError {
     fault(
@@ -165,6 +166,14 @@ impl DomainAccess for Access<'_> {
             .engine
             .scan_domain_records(table, filter, limit, self.control.clone())
             .await?;
+        if owner.row_count() == 0 && !owner.complete() && self.required_scan_tables.contains(&name)
+        {
+            return Err(fault(
+                "data.domain.record_unavailable",
+                3,
+                "Selected record cannot be resolved in unavailable source coverage",
+            ));
+        }
         let extra = owner.extra();
         Ok((self.records(owner)?, extra))
     }
@@ -338,6 +347,13 @@ pub(super) async fn execute(
         partial: vec![],
         truncation: None,
         required_lookup,
+        required_scan_tables: match &request {
+            DomainRequest::DecorGet { .. } => &["HouseDecor"],
+            DomainRequest::CreatureDisplay { display_id: 0, .. } => {
+                &["CreatureModelData", "CreatureDisplayInfo"]
+            }
+            _ => &[],
+        },
     };
     let mut report = match &request {
         DomainRequest::ItemGet { item_id, .. } => {

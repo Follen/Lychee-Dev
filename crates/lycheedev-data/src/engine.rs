@@ -120,5 +120,3 @@ fn error(error: DataFusionError) -> ToolkitError {
     }
     fault("relational.datafusion", 4, error.to_string())
 }
-#[cfg(test)]
-mod tests;

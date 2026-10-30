@@ -106,7 +106,7 @@ fn ingress(
                     lycheedev_data::agent_session::Task::Cancel { request_id } => {
                         Kind::Cancel(request_id)
                     }
-                    lycheedev_data::agent_session::Task::Close => Kind::Close,
+                    lycheedev_data::agent_session::Task::Close {} => Kind::Close,
                     _ => Kind::Work,
                 };
                 Event::Input(Input {

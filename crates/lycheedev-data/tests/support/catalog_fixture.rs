@@ -462,7 +462,7 @@ impl Fixture {
             &[("ID", "uint")],
             &[vec![Cell::U(7)]],
         );
-        let fixture = Self::at_objects(root, &[table], "zhCN", 0x40, Some(selected));
+        let fixture = Self::at_objects(root, &[table], "zhCN", 0x40, Some((501, selected)));
         let path = fixture.root.join("input-identity.json");
         let mut identity: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -479,7 +479,7 @@ impl Fixture {
         tables: &[Table],
         language: &str,
         mask: u32,
-        selected: Option<Object>,
+        selected: Option<(u32, Object)>,
     ) -> Self {
         assert!(!root.exists(), "fresh owned fixture root required");
         assert!(!tables.is_empty());
@@ -489,9 +489,9 @@ impl Fixture {
         let mut ordered: Vec<_> = tables.iter().collect();
         ordered.sort_by_key(|t| t.id);
         let mut objects: Vec<_> = ordered.iter().map(|t| object(&t.raw)).collect();
-        if let Some(selected) = selected {
-            assert_eq!(objects.len(), 1);
-            objects[0] = selected;
+        if let Some((id, selected)) = selected {
+            let index = ordered.iter().position(|table| table.id == id).expect("selected table belongs to fixture");
+            objects[index] = selected;
         }
         let mut root_raw = b"TSFM".to_vec();
         for n in [
@@ -695,12 +695,18 @@ impl Fixture {
         Self::with_encoded_table_at(root, table, encoded)
     }
     pub fn with_encoded_table_at(root: PathBuf, table: Table, encoded: Vec<u8>) -> Self {
+        let id = table.id;
+        Self::with_encoded_tables_at(root, &[table], id, encoded)
+    }
+    /// Keep ordinary companion tables while replacing exactly one table's BLTE.
+    pub fn with_encoded_tables_at(root: PathBuf, tables: &[Table], id: u32, encoded: Vec<u8>) -> Self {
         match fs::symlink_metadata(&root) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Ok(_) => panic!("partial fixture root already exists: {}", root.display()),
             Err(error) => panic!("partial fixture root cannot be checked: {error}"),
         }
         let header = u32::from_be_bytes(encoded[4..8].try_into().unwrap()) as usize;
+        let table = tables.iter().find(|table| table.id == id).expect("selected table belongs to fixture");
         let selected = Object {
             ckey: md5(&table.raw),
             ekey: md5(if header == 0 {
@@ -711,6 +717,6 @@ impl Fixture {
             decoded: table.raw.len(),
             raw: encoded,
         };
-        Self::at_objects(root, &[table], "zhCN", 0x40, Some(selected))
+        Self::at_objects(root, tables, "zhCN", 0x40, Some((id, selected)))
     }
 }

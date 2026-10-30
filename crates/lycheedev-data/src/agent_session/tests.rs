@@ -369,7 +369,7 @@ fn catalog_is_pinned_manifest_inventory_not_table_readability() {
     let runtime = runtime();
     let catalog = response(
         runtime
-            .block_on(session.execute(Task::Catalog, control()))
+            .block_on(session.execute(Task::Catalog {}, control()))
             .unwrap(),
     );
     assert_eq!(catalog["complete"], true);

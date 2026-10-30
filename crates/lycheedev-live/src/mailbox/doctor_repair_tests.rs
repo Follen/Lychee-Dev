@@ -91,8 +91,8 @@ fn doctor_slot_reset_recovers_default_archive_and_rejects_changed_output_without
         cancel_after_complete: true,
         ..Default::default()
     };
-    let result = service.doctor_fix(
-        &report,
+    let (_, result) = service.doctor_fix_report(
+        report.clone(),
         &DoctorFixOptions::default(),
         &mut delivery,
         &OperationControl::default(),
@@ -106,8 +106,8 @@ fn doctor_slot_reset_recovers_default_archive_and_rejects_changed_output_without
     let changed = f.root.join("different");
     assert!(
         service
-            .doctor_fix(
-                &report,
+            .doctor_fix_report(
+                report.clone(),
                 &DoctorFixOptions {
                     output: Some(&changed),
                     ..Default::default()
@@ -115,6 +115,7 @@ fn doctor_slot_reset_recovers_default_archive_and_rejects_changed_output_without
                 &mut delivery,
                 &OperationControl::default()
             )
+            .1
             .error()
             .unwrap()
             .to_string()
@@ -125,12 +126,13 @@ fn doctor_slot_reset_recovers_default_archive_and_rejects_changed_output_without
     changed_version.deployment.as_mut().unwrap().version = "changed-installed".into();
     assert!(
         service
-            .doctor_fix(
-                &changed_version,
+            .doctor_fix_report(
+                changed_version,
                 &DoctorFixOptions::default(),
                 &mut delivery,
                 &OperationControl::default()
             )
+            .1
             .error()
             .unwrap()
             .to_string()
@@ -142,8 +144,8 @@ fn doctor_slot_reset_recovers_default_archive_and_rejects_changed_output_without
     service = super::service(&f, &counts, &clock);
     // The healthy read-only pool assessment cannot hide a durable unfinished
     // reset. Complete exactly its original archive before activation.
-    let resumed = service.doctor_fix(
-        &managed_report(&f, "managed"),
+    let (_, resumed) = service.doctor_fix_report(
+        managed_report(&f, "managed"),
         &DoctorFixOptions::default(),
         &mut delivery,
         &OperationControl::default(),
@@ -174,8 +176,8 @@ fn doctor_hard_reset_preserves_current_release_and_old_non_slot_addon_takes_upgr
             interrupt: true,
             ..Default::default()
         };
-        let result = service.doctor_fix(
-            &report,
+        let (_, result) = service.doctor_fix_report(
+            report,
             &DoctorFixOptions {
                 hard_reset: true,
                 bundled_release: Some(Path::new("bundled")),
@@ -227,8 +229,8 @@ fn doctor_resets_old_pool_at_installed_version_before_managed_upgrade() {
     let mut report = managed_report(&f, "incomplete");
     report.deployment.as_mut().unwrap().version = "old-installed".into();
     let mut delivery = ResetDelivery::default();
-    let outcome = service.doctor_fix(
-        &report,
+    let (_, outcome) = service.doctor_fix_report(
+        report,
         &DoctorFixOptions {
             bundled_release: Some(Path::new("bundled")),
             ..Default::default()

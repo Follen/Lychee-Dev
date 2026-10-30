@@ -62,3 +62,27 @@ pub(super) fn write(value: Scalar, kind: &DataType) -> Result<ScalarValue> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_decimal_boundary_does_not_coerce_through_float() {
+        assert_eq!(
+            read(ScalarValue::Decimal128(Some(u64::MAX as i128), 20, 0)).unwrap(),
+            Scalar::UInt(u64::MAX)
+        );
+        assert_eq!(
+            crate::engine::error(
+                read(ScalarValue::Decimal128(Some(u64::MAX as i128 + 1), 20, 0)).unwrap_err()
+            )
+            .code,
+            "relational.numeric_range"
+        );
+        assert_eq!(
+            write(Scalar::Null, &DataType::Float64).unwrap(),
+            ScalarValue::Float64(None)
+        );
+    }
+}

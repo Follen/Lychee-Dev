@@ -1,5 +1,3 @@
-//! Task-native replacement for the historical SQL CLI numeric witnesses.
-//! Historical source remains in b42e5b676adc20b28ee435d1eb08cc6e552755db.
 //! Actual Windows supervisor/worker JSONL, authenticated fixture, explicit CAP.
 //! No declaration here is evidence of execution; non-Windows is not acceptance.
 #![cfg(windows)]

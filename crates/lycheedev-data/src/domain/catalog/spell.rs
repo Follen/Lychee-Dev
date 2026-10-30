@@ -44,7 +44,7 @@ fn nullable_text<'a>(row: &'a Option<Row>, field: &str) -> Option<&'a str> {
 fn effect(row: &Row) -> Value {
     json!({"effectIndex":integer(row.get("EffectIndex")),"effect":integer(row.get("Effect")),
         "effectAura":integer(row.get("EffectAura")),"effectTriggerSpell":nullable_id(row,"EffectTriggerSpell"),
-        "effectAuraPeriod":nullable_id(row,"EffectAuraPeriod"),"effectBasePoints":integer(row.get("EffectBasePointsF")),
+        "effectAuraPeriod":nullable_id(row,"EffectAuraPeriod"),"effectBasePoints":row.get("EffectBasePointsF"),
         "effectMechanic":integer(row.get("EffectMechanic")),"implicitTarget":int_list(row,"ImplicitTarget"),
         "effectRadiusIndex":int_list(row,"EffectRadiusIndex"),"effectMiscValue":int_list(row,"EffectMiscValue")})
 }
@@ -178,10 +178,10 @@ pub(crate) trait SpellAccess: DomainAccess + Sized {
         let duration = self.lookup("SpellDuration", unsigned(row.get("DurationIndex"))).await?
             .map(|row| json!({"duration":integer(row.get("Duration")),"maxDuration":integer(row.get("MaxDuration"))}));
         let range = self.lookup("SpellRange", unsigned(row.get("RangeIndex"))).await?
-            .map(|row| json!({"displayName":text(&row,"DisplayName_lang"),"rangeMin":int_list(&row,"RangeMin"),"rangeMax":int_list(&row,"RangeMax")}));
+            .map(|row| json!({"displayName":text(&row,"DisplayName_lang"),"rangeMin":row.get("RangeMin"),"rangeMax":row.get("RangeMax")}));
         Ok(
             json!({"attributes":int_list(row,"Attributes"),"schoolMask":integer(row.get("SchoolMask")),
-            "speed":integer(row.get("Speed")),"spellIconFileDataID":icon,"castTime":cast,"duration":duration,"range":range}),
+            "speed":row.get("Speed"),"spellIconFileDataID":icon,"castTime":cast,"duration":duration,"range":range}),
         )
     }
     async fn spell_info(&mut self, seed: u32, max_depth: u32) -> Result<Value> {

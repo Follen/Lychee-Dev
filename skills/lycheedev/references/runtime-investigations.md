@@ -28,8 +28,7 @@ not prove game startup latency. Hiding frames does not prove release.
 
 For transport measurements separate root lookup, readiness/waits, input, Lua,
 retrieval and flush when observable. Guarded module-code/Mailbox lookup is not
-heap scanning; coverage gaps remain. Current no-cache compatibility does not
-select another lookup algorithm. Keep window/FPS/runtime/binary fixed. Input-free
+heap scanning; coverage gaps remain. Keep window/FPS/runtime/binary fixed. Input-free
 readback of a completed request is not a new execution timing. No receipt after
 submission neither proves nondelivery nor permits another attempt.
 

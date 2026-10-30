@@ -6,19 +6,33 @@ use crate::{
     resource::{Budget, Cost},
 };
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, UInt64Array};
-use arrow_schema::{Field, Schema};
-use datafusion::{execution::session_state::SessionStateBuilder, prelude::SessionConfig};
+use arrow_schema::{DataType, Field, Schema};
+use datafusion::{
+    datasource::MemTable,
+    execution::session_state::SessionStateBuilder,
+    logical_expr::LogicalPlan,
+    physical_plan::{
+        ExecutionPlan,
+        aggregates::{AggregateExec, AggregateMode},
+        collect,
+        joins::HashJoinExec,
+    },
+    prelude::SessionConfig,
+};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
 fn setup() -> (SessionContext, Arc<QueryOwner>) {
+    setup_partitions(1)
+}
+fn setup_partitions(partitions: usize) -> (SessionContext, Arc<QueryOwner>) {
     let owner = QueryOwner::new(Arc::new(Budget::new(
         Cost::defaults(),
         Instant::now() + Duration::from_secs(30),
         None,
     )));
     let state = SessionStateBuilder::new()
-        .with_config(SessionConfig::new().with_target_partitions(1))
+        .with_config(SessionConfig::new().with_target_partitions(partitions))
         .build();
     (SessionContext::new_with_state(state), owner)
 }
@@ -64,6 +78,9 @@ async fn run(
         .collect()
         .await
         .unwrap();
+    scalar_rows(&batches)
+}
+fn scalar_rows(batches: &[RecordBatch]) -> Vec<Vec<Scalar>> {
     batches
         .iter()
         .flat_map(|batch| {
@@ -1488,4 +1505,335 @@ async fn correlated_scalar_max_preserves_multiple_equality_keys() {
             vec![Scalar::Null]
         ]
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_integer_sum_crosses_signed_boundary_and_rejects_unsigned_overflow() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("Signed"),
+        vec![("value", Arc::new(Int64Array::from(vec![i64::MAX, 1])))],
+    );
+    let aggregate = |name: &str| {
+        decode(
+            json!({"op":"aggregate","input":{"op":"scan","table":{"name":name,"mode":"static"}},"groups":[],"metrics":[{"name":"answer","function":"sum","expression":{"kind":"column","name":"value"}}]}),
+        )
+    };
+    assert_eq!(
+        run(&context, owner.clone(), &aggregate("Signed")).await,
+        vec![vec![Scalar::UInt(1u64 << 63)]]
+    );
+    register(
+        &context,
+        &request("Unsigned"),
+        vec![("value", Arc::new(UInt64Array::from(vec![u64::MAX, 1])))],
+    );
+    let error = lower(&context, &aggregate("Unsigned"), owner)
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap_err();
+    assert_eq!(super::super::error(error).code, "relational.numeric_range");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_average_keeps_finite_answer_when_binary64_sum_would_overflow() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![(
+            "value",
+            Arc::new(Float64Array::from(vec![f64::MAX, f64::MAX])),
+        )],
+    );
+    let plan = decode(
+        json!({"op":"aggregate","input":{"op":"scan","table":{"name":"T","mode":"static"}},"groups":[],"metrics":[{"name":"answer","function":"average","expression":{"kind":"column","name":"value"}}]}),
+    );
+    assert_eq!(
+        run(&context, owner, &plan).await,
+        vec![vec![Scalar::Float(f64::MAX)]]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_signed_zero_comparison_and_projection_preserve_their_separate_semantics() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![
+            ("negative_zero", Arc::new(Float64Array::from(vec![-0.0]))),
+            ("positive_zero", Arc::new(Float64Array::from(vec![0.0]))),
+        ],
+    );
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[
+            {"name":"same","expression":{"kind":"binary","operator":"equal","left":{"kind":"column","name":"negative_zero"},"right":{"kind":"column","name":"positive_zero"}}},
+            {"name":"negative_zero","expression":{"kind":"column","name":"negative_zero"}}
+        ]}),
+    );
+    let rows = run(&context, owner, &plan).await;
+    assert_eq!(rows, vec![vec![Scalar::Bool(true), Scalar::Float(-0.0)]]);
+    let Scalar::Float(value) = &rows[0][1] else {
+        panic!("negative zero is a float")
+    };
+    assert_eq!(value.to_bits(), (-0.0f64).to_bits());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_division_and_modulo_preserve_fraction_and_null_zero_results() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![
+            ("a", Arc::new(Int64Array::from(vec![1]))),
+            ("b", Arc::new(Int64Array::from(vec![3]))),
+            ("z", Arc::new(Int64Array::from(vec![0]))),
+        ],
+    );
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[
+            {"name":"fraction","expression":{"kind":"binary","operator":"divide","left":{"kind":"column","name":"a"},"right":{"kind":"column","name":"b"}}},
+            {"name":"missing","expression":{"kind":"binary","operator":"divide","left":{"kind":"column","name":"a"},"right":{"kind":"column","name":"z"}}},
+            {"name":"remainder","expression":{"kind":"binary","operator":"modulo","left":{"kind":"column","name":"a"},"right":{"kind":"column","name":"z"}}}
+        ]}),
+    );
+    assert_eq!(
+        run(&context, owner, &plan).await,
+        vec![vec![Scalar::Float(1.0 / 3.0), Scalar::Null, Scalar::Null]]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_grouped_averages_keep_exact_residue_and_sorted_group_order() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![
+            ("kind", Arc::new(Int64Array::from(vec![1, 2, 1, 2]))),
+            (
+                "value",
+                Arc::new(Int64Array::from(vec![
+                    9_007_199_254_740_993,
+                    7,
+                    -9_007_199_254_740_992,
+                    9,
+                ])),
+            ),
+        ],
+    );
+    let plan = decode(
+        json!({"op":"sort","keys":[{"expression":{"kind":"column","name":"kind"},"descending":false,"nulls_first":false}],"input":{
+            "op":"aggregate","input":{"op":"scan","table":{"name":"T","mode":"static"}},
+            "groups":[{"name":"kind","expression":{"kind":"column","name":"kind"}}],
+            "metrics":[{"name":"answer","function":"average","expression":{"kind":"column","name":"value"}}]
+        }}),
+    );
+    assert_eq!(
+        run(&context, owner, &plan).await,
+        vec![
+            vec![Scalar::Int(1), Scalar::Float(0.5)],
+            vec![Scalar::Int(2), Scalar::Float(8.0)]
+        ]
+    );
+}
+
+fn aggregate_modes(plan: &dyn ExecutionPlan, modes: &mut Vec<AggregateMode>) {
+    if let Some(aggregate) = plan.downcast_ref::<AggregateExec>() {
+        modes.push(*aggregate.mode());
+    }
+    for child in plan.children() {
+        aggregate_modes(child.as_ref(), modes);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_exact_accumulators_merge_two_real_input_partitions() {
+    let (context, owner) = setup_partitions(2);
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "value",
+        DataType::Int64,
+        false,
+    )]));
+    let partitions = [
+        vec![9_007_199_254_740_993, 0],
+        vec![-9_007_199_254_740_992, 0],
+    ]
+    .into_iter()
+    .map(|values| {
+        vec![
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(values))]).unwrap(),
+        ]
+    })
+    .collect();
+    context
+        .register_table(
+            TableReference::bare(table_name(&request("T")).unwrap()),
+            Arc::new(MemTable::try_new(schema, partitions).unwrap()),
+        )
+        .unwrap();
+    let plan = decode(
+        json!({"op":"aggregate","input":{"op":"scan","table":{"name":"T","mode":"static"}},"groups":[],"metrics":[
+            {"name":"total","function":"sum","expression":{"kind":"column","name":"value"}},
+            {"name":"mean","function":"average","expression":{"kind":"column","name":"value"}}
+        ]}),
+    );
+    let frame = lower(&context, &plan, owner).await.unwrap();
+    let physical = frame.frame.create_physical_plan().await.unwrap();
+    let mut modes = Vec::new();
+    aggregate_modes(physical.as_ref(), &mut modes);
+    assert!(modes.contains(&AggregateMode::Partial), "{modes:?}");
+    assert!(
+        modes.contains(&AggregateMode::Final) || modes.contains(&AggregateMode::FinalPartitioned),
+        "{modes:?}"
+    );
+    let batches = collect(physical, context.task_ctx()).await.unwrap();
+    assert_eq!(
+        scalar_rows(&batches),
+        vec![vec![Scalar::Int(1), Scalar::Float(0.25)]]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_nested_and_constant_arithmetic_keep_exact_native_schema() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![("a", Arc::new(Int64Array::from(vec![i64::MAX])))],
+    );
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[
+            {"name":"nested","expression":{"kind":"binary","operator":"subtract","left":{"kind":"binary","operator":"add","left":{"kind":"column","name":"a"},"right":{"kind":"literal","value":1}},"right":{"kind":"column","name":"a"}}},
+            {"name":"constant","expression":{"kind":"binary","operator":"subtract","left":{"kind":"binary","operator":"add","left":{"kind":"literal","value":9223372036854775807i64},"right":{"kind":"literal","value":1}},"right":{"kind":"literal","value":9223372036854775807i64}}}
+        ]}),
+    );
+    let frame = lower(&context, &plan, owner).await.unwrap();
+    let optimized = frame.frame.clone().into_optimized_plan().unwrap();
+    let LogicalPlan::Projection(projection) = optimized else {
+        panic!("native projection")
+    };
+    let Expr::Alias(constant) = &projection.expr[1] else {
+        panic!("public constant alias")
+    };
+    assert_eq!(
+        constant.expr.get_type(projection.input.schema()).unwrap(),
+        DataType::Decimal128(20, 0)
+    );
+    let physical = frame.frame.create_physical_plan().await.unwrap();
+    for (field, name) in physical
+        .schema()
+        .fields()
+        .iter()
+        .zip(["nested", "constant"])
+    {
+        assert_eq!(field.name(), name);
+        assert_eq!(field.data_type(), &DataType::Decimal128(20, 0));
+    }
+    let schema = physical.schema();
+    let batches = collect(physical, context.task_ctx()).await.unwrap();
+    for batch in &batches {
+        assert_eq!(batch.schema(), schema);
+        for column in batch.columns() {
+            assert_eq!(
+                ScalarValue::try_from_array(column, 0).unwrap(),
+                ScalarValue::Decimal128(Some(1), 20, 0)
+            );
+        }
+    }
+    assert_eq!(
+        scalar_rows(&batches),
+        vec![vec![Scalar::Int(1), Scalar::Int(1)]]
+    );
+}
+
+fn contains_plan<T: ExecutionPlan>(plan: &dyn ExecutionPlan) -> bool {
+    plan.is::<T>()
+        || plan
+            .children()
+            .iter()
+            .any(|child| contains_plan::<T>(child.as_ref()))
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_mixed_integer_equality_keeps_native_hash_join_and_exact_match() {
+    let (context, owner) = setup_partitions(2);
+    register(
+        &context,
+        &request("L"),
+        vec![(
+            "key",
+            Arc::new(UInt64Array::from(vec![u64::MAX, i64::MAX as u64])),
+        )],
+    );
+    register(
+        &context,
+        &request("R"),
+        vec![("key", Arc::new(Int64Array::from(vec![i64::MAX, -1])))],
+    );
+    let plan = decode(
+        json!({"op":"sort","keys":[{"expression":{"kind":"column","name":"matched"},"descending":false,"nulls_first":false}],"input":{
+            "op":"project","columns":[{"name":"matched","expression":{"kind":"column","name":"left.key"}}],"input":{
+                "op":"join","kind":"inner","left":{"op":"scan","table":{"name":"L","mode":"static"}},"right":{"op":"scan","table":{"name":"R","mode":"static"}},"on":[{"left":"key","right":"key"}]
+            }
+        }}),
+    );
+    let frame = lower(&context, &plan, owner).await.unwrap();
+    let physical = frame.frame.create_physical_plan().await.unwrap();
+    assert!(contains_plan::<HashJoinExec>(physical.as_ref()));
+    let batches = collect(physical, context.task_ctx()).await.unwrap();
+    assert_eq!(
+        scalar_rows(&batches),
+        vec![vec![Scalar::UInt(i64::MAX as u64)]]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn task_plan_count_preserves_nonnull_empty_and_all_null_input_semantics() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![(
+            "value",
+            Arc::new(Int64Array::from(vec![Some(i64::MIN), None, Some(i64::MAX)])),
+        )],
+    );
+    register(
+        &context,
+        &request("Empty"),
+        vec![(
+            "value",
+            Arc::new(Int64Array::from(Vec::<Option<i64>>::new())),
+        )],
+    );
+    let counts = |input| {
+        decode(
+            json!({"op":"aggregate","input":input,"groups":[],"metrics":[{"name":"all","function":"count"},{"name":"nonnull","function":"count","expression":{"kind":"column","name":"value"}}]}),
+        )
+    };
+    assert_eq!(
+        run(
+            &context,
+            owner.clone(),
+            &counts(json!({"op":"scan","table":{"name":"T","mode":"static"}}))
+        )
+        .await,
+        vec![vec![Scalar::Int(3), Scalar::Int(2)]]
+    );
+    assert_eq!(
+        run(
+            &context,
+            owner.clone(),
+            &counts(json!({"op":"scan","table":{"name":"Empty","mode":"static"}}))
+        )
+        .await,
+        vec![vec![Scalar::Int(0), Scalar::Int(0)]]
+    );
+    assert_eq!(run(&context,owner,&counts(json!({"op":"filter","input":{"op":"scan","table":{"name":"T","mode":"static"}},"predicate":{"kind":"is_null","value":{"kind":"column","name":"value"}}}))).await,vec![vec![Scalar::Int(1),Scalar::Int(0)]]);
 }

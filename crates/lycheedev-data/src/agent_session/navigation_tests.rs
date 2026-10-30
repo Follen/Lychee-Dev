@@ -3,6 +3,8 @@ use super::*;
 use crate::capture::fixture::{self, Fixture};
 #[path = "navigation_fixture_data.rs"]
 mod data;
+#[path = "navigation_business_tests.rs"]
+mod business;
 fn relations(expected: &[(&str, &str, u32, &str, u64, u32)]) -> Value {
     Value::Array(expected.iter().map(|&(table, field, id, kind, target, depth)| {
         json!({"fromTable":table,"fromField":field,"fromID":id,"toKind":kind,"toID":target,"depth":depth})

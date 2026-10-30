@@ -170,7 +170,7 @@ fn ended_slot_reset_close_preserves_pending_disk_bytes_and_original_evidence() {
             )
             .unwrap();
             let outcome = if slot_reset {
-                service.close_for_slot_repair(&f.id, &control())
+                service.close_for_repair_mode(&f.id, true, &control())
             } else {
                 service.disconnect(&f.id, &control())
             };

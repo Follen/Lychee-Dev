@@ -37,6 +37,9 @@ local function current()
     end
     return profile
 end
+local function stopWaiting()
+    if deferred then deferred:UnregisterAllEvents(); deferred:SetScript("OnEvent", nil) end
+end
 local function installDefaults()
     local ready, reason = noncombat()
     if not ready then return nil, reason end
@@ -59,6 +62,18 @@ local function installDefaults()
             end
         end
     end
+    -- Bindings can still be loading at PLAYER_LOGIN. Resolve the player's
+    -- writable set before any mutation; never save defaults to a guessed set.
+    local bindingSet
+    if #pending > 0 then
+        bindingSet = GetCurrentBindingSet()
+        if restricted(bindingSet) or (bindingSet ~= 1 and bindingSet ~= 2) then
+            return nil, "receiver_binding_set_unavailable"
+        end
+    end
+    -- SetBinding/SaveBindings can synchronously emit UPDATE_BINDINGS, including
+    -- when a manual reset completes an outstanding startup wait.
+    stopWaiting()
     local assigned = {}
     for _, entry in ipairs(pending) do
         if not SetBinding(entry.key, entry.action) then
@@ -67,17 +82,19 @@ local function installDefaults()
         end
         assigned[#assigned + 1] = entry.key
     end
-    if #assigned > 0 then SaveBindings(GetCurrentBindingSet()) end
+    if #assigned > 0 then SaveBindings(bindingSet) end
     return current()
 end
 local function defer(event)
     if not deferred then deferred = CreateFrame("Frame") end
     deferred:RegisterEvent(event)
-    deferred:SetScript("OnEvent", function(self)
-        self:UnregisterAllEvents(); self:SetScript("OnEvent", nil)
+    if event == "BINDINGS_LOADED" then deferred:RegisterEvent("UPDATE_BINDINGS") end
+    deferred:SetScript("OnEvent", function()
+        stopWaiting()
         local ok, reason = installDefaults()
         if not ok and reason == "receiver_combat" then defer("PLAYER_REGEN_ENABLED")
-        elseif ns.Startup then ns.Startup.receiverFailure = reason end
+        elseif not ok and reason == "receiver_binding_set_unavailable" then defer("BINDINGS_LOADED") end
+        if ns.Startup then ns.Startup.receiverFailure = reason end
         if ns.Bootstrap then ns.Bootstrap.Publish() end
     end)
     return true
@@ -94,7 +111,9 @@ ns.ReceiverBindings = {
     end,
     Reset = function()
         if ns.InputProtection and ns.InputProtection.IsActive() then return nil, "receiver_active" end
-        return installDefaults()
+        local profile, reason = installDefaults()
+        if profile and ns.Startup then ns.Startup.receiverFailure = nil end
+        return profile, reason
     end,
     Register = function(callbacks)
         if handlers then local profile, reason = current(); return profile and true or nil, reason end
@@ -105,6 +124,7 @@ ns.ReceiverBindings = {
         if type(IsLoggedIn) == "function" and IsLoggedIn() ~= true then return defer("PLAYER_LOGIN") end
         local profile, reason = installDefaults()
         if not profile and reason == "receiver_combat" then return defer("PLAYER_REGEN_ENABLED") end
+        if not profile and reason == "receiver_binding_set_unavailable" then return defer("BINDINGS_LOADED") end
         return profile and true or nil, reason
     end,
 }

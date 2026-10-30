@@ -1,126 +1,68 @@
 # 当前交接
 
-以 [DESIGN.md](DESIGN.md) 为业务与架构目标；待办见 [todo.md](todo.md)，测试用途与入口见 [test.md](test.md)，工作规则见 [AGENTS.md](AGENTS.md)。本文件只保存当前状态。
+架构以 [DESIGN.md](DESIGN.md) 为准，剩余事项见 [todo.md](todo.md)，测试用途与入口见 [test.md](test.md)，工作规则见 [AGENTS.md](AGENTS.md)。这里只保存当前任务状态。
 
-## 工作区、目标与分工
+## 范围、分支与分工
 
-- 2026-10-30用户要求将Go 3.2.6变更同步到Rust，继续此前修复、业务回归和审计，暂时不占用Live。main版本与本机npm包均为3.2.6，参考HEAD `15f4db7a05`、实现`0e04ef6690`；Rust仍为3.5.0。此次只做代码、离线/隔离业务与CI，不连接游戏、不发送Live输入或更改实际游戏安装；历史性能结果不重跑或改写。
-- 本批CI重设计与集中修复已完成。用户要求每个PR完整Release和正式包验收、集中提交推送并复用产物；实现提交`95f2b152764be0669da0787b9ad4130667d0b8c4`已推送。go326_doctor完成Delivery渠道合同与真实清单回归，go326_delivery完成两组测试及覆盖汇总，go326_native完成workflow合同，均已交回并停止写入；协调者完成整合、真实CI和候选哈希核对。本轮未操作游戏。
-- GO-326实现及离线回归已完成：Delivery持久归档重置与精确退休、Doctor原CON关闭/默认归档续走/hard-reset及统一CLI入口已接通；旧schema须有实际双键INPUT才允许升级Reload，业务回执和新runtime证明保持当前协议。审查补齐旧代与迁移槽清单拒绝退休、进程结束后hard-reset保留原槽字节两处边界。旧测试将可升级协议一律拒绝的断言已改为拒绝未知协议，保留独立的升级正反例。
-- 最新Windows CI的workspace all-targets构建通过，产出93个测试程序与1个support；两组分别24/24和69/69通过，汇总确认93个程序恰好完成一次、无缺失/重叠。源码身份`c8c2360f1e40cd5eb8d4e1dce34759dfbe691d3c5670a232f7a8e47e58f0d9da`。此前Live库516通过/2 ignored及四项激活身份红/绿证据保留；本轮完整CI覆盖其当前程序，原ignored/客户端范围未扩大。
-- 用户要求的本任务Retail Live占用已释放。手动reload后，原CON `CON-6dba6d65e83c8fd4bcbbcc6fff011684`通过正式resume退出0、`closed=true / complete=true`；新runtime连续新鲜样本证明旧运行时已结束，原not_sent/0及期限不变。报告`.tmp/business-regression/live-retail-audit/release-live-after-reload.stdout.json`，receipt `e2e1ee40-5cd1-4aac-add9-c5a06bd537bc`。本任务未建立后续连接，原记录保留；该结论不描述其他任务当前的Live归属。
-- 工作区：`.worktrees/pr14-local-dev`；分支：`rust-refactor`；既有 [draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。本批本地验证基线为`9fbfd1d84568f7ec92b5656dbd7c63d337c6696d`加任务改动；当前提交以分支为准。版本以 `release/version.json` 为准，当前3.5.0。
-- 用户目标：完成设计文档全部设计；当前性能已接受，先回归全部业务，再循环审计。最新要求是先统一梳理Source调用语义，集中修改、集中验证，再恢复完整业务回归。停止性能优化和补跑，保留已有测量事实。
-- 已有提交/推送本任务、更新draft PR #14及运行真实CI的授权继续有效。最新要求暂停Live占用，之前Retail实机授权本轮不使用；全局Skill安装、合并、发布及渠道变更均不在本轮范围。
-- [完整CI 41051431104](https://github.com/Follen/Lychee-Dev/actions/runs/41051431104)的12个job全部success，包含静态、固定资源/addon、测试/Release构建、两组Rust验证、唯一TGZ生产、独立内容审计、隔离npm/Skill、包内Source/Data、覆盖汇总、候选封存及ci-required。实际验收的是PR合成提交`b6497ff51e768bb82a8c1f9f73e07fdda1a3e812`，未把产物身份改写成分支或其他提交。旧运行41045064696发现的preserveLatest硬编码拒绝已通过当前真实清单回归和新包Source业务确认修复。
-- 固定Lua供应包保持原生产字节，addon ZIP、两种Rust配置和npm TGZ各生产一次；所有消费者使用本轮明确产物，许可证closure、原receipt/日志及Cargo timings随产物传递。TGZ生产、安装、审计、业务与候选共同哈希为`900523d58ad0ddf724277c6c074d67b114bba662f95da2c0241052e145bafdc0`，Release CLI为`93ddfb3acaf44c8762b87e0922da86ce55c0062f5cb92f9668ff8470f969ccc4`。
-- 本轮Cargo测试构建413.937秒、Release944.102秒；测试553条compiler-artifact中429 fresh/124重编。新的Cargo1.99日志记录279条fingerprint信息，确认checkout后的路径源码时间戳变化会触发重编；两类target缓存均恢复并保存本次key。两组Rust验证各约7分08秒和8分15秒，保留组内串行、默认栈和原业务期限，没有额外构建或调整Release profile。
-- 本批受影响Node工具集中70/70、20项workflow合同、actionlint、文档及diff检查通过，完整CI再通过其静态门槛。本机all-targets曾在admission报disk.cache_quota，未启动Cargo或删除缓存；编译与Rust回归由本轮CI完成。包内Source的native/环境/语义coverage完整且session关闭；Data的三行精确结果、Page/CAP/release/close通过，inputsStable=true、handlesReaped=true。仅证明固定最小业务，不扩大为七客户端或全部数据通过。
-- [候选产物](https://github.com/Follen/Lychee-Dev/actions/runs/41051431104/artifacts/12976227345)已保留：独立下载ZIP并核SHA-256 `947405ef47d7691b528f5fc0b3be9352d1b38c76b4d51d33522a07587fe9725f`，11项SHA256SUMS及TGZ跨报告身份全部一致。PR仍draft，未合并或发布；此次收尾只补文档记录，跳过CI避免再次编译，验收仍绑定95f2b15276对应的上述合成提交。
-- 本轮`.tmp/ci-repair`已按核实后的绝对路径清理：245个文件、40,574,931字节，一次性清理脚本也已移除。候选、报告和生产证据保留在本轮Actions artifacts；原业务材料、恢复记录、此前13个被拒绝清理的目录及保留worktree未纳入本次删除。
-- LIVE-01已定位到INPUT采样后的两次500槽准备耗时，两项真实DiskPublications回归曾复现发送前拒绝，receipt `3d3c6e38-00dd-47d0-b0ba-b9507d21eac2`。Invoke准备后重新采样、Reload独立于槽池均已通过本批Live完整库；原目标、持久意图、one-use、profile、最终publication与deadline约束保持。临时计时已删除，实机复验按用户当前要求暂缓；诊断dev CLI仅保留原问题证据用途。
-- 主分支核对确认当前addon已包含main代码，只有3.5.0版本号不同；Go3.2.6相关行为完成移植后，以ours策略接入main历史，已核实整合前后Rust tree完全相同。2026-10-30只读`npm view lycheedev dist-tags --json`确认latest=3.2.6、next=3.1.2，本地发布清单`preserveLatest`已更新为3.2.6，不改beta目标或远程标签。此前已删除无消费者且调用退役EncodeSignal的`tests/protocol/writer.lua`，当前正式bridge的四项输入与精确数值覆盖不变。
-- 两轮审计修改及本批安装包的受影响验证全部通过。安装包基线源码`3ff2a83c4a0e5f03f5d70883a564423bad53bdbbce70ab7d39f7618053f936be`的`audit-2` all-targets构建通过（93+1，receipt `de1e643f-a86d-41ec-828b-dea633a36178`）；adapter全部19个测试程序、Source完整库712项（5项ignored）、真实checker families及nominal通过。CLI库211项及两实际CLI程序各3项、Data transport101项、CI工具回归和18项workflow结构检查通过。新Release、隔离npm安装、包内receiver/发现信息及Retail/Forever均通过。这些结果不覆盖后续Live修复；其余Actions、symlink权限和实机缺口见下文。
-- 原生构建/测试共用既有owner队列，本机默认单Cargo job、CI显式双job；默认栈、50 GiB build cache、5 GiB scratch、2 GiB空闲预留及隔离用户目录保持。Cargo编译批次默认60分钟，测试执行保持各自业务期限。
+- 用户要求：同步 main 3.2.7，完成原设计剩余业务、回归与架构/业务/Skill-CLI/有效覆盖/死代码/全仓集成/Rust 原生度审计，额外做一轮冗余测试审计。Live 实机留到用户后续安排。本轮不连接或读取游戏进程、不发送游戏输入、不更改真实游戏安装或全局 Skill。
+- 工作区 `.worktrees/pr14-local-dev`，分支 `rust-refactor`，既有 [draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。本批基线 `d13e3374267249b80d13b5d14818abc96d6d322a`；main 已 fetch 核实仍为 `cbf96df6465c661e2e5a21b0c972d6bd76beab83`，3.2.7 发行实现 `dcb35d7f36`。Rust 版本仍以 release/version.json 的 3.5.0 为准。
+- 已有提交/推送本分支、更新 draft PR、跑完整 CI 与 Release/正式包验收授权继续有效；不合并 PR、不发布、不改远程 npm 标签。性能已接受，停止优化和补跑性能轮次。
+- 分工已结束，三个代理均 STOPEDIT：rust_business_audit 完成 Data/Engine；go326_doctor 完成 Core/Windows/Delivery/Live 离线路径；go326_delivery 完成冗余测试与 Agent 使用面。协调者负责整合、根依赖/lock、CI、共享文档、唯一原生队列及最终验证。
 
-## 已接通的业务范围
+## 本批已实施，待最终验证
 
-- **类型化边界与使用面：** Source、Data、Live、Core、Delivery接收各自请求，Invocation留在CLI；入口冻结项目/安装选择。68项命令的解析、help、describe、schema、示例与Skill发现来自唯一`commands.json`，实际无home发现与正常退出已通过。
-- **Data：** 通用查询和12项领域任务走Agent Session → Engine → DataFusion。完整值、关系、顺序、UnionAll重复项、Iterate previous-delta、精确整数、Page/CSV/CAP及Analyze已回归；既有句柄不依赖原输入继续可读。raw/图片/Hotfix CSV/demux统一发布与计量，Unknown或清理失败保留未结算额度；不自动收编历史未归属数据，`total_data_coverage_complete`仍为false。
-- **Source：** 固定原版Emmy、自有adapter、TOC/XML、API环境、声明/引用/调用/关系/差异、二进制Facts/Index和受管luac已接通。非UTF8原字节、哈希和位置保留，编码告警独立；未知或条件写保持partial。32 MiB+17超限文件不丢失同快照合法文档。冷查询复用刚发布的完整索引，热查询继续认证并投影。
-- **Live/Delivery：** 当前addon、Mailbox v1、SessionOwner、500槽、有效键位、持久输入意图、原请求/deadline恢复、不重放、报告与cleanup分离已有离线回归。正式Lua bridge已接当前addon和受管Lua；离线结果不证明H01—H08游戏行为。
-- **清理与CI：** Go产品源码、旧执行器/协议/测试及冻结副本、旧CI和失效文档已移除；Data旧借用游标与无生产用途转发已退役。真实CI已验证跨job路径、93+1程序、固定工具、许可证closure及唯一TGZ传递；候选封存通过，不包含合并、npm发布或渠道变更。
-
-## 本轮业务回归与未闭合问题
-
-审计修改与实际验证：
-
-| ID | 已确认的问题与修改 | 验证状态 |
-| --- | --- | --- |
-| A01 callback | 可空callback的泛Function实参未比较具体签名，却可能记为完成；完成度现复用实际参数分支，兼容与诊断规则保持。 | 四场景及adapter全部19个测试程序通过；报告`.tmp/business-regression/audit-2-adapter-report.json`。 |
-| A02 receiver | 显式typed self漏比较；普通隐式receiver诊断指0..0或显式参数。比较已统一到实际参数检查，位置取receiver自身。 | 旧已安装包三例复现，receipt `fc423c80-3b31-4057-a78e-8521f00dae1d`；adapter与真实Source三例通过。 |
-| A03 CLI发现 | 连接/恢复/断开/重载/bugs误标无游戏输入，status/session误标接触进程；live doctor修复效应未表达，status仍提BTP。 | 效应改由commands.json声明，live doctor的gameInputWhen标明--fix，清除失效BTP说明与npm README开发分支badge。静态Skill合同、版本、6项Skill工具、CLI库211项及实际CLI两程序各3项通过；报告`.tmp/business-regression/audit-1-cli-report.json`。 |
-| A04 CI回收 | 普通测试未回收后继续启动，后项可能覆盖未回收事实。 | 已停止后续启动并保留错误/证据/报告；11项纯Node回归通过。 |
-| A05 Data冗余 | 两条HTTP读取链的read_bounded/collect共4包装仅测试调用。 | 已删除，测试直接调用正式collect_admitted；body/gzip/取消/收费等101项通过，报告`.tmp/business-regression/audit-1-data-transport-report.json`。 |
-| A06 CI报告 | 三个validate报告上传默认仅成功后执行，失败报告留在临时runner。 | 三步加always，原job失败状态保持；18项结构测试通过。 |
-| A07 泛型receiver | 显式T=number的colon receiver未代入类型，table被接受；等价dot能报错。 | 旧包四场景已复现，receipt `658ccabf-c12d-4ad9-bba2-cb67a6d61ec8`；receiver已走现有泛型代入/别名/条件类型规则，adapter共16场景及真实Source四场景通过。 |
-| A08 adapter冗余 | plain_atom无任何调用；旧scope_metrics计数器只写无消费者。 | 已删除函数及测试计数，不变更生产语义；adapter全部测试通过。 |
-| A09 激活身份 | Prepared和旧协议手动等待的自动重载快路径漏核候选build/product，可能向不符的runtime发Reload。 | 两阶段×两身份字段的四项回归先复现，入口检查修复后Live516项通过；原owner、请求、期限与零输入日志均核对。报告`go326-activation-red-report.json`及`go326-audit-report.json`。 |
-
-当前Source完整库报告`.tmp/business-regression/audit-2-source-unit-report.json`；真实checker families和nominal报告`.tmp/rust-disk/evidence/3cc1f90d-c144-4319-9e6d-4aad59cff234/summary.json`，原断言及partial边界保留。此前完整业务回归的默认程序原报告`.tmp/business-regression/default-report.json`保留Delivery首次失败。
-
-| ID / 范围 | 当前事实与下一步 |
+| 范围 | 当前修改 |
 | --- | --- |
-| REG-01 Delivery | `main_checkpoint_rejects_same_version_replacement_without_replay`曾在升级准备阶段报Windows错误5。同一程序exact、完整addon事务19项及最后完整库156项均通过，原因仍未定。完整库报告`.tmp/business-regression/repaired-3-delivery-report.json`；原失败fixture保留，不增加重试或改写业务预期。 |
-| REG-02 进程回收 | 已验证测试helper关闭根句柄后，在原15秒deadline内等待同一Job归零；真实supervisor与Source/Data隔离通过。原失败时成员身份未知，不声称曾有worker泄漏。 |
-| REG-03 Source语义 | 已验证。调用许可、参数比较、返回类型/数量及coverage各守其证据边界；统一后的真实nominal、返回数量/控制流、公开semantic validate、catalog及checker families全部通过。最后非尾vararg由list入口正确调整，精确空/单/多值、SourceCall/Exact Entry、参数/self偏移、赋值和未知尾经Source完整库及真实原失败场景验证；unknown仍为partial，未降低数量断言。 |
-| REG-04 Lua桥接 | 已验证。统一解释器报告`.tmp/business-regression/lua/build-report.json`；当前addon35套×6客户端配置通过（`1160f78e-b14f-4415-bce4-df5bdb8764a4`），正式Rust桥接11项通过（`d9e0f50c-20a4-4300-8ced-46d3fc0f5623`）。 |
-| REG-05 Data缺钥 | 已验证。真实准备链和重试次数通过；删除没有合同依据的总decode_work大小不等式，保留实际阶段次数和成本观察。新鲜fixture与业务用例通过（`d6eba767-2bee-4648-aa9e-45a84cdf88f0`），报告`.tmp/business-regression/data-key-repaired-3-report.json`。 |
-| REG-06 XML Facts | 已验证Script与handler的声明、关系、原始行映射及新缓存身份。Source库、公共XML查询和最后修复产物的16个显式XML场景均通过；最终XML及四产品Source矩阵报告为`.tmp/rust-disk/evidence/6f8668a5-c634-475a-b65c-68722a4d5383/summary.json`。 |
-| N07 CPU取消 | 新实际worker CPU进展后取消用例通过，连同其余supervisor用例共7项通过；核原15秒deadline内Job回收、旧句柄失效与不重放。报告`.tmp/business-regression/repaired-3-supervisor-report.json`。这不证明某一次DataFusion poll完全不yield。 |
+| main 3.2.7 | ReceiverBindings 与 main 当前文件逐字节归一化一致；先验证有效绑定方案，等待加载/脱战，停止监听后写入并保存原方案，重读玩家修改，手动重置清诊断。独立旧 protocol 场景合入当前 addon 套件。preserveLatest 仅更新为 3.2.7，beta 与 Rust 版本不变。 |
+| Data 领域 | 法术 EffectBasePointsF、Speed、RangeMin/Max 保留原浮点/数组；DecorGet 与 CreatureDisplay 按文件两阶段的 partial 空选择报 unavailable，完整空来源仍报 not_found。新增正式 Session、Engine 与自动 CAP 的完整结果回归。 |
+| Data Engine | 删除无生产消费者的 NumericPlanner/SQL aggregate planner 与 SQL 前端测试；独立数值、双分区聚合、Decimal schema、HashJoin、COUNT 等断言迁到 typed 生产入口。关闭 DataFusion sql feature，锁定 metadata 已核；上游仍必选依赖 datafusion-sql，不声称整个依赖消失。 |
+| Agent 使用面 | requestSchema 覆盖全部十五种完整 wire 请求，复用当前领域/查询合同；公开示例走真实 serde/Session 验分页、CSV、CAP、release 与限制。doctor 无效 --no-cache 兼容参数及 Skill 说明已删除，外部固定 Go 参考不变。 |
+| Delivery | addon/Skill status 共用既有受控、有界、checked-close 检查器，贯穿原请求 control。只把实际损坏投影为 modified/incomplete；取消、期限、I/O 与清理错误原样失败。 |
+| Core/Windows | 复用挂起启动、附 Job、恢复的单一实现，不新增内存上限。原 control 等根、pipe workers 与同 Job 自然清空；失败保留原 5 秒资源收尾窗口，join/checked close 并保留 primary/cleanup。超窗只报告未确认回收，不续业务或报成功。 |
+| 死代码/冗余测试 | 删除无生产用途 doctor wrappers，测试直接调用正式 report/close helper；去掉镜像/重复断言和无消费者 Lua builder。字符隔离、真实 INPUT 与非空 History 场景接入当前 addon；bridge 证明测试实际读取 memory/numeric 两种证据并逐字段拒绝。CLI 数值集成目标改名 data_agent_public_numbers。 |
+| CI | 两项文件 symlink 的 ignored exact 用例在所属 Windows runner 显式执行，复用同一测试记录，独立保存报告；环境缺权限仍失败。原两组逐程序汇总、唯一 TGZ、Release 和包内业务链保持。 |
 
-此前真实return count、semantic validate及catalog已通过，报告分别保留于`.tmp/rust-disk/evidence/ce11292f-8e31-43c5-83bb-5b912eac3d51/summary.json`和`.tmp/rust-disk/evidence/000afdda-3def-45d5-8b23-47a680181d6c/summary.json`；后者同时保留非尾vararg原失败，修复已由当前完整库和families验证。Delivery完整库156项通过的源码为`5d30313a798614abac33d03afcd07e549815916ef05cf0de9afa18ca9f2bfe5c`，不受本批Source改动影响。
+## 实际验证
 
-其他仍有效的业务验证：
+- 3.2.7 绑定用例在移植前六客户端均复现 SaveBindings 方案错误；移植后四套 × 六客户端 24 项通过。当前完整 addon 为 37 套，完整 CI 将执行 222 项；本轮尚未声称它们全部通过。
+- Red all-targets 构建通过，93 个测试程序和一个 support，源码摘要 `520c3d9d7a3d49334f118f3b81d6b88a11fe359bee9cad189243b96b6f546176`。Data 九项 4 通过/5 失败；Delivery 六项均失败；Core 保留原 deadline/exit5/reaped，但 jobEmpty 确认缺失。未据此声称旧 Core 曾提前返回成功。
+- 冗余清理相关 Node 77 项、workflow 21 项、版本检查、固定 Lua 供应校验、静态 Skill 合同（68 命令）、文档链接与 diff 检查通过。Windows 修改未新增 unsafe 块，边界清单检查通过。
+- 首次 green 构建报 schema 测试 E0382（值 move 后再用），已修；非零退出后 MSVC vctip 辅助进程由 owned runner 强制收尾，原 receipt `4a7139fd-57ad-446a-aa00-c18859745c86` 确认树/句柄全部回收，不作为构建通过。整合复核另补取消/deadline 与 PSS 清理错误并存时的原错误码分类，保留完整失败，并增加纯映射回归。
+- green-2 all-targets 已通过，93+1，源码摘要 `f5eac3f115dcf816ef8cc40be4bccf8ee1755e4c4da65b0bc19f27e8d5e78063`。受影响整批 `.tmp/rust327-audit/run-green.mjs` 已结束，全部进程回收确认。Delivery 五程序共198通过/1 ignored（库175，含新增六项，543.46秒）；CLI 214+6通过；Core进程五项通过；Live库516通过/2 ignored；Windows默认两项与显式sealed helper两项通过。独立helper直接取自同次Cargo的原exe并保存哈希/原生产证据，不重复编译。报告各在`.tmp/rust327-audit/*-green.json`，总表green-summary.json。
+- Data首次完整库912通过/1失败/1 ignored，195.60秒；新增九项领域均通过。失败正文 `catalog accepted an unknown field` 定位为serde内部tag unit visitor忽略未知字段。Catalog/Close已改为空struct，并移接五文件七处构造/match；schema和独立断言不变，也排除其他五个公开对象枚举同类问题。最终green-3 all-targets已通过93+1，源码摘要`0b7a12f5fa6cfa2ccd72d31f7e0e4ce9163eabfac3112ec0e75515fd2870fdcc`；schema4、catalog1、CLI214、实际数值IPC3与supervisor7全部通过、回收确认。其余未改路径复用green-2结果。报告final-summary.json和原失败记录仍在本轮临时目录。
+- 所有原生工作使用现有 owned 队列、默认栈、本机单 job、50 GiB cache/5 GiB scratch/2 GiB 预留；未另建 target。仅在持有原 channel 并检查绝对路径/reparse 后清理旧 incremental 26,405,516,864 字节，依赖、程序和 Release 留存。最近 cache 28,440,101,363 字节，后续按实际 admission 处理。
 
-- 实际CLI flow、Source会话复用/取消/原请求恢复、Data断管后的Source隔离及公共XML三组通过（`876a600a-775d-4ca2-ac7a-dfc91025d2a1`）。Live隔离部分仅用正式持久化API构造输入，不涉及游戏。
-- 320 MiB内容检查与完整导出通过（`082cc2d5-3aa1-4f67-81a9-9e0d70c1f698`）；实际Retail Data Session通过（`9cb3a31f-a0ef-4f62-93f4-c323c274bc10`）。
-- 四产品Source矩阵以固定Classic提交`1028c1e687f721ba9d3af14d1b12a5745e4227c7`在最终语义修复产物通过（`6f8668a5-c634-475a-b65c-68722a4d5383`）；最初临时输入与固定TOC不匹配的失败保留。最终同批XML 16例均通过。
-- 两项文件symlink测试因Windows 1314权限受阻，未执行重定向断言。缺依赖、ignored与环境受阻均不计为业务通过。
+## 可复用的既有结果与具体缺口
 
-## 已安装包与固定输入
-
-当前Release已包含两轮审计修改：artifact `.tmp/business-regression/release-audit/artifact.json`，源码`3ff2a83c4a0e5f03f5d70883a564423bad53bdbbce70ab7d39f7618053f936be`，二进制SHA-256 `62222ecd6c6f57c726dafc0ed8f75ddd8d9f7da4c19bf982d6e3695e4ad87553`，build receipt `2871f477-73ea-4c87-af90-13022fa38e86`。实际编译17m56s，当前运行期限为60分钟。隔离npm包报告`.tmp/delivery/npm-audit/report.json`：安装、包内Skill launcher、受管luac、显式许可证closure复用及实际Source语法检查均通过，未发布。包内七个receiver场景及命令效应通过（`3ee94983-ce37-46d9-afdc-839ef021df0c`）；完整Retail Source/native/会话复用通过（`908e5b33-76ef-417d-9fa4-9830f2390e66`，输入与产物保持一致）；Forever冷/热/原字节/编码告警/inspect/diff/luac/native复用通过（`8fe70325-7d31-4cf2-8281-3bdba19cc075`）。
-
-审计前v12包的公共Source flow/native会话隔离/XML（`e9687ca5-84b0-4266-927c-335f931eac02`）、显式refs/context（`136211d9-2e7b-4d55-8ea0-1376af16b630`）、luac/inline/ordered/validate_contract（`f963d2db-a194-4f1e-8dec-c4a2f2b967a6`）通过，未受本批修改影响。v12完整Retail及Forever报告分别为`b55e25ec-6ad3-48e6-ac81-aaf957f21d26`和`65d5eeeb-094a-4e2a-813b-9acaa4057034`；它们不代替本批安装包验证。
-
-七产品Map各自固定PIN，完整核对值、顺序、CSV、CAP、来源、缓存复用和关闭：
-
-| 产品/build | 已验证结果与receipt |
-| --- | --- |
-| Retail 12.1.5.70448 | 1,187行完整；`7ca9bdc5-3cf6-4f74-9c39-80c6fdf39c68`；预备缓存`ff0cd19f-193d-4329-be73-1d0fb68cab0f`。 |
-| Classic 5.5.4.70531 | 285行完整；`37ae35bd-d555-4942-b57d-b0fe97c3b0e0`。 |
-| Classic Era 1.15.9.70003 | 59行完整；`fa9eb4a3-7ff5-415e-abf1-1d6db06b3c28`。 |
-| Anniversary 2.5.6.70006 | 83行完整；`022c7e3f-dabc-4ba5-82c5-0f6ef2c3f9de`。 |
-| Titan 3.80.2.70522 | 130行完整；`e19fd8a1-9cc7-4ad7-9b0c-7163688cb332`。 |
-| Forever Asia beta 1.60.1.70450 | 73行可读、8行不可用，partial全路径通过；`8611ee01-9ee8-4178-b8a0-62f00b95d34e`。 |
-| Forever CN beta 1.60.1.70450 | 独立PIN，73行可读、8行不可用，partial全路径通过；`20789daa-2f7d-4092-90eb-44c3cc2780bb`。 |
-
-Forever缺失key ID为`0da4670db36fb2a9`、`d2c028cb7ac14d0b`、`da0e7785727a0a65`；外部固定参考报告相同分段和记录。已核对缺失记录及CAP的`complete=false`。Retail FID 134400的inspect/raw/PNG/WebP/CAP也通过（`daf1fc07-ee18-4e5d-9b4f-51913331912c`）：raw 3,916字节、图片64×64完整RGBA与独立预期一致。这些结果不证明其他表、全部资源或游戏行为。
-
-## 已接受的性能与清理限制
-
-- Source正式四组各20对完整一致，index冷/热中位比值38.75%/37.69%，query冷/热46.40%/29.12%，达到原50%目标；报告`94f3afa3-0cb3-4239-91ed-c3e2c5bb28d6`。describe冷/热只计正确性，整份报告仍为`fullB01B07Acceptance=false`。
-- Data内容与数值完整单对及独立复核通过正确性，未达到原50%目标。内容冷Rust/Go 440.59/188.79 ms、热166.40/146.15 ms（`d607974a-079d-4bd8-8ef7-dd7d2facf718`）；数值fresh 592.04/138.32 ms、prepare-inclusive 761.05/142.40 ms、first-after-prepare 376.29/142.40 ms、subsequent 371.93/112.38 ms（`3d5dc8c2-b367-4663-9a80-01d18a96eff8`）。双方完整业务生命周期与原始控制器总时均保留，不回写历史口径。
-- 用户指定Cargo target/scratch清理已执行，target随构建重新生成。13个已解决实验scratch的删除曾被自动审批拒绝（`blocked by policy`），仍保留，不重试绕过。外部参考、活动输入、性能失败输入和未解决恢复记录`4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b`、`de770010-ea9c-40fa-a48e-27141a6e0d64`保留；旧receipt的active不代表当前进程仍运行。`.worktrees/rust-refactor`明确保留。
+- [上一轮完整 CI 41051431104](https://github.com/Follen/Lychee-Dev/actions/runs/41051431104)的十二个 job 全通过，验收产品提交 `95f2b152764be0669da0787b9ad4130667d0b8c4`，实际 PR merge checkout `b6497ff51e768bb82a8c1f9f73e07fdda1a3e812`。93+1 构建、两组 24/69、Lua、Release、唯一 TGZ 生产/安装/审计/包内 Source/Data 和候选封存均通过；它不代替本批新源码验证。
+- 上轮 [候选](https://github.com/Follen/Lychee-Dev/actions/runs/41051431104/artifacts/12976227345) TGZ SHA-256 `900523d58ad0ddf724277c6c074d67b114bba662f95da2c0241052e145bafdc0`、Release CLI `93ddfb3acaf44c8762b87e0922da86ce55c0062f5cb92f9668ff8470f969ccc4`，原日志/receipt/timings/许可证 closure 随产物保留。记录结果的 d13 文档提交跳过 CI，没有改写产物身份。
+- 未改 Source/Emmy 的完整业务证据继续有效：`.tmp/business-regression/audit-2-source-unit-report.json`、adapter 全部十九个程序、真实 checker families/nominal、四产品 Source 与 XML 矩阵，以及已安装包的 Retail/Forever 冷热、原字节、编码告警、inspect/diff/luac/native 会话。各领域状态独立，unknown 仍为 partial。
+- 既有七产品固定 Map 全值/Page/CSV/CAP/close 已通过；两个 Forever beta 分别 73 行可读、8 行不可用，保留独立 PIN/partial，不合并身份。Retail FID134400 raw/PNG/WebP/CAP 已通过。细节仍在原 `.tmp/business-regression` 与 `.tmp/rust-disk/evidence`，不补性能轮次。
+- REG-01：Delivery 升级准备曾报 Windows 错误 5；同程序 exact、整个 addon 事务组、完整库及上轮 CI 后续均通过，原因未定。原 `.tmp/business-regression/default-report.json` 与失败 fixture 保留；不加重试或削弱断言。
+- 两项文件 symlink 本机曾因 1314 未执行实际断言；当前已接 CI，真实结果待本批 CI。普通 ignored 不能计为通过。
+- 原活动项目/CAP、外部固定参考、未解决恢复记录 `4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b` / `de770010-ea9c-40fa-a48e-27141a6e0d64`、保留 worktree `.worktrees/rust-refactor` 均保留。此前十三个已解决 scratch 删除遭自动审批拒绝，未重试绕过。任务结束只清本轮已完成临时材料。
 
 ## 下一步
 
-1. 本地完整业务回归与两轮审计已完成，修复已在本批安装包验证。后续只因新改动、实际失败或明确未解决的问题补验。
-2. 本批CI与包验收已闭合，无需重复构建；新代码、实际失败或尚未闭合的业务范围再触发对应验证。其余本地symlink权限、历史Delivery未复现错误及真实客户端缺口仍按todo保留。
-3. Go 3.2.6业务同步和Live修复的离线验证已完成；本任务两个Retail CON均已正式关闭。用户当前要求暂不占用Live；再次实机工作前核对当时安装版本、实例与归属。
+1. 集中提交并接入main3.2.7历史，核整合前后Rust树相同，单次推送。
+2. 跑完整CI，核两组93程序、两项symlink实际断言、222项Lua、Release、同TGZ安装/审计/包内业务及候选身份；PR保持draft。
+3. 保存本轮真实CI身份/结果后收尾文档；不为结果记录重建原生产物，清理本轮已完成临时目录，保留原失败/恢复记录与明确保留的worktree。
 
-## 最后执行：需要真实客户端或用户配合的验证
+## 最后执行：用户后续安排的 Live 实机
 
-`D:/Game/World of Warcraft`的七产品安装、executable与共享CASC文件已确认存在；Retail为12.1.5.70448，两Forever Beta为1.60.1.70450。用户仅授权当前Retail；下列跨客户端项目仍保留具体缺口。
+本轮没有占用 Live。此前本任务两个 CON 都已正式关闭，不能从旧进程身份或 receipt 的 active 字样推断当前连接。历史安装、PID、build 和 INPUT 观察不代表现在仍有效，恢复前用当前候选与新鲜身份重新确认。
 
-当前Retail只读doctor报告`.tmp/rust-disk/evidence/ca9928b7-aec8-4845-8210-a9a1a047437d/readiness.json`：PID `12032`，进程创建FILETIME `134371419009029958`，HWND `242684304`，build `12.1.5.70448`。磁盘为干净受管3.2.5（commit `c3450d9a32d6ea1334f0209897cc02ab06502ba6`）；500槽、0待处理预留、无owner。新CLI报告`mailbox_release_mismatch`，需受管升级后手动reload。此次没有创建CON或发送输入；诊断未证明游戏业务通过。报告中另有临时脚本误调用顶层`instances`的参数错误，正式命令为`live instances`；已知目标不再重复发现。
+保留项目 `.tmp/business-regression/live-retail-audit/project`。原激活 `CON-772d4ff02d794e1da489f49fea92651e` 及诊断 `CON-6dba6d65e83c8fd4bcbbcc6fff011684` 均经用户手动 reload 后正式 resume 关闭；最后释放报告 `release-live-after-reload.stdout.json`，receipt `e2e1ee40-5cd1-4aac-add9-c5a06bd537bc`。原输入为 not_sent/0，原期限未延长、未重放。
 
-授权后用本批已安装候选包执行`live doctor --fix`，受管交付成功后进入`activation_waiting_manual_reload`，退出6。原项目为`.tmp/business-regression/live-retail-audit/project`；CON为`CON-772d4ff02d794e1da489f49fea92651e`；请求为`retail-audit-activation-20261023`；PID/创建时间/HWND未变。报告`.tmp/business-regression/live-retail-audit/activate.json`及receipt `9c578590-60cd-4c17-8435-048d33477882`保留。用户已明确回复完成手动`/reload`；后续恢复原CON。doctor响应中的deployment是修复前的3.2.5诊断，不能当作修复后的磁盘状态。
+LIVE-01 原因：INPUT 采样后 500 槽 acquire/verify 约 519/517ms，发送前因样本不再同一 publication 拒绝。Invoke 准备后重新采样、独立 Reload、激活 build/product 身份检查已离线验证；实际发送与清理仍留待实机。原分段与失败记录继续保留，不改写成业务成功。
 
-升级后只读复查`.tmp/business-regression/live-retail-audit/after-upgrade-doctor.json`确认干净受管3.5.0、500槽、0预留及原CON归属。用户手动reload后，原CON发现runtime `000000150001da9537dd9ada27e93a3c`，GUID `Player-741-066A34E3`；开始原600秒激活预算。首次恢复遇到过期INPUT；随后的只读`.tmp/business-regression/live-retail-audit/input-doctor.json`全部健康，取得新鲜INPUT、`escapeLimit=0`、执行`ALT-CTRL-F12`和重载`ALT-CTRL-F11`，receipt `91f6d434-1ba7-4ecc-98a5-4a3f1d33e86e`。该诊断不证明绑定或业务完成。
-
-**LIVE-01｜原发送前复核阻断证据。** 当时四次输入记录均为`not_sent / messagesQueued=0`；sample至outcome为1487、1409、1346、1268ms。旧路径在采样后多次完整验证deployment，并要求复读仍为同一地址/时间戳且500ms内，分段结果见下段。普通disconnect进入`closing_exchange_unconfirmed`；用户第二次手动reload后，`resume-cleanup.json`退出0、`closed=true / complete=true`，新runtime `000000160001dcf86a866d9ed3405688`的连续新鲜样本完成旧运行时退役，receipt `e97efacd-f54e-4d64-b3c9-471f9ff6744a`。原CON已关闭且未重放，业务报告仍不可用。后续诊断激活使用独立请求`retail-input-diagnostic-20261023`，只针对同一PID/创建身份；不得改写原期限或清除原记录。
-
-临时诊断的同实例实际分段见`diagnostic-activate.json`，receipt `b68fcf9d-97d0-424f-aaf6-aa8d295b0365`：采样128ms、样本年龄223ms、intent落盘4.8ms、input.check55ms、monitor0.26ms、publication acquire519ms、verify517ms、首guard51ms、复读76ms，最后`same_publication=false`。主要耗时在采样后的publication准备。Invoke准备后重新采样与独立Reload已完成离线回归，尚未实机复验。诊断CON `CON-6dba6d65e83c8fd4bcbbcc6fff011684`已通过用户手动reload后的正式resume关闭，原reload intent仍为not_sent/0，原期限`1792695381145`未改。
-
-| ID | 验证目标 | 需要的实际结果 |
-| --- | --- | --- |
-| H01 | Retail、Classic、Classic Era、Titan、Forever Asia Beta、Forever CN Beta、Anniversary分别连接与执行。 | 产品/build、实例、报告、清理和断开；两个beta分别记录。 |
-| H02 | 当前500槽受管安装、更新与首次激活。 | 无兼容新鲜INPUT时手动reload；原连接恢复，发现/启用/加载各有事实。 |
-| H03 | 有效绑定、用户输入活动、焦点、战斗与protected/secret边界。 | 零Esc、零聊天文本、不抢前台；只释放本次注入按键，原deadline不延长。 |
-| H04 | 同安装多进程与跨产品实例。 | PID/创建时间/HWND、GUID/runtime/owner/fence独立，发布与恢复不串线。 |
-| H05 | 500槽容量边界、reload/relogin。 | 原请求与期限保持，槽不违规复用，报告与运行时退役事实准确。 |
-| H06 | 可控中断、未知输入与cleanup恢复。 | submitted/uncertain不重放，原连接/请求/期限保留；已验证报告与cleanup pending分别记录。 |
-| H07 | 按角色GUID的槽启用与故障恢复。 | doctor默认只读，受管修复按原连接完成；未就绪不报ready，不改foreign元数据。 |
-| H08 | 确需实机的有界Live耗时场景。 | 同一候选产物、业务与输入，记录原始总耗时和分段；不设Go耗时比值门槛。 |
+| ID | 待实际验证 |
+| --- | --- |
+| H01 | Retail、Classic、Classic Era、Titan、两个 Forever beta、Anniversary 各自连接/执行/报告/断开。 |
+| H02 | 当前 500 槽受管安装/更新、首次手动 reload 与原连接恢复。 |
+| H03 | 3.2.7 绑定等待/有效方案、焦点、活动输入、战斗及 protected/secret 边界；零 Esc/聊天文本。 |
+| H04 | 同安装多进程与跨产品的 PID/创建身份/HWND、GUID/runtime/owner/fence 隔离。 |
+| H05 | 500 槽容量、reload/relogin、原请求和期限及运行时退休。 |
+| H06 | 可控中断、unknown/submitted 不重放、可用报告与 cleanup pending 分开恢复。 |
+| H07 | 角色 GUID 启用、doctor 默认只读、受管修复与 foreign 元数据保护。 |
+| H08 | 确需实机的有界 Live 耗时；同候选/输入记录原始总时与分段，不恢复原 Go 比值目标。 |

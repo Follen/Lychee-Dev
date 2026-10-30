@@ -35,6 +35,7 @@ pub fn inspect_main_controlled(
         }
         Err(e) => return Err(e.into()),
     };
+    control.check()?;
     if !info.is_dir() || info.file_type().is_symlink() {
         return Ok(json!({"state":"unmanaged","detail":"target is not an ordinary directory"}));
     }
@@ -47,6 +48,7 @@ pub fn inspect_main_controlled(
         }
         Err(e) => return Err(e.into()),
     };
+    control.check()?;
     if !info.is_file() || info.file_type().is_symlink() || info.len() > RECEIPT_LIMIT as u64 {
         return Err(invalid("receipt file"));
     }
@@ -94,7 +96,11 @@ pub fn inspect_main_controlled(
     storage::finish_file(file, inspect, control)
 }
 fn resource_path(name: &str) -> bool {
-    if name.len() > 240 || !PAYLOAD_FAMILIES.iter().any(|family| name.starts_with(family)) {
+    if name.len() > 240
+        || !PAYLOAD_FAMILIES
+            .iter()
+            .any(|family| name.starts_with(family))
+    {
         return false;
     }
     let parts: Vec<_> = name.split('/').collect();
@@ -227,7 +233,10 @@ fn inspect_inventory(
                 }
                 control.check()
             })();
-            storage::finish_file(file, compared, control)?;
+            let compared = storage::finish_file(file, compared, control);
+            #[cfg(test)]
+            let compared = crate::status_control_tests::after_inventory_finish(compared, control);
+            compared?;
             seen.insert(key);
         }
     }

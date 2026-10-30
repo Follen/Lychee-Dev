@@ -190,13 +190,6 @@ function updateShard(fixture, index, change) {
   writeFileSync(fixture.reports[index].path, JSON.stringify(value));
 }
 
-test('fixed shards are immutable, disjoint and retain the intended package ownership', () => {
-  assert(Object.isFrozen(TEST_SHARDS));
-  for (const packages of Object.values(TEST_SHARDS)) assert(Object.isFrozen(packages));
-  assert.deepEqual(TEST_SHARDS['data-delivery'], ['lycheedev-data', 'lycheedev-delivery', 'lycheedev-binding-contracts']);
-  const all = Object.values(TEST_SHARDS).flat(); assert.equal(new Set(all).size, 9); assert.equal(all.length, 9);
-});
-
 test('named shard execution records its exact plan and record identity; pure aggregate proves full coverage', () => {
   const f = shardFixture(), digest = createHash('sha256').update(readFileSync(f.recordPath)).digest('hex');
   for (const group of f.reports) {

@@ -180,7 +180,7 @@ test('validation verifies the producer manifests before execution', () => {
 test('Rust shard artifacts remain distinct after merging and aggregation precedes candidate sealing', () => {
   const rust = jobs.get('validate-rust'), ready = jobs.get('release-ready'), shards = rustShards(rust);
   assert.match(rust, /^      fail-fast: false$/m, 'one failed shard must not cancel the other runner');
-  const run = commands(oneStep(rust, /ci-test-programs.mjs run /));
+  const run = commands(oneStep(rust, /ci-test-programs.mjs run .*--shard /));
   const record = /ci-test-programs.mjs run (\S+)/.exec(run)?.[1]; assert(record);
   assert.match(run, /--shard \$\{\{ matrix.shard \}\}/);
   assert.doesNotMatch(run, /--package\b|--target\b/, 'named groups cannot be narrowed in the workflow');
@@ -209,6 +209,25 @@ test('Rust shard artifacts remain distinct after merging and aggregation precede
   const unified = /--report (\S+)/.exec(aggregate)?.[1]; assert(unified);
   assert.equal(/--report rust=(\S+)/.exec(candidate)?.[1], unified);
   assert(needs(ready).includes('validate-rust'), 'candidate remains gated on success of the complete matrix');
+});
+
+test('file-symlink boundaries execute explicitly on their owning Windows runners without a rebuild', () => {
+  const rust = jobs.get('validate-rust');
+  for (const [shard, pkg, target, filter, source, report] of [
+    ['data-delivery', 'lycheedev-delivery', 'slot_maintenance', 'linked_static_slot_member_is_rejected_without_following_it', 'crates/lycheedev-delivery/tests/slot_maintenance.rs', 'symlink-slot'],
+    ['source-runtime', 'lycheedev-live', 'lycheedev_live', 'mailbox::admission::tests::mailbox_admission_redirected_claim_file_fails', 'crates/lycheedev-live/src/mailbox/admission_tests.rs', 'symlink-claim'],
+  ]) {
+    assert(TEST_SHARDS[shard].includes(pkg));
+    const step = oneStep(rust, new RegExp(`--target ${target} --arguments `));
+    assert.match(step, new RegExp(`^        if: matrix.shard == '${shard}'$`, 'm'));
+    assert(step.includes(`ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package ${pkg} --target ${target}`));
+    assert(step.includes(`--arguments '${filter},--ignored,--exact,--nocapture,--test-threads=1'`));
+    assert(step.includes(`--report .tmp/ci/validate-rust/\${{ matrix.shard }}/${report}.json`));
+    assert.match(step, /if \(\$LASTEXITCODE -ne 0\) \{ throw /);
+    assert.doesNotMatch(step, /continue-on-error|rust-build|rust-cargo|cargo (?:test|build)/);
+    const name = filter.split('::').at(-1);
+    assert.match(readFileSync(join(repository, source), 'utf8'), new RegExp(`fn ${name}\\(`), 'an exact libtest filter must name an existing test');
+  }
 });
 
 test('the workflow uses the shared Rust partition and every workspace package belongs to exactly one runner', () => {

@@ -325,15 +325,6 @@ where
         report.repair_archive = archive;
         (report, outcome)
     }
-    pub fn doctor_fix(
-        &mut self,
-        report: &DoctorResult,
-        options: &DoctorFixOptions<'_>,
-        delivery: &mut impl RepairDelivery,
-        control: &OperationControl,
-    ) -> ServiceOutcome {
-        self.doctor_fix_inner(report, options, delivery, &mut String::new(), control)
-    }
     fn doctor_fix_inner(
         &mut self,
         report: &DoctorResult,
@@ -479,17 +470,7 @@ where
             )
         }
     }
-    pub fn close_for_repair(&mut self, id: &str, control: &OperationControl) -> ServiceOutcome {
-        self.close_for_repair_mode(id, false, control)
-    }
-    pub fn close_for_slot_repair(
-        &mut self,
-        id: &str,
-        control: &OperationControl,
-    ) -> ServiceOutcome {
-        self.close_for_repair_mode(id, true, control)
-    }
-    fn close_for_repair_mode(
+    pub(super) fn close_for_repair_mode(
         &mut self,
         id: &str,
         slot_repair: bool,

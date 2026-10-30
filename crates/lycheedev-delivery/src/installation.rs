@@ -60,65 +60,7 @@ pub(crate) fn same_receipt_value(left: &Value, right: &Value) -> Result<bool> {
     )
 }
 pub fn inspect(path: &Path, component: &str) -> Result<Value> {
-    if !path.exists() {
-        return Ok(json!({"state":"absent"}));
-    }
-    if fs::symlink_metadata(path)?.file_type().is_symlink() || !path.is_dir() {
-        return Ok(json!({"state":"unmanaged","detail":"target is not an ordinary directory"}));
-    }
-    let marker = path.join(MARKER);
-    if !marker.exists() {
-        return Ok(json!({"state":"unmanaged"}));
-    }
-    let raw = fs::read(&marker)?;
-    if raw.len() > 1_048_576 {
-        return Err(ToolkitError::new(
-            "delivery.invalid_installation",
-            "receipt exceeds 1 MiB",
-            4,
-        ));
-    }
-    let receipt: Receipt = serde_json::from_slice(&raw)?;
-    if receipt.schema != "lycheedev.installation.v1"
-        || receipt.component != component
-        || receipt.version.is_empty()
-        || !valid_digest(&receipt.commit, 40)
-    {
-        return Err(ToolkitError::new(
-            "delivery.invalid_installation",
-            "receipt identity is invalid",
-            4,
-        ));
-    }
-    let prefix = format!("{component}/");
-    let mut names = std::collections::BTreeSet::new();
-    for resource in &receipt.resources {
-        let relative = resource
-            .path
-            .strip_prefix(&prefix)
-            .ok_or_else(|| ToolkitError::invalid("resource belongs to another component"))?;
-        if !names.insert(relative.to_ascii_lowercase()) || !valid_digest(&resource.sha256, 64) {
-            return Err(ToolkitError::invalid("duplicate or invalid resource"));
-        }
-        let file = storage::safe_relative(path, relative)?;
-        if !file.exists() {
-            return Ok(
-                json!({"state":"modified","receipt":receipt,"detail":format!("missing file {relative}")}),
-            );
-        }
-        storage::guard_path(path, &file)?;
-        let bytes = fs::read(file)?;
-        if bytes.len() as u64 != resource.bytes || storage::sha256(&bytes) != resource.sha256 {
-            return Ok(
-                json!({"state":"modified","receipt":receipt,"detail":format!("modified file {relative}")}),
-            );
-        }
-    }
-    if let Err(error) = crate::release::verify_inventory(path, &receipt.resources, Some(component))
-    {
-        return Ok(json!({"state":"modified","receipt":receipt,"detail":error.message}));
-    }
-    Ok(json!({"state":"managed","receipt":receipt}))
+    inspect_main_controlled(path, component, &Default::default())
 }
 pub fn verify_clean(
     path: &Path,

@@ -459,6 +459,16 @@ jobs:
         run: |
           node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --shard ${{ matrix.shard }} --report .tmp/ci/validate-rust/${{ matrix.shard }}/report.json --formal-lua .tmp/ci/build-release/lua51/build-report.json
           if ($LASTEXITCODE -ne 0) { throw 'workspace test programs failed' }
+      - name: Reject a redirected slot member through a real file symlink
+        if: matrix.shard == 'data-delivery'
+        run: |
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package lycheedev-delivery --target slot_maintenance --arguments 'linked_static_slot_member_is_rejected_without_following_it,--ignored,--exact,--nocapture,--test-threads=1' --report .tmp/ci/validate-rust/${{ matrix.shard }}/symlink-slot.json
+          if ($LASTEXITCODE -ne 0) { throw 'slot file-symlink boundary failed' }
+      - name: Reject a redirected mailbox claim through a real file symlink
+        if: matrix.shard == 'source-runtime'
+        run: |
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package lycheedev-live --target lycheedev_live --arguments 'mailbox::admission::tests::mailbox_admission_redirected_claim_file_fails,--ignored,--exact,--nocapture,--test-threads=1' --report .tmp/ci/validate-rust/${{ matrix.shard }}/symlink-claim.json
+          if ($LASTEXITCODE -ne 0) { throw 'claim file-symlink boundary failed' }
       - name: Preserve the validation report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

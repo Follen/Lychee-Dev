@@ -625,8 +625,7 @@
       "--release <distribution-root>",
       "--output <upgrade-archive>",
       "--request <idempotency-key>",
-      "--wait-seconds <1-600> (default 30)",
-      "--no-cache"
+      "--wait-seconds <1-600> (default 30)"
     ],
     "examples": [
       "lycheedev doctor --home EXAMPLE_HOME --offline --format json"

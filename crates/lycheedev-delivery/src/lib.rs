@@ -3,6 +3,8 @@
 use lycheedev_core::{Outcome, Result, ToolkitError, request::RequestContext};
 #[cfg(test)]
 mod acquisition_control_tests;
+#[cfg(test)]
+mod status_control_tests;
 pub mod addon_transaction;
 pub mod deploy;
 pub mod formal_repair;
@@ -86,19 +88,39 @@ pub fn dispatch(ctx: &RequestContext, request: &Request) -> Result<Outcome> {
         Request::AddonStatus(AddonSelector::Installation(installation)) => {
             let client = selected_client(ctx, installation)?;
             let target = lycheedev_core::client::addon_destination(&client)?;
-            let installation = installation::inspect(&target, "addon")?;
+            #[cfg(test)]
+            status_control_tests::before_inspect(status_control_tests::ReadPoint::Main, &ctx.control);
+            let installation = installation::inspect_main_controlled(&target, "addon", &ctx.control)?;
             let mut result = serde_json::json!({"client":lycheedev_core::installation_selection::Client::from(&client),"installation":installation});
-            if target.parent().unwrap().join(".lycheedev-slots.json").exists() {
+            let slot_parent = target.parent().unwrap();
+            let has_slots = match std::fs::symlink_metadata(slot_parent.join(slots::MARKER)) {
+                Ok(_) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => return Err(error.into()),
+            };
+            if has_slots {
                 let version = installation["receipt"]["version"].as_str().unwrap_or(lycheedev_core::VERSION);
-                result["slots"] = match slots::inspect(target.parent().unwrap(), version) {
+                #[cfg(test)]
+                status_control_tests::before_inspect(status_control_tests::ReadPoint::Slots, &ctx.control);
+                result["slots"] = match slots::inspect_controlled(slot_parent, version, &ctx.control) {
                     Ok(pool) => serde_json::json!({"state":"managed","count":pool["files"].as_array().map(Vec::len).unwrap_or(0),"pending":pool["files"].as_array().map(|files|files.iter().filter(|m|m["pendingHash"].as_str().is_some_and(|hash| !hash.is_empty())).count()).unwrap_or(0)}),
-                    Err(error) => serde_json::json!({"state":"incomplete","count":0,"pending":0,"detail":error.message}),
+                    Err(error) if error.code == "delivery.invalid_installation" && error.details["schema"] != lycheedev_core::storage::FILE_CLEANUP_SCHEMA => serde_json::json!({"state":"incomplete","count":0,"pending":0,"detail":error.message}),
+                    Err(error) => return Err(error),
                 };
             }
+            ctx.control.check()?;
             Ok(Outcome::new(result))
         }
-        Request::AddonStatus(AddonSelector::Path(path)) => Ok(Outcome::new(installation::inspect(path, "addon")?)),
-        Request::SkillStatus { path } => Ok(Outcome::new(installation::inspect(path, "skill")?)),
+        Request::AddonStatus(AddonSelector::Path(path)) => {
+            #[cfg(test)]
+            status_control_tests::before_inspect(status_control_tests::ReadPoint::Main, &ctx.control);
+            Ok(Outcome::new(installation::inspect_main_controlled(path, "addon", &ctx.control)?))
+        }
+        Request::SkillStatus { path } => {
+            #[cfg(test)]
+            status_control_tests::before_inspect(status_control_tests::ReadPoint::Main, &ctx.control);
+            Ok(Outcome::new(installation::inspect_main_controlled(path, "skill", &ctx.control)?))
+        }
     }
 }
 fn skill_directory(path: &std::path::Path) -> Result<()> {
