@@ -207,8 +207,11 @@ fn files(rows: &[(&str, &[u8])]) -> BTreeMap<String, Vec<u8>> {
         .collect()
 }
 fn png() -> Vec<u8> {
+    // Header-only metadata input, not a complete decodable PNG.
     let mut raw = vec![0; 24];
     raw[..8].copy_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+    raw[8..12].copy_from_slice(&13u32.to_be_bytes());
+    raw[12..16].copy_from_slice(b"IHDR");
     raw[16..20].copy_from_slice(&123u32.to_be_bytes());
     raw[20..24].copy_from_slice(&456u32.to_be_bytes());
     raw

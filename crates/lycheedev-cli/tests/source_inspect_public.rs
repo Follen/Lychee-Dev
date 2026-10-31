@@ -82,8 +82,11 @@ impl Fixture {
             b"-- main\nfunction Main() end\n",
             &["hash-object", "-w", "--stdin"],
         );
+        // Header-only metadata input, not a complete decodable PNG.
         let mut png = vec![0; 24];
         png[..8].copy_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+        png[8..12].copy_from_slice(&13u32.to_be_bytes());
+        png[12..16].copy_from_slice(b"IHDR");
         png[16..20].copy_from_slice(&123u32.to_be_bytes());
         png[20..24].copy_from_slice(&456u32.to_be_bytes());
         let image = run(&png, &["hash-object", "-w", "--stdin"]);
