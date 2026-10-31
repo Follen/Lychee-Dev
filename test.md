@@ -246,9 +246,11 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 | 原资源导出 | 134400原BLTE与独立BLP/PNG/RGBA；原始字节、PNG/WebP64×64全像素，以及来源/导出/清单CAP依赖。 |
 | 受管交付 | 合成client的main/500槽/Skill安装、幂等、update、真实deny-delete故障、原归档/不传release的resume与重复resume、归档移除及无关文件保留。 |
 | npm自更新 | loopback registry只服务同一原TGZ，两次真实prepare/handoff/apply与隔离global-prefix安装；历史字节、新nonce、500槽、完整journal和服务/进程关闭。不发布或修改真实渠道。 |
-| 管理与Agent使用 | config/target/cache/keep/doctor只读诊断与离线target修复；独立Agent仅读安装Skill、实际metadata与用户原输入，自主完成Source和三个Data任务，Root另用未透露的oracle核有用答案、精确数值、partial及收尾。doctor Live repair仍留后。 |
+| 管理与Agent使用 | config/target/cache/keep/doctor只读诊断与离线target修复；独立Agent仅读安装Skill、实际metadata与原输入完成三个Data任务，Root另用未透露的oracle核有用答案、精确数值、partial及收尾。Source控制器另核公开工作流。Skill launcher在隔离环境绑定验收包二进制，避免PATH选择其他版本；doctor Live repair仍留后。 |
 
 正式Forever回归贯穿产品目录与常用名、Source family、Data/Changes admission、wowf远端URL与缓存、`_forever_`安装发现、flavor/可用版本文件/`.build.info`交叉核对、addon profile、Live绑定和原恢复。正例至少区分本地build与远端最新build；负例包含退休Beta当前选择、跨slot/config/产品冲突和将`wow_forever`用作远端码。历史记录认证与新目标准入分别验证，原raw输入不改写。Live部分本轮只运行离线用例。
+
+正式Forever的当前原包验收读取真实`wowf`安装`1.60.1.70707`。独立IDX定位、BLTE分块MD5和zlib解码先认证原始文件；与冻结Go样本逐字节核对后，只更新schema标记、偏移和两艘飞艇中文名称，生成独立预期。Agent全部分页、CSV和CAP核73条可读记录；另8条缺钥记录分属3个分区，结果保持partial。新PIN保正式build/config；原Beta PIN和原始样本保持历史身份。全程只读游戏文件，不访问游戏进程。
 
 [selection file测试](crates/lycheedev-core/src/selection/file/tests.rs)通过真实文件发布owner验证正式Forever/CAS既存身份、两个退休Beta的source/data/changes及parent继承拒绝、旧PIN原bytes/generation和历史reader不变；[CLI文件测试](crates/lycheedev-cli/src/target_remote/tests/file.rs)验证实际argv/dispatch错误封套、输入字节和无PIN/CAP发布。local/remote父Data冲突由共同Core继承owner处理，两真实target入口各保一项config反例，不另保重复pre-guard。
 

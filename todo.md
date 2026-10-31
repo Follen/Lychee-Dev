@@ -2,12 +2,7 @@
 
 以 [DESIGN.md](DESIGN.md) 为业务与架构基点。工作规则见 [AGENTS.md](AGENTS.md)，测试用途与缺口见 [test.md](test.md)，当前实施状态见 [handover.md](handover.md)。
 
-这里仅保留未完成事项。`[ ]` 表示尚未确认在当前正式路径上闭合，不能据此断言代码完全没有实现。先复用已成立的能力，再补缺口；不把历史通过记录搬来勾选当前任务。已完成并验证的本批项（Go 产品源码删除、旧测试/旧文档账本清理、CI workflow 重写、core/data 编译）已移出，验证事实见 handover。
-
-## 当前死代码与冗余测试专项
-
-- [ ] **AUDIT-DEAD｜生产路径、有效覆盖与文档复审。** 9个Source examples已退役，35个迁移默认测试、当前全目标编译与受影响回归通过；原始失败保留，实际结果见handover。仍须最终独立Agent、最终快照完整CI/Release及唯一TGZ验收和闭包复审，Live实机留后。
-- [ ] **FOREVER-FORMAL｜正式Forever最终数据与包验收。** `forever` / `wowf` / `_forever_`全链实现及当前产品/退休Beta离线正负例已验证，旧PIN/CAP/raw输入与恢复身份保留；只读本地70658与远端70707证据不推导最低build。仍须正式wowf固定数据实际读取、最终CI和同包业务验收；Live实机由用户后续安排。
+这里只保留未完成事项；完成项移出，当前验证事实见handover。新增缺口先核当前正式路径和既有能力，再确定实现与验证范围。
 
 ## 1. 旧代码、旧测试、Go 与旧 CI 的剩余清理
 
