@@ -6,7 +6,7 @@
 
 ## 1. 工作区恢复与材料保留
 
-- [ ] **CLEAN-07｜未完成恢复与日志差异。** 已清理48份闲置工作树；本次脚本另删除58个已结束的可重建scratch、11份退役程序副本及ModuleAnalysisCache，70个目标共约19.25GB。仍保留10个active/interrupted且回收未确认的owner与1个封存日志校验异常目录，待按原身份和证据核实；e85/fc001原prepared fence及未确认owner保留。15个evidence输入和2个被当前验收引用的目录属于有效材料，当前CI包、build-16、Lua、活动项目/CAP及固定输入继续保留。
+- [ ] **CLEAN-07｜未完成恢复与日志差异。** 已累计清理51份闲置工作树，仅保留main和当前Rust-refactor；另删除58个已结束的可重建scratch、11份退役程序副本及ModuleAnalysisCache。当前目录仍保留10个active/interrupted且回收未确认的owner与1个封存日志校验异常目录，待按原身份和证据核实。三份已移除旧树中的6个未收尾owner及原prepared fence/lease等资料集中保留在`.tmp/worktree-rename/recovery/`，状态未改写。15个evidence输入、2个被当前验收引用的目录、当前CI包、build-16、Lua、活动项目/CAP及固定输入继续保留。
 
 ## 2. 当前路径测试与交付
 

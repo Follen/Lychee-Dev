@@ -24,7 +24,7 @@ Mailbox 的业务合同见 DESIGN 的 Live 章节，具体格式对照当前 [ad
 
 ## 工作范围与协作
 
-复用当前 `rust-refactor` 分支、既有任务工作区和 draft PR，不为了流程另建环境。保留无关改动和明确保留的 `.worktrees/rust-refactor`。提交、推送按当前任务已有授权执行；本文件和交接记录不新增合并、发布、游戏输入、全局 Skill 安装或渠道切换授权。
+复用当前本地 `Rust-refactor` 分支、`.worktrees/Rust-refactor` 工作树和 draft PR #14，不为了流程另建环境。远端继续使用 `origin/rust-refactor`，推送使用 `git push origin HEAD:refs/heads/rust-refactor`，保留现有 PR。保留无关改动；提交、推送按当前任务已有授权执行。本文件和交接记录不新增合并、发布、游戏输入、全局 Skill 安装或渠道切换授权。
 
 协调者维护共享文档、根 Cargo/lock、tools、CI 和集成；模块改动遵守当前文件边界。遇到真实重叠再协调，不覆盖别人的工作。原生构建与测试共用现有 owner 队列，不并发占用同一运行环境。
 

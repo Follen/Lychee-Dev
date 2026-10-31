@@ -4,7 +4,7 @@
 
 ## 分支、范围与状态
 
-- 工作树`.worktrees/pr14-local-dev`，分支`rust-refactor`；main3.2.7已同步。代码与11份Markdown集中提交推送`66aa8f5e0bb57cf3b974b5a48b27dca36e6b7c8d`，复用[draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。开发版本3.5.0/beta；latest继续3.2.7。
+- 当前工作树`.worktrees/Rust-refactor`，本地分支`Rust-refactor`跟踪`origin/rust-refactor`；main3.2.7已同步。远端按用户选择保留原名及[draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)，推送使用`git push origin HEAD:refs/heads/rust-refactor`。产品代码提交为`66aa8f5e0bb57cf3b974b5a48b27dca36e6b7c8d`，开发版本3.5.0/beta；latest继续3.2.7。
 - 本轮死代码、冗余测试、CLI/Skill和文档审计，以及正式Forever非Live实现与包验收均已完成。最后两侧只读闭包复审未发现新确认缺陷；两个仅供测试读取预算/数量的薄getter保留为可收窄候选，没有增加另一套执行器。
 - 正式Forever规范ID/Source family为`forever`，官方远端/flavor为`wowf`，目录`_forever_`，可执行文件`Wow.exe`；当前支持六产品。两个Beta退出当前目标准入，历史PIN/CAP/raw和恢复身份保留。
 - 未合并、未发布、未改npm标签、未全局安装Skill/npm。游戏进程读取、输入、真实部署和Live实机测试继续留待用户安排；本次正式Forever只读游戏文件。
@@ -21,7 +21,7 @@
 | 自更新与Skill边界 | 移除Skill固定latest及版本→tag表；CLI编译嵌入release/npm-channel.json，策略发现、selector和候选准入同源，保原Handoff目标/包/期限。 | 原包loopback registry两次真实prepare/handoff/apply通过，隔离prefix安装；无真实渠道变更。 |
 | 正式Forever全链 | 六产品、wowf安装/远端/缓存/Source/Delivery及Live离线身份统一；file发布owner补退休Beta准入，父Data冲突回收敛Core，历史认证不改。 | selection file15项、CLI真实argv负例、Live离线516项及addon37套件通过；正式70707真实数据同包验收通过。 |
 | CI与覆盖真实性 | 四项guarded-spawn绑定封存helper并拒零执行；八个空成功child helper改显式ignored和必需角色。测试、Release各配置只生产一次。 | 完整CI12个job成功、89程序覆盖完整、222套Lua通过；原TGZ的17个非Live验收控制器全部通过、输入稳定、进程回收。 |
-| 文档、Skill与工作区 | Skill references由20收敛11；11份Markdown按设计/用途/待办/事实分工更新，移除陈旧状态；闲置工作树清理48份、保留5份。 | 静态/动态Skill、版本、链接和包装合同通过；保留原失败、活动输入及未解决恢复，不把离线结果计为实机。 |
+| 文档、Skill与工作区 | Skill references由20收敛11；11份Markdown按设计/用途/待办/事实分工更新，移除陈旧状态；闲置工作树累计清理51份、保留2份，当前分支和目录统一改名Rust-refactor。 | 静态/动态Skill、版本、链接和包装合同通过；改名后27份产物/报告哈希及原包CLI启动验证通过，恢复材料原字节保留。 |
 
 ## 最终CI与唯一包验收
 
@@ -34,10 +34,10 @@
 
 ## 工作树与输入保留
 
-- 原53份工作树已用git worktree remove清理48份，无独立代码变更；两个witness的7项差异经原字节核对仅为CRLF。分支与PR保留。
-- 剩5份：主checkout、当前pr14-local-dev、明确保留的rust-refactor；pr14-agent-e85-first-check保原prepared fence/ordinary.lease.original及未确认回收owner，pr14-fc001-offline保未确认source-pack owner。回收按owner证据判断。
+- 原53份工作树累计用git worktree remove清理51份；当前仅主checkout `main`与`.worktrees/Rust-refactor`。本次移除旧`rust-refactor`、`pr14-agent-e85-first-check`和`pr14-fc001-offline`，三份均无独立改动或未合入提交；当前分支与目录已改名，原HEAD和PR保留。
+- 旧树的6个未收尾owner、原fence/lease、日志及历史静态分析/Live本地输入集中保留于`.tmp/worktree-rename/recovery/`：17,390个文件、5,047,854,509字节逐项核对原哈希。旧owner状态和原始路径未改写；这些是历史资料，没有导入当前owner注册表。清单与路径映射见`.tmp/worktree-rename/preservation.json`，清理/改名结果及迁移复核在同目录。
 - 用户追加脚本清理授权后，固定清单脚本已删除70个目标：58个已结束且可重建scratch、11份退役程序副本（rust-audit-next八份、rust327-audit三份）及一个ModuleAnalysisCache文件，合计19,254,546,378字节；磁盘可用空间增加约19.28GB。原报告、build记录和封存日志保留；rust327-audit内仍复用的Lua与suspended-fixture保留。
-- 另28个scratch保留：15个evidence输入、2个被当前包验收引用的目录、10个active/interrupted且回收未确认的owner，以及1个封存日志校验异常目录。清理清单、结果和复核在`.tmp/cleanup-clean07/`；17份当前验收报告、原TGZ、build-16、Lua及源码摘要复核通过，5个工作树和PR继续保留。
+- 另28个scratch保留：15个evidence输入、2个被当前包验收引用的目录、10个active/interrupted且回收未确认的owner，以及1个封存日志校验异常目录。临时材料清理清单、结果和复核在`.tmp/cleanup-clean07/`；本次路径改名后，原TGZ、native、17份验收报告、build-16记录、Lua和源码摘要均按原哈希复核通过。只运行原包CLI version启动检查，成功且进程回收，未重建或重打包；历史报告保留旧绝对路径，读取时使用清单中的新旧Root映射。
 - REG-01旧准备错误5未再复现、原因未定；恢复`4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b`和`de770010-ea9c-40fa-a48e-27141a6e0d64`保留。旧CI与旧包结果只作输入/方法基线。
 
 ## 下一步
