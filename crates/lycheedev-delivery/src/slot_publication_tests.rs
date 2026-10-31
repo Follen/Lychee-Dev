@@ -1501,7 +1501,7 @@ fn disk_pre_input_rechecks_addon_inventory_with_original_control() {
     let cancelled = c.tracked_cancel_handle().unwrap();
     cancelled.cancel();
     code(lease.verify("a", &e), "command.cancelled");
-    assert!(!slots::read_pool(&f.root).unwrap().files[0].consumed);
+    assert!(!slots::read_pool_controlled(&f.root, &Default::default()).unwrap().files[0].consumed);
 }
 
 #[test]
@@ -1644,7 +1644,7 @@ fn disk_retirement_ignores_unrelated_static_damage_and_keeps_exact_reservation_c
             lease.close().unwrap();
             let after = fs::read(f.root.join(slots::MARKER)).unwrap();
             if damage == "static" {
-                let retired = slots::read_pool(&f.root).unwrap();
+                let retired = slots::read_pool_controlled(&f.root, &Default::default()).unwrap();
                 assert_eq!(retired.files[0].retired_process, process);
                 assert_eq!(!retired.files[0].retired_runtime.is_empty(), !process);
                 assert!(!retired.files[0].consumed);

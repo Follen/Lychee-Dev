@@ -8,7 +8,6 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     process::Command,
-    sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 

@@ -61,7 +61,7 @@ impl Fixture {
             .unwrap()
             .close()
             .unwrap();
-        deploy::installation_lock(&self.target)
+        deploy::installation_lock_controlled(&self.target, &Default::default())
             .unwrap()
             .close()
             .unwrap();
@@ -87,7 +87,7 @@ fn close_error(which: &str) -> ToolkitError {
 #[test]
 fn installation_busy_failure_closes_maintenance_and_keeps_competing_lock() {
     let fixture = Fixture::new(false);
-    let competitor = deploy::installation_lock(&fixture.target).unwrap();
+    let competitor = deploy::installation_lock_controlled(&fixture.target, &Default::default()).unwrap();
     let mut closes = 0;
     let error = addon_with_cleanup(
         &fixture.target,
@@ -115,7 +115,7 @@ fn installation_busy_failure_closes_maintenance_and_keeps_competing_lock() {
         .close()
         .unwrap();
     assert_eq!(
-        deploy::installation_lock(&fixture.target)
+        deploy::installation_lock_controlled(&fixture.target, &Default::default())
             .err()
             .unwrap()
             .code,
@@ -166,7 +166,7 @@ fn cancellation_after_lock_or_real_inventory_closes_both_without_moving() {
         assert!(!companion(&fixture.archive, ".removal.json").exists());
         fixture.assert_released();
         assert_eq!(
-            addon(&fixture.target, &fixture.archive).unwrap()["state"],
+            addon_controlled(&fixture.target, &fixture.archive, &Default::default()).unwrap()["state"],
             "archived"
         );
     }
@@ -275,7 +275,7 @@ fn partial_slot_removal_cancel_and_close_failures_keep_exact_intent_for_resume()
     assert!(!fixture.archive.exists());
     fixture.assert_released();
     assert_eq!(
-        addon(&fixture.target, &fixture.archive).unwrap()["state"],
+        addon_controlled(&fixture.target, &fixture.archive, &Default::default()).unwrap()["state"],
         "archived"
     );
     assert_eq!(fs::read(journal).unwrap(), intent);

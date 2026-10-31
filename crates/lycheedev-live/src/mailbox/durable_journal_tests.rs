@@ -829,10 +829,10 @@ fn mailbox_durable_foreign_connection_or_external_head_change_is_rejected() {
 }
 
 #[test]
+#[ignore = "child fixture only; invoked by durable journal process regressions"]
 fn mailbox_durable_process_helper() {
-    let Some(root) = std::env::var_os("LYCHEEDEV_DURABLE_JOURNAL_FIXTURE") else {
-        return;
-    };
+    let root = std::env::var_os("LYCHEEDEV_DURABLE_JOURNAL_FIXTURE")
+        .expect("durable journal child fixture requires its owned root");
     let f = Fixture::at(PathBuf::from(root));
     let control = OperationControl::default();
     let mut journal = f.acquire(&control).unwrap();
@@ -882,8 +882,12 @@ fn child(f: &Fixture, mode: &str) -> OwnedChild {
     let output = File::create(f.root.join(format!("child-{mode}.log"))).unwrap();
     OwnedChild(
         Command::new(std::env::current_exe().unwrap())
-            .arg("mailbox_durable_process_helper")
-            .arg("--nocapture")
+            .args([
+                "--exact",
+                "mailbox::durable_journal::tests::mailbox_durable_process_helper",
+                "--ignored",
+                "--nocapture",
+            ])
             .env("LYCHEEDEV_DURABLE_JOURNAL_FIXTURE", &f.root)
             .env("LYCHEEDEV_DURABLE_JOURNAL_MODE", mode)
             .stdin(Stdio::piped())

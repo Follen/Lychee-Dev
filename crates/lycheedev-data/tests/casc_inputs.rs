@@ -1,10 +1,9 @@
 use lycheedev_data::{
-    blte::{Content, Limits as BlteLimits},
+    blte::Content,
     casc::{self, Index, Limits},
     metadata_format::{Encoding, RootLimits, lookup_root},
 };
 use md5::{Digest, Md5};
-use std::{collections::BTreeMap, path::PathBuf};
 fn index(key: &[u8; 16], bytes: u32) -> Vec<u8> {
     let mut raw = vec![0; 58];
     raw[..4].copy_from_slice(&16u32.to_le_bytes());
@@ -80,123 +79,6 @@ fn guarded_index_reference_vectors_and_full_admission() {
             .unwrap()
             .exit_code,
         7
-    );
-}
-fn isolated() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.tmp/rust-casc-fixture")
-        .join(format!(
-            "{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
-}
-#[test]
-fn local_archive_reads_newest_generation_and_checks_ekey_ckey_before_decode() {
-    let root = isolated();
-    std::fs::create_dir_all(root.join("Data/data")).unwrap();
-    let payload = b"decoded authenticated content";
-    let mut encoded = b"BLTE\0\0\0\0N".to_vec();
-    encoded.extend_from_slice(payload);
-    let ekey: [u8; 16] = Md5::digest(&encoded).into();
-    let ckey = casc::hex(&Md5::digest(payload));
-    let raw = index(&ekey, (encoded.len() + 30) as u32);
-    std::fs::write(
-        root.join("Data/data/0000000001.idx"),
-        b"damaged old generation",
-    )
-    .unwrap();
-    std::fs::write(root.join("Data/data/0000000002.idx"), &raw).unwrap();
-    let mut archive = vec![0; 94];
-    archive.extend_from_slice(&encoded);
-    std::fs::write(root.join("Data/data/data.001"), &archive).unwrap();
-    let object = casc::open_local(
-        &root,
-        &casc::hex(&ekey),
-        encoded.len(),
-        Limits::default(),
-        None,
-    )
-    .unwrap();
-    assert_eq!(object.index, "0000000002.idx");
-    assert_eq!(
-        object
-            .decode(&ckey, BlteLimits::default(), &BTreeMap::new())
-            .unwrap()
-            .bytes,
-        payload
-    );
-    assert_eq!(
-        object
-            .decode(&"0".repeat(32), BlteLimits::default(), &BTreeMap::new())
-            .err()
-            .unwrap()
-            .code,
-        "records.content_integrity"
-    );
-    // A valid prefix candidate must still fail a forged complete EKey.
-    let mut collision = ekey;
-    collision[15] ^= 1;
-    assert_eq!(
-        casc::open_local(
-            &root,
-            &casc::hex(&collision),
-            encoded.len(),
-            Limits::default(),
-            None
-        )
-        .err()
-        .unwrap()
-        .code,
-        "archive.index_integrity"
-    );
-    std::fs::write(
-        root.join("Data/data/0000000003.idx"),
-        b"damaged newest generation",
-    )
-    .unwrap();
-    assert_eq!(
-        casc::open_local(
-            &root,
-            &casc::hex(&ekey),
-            encoded.len(),
-            Limits::default(),
-            None
-        )
-        .err()
-        .unwrap()
-        .code,
-        "archive.invalid_index"
-    );
-    std::fs::remove_dir_all(root).unwrap();
-}
-#[test]
-fn framed_encoding_identity_covers_directory_then_blte_covers_payload() {
-    let mut encoded = b"BLTE\0\0\0\x24\x0f\0\0\x01".to_vec();
-    let chunk = b"Nhello";
-    encoded.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
-    encoded.extend_from_slice(&5u32.to_be_bytes());
-    encoded.extend_from_slice(&Md5::digest(chunk));
-    encoded.extend_from_slice(chunk);
-    let ekey: [u8; 16] = Md5::digest(&encoded[..36]).into();
-    let mut archive = vec![0; 30];
-    archive.extend_from_slice(&encoded);
-    let original = casc::authenticate_span(&archive, &ekey, 1024).unwrap();
-    assert_eq!(
-        lycheedev_data::blte::decode(original, BlteLimits::default(), &BTreeMap::new()).unwrap(),
-        b"hello"
-    );
-    *archive.last_mut().unwrap() ^= 1;
-    let admitted = casc::authenticate_span(&archive, &ekey, 1024).unwrap();
-    assert_eq!(
-        lycheedev_data::blte::decode(admitted, BlteLimits::default(), &BTreeMap::new())
-            .err()
-            .unwrap()
-            .code,
-        "container.integrity_mismatch"
     );
 }
 fn encoding() -> (Content, String) {

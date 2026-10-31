@@ -16,6 +16,14 @@ fn actual_discovery_is_structured_and_never_creates_home(){
         else if words.get(1)==Some(&"search"){assert_eq!(value["result"]["schema"],"lycheedev.cli-search.v1");assert!(value["result"]["matches"].as_array().unwrap().len()<=5);}
         else if words.last()==Some(&"schema"){assert_eq!(value["result"]["protocol"],"lycheedev.data-agent.v1");}
         else{assert_eq!(value["result"]["schema"],"lycheedev.cli-help.v1");}
+        if words == ["schema","data","agent","serve"] || words == ["data","agent","serve","--help"] {
+            let described=&value["result"];
+            assert_eq!(described["result"]["jsonl"],json!({"beginFrame":"absent","endFrame":"absent","responseId":"matches request id"}));
+            assert!(described["result"].get("envelope").is_none());
+            let frames=described.pointer(described["result"]["responseSchemaPointer"].as_str().unwrap()).unwrap();
+            assert_eq!(frames["$defs"]["SuccessFrame"]["x-stream"],"stdout");
+            assert_eq!(frames["$defs"]["TerminalDiagnostic"]["x-stream"],"stderr");
+        }
         assert!(!home.exists(),"metadata must not create a home: {words:?}");
     }
     for words in [vec!["data","sql"],vec!["schema","data","sql"],vec!["version","--invented"],vec!["version","--format","yaml"]]{
@@ -90,9 +98,22 @@ mod worker {
             .iter().map(|v|v.to_string()+"\n").collect::<String>();
         let(code,out,err)=run(&fx,"task-errors",&input);assert_eq!(code,0);assert!(err.is_empty());
         let lines:Vec<Value>=String::from_utf8(out).unwrap().lines().map(|s|serde_json::from_str(s).unwrap()).collect();assert_eq!(lines.len(),3);
+        // Use the advertised public serve contract to check real worker frames.
+        let home=unused_home();
+        let metadata=Command::new(env!("CARGO_BIN_EXE_lycheedev")).env("LYCHEEDEV_HOME",&home)
+            .args(["schema","data","agent","serve","--format","json"]).output().unwrap();
+        assert!(metadata.status.success());assert!(metadata.stderr.is_empty());assert!(!home.exists());
+        let metadata:Value=serde_json::from_slice(&metadata.stdout).unwrap();
+        let described=&metadata["result"];
+        let schema=described.pointer(described["result"]["responseSchemaPointer"].as_str().unwrap()).unwrap();
+        let error_frame=&schema["$defs"]["ErrorFrame"];
         for (index,(value,(code,exit))) in lines.iter().zip([("data.session.page_limit",2),("data.session.result_missing",4),("data.session.page_limit",2)]).enumerate(){
             assert_eq!(value["protocol"],"lycheedev.data-agent.v1");assert_eq!(value["id"],index+1);assert_eq!(value["ok"],false);assert!(value.get("result").is_none());
             assert_eq!(value["error"]["code"],code);assert_eq!(value["error"]["exit_code"],exit);assert_eq!(value.as_object().unwrap().len(),4);
+            for required in error_frame["required"].as_array().unwrap(){assert!(value.get(required.as_str().unwrap()).is_some());}
+            assert_eq!(value["protocol"],error_frame["properties"]["protocol"]["const"]);
+            assert_eq!(value["ok"],error_frame["properties"]["ok"]["const"]);
+            for required in schema["$defs"]["ToolkitError"]["required"].as_array().unwrap(){assert!(value["error"].get(required.as_str().unwrap()).is_some());}
         }
     }
 }

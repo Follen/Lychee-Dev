@@ -1,7 +1,7 @@
 //! Owned query-sensitive diagnostic; query failures preserve caller control.
 use super::super::{OwnedQuery, QueryResult};
 use super::CheckContext;
-use crate::session::{OwnedValue, SelectedProjectionBackend};
+use crate::session::SelectedProjectionBackend;
 use emmylua_code_analysis::{DiagnosticCode, LuaType};
 use emmylua_code_analysis::{SemanticId, TypeScope};
 use emmylua_parser::{LuaAst, LuaAstNode, LuaAstToken, LuaExpr, VisibilityKind};

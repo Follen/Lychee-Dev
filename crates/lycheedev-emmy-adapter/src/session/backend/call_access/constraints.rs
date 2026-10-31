@@ -1,7 +1,7 @@
 use super::*;
 use crate::session::BindingDecision;
 use emmylua_code_analysis::{
-    DocGenericParam, FileId, GenericTpl, LuaIntersectionType, LuaStringTplType, LuaTypeDeclId,
+    DocGenericParam, FileId, GenericTpl, LuaIntersectionType, LuaStringTplType,
 };
 use emmylua_parser::{LuaDocType, LuaTypeBinaryOperator, LuaTypeUnaryOperator};
 use std::{collections::HashMap, sync::Arc};

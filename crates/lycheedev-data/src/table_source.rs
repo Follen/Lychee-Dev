@@ -47,7 +47,7 @@ pub(crate) fn prepare_scoped(
         inv.source.offline,
         budget.deadline,
         Some(budget),
-        Some(&inv.control),
+        &inv.control,
     )?;
     let ids: Vec<_> = bundles
         .iter()

@@ -4,14 +4,14 @@ mod expected;
 mod local;
 
 use super::return_pack::{return_arity, return_expands};
-use super::{OwnedQuery, OwnedQueryCapability, ProjectionResult, QueryResult};
+use super::{OwnedQuery, ProjectionResult, QueryResult};
 use crate::session::{BindingCoverage, BindingSite, OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
     AsyncState, FileId, LuaFunctionType, LuaSignatureId, LuaType, LuaUnionType, Signature,
     VariadicType,
 };
 use emmylua_parser::{
-    LuaAstNode, LuaClosureExpr, LuaCommentOwner, LuaDocTag, LuaExpr, LuaReturnStat, LuaStat,
+    LuaAstNode, LuaClosureExpr, LuaCommentOwner, LuaDocTag, LuaReturnStat, LuaStat,
     LuaSyntaxId, LuaTableField,
 };
 use std::sync::Arc;

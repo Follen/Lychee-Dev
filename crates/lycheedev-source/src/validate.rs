@@ -208,26 +208,6 @@ pub fn addon_with_environment(
 
 /// Matrix TOC compatibility entry. Kept separately from the single-addon
 /// endpoint so consumers cannot accidentally exchange their public contracts.
-pub fn toc(
-    home: &Path,
-    pin: &SourcePin,
-    snapshot: &str,
-    root: &Path,
-    manifest: &str,
-    tools: &SourceTools<'_>,
-    requested: bool,
-) -> Result<Value> {
-    toc_with_control(
-        home,
-        pin,
-        snapshot,
-        root,
-        manifest,
-        tools,
-        requested,
-        &Default::default(),
-    )
-}
 #[allow(clippy::too_many_arguments)]
 pub fn toc_with_control(
     home: &Path,

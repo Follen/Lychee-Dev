@@ -2,13 +2,8 @@
 //! after attachment; spawn-to-attach race remains documented until suspended spawn.
 use lycheedev_core::{Result, ToolkitError, control::OperationControl};
 use std::{
-    io::{Read, Write},
     process::{Child, Command, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::mpsc,
     time::{Duration, Instant},
 };
 #[derive(Debug)]
@@ -57,19 +52,6 @@ fn complete_process_control(
         error.details = cleanup();
         error
     })
-}
-#[cfg(test)]
-pub fn run(cmd: Command, cap: usize, timeout: Duration) -> Result<Output> {
-    run_with_input(cmd, cap, timeout, None)
-}
-#[cfg(test)]
-pub fn run_with_input(
-    cmd: Command,
-    cap: usize,
-    timeout: Duration,
-    input: Option<Vec<u8>>,
-) -> Result<Output> {
-    run_with_operation_control(cmd, cap, timeout, input, &OperationControl::default())
 }
 pub fn run_with_operation_control(
     cmd: Command,
@@ -351,11 +333,12 @@ impl lifetime::ProcessOwner for OwnedProcess<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{io::{Read, Write}, sync::atomic::Ordering};
     #[test]
+    #[ignore = "subprocess helper; invoked by the process and Git batch lifecycle regressions"]
     fn helper_process() {
-        let Ok(mode) = std::env::var("LYCHEEDEV_SOURCE_TEST_PROCESS") else {
-            return;
-        };
+        let mode = std::env::var("LYCHEEDEV_SOURCE_TEST_PROCESS")
+            .expect("required Source process helper mode");
         match mode.as_str() {
             "output" => {
                 std::io::stdout().write_all(&vec![b'x'; 65536]).unwrap();
@@ -437,24 +420,24 @@ mod tests {
     }
     fn helper(mode: &str) -> Command {
         let mut cmd = Command::new(std::env::current_exe().unwrap());
-        cmd.args(["--exact", "process::tests::helper_process", "--nocapture"])
+        cmd.args(["--exact", "process::tests::helper_process", "--ignored", "--nocapture"])
             .env("LYCHEEDEV_SOURCE_TEST_PROCESS", mode);
         cmd
     }
     #[test]
     fn timeout_output_budget_and_cancel_reap_blocked_writer() {
-        let timed = run_with_input(
+        let timed = run_with_operation_control(
             helper("block"),
             1024,
             Duration::from_millis(100),
-            Some(vec![b'x'; 4 << 20]),
+            Some(vec![b'x'; 4 << 20]), &Default::default(),
         )
         .unwrap_err();
         assert_eq!(timed.details["reaped"], true, "{:?}", timed.details);
         assert_eq!(timed.details["stdinWriterComplete"], true);
         assert_eq!(timed.details["outputReadersComplete"], true);
         assert_eq!(timed.details["jobEmpty"], true);
-        let over = run(helper("output"), 1024, Duration::from_secs(10)).unwrap_err();
+        let over = run_with_operation_control(helper("output"), 1024, Duration::from_secs(10), None, &Default::default()).unwrap_err();
         assert_eq!(over.code, "source.process_input_budget");
         assert_eq!(over.details["reaped"], true);
         assert_eq!(over.details["ownedJobTerminal"], true);

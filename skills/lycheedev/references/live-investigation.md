@@ -1,58 +1,44 @@
-# Live investigation
+# Live investigation and recovery
 
-A live observation establishes behavior on one verified client under its recorded
-conditions. Source, static data and Hotfix records establish different facts.
-Start with existing CON status/results; use [recovery](live-recovery.md) for pending
-work, [startup](live-startup.md) for readiness, [retained errors](error-diagnosis.md)
-or [performance](runtime-investigations.md) when those answer the question.
-Write a [probe](live-probes.md) only for missing evidence.
+Read the original CON's status/results before starting work. Use installed schema
+for exact calls, effects and returned continuation. A Data pin does not select or
+authenticate a process. Reuse the chosen installation/PID and bind fresh process/
+runtime/actor identity; same-build processes sharing files remain separate.
 
-## Select and connect
+For readiness failures, `doctor` diagnoses without input; apply supported repair
+only within existing task scope. Follow its concrete blocker/next step rather
+than guessing bindings, offsets or input. A manual reload wait needs one user
+action in the exact selected window, followed by the returned CON. File deployment
+does not prove loaded readiness. Each selected process needs its own activation.
 
-Reuse the selected installation/PID or discover passive instances. Match verified
-executable path and process creation identity, not name, folder or build alone.
-Resolve only remaining target ambiguity. Unknown actor stays unknown; current-
-character or multiple-client scope need not become a new approval question.
-Retain returned project, CON, journal, runtime and process/actor identity.
-A data snapshot neither selects nor authenticates the running process.
+## Observe only the missing fact
 
-One process has one durable owner and one active driver. Same-build instances
-remain separate even with shared addon files. Use installed help for connect/
-execute/disconnect syntax. Live uses Lycheedev mailbox protocol v1 and a matching
-clean 500-slot installation. The CLI owns guarded runtime-code/Lua/Mailbox lookup,
-identity and input checks. Unsupported layout, ambiguity or unreadable coverage
-is a diagnostic gap, not permission for heap scans, guessed RVAs or raw input.
-A successful lookup with scanComplete=false does not prove global uniqueness.
+Retained addon errors may answer the question without reproduction. Their provider
+can be missing/partial and can include earlier sessions; a current stack/file
+does not prove which actor or revision produced it. A stack locates a failure,
+not necessarily its cause. Use fixed source/callers, then a [probe](live-probes.md)
+only for the unresolved distinction. Read [measurement guidance](runtime-investigations.md)
+for CPU/memory claims.
 
-## Complete an investigation
+Keep the exact source/probe revision and stable request key. Choose observation
+policy only for a wholly repeatable experiment; opaque effects stay opaque.
+Transport verification, report assertions/coverage and cleanup are separate facts.
+A verified Lua failure is evidence; a successful observation outside failing
+conditions does not disprove the fault.
 
-Use a stable request key and exact source or immutable probe revision. The Lua
-execution budget, host wait and durable recovery deadline are different; a host
-timeout does not cancel Lua or renew its budget. Observation policy is for an
-entire safely repeatable experiment after verified runtime loss. Opaque is the
-default for effects that cannot safely repeat. Neither allows manual replay of
-unknown input. A changed experiment needs prior operation closure and a new key.
+## Finish the original lifecycle
 
-Read three independent facts:
-- reportState=verified: exact result bytes were retained and verified
-- report.ok, assertions and coverage: business outcome and observed scope
-- complete with cleanup=complete: this command's lifecycle finished
+Follow returned continuation, error, blocker and remaining budget on the original
+project/CON/request. Wait for an active owner or external condition; do not start
+a competing driver. Resume does not renew the durable deadline. Submitted input
+proves queue submission, not execution; missing/partial reads never permit replay.
+Never change keys, journals, claims, slots or send raw input to force progress.
 
-A verified Lua error is evidence; pending cleanup still needs recovery on the
-same CON. Exact completed-request replay reads retained bytes without rerunning
-Lua; changed code/arguments are not that replay. Capacity recovery may reload,
-so scene-dependent probes must reconstruct prerequisites or record their absence.
-
-Disconnect at the end unless continued use is needed. Closed records durable
-connection closure; it does not prove the ownership claim was released. Check
-the current error and retirement result: if lease close or retirement failed,
-continue cleanup on the original CON/project. Closing also does not prove an
-unavailable/unknown business effect never ran. Preserve the whole
-`.lycheedev/live` recovery unit.
-
-## Test source hypotheses
-
-Carry fixed locations, version correspondence and remaining conditions into
-[bounded hypothesis testing](live-probes.md#test-source-hypotheses); feed the result
-back into that path. An unrelated successful probe does not validate it.
-For pending input, interruption or reload, use [recovery](live-recovery.md).
+A verified report with cleanup pending remains useful evidence and unfinished
+work. Continue recovery/disconnect when done, unless continued use is needed.
+Process/runtime retirement and business completion are separate: a replacement
+runtime does not prove an unknown old effect never happened. Nonretryable errors
+need a changed cause, not a resume/reload loop. Preserve the entire
+`.lycheedev/live` recovery unit and older incompatible journals for matching-version
+diagnosis. Report useful retained results and the concrete blocker if progress
+requires unavailable evidence or user action.

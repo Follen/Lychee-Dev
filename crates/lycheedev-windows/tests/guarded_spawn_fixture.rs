@@ -24,9 +24,8 @@ fn created(handle: HANDLE) -> u64 {
     (c.dwHighDateTime as u64) << 32 | c.dwLowDateTime as u64
 }
 fn main() {
-    let Ok(role) = std::env::var("LYCHEEDEV_SUSPENDED_ROLE") else {
-        return;
-    };
+    let role = std::env::var("LYCHEEDEV_SUSPENDED_ROLE")
+        .expect("sealed guarded spawn helper requires its explicit child role");
     let token = std::env::var("LYCHEEDEV_SUSPENDED_TOKEN").unwrap();
     assert!(token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit()));
     let root = std::env::current_dir().unwrap();

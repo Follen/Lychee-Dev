@@ -71,14 +71,6 @@ impl Script {
             "generatedRange":utf16_range(&self.compiler.text,range).map_err(invalid)?,"generatedBytes":range,
             "sourceMap":mapping,"inlineHandler":self.handler,"xmlContentHash":self.xml_sha256}))
     }
-    pub fn position_from_utf16(&self,range:&Value)->Result<Value>{
-        let offset=|name:&str|->Result<usize>{
-            let line=range[name]["line"].as_u64().ok_or_else(||invalid("diagnostic line missing"))?as usize;
-            let column=range[name]["character"].as_u64().ok_or_else(||invalid("diagnostic character missing"))?as usize;
-            source_map::utf16_offset(&self.compiler.text,line,column).map_err(invalid)
-        };
-        self.position(Span::new(offset("start")?,offset("end")?))
-    }
     pub fn compiler_line(&self,line:usize)->Result<Value>{
         let range=lua_line_span(&self.compiler.text,line).map_err(invalid)?;
         let mapping=self.project(range)?;
@@ -454,7 +446,7 @@ mod tests{
     #[test]
     fn syntax_inputs_preserve_original_cancelled_and_expired_controls() {
         use lycheedev_core::control::OperationControl;
-        use std::{sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};
+        use std::{time::{Duration, Instant}};
         let document = crate::closure::Document { path: "Stopped.xml".into(), bytes: b"<Root><Script>Run()</Script></Root>".to_vec(), facts: Default::default(), blob: Value::Null };
         let cancelled = crate::native::stopped_control(false, Instant::now() + Duration::from_secs(180));
         let expired = OperationControl::uncancelable(Instant::now());

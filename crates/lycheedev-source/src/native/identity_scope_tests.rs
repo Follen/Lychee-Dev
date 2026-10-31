@@ -1,6 +1,6 @@
 use super::*;
 use crate::xml_load::{Action, GameMode, HandlerTarget, LoadFamily, Program, XmlOrigin, XmlReference};
-use std::{sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
+use std::{time::{Duration, Instant}};
 
 fn control() -> OperationControl {
     OperationControl::uncancelable(Instant::now() + Duration::from_secs(30))

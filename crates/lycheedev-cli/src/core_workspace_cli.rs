@@ -190,6 +190,30 @@ pub fn inspect_doctor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn public_target_add_requires_product_region_locale_in_typed_admission() {
+        let home = std::env::temp_dir().join(format!("cli-admission-unused-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let words = ["target", "add", "audit-retail", "--remote", "--product", "retail", "--region", "us", "--locale", "enUS"].map(str::to_owned);
+        let mut inv = crate::parse(&words).unwrap();
+        inv.home = home.clone();
+        let TargetRequest::Add { config, replace } = admit_target(&inv).unwrap() else { panic!("target add"); };
+        assert_eq!((config.name.as_str(), config.product.as_str(), config.region.as_str(), config.locale.as_str()),
+            ("audit-retail", "retail", "us", "enUS"));
+        assert_eq!(config.source, "remote");
+        assert!(!replace);
+        for missing in ["--product", "--region", "--locale"] {
+            let mut incomplete = words.to_vec();
+            let index = incomplete.iter().position(|word| word == missing).unwrap();
+            incomplete.drain(index..index + 2);
+            let mut inv = crate::parse(&incomplete).unwrap();
+            inv.home = home.clone();
+            let error = admit_target(&inv).unwrap_err();
+            assert_eq!(error.exit_code, 2);
+            assert_eq!(error.message, "target add requires --product, --region, and --locale");
+        }
+        assert!(!home.exists());
+    }
     fn invocation(command: &str, positional: Option<&str>, flags: &[(&str, &str)]) -> Invocation {
         Invocation {
             command: command.into(),

@@ -18,7 +18,7 @@ pub mod slot_reset;
 mod slot_test_diagnostics;
 pub mod slots;
 pub mod update;
-pub use installation::{VerifiedInstallation, verify_clean};
+pub use installation::VerifiedInstallation;
 #[derive(Clone, Debug)]
 pub enum AddonSelector {
     Installation(std::path::PathBuf),
@@ -181,7 +181,7 @@ mod selection_tests {
                         client.directory
                     )
                 });
-            let installation = installation::inspect(&target, "addon").unwrap_or_else(|error| {
+            let installation = installation::inspect_main_controlled(&target, "addon", &Default::default()).unwrap_or_else(|error| {
                 panic!("{selector}: inspect addon at {target:?}: {error:?}")
             });
             let result = dispatch(ctx, &Request::AddonStatus(AddonSelector::Installation(installation_path.to_owned())))

@@ -25,9 +25,6 @@ pub struct Release {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corresponding_source: Option<Value>,
 }
-pub fn inspect(root: &Path, version: &str) -> Result<Release> {
-    inspect_with_control(root, version, &OperationControl::default())
-}
 pub fn inspect_with_control(
     root: &Path,
     version: &str,
@@ -161,13 +158,6 @@ pub fn receipt(release: &Release, component: &str) -> Receipt {
             .cloned()
             .collect(),
     }
-}
-pub fn verify_inventory(
-    root: &Path,
-    resources: &[Resource],
-    component: Option<&str>,
-) -> Result<()> {
-    verify_inventory_with_control(root, resources, component, &OperationControl::default())
 }
 pub fn verify_inventory_with_control(
     root: &Path,

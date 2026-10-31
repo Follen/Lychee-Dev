@@ -125,9 +125,6 @@ fn ready(
         result => result,
     }
 }
-pub fn compare(home: &Path, from: &SourcePin, to: &SourcePin, limit: usize) -> Result<Value> {
-    compare_with_control(home, from, to, limit, &Default::default())
-}
 pub fn compare_with_control(
     home: &Path,
     from: &SourcePin,

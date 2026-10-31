@@ -2,7 +2,7 @@
 //! Each ordinary expression starts a fresh environment; callback return probes
 //! explicitly inherit only the parameter bindings, matching the original VM.
 use super::*;
-use emmylua_code_analysis::{LuaSignatureId, LuaTypeDeclId, VariadicType};
+use emmylua_code_analysis::{LuaTypeDeclId, VariadicType};
 use emmylua_parser::{LuaCallExpr, LuaReturnStat};
 use std::collections::HashSet;
 

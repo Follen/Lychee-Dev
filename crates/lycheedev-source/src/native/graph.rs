@@ -527,13 +527,6 @@ impl Facade<'_> {
             "checkScope":"return-expression and call-site checks only; no whole-function or whole-program checking claim",
             "managedFallbackCalls":0,"ownership":"Bound, Unavailable and KnownAbsent are authoritative; only NotManaged permits a future fallback provider"})
     }
-    pub fn site_fact(&self,file:&str,marker:&str,token:&str,context_prefix:&str)->Result<&UseFact> {
-        let text=self.graph.inputs.original(file).map_err(|e|e.to_string())?;let marker_at=text.find(marker).ok_or("missing assertion marker")?;
-        if text[marker_at+marker.len()..].contains(marker){return Err("non-unique assertion marker".into())}
-        let start=(marker_at+marker.find(token).ok_or("missing assertion token")?) as u32;
-        let found:Vec<_>=self.graph.uses.iter().filter(|f|f.site.file==file&&f.site.start==start&&f.site.end==start+token.len()as u32&&f.context.starts_with(context_prefix)).collect();
-        if found.len()!=1{return Err(format!("expected one fact: {file} {marker} {token}, got {}",found.len()))}Ok(found[0])
-    }
 }
 
 fn build_graph(prepared:&PreparedSnapshot,name:&str,snapshot_inputs:GraphSnapshotEvidence,inputs:Arc<SourceInputs>)->Result<Graph> {

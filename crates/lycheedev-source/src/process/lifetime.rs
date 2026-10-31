@@ -374,7 +374,6 @@ fn retire_inner(
 mod completion_tests {
     use super::*;
     use lycheedev_core::control::OperationControl;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     struct Exited;
     impl ProcessOwner for Exited {

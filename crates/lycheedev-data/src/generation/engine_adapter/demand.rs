@@ -7,7 +7,7 @@ use crate::query_value::RowCursor;
 use arrow_array::{Array, UInt32Array};
 use arrow_snapshot::{ArrowCursor, ArrowSnapshot};
 
-pub(crate) enum DemandKind {
+enum DemandKind {
     Arrow(Arc<ArrowSnapshot>),
     Static(Arc<table::Table<'static>>),
     Effective {
@@ -16,7 +16,7 @@ pub(crate) enum DemandKind {
     },
 }
 pub(crate) struct DemandSource {
-    pub(super) kind: DemandKind,
+    kind: DemandKind,
     pub(super) original: Option<Arc<table_source::Prepared>>,
     pub(super) schema: Arc<SchemaOwner>,
     pub(super) budget: Arc<Budget>,

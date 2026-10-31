@@ -3,7 +3,7 @@
 // Go execution, fixed oracle, arbitrary fixture argument, game input, release
 // publication or process-runner replacement.
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, writeFileSync} from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beginScratch, contained } from './rust-disk.mjs';

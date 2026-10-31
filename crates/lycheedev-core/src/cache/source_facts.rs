@@ -1264,7 +1264,7 @@ mod streaming_tests {
     impl ProcessOwner {
         fn start(home: &Path, key: &str, id: &str, value: u8) -> Self {
             Self(Some(std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "cache::source_facts::streaming_tests::streamed_publication_process_helper", "--nocapture"])
+                .args(["--exact", "cache::source_facts::streaming_tests::streamed_publication_process_helper", "--ignored", "--nocapture"])
                 .env("LYCHEEDEV_STREAMED_FACTS_HOME", home).env("LYCHEEDEV_STREAMED_FACTS_KEY", key)
                 .env("LYCHEEDEV_STREAMED_FACTS_ID", id).env("LYCHEEDEV_STREAMED_FACTS_BYTE", value.to_string())
                 .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::inherit())
@@ -1294,8 +1294,10 @@ mod streaming_tests {
         }
     }
     #[test]
+    #[ignore = "subprocess helper; invoked by the concurrent streamed facts publication regression"]
     fn streamed_publication_process_helper() {
-        let Some(home) = std::env::var_os("LYCHEEDEV_STREAMED_FACTS_HOME") else { return; };
+        let home = std::env::var_os("LYCHEEDEV_STREAMED_FACTS_HOME")
+            .expect("required streamed facts publication helper home");
         let home = PathBuf::from(home); let key = std::env::var("LYCHEEDEV_STREAMED_FACTS_KEY").unwrap();
         let id = std::env::var("LYCHEEDEV_STREAMED_FACTS_ID").unwrap();
         let value: u8 = std::env::var("LYCHEEDEV_STREAMED_FACTS_BYTE").unwrap().parse().unwrap();

@@ -694,3 +694,5 @@ mod capacity_tests;
 
 #[cfg(test)]
 mod rebuild_tests;
+#[cfg(test)]
+mod source_tests;

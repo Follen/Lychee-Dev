@@ -1,36 +1,16 @@
 # Addon validation
 
-Read for TOC/XML/Lua closure and client compatibility. Use the actual addon bytes
-and intended relative TOC: the source snapshot supplies a fixed reference, not
-replacement local bytes. Keep working changes/addon revision separately. Do not
-substitute a recursive scan for a release's ordered load closure.
+Validate actual addon bytes against the intended relative TOC and fixed source.
+A recursive directory scan is not the ordered TOC/XML load closure. Discover
+`source validate`; its `fileInput` describes matrix inputs and complete examples.
+Keep working changes/addon revision separate from the source/API reference.
 
-Use `lycheedev schema source validate` or leaf help. `fileInput` describes the
-`--matrix` JSON file, including required fields, limits and a complete example.
-Ordinary `--path` selects the addon directory and `--toc` its relative load
-manifest; neither is a matrix JSON file.
+Read returned load validity, static checks, interface status, unresolved findings
+and coverage per target. A name match does not establish binding identity;
+missing names can be local or dynamic. A branch or folder label does not identify
+a historical interface. Aggregate matrix success cannot erase one target's gap.
 
-Matrix paths are relative to the config; each target owns its product, TOC and
-fixed source reference. Retain the resolved commit when using a full ref. A
-current branch does not identify a historical version. Unknown fields are
-rejected.
-
-Single validation's loadValid covers paths/order/syntax; staticValid adds the
-returned checks. A source name match does not prove binding identity or argument
-types. Missing names can be local/dynamic. Inspect complete, unresolved,
-interfaceStatus, checks and notChecked even after exit 0. Unknown interface commits
-remain unresolved; never infer them from folder/version labels.
-
-Matrix targets have resolvedCommit, toc, loadClosure, valid, diagnostics,
-unresolved and coverage rather than the single-result shape. Keep each client's
-gaps; aggregate success cannot erase them. Static/semantic success does not prove
-runtime loading, combat, taint, visual behavior or performance.
-
-Semantic analysis is optional evidence. A missing engine/tool leaves a capability
-gap; the same static validation can still be useful without semantic/environment/
-release options. Third-party source needs its fixed client API environment.
-Matrix has no per-target environment field and cannot combine with a global
-environment: use client API targets or separate validations for distinct source/
-environment pairs. Preserve semantic input/report captures. Single semantic
-validation intentionally retains incomplete coverage; do not raise budgets to
-force complete=true. Identify actual clients from verified metadata, not folders.
+Semantic validation needs a matching fixed client environment; missing support
+leaves a specific gap. Preserve its input/report captures and partial findings.
+Use only combinations declared by the installed schema. Static or semantic success
+does not establish actual loading, combat, taint, rendering or performance.

@@ -36,7 +36,7 @@ fn cross_partition_strings_stop_before_same_block_and_later_missing_spans() {
         let start = strings_fixture::pool(&spec.raw);
         let table = view(&spec, &[start + gap..start + gap + 8]);
         let expected = String::from_utf8(text[..text.len() - 1].to_vec()).unwrap();
-        assert_eq!(table.row(1, 1024).unwrap()["Name"], Value::String(expected));
+        assert_eq!(table.leased_row_values(1, 1024).unwrap().value[1], Value::String(expected));
         assert_eq!(table.ids().collect::<Vec<_>>(), vec![1]);
         assert_eq!(table.coverage()["complete"], false);
     }
@@ -52,14 +52,14 @@ fn missing_string_prefix_or_terminator_remains_unavailable_with_unsorted_spans()
             &[start + 900..start + 908, start + gap..start + gap + 8],
         );
         assert_eq!(
-            table.row(1, 1024).unwrap_err().code,
+            table.leased_row_values(1, 1024).err().unwrap().code,
             "table.partition_unavailable"
         );
     }
     let spec = strings_fixture::table(201, 8, b"visible\0");
     let start = strings_fixture::pool(&spec.raw);
     assert_eq!(
-        view(&spec, &[start + 8..start + 16]).row(1, 1024).unwrap()["Name"],
+        view(&spec, &[start + 8..start + 16]).leased_row_values(1, 1024).unwrap().value[1],
         Value::String("visible".into())
     );
 }
@@ -69,7 +69,7 @@ fn terminated_prefix_preserves_utf8_pool_boundaries_and_exact_output_limits() {
     let mut spec = strings_fixture::table(201, 512, &split_utf8);
     let start = strings_fixture::pool(&spec.raw);
     let table = view(&spec, &[start + 512..start + 520]);
-    let mut allocation = RowAllocation::new(None, false);
+    let mut allocation = RowAllocation::new(None);
     assert_eq!(
         table
             .terminated(start, start + 1024, 259, &mut allocation)
@@ -150,17 +150,9 @@ fn terminated_prefix_keeps_original_control_and_admits_only_returned_bytes() {
         None,
     ));
     table.source.budget = Some(ledger.clone());
-    assert_eq!(
-        table
-            .terminated(
-                start,
-                start + 1024,
-                1024,
-                &mut RowAllocation::new(Some(&ledger), false)
-            )
-            .unwrap(),
-        "visible"
-    );
+    let mut allocation = RowAllocation::new(Some(&ledger));
+    let returned = table.terminated(start, start + 1024, 1024, &mut allocation).unwrap();
+    assert_eq!(returned, "visible");
     assert_eq!(ledger.snapshot().unwrap(), Cost::retained(7));
     assert_eq!(
         table
@@ -168,13 +160,16 @@ fn terminated_prefix_keeps_original_control_and_admits_only_returned_bytes() {
                 start,
                 start + 1024,
                 1024,
-                &mut RowAllocation::new(Some(&ledger), false)
+                &mut RowAllocation::new(Some(&ledger))
             )
             .unwrap_err()
             .code,
         "records.query_resource_budget"
     );
     assert_eq!(ledger.snapshot().unwrap(), Cost::retained(7));
+    drop(returned);
+    drop(allocation);
+    assert_eq!(ledger.snapshot().unwrap(), Cost::default());
     let stop = TrackedCancellation::new();
     let control = OperationControl::tracked(Instant::now() + Duration::from_secs(30), stop.clone());
     let ledger = Arc::new(Budget::controlled(
@@ -189,7 +184,7 @@ fn terminated_prefix_keeps_original_control_and_admits_only_returned_bytes() {
             start,
             start + 1024,
             1024,
-            &mut RowAllocation::new(Some(&ledger), false),
+            &mut RowAllocation::new(Some(&ledger)),
         )
         .unwrap_err();
     assert_eq!(
@@ -212,7 +207,7 @@ fn terminated_prefix_keeps_original_control_and_admits_only_returned_bytes() {
                 blocked_start,
                 blocked_start + 1024,
                 1024,
-                &mut RowAllocation::new(Some(&ledger), false)
+                &mut RowAllocation::new(Some(&ledger))
             )
             .unwrap_err()
             .code,

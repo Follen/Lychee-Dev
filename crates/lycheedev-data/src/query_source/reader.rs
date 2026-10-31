@@ -86,8 +86,11 @@ impl<'a> Reader<'a> {
         let budget = self.budget;
         let _phase = budget.phase(Phase::Prepare);
         if self.keys.is_none() {
-            self.keys = Some(keys::Context::prepare_budgeted(
-                self.context,
+            self.keys = Some(keys::Context::prepare_scoped(
+                &self.context.home,
+                self.context.source.key_file.as_deref(),
+                self.context.source.offline,
+                &self.context.control,
                 self.budget.deadline,
                 Some(self.budget.clone()),
             )?);

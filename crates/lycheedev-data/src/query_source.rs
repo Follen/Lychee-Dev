@@ -104,29 +104,6 @@ fn locale(language: &str) -> Result<u32> {
         )),
     }
 }
-pub fn read_files(
-    inv: &DataContext,
-    pin: &selection::DataPin,
-    ids: &[u32],
-    deadline: Instant,
-) -> Result<Vec<File>> {
-    let budget = Arc::new(Budget::query_controlled(deadline, inv.control.clone()));
-    // Reader FileQuery errors precede admission; DataIdentity deliberately does
-    // not. Preserve original control before query checks or workspace IO.
-    inv.control.check()?;
-    budget.check()?;
-    validate_local_file_request(inv, ids)?;
-    let scope = {
-        let _phase = budget.phase(Phase::Admission);
-        crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?
-    };
-    let result = (|| {
-        scope.check_pin(pin)?;
-        read_files_budgeted(inv, pin, ids, &budget)
-    })();
-    let _phase = budget.phase(Phase::SourceClose);
-    scope.finish(result)
-}
 /// No IO, allocation admission, key preparation or pin lookup. Keep Go's
 /// variant-before-FileQuery order with the existing local multi-ID contract.
 fn validate_local_file_request(inv: &DataContext, ids: &[u32]) -> Result<usize> {
@@ -147,32 +124,8 @@ fn validate_local_file_request(inv: &DataContext, ids: &[u32]) -> Result<usize> 
     Ok(inv.source.max_file_bytes)
 }
 
-pub(crate) fn read_files_budgeted(
-    inv: &DataContext,
-    pin: &selection::DataPin,
-    ids: &[u32],
-    budget: &Arc<Budget>,
-) -> Result<Vec<File>> {
-    let mut files = Vec::new();
-    read_file_batches_budgeted(inv, pin, ids, budget, &mut |batch| {
-        files.extend(batch);
-        Ok(Vec::new())
-    })?;
-    Ok(files)
-}
-
-/// The callback may request another bounded batch while the authenticated
-/// Encoding/Root session remains alive. Once a callback has run it is never
-/// replayed, including on a missing key or cancellation.
-pub(crate) fn read_file_batches_budgeted(
-    inv: &DataContext,
-    pin: &selection::DataPin,
-    ids: &[u32],
-    budget: &Arc<Budget>,
-    callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
-) -> Result<()> {
-    read_materialized_batches(inv, pin, ids, budget, blte::DecodePolicy::Strict, callback)
-}
+/// The callback may request another bounded table batch while the authenticated
+/// Encoding/Root session remains alive. Delivered callbacks are never replayed.
 pub(crate) fn read_table_batches_budgeted(
     inv: &DataContext,
     pin: &selection::DataPin,
@@ -180,29 +133,12 @@ pub(crate) fn read_table_batches_budgeted(
     budget: &Arc<Budget>,
     callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
 ) -> Result<()> {
-    read_materialized_batches(
-        inv,
-        pin,
-        ids,
-        budget,
-        blte::DecodePolicy::TableAllowMissing,
-        callback,
-    )
-}
-fn read_materialized_batches(
-    inv: &DataContext,
-    pin: &selection::DataPin,
-    ids: &[u32],
-    budget: &Arc<Budget>,
-    policy: blte::DecodePolicy,
-    callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
-) -> Result<()> {
     read_batches(
         inv,
         pin,
         ids,
         budget,
-        ReadMode::Materialized(policy),
+        ReadMode::Materialized(blte::DecodePolicy::TableAllowMissing),
         &mut |files| {
             let files = files
                 .into_iter()
@@ -293,7 +229,7 @@ fn read_batches(
     budget.check()?;
     validate_local_file_request(inv, ids)?;
     let deadline = budget.deadline;
-    let mut keys = keys::Context::prepare_budgeted(inv, deadline, Some(budget.clone()))?;
+    let mut keys = keys::Context::prepare_scoped(&inv.home, inv.source.key_file.as_deref(), inv.source.offline, &inv.control, deadline, Some(budget.clone()))?;
     let mut delivered = false;
     let first = read_files_with_keys(
         inv,
@@ -836,7 +772,7 @@ mod retry_tests {
                 ctx.control.clone(),
             ).with_test_phase_profile();
             let budget = Arc::new(budget);
-            let error = read_files_budgeted(&ctx, &pin, &[303], &budget)
+            let error = read_verified_file_budgeted(&ctx, &pin, 303, &budget)
                 .err()
                 .expect("actual encrypted chunk's absent key");
             assert_eq!(error.code, "container.key_unavailable");

@@ -1,5 +1,5 @@
 // Trusted host admission checks only. Source is not executed or abstractly advanced.
-use std::{path::PathBuf,sync::{Arc,atomic::{AtomicBool,Ordering}},time::{Duration,Instant}};
+use std::{path::PathBuf,time::{Duration,Instant}};
 use emmylua_code_analysis::{Emmyrc,EmmyrcLuaVersion};
 use lycheedev_core::control::OperationControl;
 use lycheedev_source::native::*;

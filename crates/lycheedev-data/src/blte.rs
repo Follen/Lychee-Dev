@@ -406,7 +406,6 @@ impl<'a> Ranges<'a> {
                 limits: self.limits,
                 keys: self.keys,
                 chunks: if self.session { visited_chunks } else { 1 },
-                allow_missing: false,
                 // The extent reservation covers the output/copy and digest
                 // work. Decoder scratch, nested/cipher buffers and codec-loop
                 // work still belong to this same ledger and cancellation tree.
@@ -638,45 +637,10 @@ struct Part {
     decoded: usize,
     digest: [u8; 16],
 }
-pub fn decode(raw: &[u8], limits: Limits, keys: &BTreeMap<u64, Vec<u8>>) -> Result<Vec<u8>> {
-    let c = decode_available(raw, limits, keys, false)?;
-    Ok(c.bytes)
-}
-pub fn decode_available(
-    raw: &[u8],
-    limits: Limits,
-    keys: &BTreeMap<u64, Vec<u8>>,
-    allow_missing: bool,
-) -> Result<Content> {
-    if limits.encoded_bytes == 0
-        || limits.decoded_bytes == 0
-        || limits.decoded_bytes > 256 << 20
-        || limits.chunk_bytes == 0
-        || limits.chunk_bytes > 64 << 20
-        || limits.chunks == 0
-        || limits.chunks > 65536
-        || limits.depth == 0
-        || limits.depth > 16
-        || raw.len() > limits.encoded_bytes
-    {
-        return exceeded();
-    }
-    let mut d = Decoder {
-        limits,
-        keys,
-        chunks: 0,
-        allow_missing,
-        budget: None,
-        logical_layout: None,
-        source_check: None,
-    };
-    d.expand(raw, 1, limits.decoded_bytes)
-}
 struct Decoder<'a> {
     limits: Limits,
     keys: &'a BTreeMap<u64, Vec<u8>>,
     chunks: usize,
-    allow_missing: bool,
     budget: Option<&'a Budget>,
     logical_layout: Option<&'a Budget>,
     source_check: Option<&'a dyn Fn() -> Result<()>>,
@@ -828,22 +792,6 @@ impl Decoder<'_> {
                     }
                     content.missing.extend(c.missing);
                     content.bytes.extend(c.bytes);
-                }
-                Err(e)
-                    if self.allow_missing
-                        && header != 0
-                        && e.code == "container.key_unavailable"
-                        && e.details.get("missingKey").and_then(|v| v.as_bool()) == Some(true) =>
-                {
-                    let key = e.details["keyId"].as_str().unwrap_or("").to_owned();
-                    let begin = content.bytes.len();
-                    content.bytes.resize(begin + p.decoded, 0);
-                    content.missing.push(Missing {
-                        offset: begin,
-                        bytes: p.decoded,
-                        key_id: key,
-                        chunk: index,
-                    });
                 }
                 Err(e) => return Err(e),
             }
@@ -1048,6 +996,9 @@ fn quarter(x: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
 mod tests {
     use super::*;
     use std::io::Write;
+    fn decoded_range(raw: &[u8], limits: Limits, keys: &BTreeMap<u64, Vec<u8>>) -> Result<Vec<u8>> {
+        Ranges::open(raw, limits, keys)?.read_span(0, 5).map(Cow::into_owned)
+    }
     fn frame(payload: &[u8], decoded: usize) -> Vec<u8> {
         let mut v = b"BLTE".to_vec();
         v.extend(36u32.to_be_bytes());
@@ -1062,21 +1013,21 @@ mod tests {
     fn raw_zlib_nested_and_integrity() {
         let keys = BTreeMap::new();
         let l = Limits::default();
-        assert_eq!(decode(&frame(b"Nhello", 5), l, &keys).unwrap(), b"hello");
+        assert_eq!(decoded_range(&frame(b"Nhello", 5), l, &keys).unwrap(), b"hello");
         let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
         z.write_all(b"hello").unwrap();
         let mut payload = vec![b'Z'];
         payload.extend(z.finish().unwrap());
-        assert_eq!(decode(&frame(&payload, 5), l, &keys).unwrap(), b"hello");
+        assert_eq!(decoded_range(&frame(&payload, 5), l, &keys).unwrap(), b"hello");
         payload.push(0);
-        assert!(decode(&frame(&payload, 5), l, &keys).is_err());
+        assert!(decoded_range(&frame(&payload, 5), l, &keys).is_err());
         let mut nested = vec![b'F'];
         nested.extend(frame(b"Nhello", 5));
-        assert_eq!(decode(&frame(&nested, 5), l, &keys).unwrap(), b"hello");
+        assert_eq!(decoded_range(&frame(&nested, 5), l, &keys).unwrap(), b"hello");
         let mut bad = frame(b"Nhello", 5);
         *bad.last_mut().unwrap() ^= 1;
         assert_eq!(
-            decode(&bad, l, &keys).unwrap_err().code,
+            decoded_range(&bad, l, &keys).unwrap_err().code,
             "container.integrity_mismatch"
         );
     }
@@ -1093,20 +1044,26 @@ mod tests {
             e.extend(salsa_checked(b"Nhello", &key, [0; 8], None, None).unwrap());
             let b = frame(&e, 5);
             assert_eq!(
-                decode(&b, Limits::default(), &BTreeMap::from([(id, key)])).unwrap(),
+                decoded_range(&b, Limits::default(), &BTreeMap::from([(id, key)])).unwrap(),
                 b"hello"
             );
-            let c = decode_available(&b, Limits::default(), &BTreeMap::new(), true).unwrap();
+            let budget = Budget::new(Cost::defaults(), std::time::Instant::now() + std::time::Duration::from_secs(5), None);
+            let empty = BTreeMap::new();
+            let mut input = std::io::Cursor::new(&b);
+            let mut reader = StreamingReader::new_incremental_with_check(&mut input, b.len(), 5, Md5::digest(b"hello").into(), &empty, &budget, None).unwrap().with_policy(DecodePolicy::TableAllowMissing);
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).unwrap();
+            let c = Content { bytes, missing: reader.take_missing() };
             assert!(!c.complete());
             assert_eq!(c.missing[0].key_id, "000000000000002a");
             assert!(c.checked_span(0, 1).is_err());
-            assert!(decode(&b, Limits::default(), &BTreeMap::new()).is_err());
+            assert!(decoded_range(&b, Limits::default(), &BTreeMap::new()).is_err());
         }
     }
     #[test]
     fn budgets_and_external_ckey() {
         assert!(
-            decode(
+            decoded_range(
                 &frame(b"Nhello", 5),
                 Limits {
                     decoded_bytes: 4,
@@ -1118,7 +1075,7 @@ mod tests {
         );
         let mut b = frame(b"Nhello", 5);
         b.push(0);
-        assert!(decode(&b, Limits::default(), &BTreeMap::new()).is_err());
+        assert!(decoded_range(&b, Limits::default(), &BTreeMap::new()).is_err());
     }
 
     #[test]

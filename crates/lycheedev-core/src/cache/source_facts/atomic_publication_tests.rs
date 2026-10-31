@@ -450,7 +450,7 @@ struct ChildOwner(Option<Child>);
 impl ChildOwner {
     fn start(home: &Path, key: &str, id: &str, fill: u8, repeats: usize) -> Self {
         Self(Some(Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "cache::source_facts::atomic_publication_tests::facts_publication_process_helper", "--nocapture"])
+            .args(["--exact", "cache::source_facts::atomic_publication_tests::facts_publication_process_helper", "--ignored", "--nocapture"])
             .env("LYCHEEDEV_FACTS_PUBLICATION_HOME", home)
             .env("LYCHEEDEV_FACTS_PUBLICATION_KEY", key)
             .env("LYCHEEDEV_FACTS_PUBLICATION_ID", id)
@@ -495,10 +495,10 @@ impl Drop for ChildOwner {
     }
 }
 #[test]
+#[ignore = "subprocess helper; invoked by the concurrent facts publication regressions"]
 fn facts_publication_process_helper() {
-    let Some(home) = std::env::var_os("LYCHEEDEV_FACTS_PUBLICATION_HOME") else {
-        return;
-    };
+    let home = std::env::var_os("LYCHEEDEV_FACTS_PUBLICATION_HOME")
+        .expect("required facts publication helper home");
     let home = PathBuf::from(home);
     let key = std::env::var("LYCHEEDEV_FACTS_PUBLICATION_KEY").unwrap();
     let id = std::env::var("LYCHEEDEV_FACTS_PUBLICATION_ID").unwrap();

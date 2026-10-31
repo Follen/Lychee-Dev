@@ -391,7 +391,7 @@ fn public_context_memoizes_corrected_public_fetcher_first_failure_with_all_cause
         home: home.0.clone(), cwd: home.0.clone(), control: control.clone(),
         source: Default::default(),
     };
-    let mut context = Context::prepare(&request, deadline).unwrap();
+    let mut context = Context::prepare_scoped(&request.home, request.source.key_file.as_deref(), request.source.offline, &request.control, deadline, None).unwrap();
     let sender = OnSend { calls: std::cell::Cell::new(0), action: |_: &OperationControl, _: Instant| {
         sleep_past(deadline);
         cancel.cancel();

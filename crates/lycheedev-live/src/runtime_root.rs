@@ -391,7 +391,7 @@ struct Proof<I> {
 /// remaining request budget. No implicit re-scan or private-heap fallback exists.
 pub struct RootBinding {
     proof: Proof<RuntimeModuleIdentity>,
-    trusted_image: Option<Arc<RuntimeImageLayout>>,
+    trusted_image: Arc<RuntimeImageLayout>,
 }
 impl RootBinding {
     pub fn root_rva(&self) -> u64 {
@@ -406,11 +406,6 @@ impl RootBinding {
     pub fn evidence(&self) -> &RootEvidence {
         &self.proof.evidence
     }
-    pub fn executable_sha256(&self) -> Option<&str> {
-        self.trusted_image
-            .as_ref()
-            .map(|layout| layout.executable_sha256())
-    }
     /// Checks the same capability, current anchor/RIP, root stability and locating
     /// metadata. This is an anchor recheck, not a new proof of whole-code-domain
     /// uniqueness. The Mailbox reader must also guard its root/path across lookup.
@@ -420,14 +415,12 @@ impl RootBinding {
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<RootEvidence, RootFailure> {
         if self.proof.poisoned.is_none() {
-            if let Some(layout) = &self.trusted_image {
-                if let Err(cause) = layout.verify(module, budget) {
-                    self.proof.poisoned = Some(cause.clone());
-                    return Err(RootFailure {
-                        cause,
-                        evidence: Box::default(),
-                    });
-                }
+            if let Err(cause) = self.trusted_image.verify(module, budget) {
+                self.proof.poisoned = Some(cause.clone());
+                return Err(RootFailure {
+                    cause,
+                    evidence: Box::default(),
+                });
             }
         }
         revalidate(&mut self.proof, module, budget)
@@ -435,15 +428,6 @@ impl RootBinding {
 }
 pub struct RuntimeRootRecipe;
 impl RuntimeRootRecipe {
-    pub fn resolve(
-        module: &RuntimeModule,
-        budget: &mut RuntimeBudget,
-    ) -> std::result::Result<RootBinding, RootFailure> {
-        resolve(module, budget).map(|proof| RootBinding {
-            proof,
-            trusted_image: None,
-        })
-    }
     /// Formal native-reader issuance. The held opaque layout comes only from
     /// this module's controlled EXE hash/PE verification, and supplies trusted
     /// locating metadata rather than reparsing mutable runtime header bounds.
@@ -492,13 +476,13 @@ impl RuntimeRootRecipe {
             cause,
             evidence: Box::default(),
         })?;
-        let proofs = resolve_candidates_with_image(module, budget, Some(image))?;
+        let proofs = resolve_candidates_with_image(module, budget, image)?;
         let trusted_image = Arc::new(layout);
         Ok(proofs
             .into_iter()
             .map(|proof| RootBinding {
                 proof,
-                trusted_image: Some(Arc::clone(&trusted_image)),
+                trusted_image: Arc::clone(&trusted_image),
             })
             .collect())
     }
@@ -574,80 +558,6 @@ impl<S: Source> Access<'_, S> {
         }
         self.evidence.header_bytes += size as u64;
         self.read(rva, size, RuntimeReadKind::Metadata)
-    }
-    fn image(&mut self) -> Result<Image> {
-        // Only locating fields are decoded. Architecture and image bounds come
-        // from the OS capability, not runtime Machine/SizeOfImage/COFF/raw offsets.
-        self.budget.charge(RuntimeCost::allocation(
-            7 * std::mem::size_of::<HeaderGuard>(),
-        ))?;
-        let mut headers = Vec::with_capacity(7);
-        let mut field = |this: &mut Self, rva, len| -> Result<Vec<u8>> {
-            let bytes = this.header(rva, len)?;
-            this.budget.charge(RuntimeCost::allocation(bytes.len()))?;
-            headers.push(HeaderGuard {
-                rva,
-                bytes: bytes.clone(),
-            });
-            Ok(bytes)
-        };
-        if field(self, 0, 2)? != b"MZ" {
-            return Err("root.dos_header".into());
-        }
-        let nt = u32::from_le_bytes(field(self, 0x3c, 4)?.try_into().unwrap()) as u64;
-        if field(self, nt, 4)? != b"PE\0\0" {
-            return Err("root.nt_signature".into());
-        }
-        let count = u16::from_le_bytes(field(self, nt + 6, 2)?.try_into().unwrap()) as usize;
-        let optional = u16::from_le_bytes(field(self, nt + 20, 2)?.try_into().unwrap()) as u64;
-        if count == 0 || count > 96 || optional < 112 {
-            return Err("root.image_layout".into());
-        }
-        if u16::from_le_bytes(field(self, nt + 24, 2)?.try_into().unwrap()) != 0x20b {
-            return Err("root.optional_magic".into());
-        }
-        let table = nt + 24 + optional;
-        let bytes = field(self, table, count * 40)?;
-        self.budget.charge(RuntimeCost::allocation(
-            count * std::mem::size_of::<Section>(),
-        ))?;
-        let mut sections: Vec<Section> = Vec::with_capacity(count);
-        let mut text = None;
-        for raw in bytes.as_chunks::<40>().0 {
-            self.budget
-                .charge(RuntimeCost::work(sections.len() as u64 + 1))?;
-            let length = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as u64;
-            let start = u32::from_le_bytes(raw[12..16].try_into().unwrap()) as u64;
-            let flags = u32::from_le_bytes(raw[36..40].try_into().unwrap());
-            if length == 0 || start > self.geometry.size || length > self.geometry.size - start {
-                return Err("root.section_range".into());
-            }
-            let section = Section {
-                start,
-                end: start + length,
-                flags,
-                text: raw[..8] == *b".text\0\0\0",
-            };
-            if sections
-                .iter()
-                .any(|s| start < s.end && s.start < section.end)
-            {
-                return Err("root.section_overlap".into());
-            }
-            if section.text && text.replace(section).is_some() {
-                return Err("root.text_ambiguous".into());
-            }
-            sections.push(section);
-        }
-        let text = text.ok_or("root.text_missing")?;
-        if text.flags & (READ | EXECUTE) != READ | EXECUTE || text.end - text.start > TEXT_LIMIT {
-            return Err("root.text_section".into());
-        }
-        Ok(Image {
-            sections,
-            text,
-            headers,
-        })
     }
     fn pattern(&mut self, id: RecipeId) -> Result<Vec<Option<u8>>> {
         self.budget
@@ -1003,34 +913,10 @@ fn geometry(geometry: Geometry) -> Result<()> {
     }
     Ok(())
 }
-fn resolve<S: Source>(
-    source: &S,
-    budget: &mut RuntimeBudget,
-) -> std::result::Result<Proof<S::Identity>, RootFailure> {
-    let mut candidates = resolve_candidates(source, budget)?;
-    if candidates.len() != 1 {
-        return Err(RootFailure {
-            cause: "root.ambiguous_root".into(),
-            evidence: Box::new(
-                candidates
-                    .first()
-                    .map(|p| p.evidence.clone())
-                    .unwrap_or_default(),
-            ),
-        });
-    }
-    Ok(candidates.remove(0))
-}
-fn resolve_candidates<S: Source>(
-    source: &S,
-    budget: &mut RuntimeBudget,
-) -> std::result::Result<Vec<Proof<S::Identity>>, RootFailure> {
-    resolve_candidates_with_image(source, budget, None)
-}
 fn resolve_candidates_with_image<S: Source>(
     source: &S,
     budget: &mut RuntimeBudget,
-    image: Option<Image>,
+    image: Image,
 ) -> std::result::Result<Vec<Proof<S::Identity>>, RootFailure> {
     let mut access = Access {
         source,
@@ -1042,10 +928,6 @@ fn resolve_candidates_with_image<S: Source>(
         access.verify()?;
         geometry(access.geometry)?;
         let identity = source.identity();
-        let image = match image {
-            Some(image) => image,
-            None => access.image()?,
-        };
         let candidates = access.scan(&image)?;
         if candidates.is_empty() {
             return Err("root.anchor_missing".into());

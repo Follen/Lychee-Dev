@@ -72,7 +72,7 @@ fn read(path: &Path, limit: u64, control: &OperationControl) -> Result<Vec<u8>> 
     })();
     storage::finish_file(file, result, control)
 }
-fn compiler(root: &Path, control: &OperationControl) -> Result<luac::Runtime> {
+pub(super) fn compiler(root: &Path, control: &OperationControl) -> Result<luac::Runtime> {
     // Authentication is the executable's build-time tool identity, never a
     // self-supplied release hash or PATH executable. The full snapshot inventory
     // was checked before this manifest is interpreted.

@@ -454,17 +454,6 @@ pub fn commit_capture_budgeted_with_dependencies_and_metadata(
     )
 }
 
-pub fn commit_capture_budgeted_referencing_with_metadata(
-    home: &Path,
-    metadata: &mut Metadata,
-    input: CaptureInput<'_>,
-    references: &[&str],
-    control: &OperationControl,
-    meter: &impl CaptureAccounting,
-) -> Result<Value> {
-    commit_capture_referencing(home, Some(metadata), input, &[], references, control, meter)
-}
-
 fn commit_capture_referencing(
     home: &Path,
     metadata: Option<&mut Metadata>,

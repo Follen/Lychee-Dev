@@ -145,35 +145,6 @@ impl blte::EncodedRead for LocalReader<'_> {
         })
     }
 }
-pub fn open_local_reader<'a>(
-    root: &Path,
-    encoding_key: &str,
-    encoded_bytes: usize,
-    limits: Limits,
-    cancel: Option<&'a TrackedCancellation>,
-) -> Result<LocalReader<'a>> {
-    open_local_reader_budgeted(root, encoding_key, encoded_bytes, limits, cancel, None)
-}
-pub fn open_local_reader_budgeted<'a>(
-    root: &Path,
-    encoding_key: &str,
-    encoded_bytes: usize,
-    limits: Limits,
-    cancel: Option<&'a TrackedCancellation>,
-    budget: Option<&'a Budget>,
-) -> Result<LocalReader<'a>> {
-    open_reader(
-        root,
-        encoding_key,
-        encoded_bytes,
-        Scope {
-            limits,
-            cancel,
-            budget,
-            control: None,
-        },
-    )
-}
 pub(crate) fn open_local_reader_controlled<'a>(
     root: &Path,
     encoding_key: &str,
@@ -627,40 +598,6 @@ pub fn key(value: &str) -> Result<[u8; 16]> {
 pub fn hex(raw: &[u8]) -> String {
     raw.iter().map(|b| format!("{b:02x}")).collect()
 }
-pub struct LocalObject {
-    pub encoded: Vec<u8>,
-    pub index: String,
-    pub span: Span,
-    pub encoding_key: String,
-}
-impl LocalObject {
-    pub fn decode(
-        &self,
-        expected_content: &str,
-        limits: blte::Limits,
-        keys: &BTreeMap<u64, Vec<u8>>,
-    ) -> Result<blte::Content> {
-        let content = blte::decode_available(&self.encoded, limits, keys, false)?;
-        if Md5::digest(&content.bytes).as_slice() != key(expected_content)? {
-            return Err(fault(
-                "records.content_integrity",
-                4,
-                "Decoded CASC content key differs",
-            ));
-        }
-        Ok(content)
-    }
-}
-fn bounded_read_budgeted(
-    path: &Path,
-    root: &Path,
-    max: usize,
-    limits: Limits,
-    cancel: Option<&TrackedCancellation>,
-    budget: Option<&Budget>,
-) -> Result<Vec<u8>> {
-    bounded_read_with_check(path, root, max, limits, cancel, budget, || Ok(()))
-}
 fn bounded_read_with_check(
     path: &Path,
     root: &Path,
@@ -723,128 +660,6 @@ fn bounded_read_with_check(
         .into_iter()
         .flatten(),
     )
-}
-pub fn open_local(
-    root: &Path,
-    encoding_key: &str,
-    encoded_bytes: usize,
-    limits: Limits,
-    cancel: Option<&TrackedCancellation>,
-) -> Result<LocalObject> {
-    open_local_budgeted(root, encoding_key, encoded_bytes, limits, cancel, None)
-}
-pub fn open_local_budgeted(
-    root: &Path,
-    encoding_key: &str,
-    encoded_bytes: usize,
-    limits: Limits,
-    cancel: Option<&TrackedCancellation>,
-    budget: Option<&Budget>,
-) -> Result<LocalObject> {
-    check(limits, cancel)?;
-    let key = key(encoding_key)?;
-    if !(8..=limits.encoded_bytes).contains(&encoded_bytes)
-        || limits.encoded_bytes > 256 << 20
-        || limits.index_bytes == 0
-        || limits.index_bytes > 64 << 20
-        || limits.directory_entries == 0
-        || limits.directory_entries > 4096
-    {
-        return Err(exceeded());
-    }
-    let directory = root.join("Data/data");
-    let selected = select_indices(root, limits, cancel)?;
-    let mut collision_failure = false;
-    for (bucket, (_, name)) in selected {
-        let raw = bounded_read_budgeted(
-            &directory.join(&name),
-            root,
-            limits.index_bytes,
-            limits,
-            cancel,
-            budget,
-        )?;
-        let index = Index::open(&raw, bucket, limits, cancel)?;
-        for span in index.find(&key, limits, cancel)? {
-            if span.bytes != encoded_bytes as u64 + 30 {
-                collision_failure = true;
-                continue;
-            }
-            let path = directory.join(span.filename());
-            storage::guard_path(root, &path)?;
-            let mut archive = fs::File::open(&path)?;
-            let stat = archive.metadata()?;
-            if !stat.is_file() || span.offset > stat.len() || span.bytes > stat.len() - span.offset
-            {
-                return Err(invalid());
-            }
-            archive.seek(SeekFrom::Start(span.offset))?;
-            if let Some(budget) = budget {
-                budget.charge(Cost::retained(span.bytes as usize * 2))?;
-            }
-            let mut raw = vec![0; span.bytes as usize];
-            for chunk in raw.chunks_mut(65536) {
-                check(limits, cancel)?;
-                archive.read_exact(chunk)?;
-            }
-            storage::guard_path(root, &path)?;
-            match authenticate_span(&raw, &key, limits.encoded_bytes) {
-                Ok(encoded) => {
-                    return Ok(LocalObject {
-                        encoded: encoded.to_vec(),
-                        index: name,
-                        span,
-                        encoding_key: encoding_key.into(),
-                    });
-                }
-                Err(e) if e.code == "archive.index_integrity" => {
-                    collision_failure = true;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-    }
-    if collision_failure {
-        Err(integrity())
-    } else {
-        Err(fault(
-            "records.local_object_unavailable",
-            3,
-            "Full encoding key not available in newest local CASC indices",
-        ))
-    }
-}
-pub fn authenticate_span<'a>(raw: &'a [u8], key: &[u8; 16], max: usize) -> Result<&'a [u8]> {
-    if raw.len() < 38 {
-        return Err(invalid());
-    }
-    if raw.len() - 30 > max {
-        return Err(exceeded());
-    }
-    if raw[..30].iter().any(|b| *b != 0) && (0..9).any(|i| raw[15 - i] != key[i]) {
-        return Err(integrity());
-    }
-    let encoded = &raw[30..];
-    if &encoded[..4] != b"BLTE" {
-        return Err(invalid());
-    }
-    let header = u32::from_be_bytes(encoded[4..8].try_into().unwrap()) as usize;
-    let extent = if header == 0 { encoded.len() } else { header };
-    if header != 0 && (header < 12 || header > encoded.len()) {
-        return Err(invalid());
-    }
-    if Md5::digest(&encoded[..extent]).as_slice() != key {
-        return Err(integrity());
-    }
-    Ok(encoded)
-}
-
-fn select_indices(
-    root: &Path,
-    limits: Limits,
-    cancel: Option<&TrackedCancellation>,
-) -> Result<BTreeMap<u8, (u32, String)>> {
-    select_indices_with_check(root, limits, cancel, || Ok(()))
 }
 fn select_indices_with_check(
     root: &Path,

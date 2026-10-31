@@ -4,11 +4,12 @@ use super::{BlobRef, CaptureRef, blob_path, capture_identity};
 use crate::{
     Result, ToolkitError,
     control::OperationControl,
-    metadata::Metadata,
     storage::{self, ExclusiveLock},
     workspace,
 };
 use lycheedev_windows::filesystem::Directory;
+#[cfg(test)]
+use crate::metadata::Metadata;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -623,53 +624,6 @@ fn publish_blob_reader_internal(
         control: control.clone(),
         supplemental,
     })
-}
-
-/// Capture an already verified held blob without allocating or rehashing it.
-pub fn commit_verified_capture(
-    blob: &VerifiedBlob,
-    media_type: &str,
-    provenance: Value,
-    complete: bool,
-    truncated: bool,
-    control: &OperationControl,
-) -> Result<Value> {
-    control.check()?;
-    if media_type.is_empty()
-        || provenance["kind"].as_str().unwrap_or("").is_empty()
-        || provenance["locator"].as_str().unwrap_or("").is_empty()
-        || complete && truncated
-    {
-        return Err(ToolkitError::new(
-            "evidence.invalid_capture",
-            "invalid media/provenance/completeness",
-            4,
-        ));
-    }
-    super::budgeted::commit_verified_capture_budgeted(
-        blob,
-        super::budgeted::CaptureHeader {
-            media_type,
-            provenance,
-            complete,
-            truncated,
-        },
-        control,
-        &LegacyCaptureAccounting,
-    )
-}
-
-struct LegacyCaptureAccounting;
-impl super::budgeted::CaptureAccounting for LegacyCaptureAccounting {
-    fn check(&self) -> Result<()> {
-        Ok(())
-    }
-    fn admit_allocation(&self, _: usize) -> Result<()> {
-        Ok(())
-    }
-    fn admit_work(&self, _: usize) -> Result<()> {
-        Ok(())
-    }
 }
 
 /// Verify without allocating a second body. The fixed maximum and exact open

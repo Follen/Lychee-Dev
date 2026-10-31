@@ -3,7 +3,7 @@
 #[path = "data_cache.rs"]
 mod data_cache;
 use lycheedev_core::{
-    Outcome, evidence,
+    evidence,
     selection::{self, DataPin, SelectionSpec},
     storage, workspace,
 };
@@ -228,25 +228,6 @@ impl Fixture {
                 offline: true,
                 ..Default::default()
             },
-        }
-    }
-    pub fn assert_outcome(&self, name: &str, actual: &Outcome, fields: &[&str]) {
-        let expected = self.oracle(name);
-        assert!(
-            expected["ok"].as_bool().unwrap(),
-            "{name} Go oracle succeeded"
-        );
-        assert_eq!(
-            actual.complete,
-            expected["result"]["complete"].as_bool().unwrap(),
-            "{name} completeness"
-        );
-        for field in fields {
-            self.assert_json_equal(
-                &actual.data[*field],
-                &expected["result"][*field],
-                &format!("{name}.{field}"),
-            );
         }
     }
     pub fn assert_json_equal(&self, actual: &Value, expected: &Value, context: &str) {

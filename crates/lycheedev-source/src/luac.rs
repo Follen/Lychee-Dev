@@ -36,9 +36,6 @@ impl Runtime {
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
     }
-    pub fn verified(root: &Path, manifest: Manifest) -> Result<Self> {
-        Self::verified_with_ordered_control(root, manifest, &Default::default())
-    }
     pub fn verified_with_ordered_control(
         root: &Path,
         manifest: Manifest,
@@ -71,14 +68,6 @@ impl Runtime {
             root: fs::canonicalize(root)?,
             manifest,
         })
-    }
-    pub fn verify(&self) -> Result<()> { self.verify_with_control(&Default::default()) }
-    pub fn verify_with_control(&self, control: &lycheedev_core::control::OperationControl) -> Result<()> {
-        let held = self.lock_verified_ordered(control)?;
-        finish_runtime(held, Ok(()), control)
-    }
-    pub fn check(&self, staging: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<Value> {
-        self.check_with_control(staging, files, &Default::default())
     }
     pub fn check_with_control(&self, staging: &Path, files: &BTreeMap<String, Vec<u8>>, control: &lycheedev_core::control::OperationControl) -> Result<Value> {
         control.ordered_child(control.deadline())?;

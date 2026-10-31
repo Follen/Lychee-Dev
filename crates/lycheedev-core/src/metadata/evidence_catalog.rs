@@ -6,10 +6,8 @@ use crate::{
     control::OperationControl, storage::ExclusiveLock, workspace::data_disk::EvidenceQuota,
 };
 use owned_write::finish_owned;
-mod checked_delete;
 mod keys;
 mod shared_anchor;
-pub(crate) use checked_delete::run as checked_delete;
 mod store;
 pub(crate) use keys::{EvidenceKey, intersects};
 

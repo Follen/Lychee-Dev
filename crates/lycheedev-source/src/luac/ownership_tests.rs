@@ -41,7 +41,7 @@ fn ownership_empty_compile_cleans_only_its_scratch_and_releases_runtime() {
     let staging = root.join("staging");
     fs::create_dir(&staging).unwrap();
     fs::write(staging.join("other-owner"), b"keep").unwrap();
-    let checked = runtime.check(&staging, &BTreeMap::new()).unwrap();
+    let checked = runtime.check_with_control(&staging, &BTreeMap::new(), &Default::default()).unwrap();
     assert_eq!(checked["checkedLua"], 0);
     assert_eq!(checked["complete"], true);
     assert_eq!(fs::read_dir(&staging).unwrap().count(), 1);
@@ -56,9 +56,9 @@ fn ownership_entered_spawn_failure_is_conservatively_retained_and_mapped() {
     let runtime = runtime(&root);
     let staging = root.join("staging");
     let error = runtime
-        .check(
+        .check_with_control(
             &staging,
-            &BTreeMap::from([("a.lua".into(), b"local value = 1".to_vec())]),
+            &BTreeMap::from([("a.lua".into(), b"local value = 1".to_vec())]), &Default::default(),
         )
         .unwrap_err();
     assert_eq!(error.code, "luac.unavailable");

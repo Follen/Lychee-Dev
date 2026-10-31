@@ -13,7 +13,7 @@ fn context(offline: bool, limits: Cost) -> (Fixture, Context, Arc<Budget>) {
         home: home.clone(), cwd: home.clone(), control: OperationControl::uncancelable(deadline),
         source: crate::request::SourceOptions { offline, ..Default::default() },
     };
-    let ctx = Context::prepare_budgeted(&request, deadline, Some(budget.clone())).unwrap();
+    let ctx = Context::prepare_scoped(&request.home, request.source.key_file.as_deref(), request.source.offline, &request.control, deadline, Some(budget.clone())).unwrap();
     (Fixture(home), ctx, budget)
 }
 struct Failed(Cell<usize>);

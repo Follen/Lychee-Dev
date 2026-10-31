@@ -234,9 +234,9 @@ fn archive_cancellation_keeps_exact_journal_and_move_facts_and_allows_safe_resum
         f.assert_no_stages();
         f.assert_lease_released();
         let recovered = if journal.exists() {
-            resume(&f.home)
+            resume_controlled(&f.home, &OperationControl::default())
         } else {
-            fresh(&f.home)
+            fresh_controlled(&f.home, &OperationControl::default())
         }
         .unwrap();
         assert_eq!(recovered["plan"]["state"], "complete");
@@ -246,7 +246,7 @@ fn archive_cancellation_keeps_exact_journal_and_move_facts_and_allows_safe_resum
             recovered["summary"]["identity"],
             workspace::open(&f.home).unwrap()
         );
-        assert_eq!(resume(&f.home).unwrap(), recovered, "resume is idempotent");
+        assert_eq!(resume_controlled(&f.home, &OperationControl::default()).unwrap(), recovered, "resume is idempotent");
     }
 }
 #[test]
@@ -284,7 +284,7 @@ fn archive_business_failure_after_move_keeps_first_error_and_separate_stop_with_
     assert_eq!(recorded["state"], "planned");
     assert!(!f.home.exists());
     f.assert_lease_released();
-    let recovered = resume(&f.home).unwrap();
+    let recovered = resume_controlled(&f.home, &OperationControl::default()).unwrap();
     assert_eq!(recovered["plan"]["state"], "complete");
     let archive = PathBuf::from(recovered["plan"]["archivePath"].as_str().unwrap());
     assert_eq!(snapshot(&archive), legacy);
@@ -292,7 +292,7 @@ fn archive_business_failure_after_move_keeps_first_error_and_separate_stop_with_
 #[test]
 fn stopped_resume_and_missing_resume_do_not_create_paths_or_rewrite_journal() {
     let f = Fixture::new();
-    let planned = plan(&f.home).unwrap();
+    let planned = plan_controlled(&f.home, &OperationControl::default()).unwrap();
     storage::atomic_json(&journal_path(&f.home).unwrap(), &planned).unwrap();
     let before = snapshot(&f.base);
     let (control, signal) = original_control();

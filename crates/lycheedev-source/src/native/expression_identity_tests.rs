@@ -1,6 +1,5 @@
 use super::*;
 use std::{
-    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 

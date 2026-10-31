@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
     path::Path,
-    sync::{Arc, atomic::AtomicBool},
+    sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 

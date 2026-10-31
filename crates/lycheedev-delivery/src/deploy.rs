@@ -28,9 +28,6 @@ pub fn destination(path: &Path) -> Result<PathBuf> {
         target
     })
 }
-pub fn installation_lock(target: &Path) -> Result<ExclusiveLock> {
-    installation_lock_controlled(target, &OperationControl::default())
-}
 pub(crate) fn installation_lock_controlled(
     target: &Path,
     control: &OperationControl,
@@ -180,15 +177,6 @@ fn finish_preparation<T>(stage: &Path, result: Result<T>) -> Result<T> {
         result
     }
 }
-pub fn fresh(root: &Path, target: &Path, component: &str, version: &str) -> Result<Receipt> {
-    fresh_controlled(
-        root,
-        target,
-        component,
-        version,
-        &OperationControl::default(),
-    )
-}
 pub fn fresh_controlled(
     root: &Path,
     target: &Path,
@@ -336,24 +324,6 @@ fn fresh_locked_observed(
         Ok(wanted)
     })();
     finish_preparation(&stage, result)
-}
-pub fn upgrade(
-    root: Option<&Path>,
-    target: &Path,
-    archive: &Path,
-    component: &str,
-    version: &str,
-    resume: bool,
-) -> Result<Value> {
-    upgrade_controlled(
-        root,
-        target,
-        archive,
-        component,
-        version,
-        resume,
-        &OperationControl::default(),
-    )
 }
 pub fn upgrade_controlled(
     root: Option<&Path>,
@@ -636,9 +606,6 @@ pub(crate) fn interrupt_addon_upgrade_for_test(
         "replacement checkpoint was not reached: {checkpoint:?}"
     );
     result
-}
-pub fn remove(target: &Path, archive: &Path, component: &str) -> Result<Value> {
-    remove_controlled(target, archive, component, &OperationControl::default())
 }
 pub fn remove_controlled(
     target: &Path,

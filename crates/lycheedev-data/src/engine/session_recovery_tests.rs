@@ -477,3 +477,32 @@ async fn wdc_projection_error_precedes_a_later_invalid_source_row() {
     engine.close().unwrap();
     assert_eq!(engine.memory.budget.snapshot().unwrap().retained_bytes, 0);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn wdc_projection_keeps_whole_visited_row_validation_and_partial_coverage() {
+    let fx = Fixture::new(&[fixture::table("ProjectionFields", 928,
+        &[("ID", "uint"), ("Value", "float")], &[vec![Cell::U(1), Cell::F(f32::NAN)]])]);
+    let mut engine = Engine::new(fx.context(), EngineLimits::default()).unwrap();
+    for field in ["ID", "Value"] {
+        let request = serde_json::from_value(serde_json::json!({"kind":"plan","plan":{
+            "op":"project","columns":[{"name":field,"expression":{"kind":"column","name":field}}],
+            "input":{"op":"scan","table":{"name":"ProjectionFields","mode":"static"}}}})).unwrap();
+        assert_eq!(engine.execute(request, OperationControl::default()).await.err().unwrap().code, "table.invalid_format");
+    }
+    engine.close().unwrap();
+    let spec = fixture::encrypted_sections(929);
+    let (_, encoded) = fixture::encrypted_frame(&spec.raw);
+    let fx = Fixture::with_encoded_table(spec, encoded);
+    let mut engine = Engine::new(fx.context(), EngineLimits::default()).unwrap();
+    let request = serde_json::from_value(serde_json::json!({"kind":"plan","plan":{
+        "op":"project","columns":[{"name":"ID","expression":{"kind":"column","name":"ID"}}],
+        "input":{"op":"scan","table":{"name":"Sample","mode":"static"}}}})).unwrap();
+    let result = engine.execute(request, OperationControl::default()).await.unwrap();
+    assert!(!result.complete());
+    let page = serde_json::to_value(result.page(0,10).unwrap()).unwrap();
+    assert_eq!(page["rows"], serde_json::json!([[1]]));
+    assert_eq!(page["complete"], false);
+    drop(result);
+    engine.close().unwrap();
+    assert_eq!(engine.memory.budget.snapshot().unwrap().retained_bytes, 0);
+}

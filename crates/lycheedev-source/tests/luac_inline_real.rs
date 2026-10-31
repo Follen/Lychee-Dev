@@ -44,7 +44,7 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
     let release: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
     let manifest: Manifest = serde_json::from_value(release["runtime"].clone()).unwrap();
-    let runtime = Runtime::verified(&stage, manifest).unwrap();
+    let runtime = Runtime::verified_with_ordered_control(&stage, manifest, &Default::default()).unwrap();
     let home = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
         "../../.tmp/rust-source-inline-real/home-{}",
         std::process::id()

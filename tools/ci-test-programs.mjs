@@ -11,7 +11,7 @@
 // an explicit error. This is what makes "每种必要配置只编译一次" observable.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -91,7 +91,7 @@ export function buildTestPrograms({ root = repository, output, owner = 'ci-test-
   mkdirSync(out, { recursive: true });
   const helpers = harnesslessTargets(root);
   const record = runCargo(root, args, {
-    owner, oneShot: false, execute,
+    owner, oneShot: false, isolateUser: true, execute,
     onSuccess(invocation) {
       const messages = cargoMessages(invocation.stdout.toString());
       const rows = messages.filter(row => row.reason === 'compiler-artifact' && row.executable && row.target && row.profile);
@@ -105,9 +105,9 @@ export function buildTestPrograms({ root = repository, output, owner = 'ci-test-
         if (seen.has(row.executable)) continue;
         seen.add(row.executable);
         const isTestHarness = row.profile.test === true;
-        if (isTestHarness && kinds.includes('test') && helpers.has(row.target.name)) {
+        const isHelper = kinds.includes('test') && helpers.has(row.target.name);
+        if (isHelper) {
           excluded.push({ package: packageName(row), target: row.target.name, reason: 'harness=false helper program' });
-          continue;
         }
         const source = contained(root, row.executable);
         const bytes = readFileSync(source);
@@ -116,7 +116,7 @@ export function buildTestPrograms({ root = repository, output, owner = 'ci-test-
         // outputs while accepting the actual debug CLI executor.
         if (bytes.length > 512 << 20) throw new Error(`ci-test-programs.executable_budget: ${source}`);
         const entry = { package: packageName(row), target: row.target.name, kinds, executable: hash(source).slice(0, 12) + '-' + slug(row.target.name) };
-        if (isTestHarness) {
+        if (isTestHarness && !isHelper) {
           const destination = join(out, 'programs', `${entry.package}__${entry.executable}.exe`);
           copyProgram(root, source, destination, bytes);
           tests.push({ ...entry, path: relative(root, destination).replaceAll('\\', '/'), sha256: hash(bytes), bytes: bytes.length });
@@ -246,8 +246,14 @@ export function runTestPrograms({ root = repository, recordPath, shard = 'all', 
       handlesReaped = result.handlesReaped === true;
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
-      const ok = handlesReaped && !result.error && result.status === 0;
-      results.push({ package: program.package, target: program.target, executable: program.path, sha256: program.sha256, exit: result.status, signal: result.signal, ok, handlesReaped, error: result.error?.message, millis: Date.now() - started,
+      const filtered = !extraArguments.includes('--list') && extraArguments.some(arg => arg === '--exact' || arg === '--ignored');
+      const summary = filtered ? [...String(result.stdout ?? '').matchAll(/^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;/gm)].at(-1) : undefined;
+      const executedTests = summary ? Number(summary[1]) + Number(summary[2]) : undefined;
+      const scopeError = filtered && handlesReaped && !result.error && result.status === 0 && !(executedTests > 0)
+        ? 'ci-test-programs.filtered_no_tests_executed' : undefined;
+      const ok = handlesReaped && !result.error && !scopeError && result.status === 0;
+      results.push({ package: program.package, target: program.target, executable: program.path, sha256: program.sha256, exit: result.status, signal: result.signal, ok, handlesReaped, error: result.error?.message ?? scopeError, millis: Date.now() - started,
+        ...(executedTests !== undefined ? {executedTests} : {}),
         ...(!handlesReaped ? { proof: result.proof, logs: result.logs } : {}) });
       if (!ok) failed++;
       if (!handlesReaped) { unreapedError = result.error; break; }

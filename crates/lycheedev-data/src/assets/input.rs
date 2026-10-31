@@ -22,14 +22,6 @@ pub struct CascInput {
     pub snapshot: String,
     pub data_build: String,
 }
-pub struct VerifiedCascInput {
-    pub blob: evidence::VerifiedBlob,
-    pub reading: Value,
-    pub capture: Value,
-    pub snapshot: String,
-    pub data_build: String,
-    pub budget: Arc<Budget>,
-}
 /// The selected source cannot outlive its query or real workspace admission.
 /// Only the immutable body is mutably borrowed for Read/rewind, never detached.
 pub(crate) struct VerifiedView<'a> {
@@ -214,75 +206,6 @@ pub(crate) fn with_casc_bytes<R>(
     scope.finish(result)
 }
 
-pub fn capture_casc_verified(ctx: &DataContext, id: u32) -> Result<VerifiedCascInput> {
-    ctx.control.check()?;
-    let pin = ctx.resolve_pinned()?;
-    let data = pin.data.as_ref().ok_or_else(|| {
-        ToolkitError::new("records.data_pin_required", "records.data_pin_required", 2)
-    })?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
-        ctx.control.deadline(),
-        ctx.control.clone(),
-    ));
-    let file = query_source::read_verified_file_budgeted(ctx, data, id, &budget)?;
-    let capture = evidence::commit_verified_capture_budgeted(
-        &file.blob,
-        evidence::CaptureHeader {
-            media_type: "application/octet-stream",
-            provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",file.reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
-            complete: true,
-            truncated: false,
-        },
-        &ctx.control,
-        budget.as_ref(),
-    )?;
-    Ok(VerifiedCascInput {
-        blob: file.blob,
-        reading: file.reading,
-        capture,
-        snapshot: pin.id.clone(),
-        data_build: data.full_build.clone(),
-        budget,
-    })
-}
-pub fn capture_casc(ctx: &DataContext, id: u32, maximum: usize) -> Result<CascInput> {
-    ctx.control.check()?;
-    let pin = ctx.resolve_pinned()?;
-    let data = pin.data.as_ref().ok_or_else(|| {
-        ToolkitError::new("records.data_pin_required", "records.data_pin_required", 2)
-    })?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
-        ctx.control.deadline(),
-        ctx.control.clone(),
-    ));
-    let file = query_source::read_files_budgeted(ctx, data, &[id], &budget)?.remove(0);
-    if file.bytes.len() > maximum {
-        return Err(fault("records.metadata_limit", 3));
-    }
-    budget.check()?;
-    let capture = evidence::commit_capture_budgeted(
-        &ctx.home,
-        CaptureInput {
-            bytes: &file.bytes,
-            maximum_bytes: maximum,
-            media_type: "application/octet-stream",
-            provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",file.reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
-            complete: true,
-            truncated: false,
-        },
-        &ctx.control,
-        budget.as_ref(),
-    )?;
-    Ok(CascInput {
-        bytes: file.bytes,
-        reading: file.reading,
-        capture,
-        snapshot: pin.id.clone(),
-        data_build: data.full_build.clone(),
-    })
-}
 pub fn local(ctx: &DataContext, path: &Path, maximum: usize) -> Result<(Vec<u8>, String)> {
     ctx.control.check()?;
     let canonical = output::ordinary(&fs::canonicalize(path)?);

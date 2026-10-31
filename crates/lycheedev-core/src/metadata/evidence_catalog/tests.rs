@@ -583,23 +583,29 @@ fn completed_removal_retry_remains_readable_after_quota_is_lowered() {
 }
 
 #[test]
-fn checked_delete_reads_both_stores_but_mutates_one_owner() {
+fn removal_transaction_reads_both_stores_but_mutates_one_owner() {
     let f = Fixture::new();
     let capture = f.capture(b"checked delete", true, &[]);
     let key = format!("capture/{}", id(&capture));
     let mut metadata = Metadata::open(&f.0, true).unwrap();
     metadata.put("ordinary/other", &17, None).unwrap();
     let recovery = format!("evidence/remove/{}", id(&capture));
-    metadata
-        .delete_checked_record(&[key.clone()], &[(key.clone(), 1)], |documents| {
-            assert!(documents.iter().any(|row| row.key == "ordinary/other"));
-            assert!(documents.iter().any(|row| row.key == key));
-            Ok((
-                (),
-                Some((recovery.clone(), serde_json::json!({"test":"same owner"}))),
-            ))
+    let control = OperationControl::default();
+    with_existing_writer(&f.0, id(&capture), &control, |writer| {
+        writer.with_write_lease(|writer| {
+            let mut state = owned_write::removal::RemovalCommit::NotCommitted;
+            writer.removal_transaction(&mut state, |tx| {
+                let mut keys = Vec::new();
+                tx.visit_raw_page("", "", |key, _, _| { keys.push(key.to_owned()); Ok(()) })?;
+                assert!(keys.iter().any(|key| key == "ordinary/other"));
+                assert!(keys.contains(&key));
+                tx.put_recovery(&recovery, 0, br#"{"test":"same owner"}"#)?;
+                tx.delete_manifest(&key, 1)
+            })?;
+            assert_eq!(state, owned_write::removal::RemovalCommit::Committed);
+            Ok(())
         })
-        .unwrap();
+    }).unwrap();
     assert_eq!(metadata.generation(&key).unwrap(), None);
     assert_eq!(metadata.generation(&recovery).unwrap(), Some(1));
     assert_eq!(
@@ -617,16 +623,20 @@ fn checked_delete_reads_both_stores_but_mutates_one_owner() {
 }
 
 #[test]
-fn checked_delete_rejects_cross_store_recovery_before_any_mutation() {
+fn removal_transaction_rejects_unrelated_recovery_before_any_mutation() {
     let f = Fixture::new();
     let capture = f.capture(b"checked split", true, &[]);
     let key = format!("capture/{}", id(&capture));
-    let mut metadata = Metadata::open(&f.0, true).unwrap();
-    let error = metadata.delete_checked_record(&[key.clone()], &[(key.clone(), 1)], |_| {
-        Ok((
-            (),
-            Some(("ordinary/recovery".into(), serde_json::json!(true))),
-        ))
+    let metadata = Metadata::open(&f.0, true).unwrap();
+    let control = OperationControl::default();
+    let error = with_existing_writer(&f.0, id(&capture), &control, |writer| {
+        writer.with_write_lease(|writer| {
+            let mut state = owned_write::removal::RemovalCommit::NotCommitted;
+            writer.removal_transaction(&mut state, |tx| {
+                tx.put_recovery("ordinary/recovery", 0, b"true")?;
+                tx.delete_manifest(&key, 1)
+            })
+        })
     });
     assert!(error.is_err());
     assert_eq!(metadata.generation(&key).unwrap(), Some(1));
@@ -658,27 +668,6 @@ fn cancelled_removal_rollback_preserves_original_failure_and_manifest() {
     assert_eq!(error.code, "fixture.primary");
     assert_eq!(state, RemovalCommit::NotCommitted);
     assert_eq!(evidence::read_capture(&f.0, id(&capture)).unwrap(), capture);
-}
-
-#[test]
-fn on_owner_raw_read_resolves_data_capture_from_carrier_and_historical_handle() {
-    let f = Fixture::new();
-    let capture = f.capture(b"owned raw read", true, &[]);
-    let key = format!("capture/{}", id(&capture));
-    for historical in [false, true] {
-        if historical {
-            Metadata::open(&f.0, true).unwrap().close().unwrap();
-        }
-        let reader = Metadata::open(&f.0, false).unwrap();
-        let row = reader
-            .read_document_on_owner_controlled(&key, &OperationControl::default())
-            .unwrap();
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&row.bytes).unwrap(),
-            capture
-        );
-        reader.close().unwrap();
-    }
 }
 
 #[test]

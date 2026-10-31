@@ -6,10 +6,6 @@ use lycheedev_source::native::*;
 use serde_json::{Value, json};
 use std::{
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, String>;

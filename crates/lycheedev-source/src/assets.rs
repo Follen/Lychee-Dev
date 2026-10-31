@@ -2,7 +2,7 @@
 use super::index::AssetRecord;
 use lycheedev_core::evidence::BlobRef;
 #[cfg(test)]
-use serde_json::{Value, json};
+use serde_json::json;
 use std::path::Path;
 
 pub(crate) const MAX_BYTES: usize = 64 << 20;

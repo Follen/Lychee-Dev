@@ -1,5 +1,4 @@
-//! Current ordered collector parity against the named-row collector. The
-//! retired bound-plan projection API is covered by the DataFusion provider.
+//! Independent ordered-row values, original text boundary and float width.
 use super::*;
 
 #[allow(dead_code)]
@@ -14,11 +13,11 @@ fn definition(spec: &fixture::Table) -> Definition {
         .unwrap()
 }
 fn opened(spec: &fixture::Table) -> Table<'_> {
-    super::super::open(&spec.raw, &definition(spec), TableLimits::default()).unwrap()
+    super::open(&spec.raw, &definition(spec), TableLimits::default()).unwrap()
 }
 
 #[test]
-fn ordered_row_collector_matches_every_named_column() {
+fn ordered_row_keeps_independent_types_text_boundary_and_signed_zero() {
     let spec = table(
         "Values",
         904,
@@ -38,14 +37,13 @@ fn ordered_row_collector_matches_every_named_column() {
         ]],
     );
     let table = opened(&spec);
-    let names: BTreeSet<_> = table.columns().iter().map(|c| c.name.clone()).collect();
-    let mut named = table.row_projected(1, 1 << 20, Some(&names)).unwrap();
-    let expected: Vec<_> = table
-        .columns()
-        .iter()
-        .map(|c| named.remove(&c.name).unwrap())
-        .collect();
-    assert!(named.is_empty());
     let ordered = table.leased_row_values(1, 1 << 20).unwrap();
-    assert_eq!(&ordered.value, &expected);
+    assert_eq!(ordered.value, [
+        Value::UInt(1), Value::Int(i64::MIN), Value::String("<>&界🙂".into()),
+        Value::Float32(-0.0), Value::Array(vec![Value::Int(i32::MIN as i64), Value::Int(i32::MAX as i64)]),
+    ]);
+    match ordered.value[3] {
+        Value::Float32(value) => assert_eq!(value.to_bits(), (-0.0f32).to_bits()),
+        _ => panic!("source float width lost"),
+    }
 }

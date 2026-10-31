@@ -150,6 +150,19 @@ fn project_init_and_status_reject_home_before_dispatch() {
             error.message,
             format!("--home is not supported by project {verb}")
         );
-        assert_eq!(error.details, json!({"parser":"clap","kind":"UnknownArgument","flag":"--home"}));
+        assert_eq!(error.details, json!({
+            "parser":"clap", "kind":"UnknownArgument", "flag":"--home",
+            "command":format!("project {verb}"),
+            "usage":format!("lycheedev project {verb} [OPTIONS]"),
+            "schemaCommand":format!("lycheedev schema project {verb}"),
+            "helpCommand":format!("lycheedev project {verb} --help"),
+            "acceptedFlags":if verb=="init" {
+                json!(["--format","--product","--path","--help","-h"])
+            } else {
+                json!(["--format","--path","--help","-h"])
+            },
+            "arguments":[], "requiredFlags":if verb=="init" {json!(["--product"])} else {json!([])},
+            "suggestions":[]
+        }));
     }
 }

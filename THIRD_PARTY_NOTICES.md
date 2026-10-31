@@ -128,7 +128,7 @@ the shipped npm/addon payloads.
 
 - [tests/fixtures/db2/JournalEncounterSection-classic-era.db2](tests/fixtures/db2/JournalEncounterSection-classic-era.db2)
   — a minimal real WDC5 DB2 sample (zero rows) consumed by
-  `crates/lycheedev-data/tests/table_decode.rs` for real-format parsing and
+  `crates/lycheedev-data/src/table/decode_tests.rs` for real-format parsing and
   empty-result encounter semantics. Provenance, bytes and SHA-256 are recorded in
   [tests/fixtures/provenance.json](tests/fixtures/provenance.json).
 - `tests/fixtures/hotfix-wago/response-page-1.html`,

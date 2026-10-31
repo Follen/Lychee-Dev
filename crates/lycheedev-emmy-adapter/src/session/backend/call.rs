@@ -3,7 +3,7 @@
 //! current owned query and append-only binding ledger.
 use super::{ExpressionValue, OwnedQuery, QueryResult, call_unify::Bindings};
 use crate::session::{OwnedValue, SelectedProjectionBackend};
-use emmylua_code_analysis::{LuaMemberKey, LuaType, SemanticId, VariadicType};
+use emmylua_code_analysis::{LuaType, SemanticId, VariadicType};
 use emmylua_parser::{LuaAstNode, LuaClosureExpr, LuaSyntaxId};
 use std::{cell::RefCell, collections::HashSet, rc::Rc};
 

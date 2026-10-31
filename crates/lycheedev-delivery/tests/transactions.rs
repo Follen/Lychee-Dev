@@ -52,18 +52,18 @@ fn fresh_is_idempotent_and_unmanaged_or_extra_files_are_never_adopted() {
     let parent = temp.0.join("skills");
     fs::create_dir(&parent).unwrap();
     let target = parent.join("lycheedev");
-    let first = deploy::fresh(&root, &target, "skill", VERSION).unwrap();
-    let second = deploy::fresh(&root, &target, "skill", VERSION).unwrap();
+    let first = deploy::fresh_controlled(&root, &target, "skill", VERSION, &Default::default()).unwrap();
+    let second = deploy::fresh_controlled(&root, &target, "skill", VERSION, &Default::default()).unwrap();
     assert_eq!(
         serde_json::to_value(first).unwrap(),
         serde_json::to_value(second).unwrap()
     );
     fs::write(target.join("notes.txt"), b"owner text").unwrap();
     assert_eq!(
-        installation::inspect(&target, "skill").unwrap()["state"],
+        installation::inspect_main_controlled(&target, "skill", &Default::default()).unwrap()["state"],
         "modified"
     );
-    assert!(deploy::fresh(&root, &target, "skill", VERSION).is_err());
+    assert!(deploy::fresh_controlled(&root, &target, "skill", VERSION, &Default::default()).is_err());
     assert_eq!(fs::read(target.join("notes.txt")).unwrap(), b"owner text");
 }
 #[test]
@@ -76,13 +76,13 @@ fn upgrade_preserves_previous_and_resume_is_read_only_after_success() {
     let parent = temp.0.join("skills");
     fs::create_dir(&parent).unwrap();
     let target = parent.join("lycheedev");
-    deploy::fresh(&old, &target, "skill", VERSION).unwrap();
+    deploy::fresh_controlled(&old, &target, "skill", VERSION, &Default::default()).unwrap();
     let archive = temp.0.join("recovery");
-    let result = deploy::upgrade(Some(&next), &target, &archive, "skill", VERSION, false).unwrap();
+    let result = deploy::upgrade_controlled(Some(&next), &target, &archive, "skill", VERSION, false, &Default::default()).unwrap();
     assert_eq!(fs::read(target.join("SKILL.md")).unwrap(), b"new");
     assert_eq!(fs::read(archive.join("previous/SKILL.md")).unwrap(), b"old");
     assert_eq!(
-        deploy::upgrade(None, &target, &archive, "skill", VERSION, true).unwrap(),
+        deploy::upgrade_controlled(None, &target, &archive, "skill", VERSION, true, &Default::default()).unwrap(),
         result
     );
 }
@@ -96,14 +96,14 @@ fn interrupted_upgrade_resumes_exact_journal_without_release() {
     let parent = temp.0.join("skills");
     fs::create_dir(&parent).unwrap();
     let target = parent.join("lycheedev");
-    let previous = deploy::fresh(&old, &target, "skill", VERSION).unwrap();
+    let previous = deploy::fresh_controlled(&old, &target, "skill", VERSION, &Default::default()).unwrap();
     let archive = temp.0.join("recovery");
     fs::create_dir(&archive).unwrap();
-    let next = deploy::fresh(&next, &archive.join("next"), "skill", VERSION).unwrap();
+    let next = deploy::fresh_controlled(&next, &archive.join("next"), "skill", VERSION, &Default::default()).unwrap();
     let canonical_target = fs::canonicalize(&target).unwrap();
     storage::atomic_json(&archive.join("replacement.json"),&json!({"schema":"lycheedev.replacement.v1","target":canonical_target,"previous":previous,"next":next})).unwrap();
     fs::rename(&target, archive.join("previous")).unwrap();
-    deploy::upgrade(None, &target, &archive, "skill", VERSION, true).unwrap();
+    deploy::upgrade_controlled(None, &target, &archive, "skill", VERSION, true, &Default::default()).unwrap();
     assert_eq!(fs::read(target.join("SKILL.md")).unwrap(), b"new");
     assert_eq!(fs::read(archive.join("previous/SKILL.md")).unwrap(), b"old");
 }
@@ -115,27 +115,28 @@ fn edited_preparation_or_in_discovery_archive_blocks_without_destroying_current(
     let parent = temp.0.join("skills");
     fs::create_dir(&parent).unwrap();
     let target = parent.join("lycheedev");
-    deploy::fresh(&root, &target, "skill", VERSION).unwrap();
+    deploy::fresh_controlled(&root, &target, "skill", VERSION, &Default::default()).unwrap();
     assert!(
-        deploy::upgrade(
+        deploy::upgrade_controlled(
             Some(&root),
             &target,
             &parent.join("recovery"),
             "skill",
             VERSION,
-            false
+            false,
+            &Default::default(),
         )
         .is_err()
     );
     assert_eq!(fs::read(target.join("SKILL.md")).unwrap(), b"old");
     let archive = temp.0.join("recovery");
-    let previous: Value = installation::inspect(&target, "skill").unwrap()["receipt"].clone();
+    let previous: Value = installation::inspect_main_controlled(&target, "skill", &Default::default()).unwrap()["receipt"].clone();
     fs::create_dir(&archive).unwrap();
-    let next = deploy::fresh(&root, &archive.join("next"), "skill", VERSION).unwrap();
+    let next = deploy::fresh_controlled(&root, &archive.join("next"), "skill", VERSION, &Default::default()).unwrap();
     storage::atomic_json(&archive.join("replacement.json"),&json!({"schema":"lycheedev.replacement.v1","target":fs::canonicalize(&target).unwrap(),"previous":previous,"next":next})).unwrap();
     fs::write(archive.join("next/SKILL.md"), b"tampered").unwrap();
     assert_eq!(
-        deploy::upgrade(None, &target, &archive, "skill", VERSION, true)
+        deploy::upgrade_controlled(None, &target, &archive, "skill", VERSION, true, &Default::default())
             .err()
             .unwrap()
             .code,
@@ -150,7 +151,7 @@ fn release_rejects_unlisted_file_before_installation_write() {
     candidate(&root, b"skill");
     fs::write(root.join("payload/foreign.py"), b"unknown").unwrap();
     assert_eq!(
-        release::inspect(&root, VERSION).err().unwrap().code,
+        release::inspect_with_control(&root, VERSION, &Default::default()).err().unwrap().code,
         "delivery.invalid_payload"
     );
 }
@@ -169,8 +170,8 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
     fs::create_dir(&first).unwrap();
     let files = slots::files(1, VERSION);
     fs::write(first.join(&files[0].0), &files[0].1).unwrap();
-    slots::install(&temp.0, VERSION).unwrap();
-    let pool = slots::inspect(&temp.0, VERSION).unwrap();
+    slots::install_controlled(&temp.0, VERSION, &Default::default()).unwrap();
+    let pool = slots::inspect_controlled(&temp.0, VERSION, &Default::default()).unwrap();
     assert_eq!(pool["files"].as_array().unwrap().len(), 500);
     assert!(
         slots::directory(&temp.0, 500)
@@ -178,13 +179,13 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
             .exists()
     );
     fs::write(first.join("Loader.lua"), b"foreign").unwrap();
-    assert!(slots::install(&temp.0, VERSION).is_err());
+    assert!(slots::install_controlled(&temp.0, VERSION, &Default::default()).is_err());
     fs::write(first.join("Loader.lua"), &slots::files(1, VERSION)[1].1).unwrap();
     let root = temp.0.join("candidate");
     candidate(&root, b"skill");
     let target = temp.0.join("Lychee Dev");
-    deploy::fresh(&root, &target, "addon", VERSION).unwrap();
-    installation::verify_clean(&target, VERSION, slots::TRANSPORT, 500).unwrap();
+    deploy::fresh_controlled(&root, &target, "addon", VERSION, &Default::default()).unwrap();
+    installation::verify_clean_controlled(&target, VERSION, slots::TRANSPORT, 500, &Default::default()).unwrap();
     let recovery = Temp::new();
     let slot_archive = recovery.0.join("addon-archive.slots");
     fs::create_dir(&slot_archive).unwrap();
@@ -192,7 +193,7 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
     let target = fs::canonicalize(&target).unwrap();
     let archive = fs::canonicalize(&recovery.0).unwrap().join("addon-archive");
     let slot_archive = fs::canonicalize(&slot_archive).unwrap();
-    let receipt = installation::inspect(&target, "addon").unwrap()["receipt"].clone();
+    let receipt = installation::inspect_main_controlled(&target, "addon", &Default::default()).unwrap()["receipt"].clone();
     let journal = recovery.0.join("addon-archive.removal.json");
     storage::atomic_json(&journal,&json!({"schema":"lycheedev.addon-removal.v1","parent":parent,"archive":archive,"pool":pool,"receipt":receipt})).unwrap();
     fs::rename(
@@ -205,7 +206,7 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
         b"player profile",
     )
     .unwrap();
-    let removed = lycheedev_delivery::removal::addon(&target, &archive).unwrap();
+    let removed = lycheedev_delivery::removal::addon_controlled(&target, &archive, &Default::default()).unwrap();
     assert_eq!(removed["state"], "archived");
     assert!(archive.join(installation::MARKER).exists());
     assert!(slots::directory(&slot_archive, 500).exists());
@@ -215,7 +216,7 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
         b"player profile"
     );
     assert_eq!(
-        lycheedev_delivery::removal::addon(&target, &archive).unwrap(),
+        lycheedev_delivery::removal::addon_controlled(&target, &archive, &Default::default()).unwrap(),
         removed
     );
 }
@@ -230,20 +231,20 @@ fn managed_update_plans_readonly_then_updates_and_cleans_exact_recovery() {
     let parent = temp.0.join("skills");
     fs::create_dir(&parent).unwrap();
     let target = parent.join("lycheedev");
-    deploy::fresh(&old, &target, "skill", VERSION).unwrap();
+    deploy::fresh_controlled(&old, &target, "skill", VERSION, &Default::default()).unwrap();
     let state = temp.0.join("delivery-state");
     let targets = [lycheedev_delivery::update::UpdateTarget {
         component: "skill".into(),
         path: target.clone(),
     }];
     let planned =
-        lycheedev_delivery::update::managed(&next, VERSION, &state, &targets, true).unwrap();
+        lycheedev_delivery::update::managed_with_control(&next, VERSION, &state, &targets, true, &Default::default()).unwrap();
     assert_eq!(planned.data["plan"], true);
     assert_eq!(planned.data["complete"], false);
     assert!(!state.exists());
     assert_eq!(fs::read(target.join("SKILL.md")).unwrap(), b"old skill");
     let applied =
-        lycheedev_delivery::update::managed(&next, VERSION, &state, &targets, false).unwrap();
+        lycheedev_delivery::update::managed_with_control(&next, VERSION, &state, &targets, false, &Default::default()).unwrap();
     assert_eq!(applied.data["complete"], true);
     assert_eq!(applied.data["targets"][0]["state"], "current");
     assert_eq!(
@@ -254,7 +255,7 @@ fn managed_update_plans_readonly_then_updates_and_cleans_exact_recovery() {
     assert!(state.join("targets.json").exists());
     let recovery = PathBuf::from(planned.data["targets"][0]["recovery"].as_str().unwrap());
     assert!(!recovery.exists());
-    assert!(lycheedev_delivery::update::managed(&next, VERSION, &state, &targets, false).is_ok());
+    assert!(lycheedev_delivery::update::managed_with_control(&next, VERSION, &state, &targets, false, &Default::default()).is_ok());
 }
 #[test]
 fn managed_update_checks_all_targets_before_changing_first() {
@@ -268,7 +269,7 @@ fn managed_update_checks_all_targets_before_changing_first() {
         let parent = temp.0.join(name);
         fs::create_dir(&parent).unwrap();
         let path = parent.join("lycheedev");
-        deploy::fresh(&old, &path, "skill", VERSION).unwrap();
+        deploy::fresh_controlled(&old, &path, "skill", VERSION, &Default::default()).unwrap();
         targets.push(lycheedev_delivery::update::UpdateTarget {
             component: "skill".into(),
             path,
@@ -276,7 +277,7 @@ fn managed_update_checks_all_targets_before_changing_first() {
     }
     fs::write(targets[1].path.join("SKILL.md"), b"owner edit").unwrap();
     assert_eq!(
-        lycheedev_delivery::update::managed(&next, VERSION, &temp.0.join("state"), &targets, false)
+        lycheedev_delivery::update::managed_with_control(&next, VERSION, &temp.0.join("state"), &targets, false, &Default::default())
             .err()
             .unwrap()
             .code,

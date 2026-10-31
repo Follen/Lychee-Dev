@@ -198,7 +198,6 @@ fn recursive_children_append_before_parent_and_preserve_owned_carrier() {
         panic!("owned carrier was erased")
     };
     assert!(Arc::ptr_eq(&marker, &backend.marker));
-    assert!(Arc::ptr_eq(&marker.session, &backend.marker.session));
     let rows = session.coverage_checked(|| Ok::<_, Stop>(())).unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].site, statement);

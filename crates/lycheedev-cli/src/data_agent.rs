@@ -37,6 +37,7 @@ pub fn worker(args: &[String]) -> Result<()> {
 pub fn worker(_args: &[String]) -> Result<()> {
     Err(unavailable())
 }
+#[cfg(not(windows))]
 fn unavailable() -> ToolkitError {
     ToolkitError::new(
         "data.session.process_limit_unavailable",

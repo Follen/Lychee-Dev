@@ -10,7 +10,7 @@ use arrow_array::{
     Array, FixedSizeListArray, Float32Array, Int64Array, StringArray, UInt32Array, UInt64Array,
 };
 use arrow_schema::DataType;
-use query_value::{RowCursor, Scalar};
+use query_value::Scalar;
 use std::collections::BTreeSet;
 
 struct Row<'a> {

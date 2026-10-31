@@ -11,7 +11,6 @@
 //   audit-tgz           content whitelist audit of the packed Rust npm tarball
 //   policy / dist-tag   version-bound npm channel policy
 //   verify-npm-channel  read-back comparison used by a future publish workflow
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -47,12 +46,13 @@ export function policyFor(version) {
   };
 }
 
-/** Strict version-bound npm channel exception; future releases must review it. */
+/** Channel shape; the reviewed manifest owns the tag and version selection. */
 export function validateNpmChannel(value, version) {
   const stable = /^\d+\.\d+\.\d+$/;
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).sort().join(',') !== 'distTag,preserveLatest,schema,version' ||
-      value.schema !== 'lycheedev.npm-channel.v1' || value.distTag !== (value.version === '3.5.0' ? 'beta' : 'next') ||
+      value.schema !== 'lycheedev.npm-channel.v1' || typeof value.distTag !== 'string' ||
+      !/^[a-z][a-z0-9._-]*$/.test(value.distTag) || value.distTag === 'latest' ||
       typeof value.version !== 'string' || typeof value.preserveLatest !== 'string' ||
       !stable.test(value.version) || !stable.test(value.preserveLatest) ||
       value.version === value.preserveLatest || (version !== undefined && value.version !== version)) {
@@ -66,18 +66,7 @@ function npmChannel(version) {
 }
 
 export function distTagFor(version) {
-  const channel = npmChannel();
-  if (version === channel.version) return channel.distTag;
-  if (/^\d+\.\d+\.\d+-rc\.\d+$/.test(version)) return 'next';
-  if (/^\d+\.\d+\.\d+$/.test(version)) return 'latest';
-  throw new Error(`release.invalid_version: ${version}`);
-}
-
-/** A release ref is exactly `v<major>.<minor>.<patch>[-rc.<n>]`. */
-export function parseTag(tag) {
-  const match = /^v(\d+\.\d+\.\d+(?:-rc\.\d+)?)$/.exec(tag ?? '');
-  if (!match) throw new Error(`release.invalid_tag: ${tag}`);
-  return match[1];
+  return npmChannel(version).distTag;
 }
 
 export function verifyNpmChannelTags(tags, channel, version, distTag, phase) {
@@ -88,31 +77,6 @@ export function verifyNpmChannelTags(tags, channel, version, distTag, phase) {
     throw new Error('release.npm_channel_mismatch');
   }
   return { ok: true, version, distTag, latest: tags.latest, phase };
-}
-
-/**
- * Current `lycheedev.release.v1` manifest builder. Mirrors the payload that the
- * build stage assembles: the windows-amd64 Rust CLI, the addon, the Skill and
- * the managed luac. No corresponding-source or Go identity field is invented.
- */
-export function releaseJson({ version, commit, npmChannel: channel, binaries, resources }) {
-  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('release.invalid_version_source');
-  if (!HEX40.test(commit ?? '')) throw new Error('release.invalid_commit');
-  validateNpmChannel(channel, version);
-  if (!binaries || Object.keys(binaries).join(',') !== TARGETS.map(entry => entry.target).join(',')) throw new Error('release.invalid_binaries');
-  for (const entry of TARGETS) {
-    const record = binaries[entry.target];
-    if (record?.path !== entry.binary || !Number.isSafeInteger(record.bytes) || record.bytes < 1 || !HEX64.test(record.sha256 ?? '')) {
-      throw new Error(`release.invalid_binary: ${entry.target}`);
-    }
-  }
-  if (!Array.isArray(resources)) throw new Error('release.invalid_resources');
-  for (const resource of resources) {
-    if (!PAYLOAD_FAMILIES.some(family => resource?.path?.startsWith(`${family}/`)) || !Number.isSafeInteger(resource.bytes) || resource.bytes < 1 || !HEX64.test(resource.sha256 ?? '')) {
-      throw new Error(`release.invalid_resource: ${resource?.path}`);
-    }
-  }
-  return { schema: 'lycheedev.release.v1', version, commit, runtime: 'rust', npmChannel: channel, binaries, resources };
 }
 
 /**
@@ -178,7 +142,11 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot, develop
       if (version && manifest.version !== version) violations.push(`release.json version ${manifest.version} (REL-01)`);
       if (!HEX40.test(manifest.commit ?? '')) violations.push('release.json commit must be 40 lowercase hex');
       if (expectedCommit && manifest.commit !== expectedCommit) violations.push(`release.json commit ${manifest.commit} != ${expectedCommit} (REL-05)`);
-      try { validateNpmChannel(manifest.npmChannel, version); } catch { violations.push('release.json npmChannel is not the current channel contract'); }
+      try {
+        const channel = validateNpmChannel(manifest.npmChannel, version);
+        const authority = npmChannel(version ?? manifest.version);
+        if (Object.keys(authority).some(key => channel[key] !== authority[key])) throw new Error('release.channel_differs');
+      } catch { violations.push('release.json npmChannel is not the current channel contract'); }
       const binaries = manifest.binaries ?? {};
       for (const entry of TARGETS) {
         const record = binaries[entry.target];
@@ -257,12 +225,6 @@ function auditCommand(argv) {
   if (typeof options['--out'] === 'string') writeFileSync(resolve(options['--out']), `${JSON.stringify(report, null, 2)}\n`);
   if (!report.ok) throw new Error(`release.tgz_audit_failed: ${report.violations.join('; ')}`);
   return report;
-}
-
-function git(args) {
-  const result = spawnSync('git', args, { cwd: repository, encoding: 'utf8', windowsHide: true, shell: false, timeout: 60000 });
-  if (result.error || result.status !== 0) throw new Error(`release.git_failed: ${result.error?.message ?? result.status}`);
-  return result.stdout.trim();
 }
 
 const commands = {

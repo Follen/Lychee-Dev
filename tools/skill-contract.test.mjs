@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -27,7 +27,10 @@ test('unsupported commands, flags and missing packaged references fail', t => {
 });
 test('missing live group in an installed declaration remains visible', t => {
   const root = fixture(t), skill = join(root, 'skill');
-  cpSync(resolve('skills/lycheedev'), skill, {recursive: true});
+  mkdirSync(skill);
+  // An explicit documented call is the input under test. The current Skill may
+  // delegate Live syntax entirely to discovery without documenting such a call.
+  writeFileSync(join(skill, 'SKILL.md'), '`lycheedev live status --session <CON_ID>`\n');
   const selected = commands.filter(command => !command.path.startsWith('live '));
   const path = join(root, 'commands.json');
   writeFileSync(path, JSON.stringify({commands: selected}));

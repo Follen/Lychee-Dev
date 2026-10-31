@@ -401,7 +401,7 @@ impl Builder {
 #[cfg(test)]
 mod native_budget_recovery_tests {
     use super::*;
-    use std::{sync::atomic::AtomicBool, time::{Duration, Instant}};
+    use std::{time::{Duration, Instant}};
 
     #[test]
     fn continuation_predicates_preserve_truth_table_and_distinct_facts() {

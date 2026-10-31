@@ -323,7 +323,7 @@ fn inspect_asset_exact_path_sorts_before_lexically_earlier_substring_match() {
 fn inspect_non_path_symbol_uses_existing_precise_query_and_no_match_suggests_assets() {
     let f = Fixture::new(files(&[("Main.lua", b"function Main() end\n")]));
     let result = f.inspect(InspectTarget::Symbol("Main".into()));
-    let full = index::build(&f.home, &f.source)
+    let full = index::build_with_control(&f.home, &f.source, &Default::default())
         .unwrap()
         .search(&f.source, &f.snapshot, "Main", "precise", "", 25, "")
         .unwrap();
@@ -400,7 +400,7 @@ fn inspect_asset_missing_original_recovers_fixed_git_but_corruption_is_an_error(
 #[test]
 fn inspect_trimmed_target_errors_keep_reference_plain_failure_after_ready_index() {
     let f = Fixture::new(files(&[("Main.lua", b"-- main\n")]));
-    index::build(&f.home, &f.source).unwrap();
+    index::build_with_control(&f.home, &f.source, &Default::default()).unwrap();
     let too_long = "x".repeat(4097);
     for (target, message) in [
         (InspectTarget::TargetPath(too_long), "codebase.invalid_span"),
@@ -423,7 +423,7 @@ fn inspect_trimmed_target_errors_keep_reference_plain_failure_after_ready_index(
 #[test]
 fn inspect_index_failure_precedes_target_validation_and_keeps_original_stop_control() {
     let f = Fixture::new(files(&[("Main.lua", b"-- main\n")]));
-    index::build(&f.home, &f.source).unwrap();
+    index::build_with_control(&f.home, &f.source, &Default::default()).unwrap();
     let metadata = Metadata::open(&f.home, false).unwrap();
     let manifests = metadata.list::<Value>("source/rust-index/", 10).unwrap();
     metadata.close().unwrap();
@@ -522,7 +522,7 @@ fn unicode_asset_queries_match_full_index_cold_warm_and_rebuilt_file_projection(
             ("ASSETS\\ASCII.PNG", "Assets/ASCII.PNG"),
         ] {
             let projected = f.query(query);
-            let full = index::build(&f.home, &f.source)
+            let full = index::build_with_control(&f.home, &f.source, &Default::default())
                 .unwrap()
                 .search(&f.source, &f.snapshot, query, "", "asset", 50, "")
                 .unwrap();
@@ -608,7 +608,7 @@ fn non_utf8_lua_comment_inspect_and_query_display_fffd_without_rewriting_bytes()
     assert_eq!(queried.coverage["warningSample"][0]["byteOffset"], offset);
     // The indexed store keeps the original bytes and hash, cold and warm.
     for _ in 0..2 {
-        let index = index::build(&f.home, &f.source).unwrap();
+        let index = index::build_with_control(&f.home, &f.source, &Default::default()).unwrap();
         let document = index
             .documents
             .iter()

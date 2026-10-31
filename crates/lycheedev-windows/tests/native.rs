@@ -34,7 +34,7 @@ fn durable_replace_updates_existing() {
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
-fn job_drop_stops_owned_child() {
+fn job_terminate_stops_owned_child() {
     let mut child = Command::new("cmd.exe")
         .args(["/c", "ping", "-n", "30", "127.0.0.1"])
         .creation_flags(0x08000000)

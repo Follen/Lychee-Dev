@@ -35,6 +35,12 @@ is not a published-release acceptance record.
 - The Agent surface is a minimal first-party Skill with the current product/build
   quick reference and versioned CLI discovery; command parameters, schemas and
   examples come from the CLI instead of a second prose manual.
+- Update discovery, registry selection and candidate admission use the embedded
+  channel authority. A newer release in the same channel remains eligible;
+  the Skill carries no toolkit version or channel selection table.
+- Command errors expose the recognized command's correction metadata, required
+  flags match typed admission, and Data Agent discovery describes actual response
+  frames, result handles, exact values, paging, exports and captures.
 - Distribution is the npm package plus the native Windows amd64 payload. The npm
   package contains the native CLI, the addon and the Skill; the version and npm
   channel configuration are defined by `release/version.json` and

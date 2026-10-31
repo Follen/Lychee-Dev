@@ -16,9 +16,12 @@ use lycheedev_core::{
     control::OperationControl,
     evidence::{self},
     metadata::DataCacheMetadata,
-    storage::{self, ExclusiveLock},
+    storage::ExclusiveLock,
 };
 use serde::{Serialize, de::DeserializeOwned};
+#[cfg(test)]
+use lycheedev_core::storage;
+#[cfg(test)]
 use serde_json::Value;
 use std::{
     path::Path,

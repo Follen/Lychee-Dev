@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use crate::request::{SelectedSource, SourceContext, SourceRequest};
-use lycheedev_core::{control::OperationControl, selection, storage};
+use lycheedev_core::{control::OperationControl, selection};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs};
 

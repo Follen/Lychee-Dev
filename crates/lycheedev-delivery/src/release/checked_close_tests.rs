@@ -318,12 +318,15 @@ fn inventory_directory_scan_still_rejects_unlisted_files_after_checked_closes() 
 
 #[test]
 fn manifest_runtime_channel_uses_the_same_version_binding_as_update() {
+    let policy = crate::npm_update::update_policy();
+    let tag = policy["npmChannel"]["distTag"].as_str().unwrap();
+    let other = if tag == "beta" { "next" } else { "beta" };
     for (version, tag, accepted) in [
-        ("3.5.0", "beta", true),
-        ("3.5.0", "next", false),
+        ("3.5.0", tag, true),
+        ("3.5.0", other, false),
         ("3.5.0", "latest", false),
-        ("3.1.2", "next", true),
-        ("3.1.2", "beta", false),
+        ("3.1.2", tag, true),
+        ("3.1.2", other, false),
     ] {
         let fixture = Fixture::new();
         let path = fixture.manifest();
@@ -337,7 +340,7 @@ fn manifest_runtime_channel_uses_the_same_version_binding_as_update() {
         fs::write(&path, serde_json::to_vec(&raw).unwrap()).unwrap();
         let result = read_manifest_with_control(&fixture.0, version, &OperationControl::default());
         assert_eq!(result.is_ok(), accepted, "{version}/{tag}: {result:?}");
-        assert_eq!(crate::npm_update::binding(&fixture.0, version).is_ok(), accepted);
+        assert_eq!(crate::npm_update::binding_controlled(&fixture.0, version, &Default::default()).is_ok(), accepted);
         if let Err(error) = result {
             assert_eq!(error.code, "delivery.invalid_release");
             assert_eq!(error.exit_code, 4);
@@ -367,7 +370,7 @@ fn write_channel_manifest(fixture: &Fixture, version: &str, channel: &[u8]) -> P
 
 fn assert_channel_readers(fixture: &Fixture, version: &str, accepted: bool, case: &str) {
     let manifest = read_manifest_with_control(&fixture.0, version, &OperationControl::default());
-    let update = crate::npm_update::binding(&fixture.0, version);
+    let update = crate::npm_update::binding_controlled(&fixture.0, version, &Default::default());
     assert_eq!(manifest.is_ok(), accepted, "manifest {case}: {manifest:?}");
     assert_eq!(update.is_ok(), accepted, "update {case}: {update:?}");
     if !accepted {
@@ -385,6 +388,25 @@ fn current_npm_channel_bytes_are_accepted_by_release_and_update() {
     let fixture = Fixture::new();
     let path = write_channel_manifest(&fixture, version, CURRENT_CHANNEL);
     assert_channel_readers(&fixture, version, true, "current release/npm-channel.json");
+    assert_released(&path);
+}
+
+#[test]
+fn next_version_on_the_authority_channel_is_accepted_without_a_version_tag_table() {
+    let mut channel: Value = serde_json::from_slice(CURRENT_CHANNEL).unwrap();
+    let current = channel["version"].as_str().unwrap().to_owned();
+    let (prefix, patch) = current.rsplit_once('.').unwrap();
+    let next = format!("{prefix}.{}", patch.parse::<u64>().unwrap().checked_add(1).unwrap());
+    channel["version"] = json!(next);
+    let fixture = Fixture::new();
+    let path = write_channel_manifest(&fixture, &next, &serde_json::to_vec(&channel).unwrap());
+    // The old installed CLI admits the next npm package before handing off to
+    // its helper. Its lane stays frozen; its candidate version is independent.
+    assert_channel_readers(&fixture, &next, true, "next version, same selected channel");
+    assert_channel_readers(&fixture, &current, false, "candidate version cannot impersonate installed version");
+    channel["distTag"] = json!("latest");
+    write_channel_manifest(&fixture, &next, &serde_json::to_vec(&channel).unwrap());
+    assert_channel_readers(&fixture, &next, false, "next version cannot switch to latest");
     assert_released(&path);
 }
 
@@ -461,7 +483,6 @@ fn npm_channel_binding_rejects_incomplete_fields_wrong_types_and_original_identi
         let fixture = Fixture::new();
         let mut channel = current.clone();
         channel["version"] = json!(invalid_version);
-        channel["distTag"] = json!(crate::npm_update::release_channel(invalid_version));
         let path = write_channel_manifest(
             &fixture,
             invalid_version,

@@ -1,6 +1,6 @@
 //! Valid empty chunks retain their authenticated load and native control state.
 use super::*;
-use std::{sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
+use std::{sync::atomic::Ordering, time::{Duration, Instant}};
 
 fn admitted(files:&[(&str,&str)],ordered:&[&str])->Arc<SourceInputs> {
     let control=OperationControl::uncancelable(Instant::now()+Duration::from_secs(30));

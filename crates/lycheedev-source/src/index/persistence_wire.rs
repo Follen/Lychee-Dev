@@ -531,53 +531,53 @@ fn validate_summary<T: AsRef<str>>(
     Ok(())
 }
 struct GapsSeed<'a, 'b>(&'a mut Context<'b>);
+impl<'de> Visitor<'de> for GapsSeed<'_, '_> {
+    type Value = BTreeSet<String>;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ordered compatibility categories")
+    }
+    fn visit_seq<A: SeqAccess<'de>>(
+        self,
+        mut seq: A,
+    ) -> std::result::Result<Self::Value, A::Error> {
+        let count = seq
+            .size_hint()
+            .filter(|n| *n <= 6)
+            .ok_or_else(|| A::Error::custom("invalid compatibility category count"))?;
+        let mut result = BTreeSet::new();
+        let mut previous: Option<&str> = None;
+        for _ in 0..count {
+            self.0.check()?;
+            let row: &str = seq
+                .next_element()?
+                .ok_or_else(|| A::Error::custom("missing compatibility category"))?;
+            if ![
+                "api",
+                "event",
+                "frame-type",
+                "interface",
+                "mixin",
+                "template",
+            ]
+            .contains(&row)
+                || previous.is_some_and(|p| p >= row)
+            {
+                return Err(A::Error::custom(
+                    "unknown, duplicate or unordered compatibility category",
+                ));
+            }
+            previous = Some(row);
+            result.insert(self.0.text::<A::Error>(row)?);
+        }
+        Ok(result)
+    }
+}
 impl<'de> DeserializeSeed<'de> for GapsSeed<'_, '_> {
     type Value = BTreeSet<String>;
     fn deserialize<D: serde::Deserializer<'de>>(
         self,
         deserializer: D,
     ) -> std::result::Result<Self::Value, D::Error> {
-        impl<'de> Visitor<'de> for GapsSeed<'_, '_> {
-            type Value = BTreeSet<String>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("ordered compatibility categories")
-            }
-            fn visit_seq<A: SeqAccess<'de>>(
-                self,
-                mut seq: A,
-            ) -> std::result::Result<Self::Value, A::Error> {
-                let count = seq
-                    .size_hint()
-                    .filter(|n| *n <= 6)
-                    .ok_or_else(|| A::Error::custom("invalid compatibility category count"))?;
-                let mut result = BTreeSet::new();
-                let mut previous: Option<&str> = None;
-                for _ in 0..count {
-                    self.0.check()?;
-                    let row: &str = seq
-                        .next_element()?
-                        .ok_or_else(|| A::Error::custom("missing compatibility category"))?;
-                    if ![
-                        "api",
-                        "event",
-                        "frame-type",
-                        "interface",
-                        "mixin",
-                        "template",
-                    ]
-                    .contains(&row)
-                        || previous.is_some_and(|p| p >= row)
-                    {
-                        return Err(A::Error::custom(
-                            "unknown, duplicate or unordered compatibility category",
-                        ));
-                    }
-                    previous = Some(row);
-                    result.insert(self.0.text::<A::Error>(row)?);
-                }
-                Ok(result)
-            }
-        }
         deserializer.deserialize_seq(self)
     }
 }
@@ -588,6 +588,61 @@ struct IndexSeed<'a, 'b, D, A, S> {
     types: PhantomData<(D, A, S)>,
 }
 impl<'de, D: Collection<Document>, A: Collection<AssetRecord>, S: Collection<Symbol>>
+    Visitor<'de> for IndexSeed<'_, '_, D, A, S>
+{
+    type Value = Index<D, A, S>;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a complete current Source index")
+    }
+    fn visit_seq<Q: SeqAccess<'de>>(
+        self,
+        mut seq: Q,
+    ) -> std::result::Result<Self::Value, Q::Error> {
+        let ctx = self.ctx;
+        ctx.check()?;
+        let summary: SourceSummary<&str> = seq
+            .next_element()?
+            .ok_or_else(|| Q::Error::custom("missing index summary"))?;
+        validate_summary(&summary, self.identity, ctx.control)
+            .map_err(|error| ctx.stop::<Q::Error>(error))?;
+        let summary = own_summary::<Q::Error>(summary, ctx)?;
+        let documents: D = seq
+            .next_element_seed(RowsSeed::<D, Document>(ctx, PhantomData))?
+            .ok_or_else(|| Q::Error::custom("missing index documents"))?;
+        let assets: A = seq
+            .next_element_seed(RowsSeed::<A, AssetRecord>(ctx, PhantomData))?
+            .ok_or_else(|| Q::Error::custom("missing index assets"))?;
+        let symbols: S = if self.metadata {
+            S::reserve::<Q::Error>(0, ctx)?
+        } else {
+            seq.next_element_seed(RowsSeed::<S, Symbol>(ctx, PhantomData))?
+                .ok_or_else(|| Q::Error::custom("missing index symbols"))?
+        };
+        let compatibility_gaps = seq
+            .next_element_seed(GapsSeed(ctx))?
+            .ok_or_else(|| Q::Error::custom("missing compatibility categories"))?;
+        if documents.len() != summary.documents
+            || assets.len() != summary.assets
+            || (!self.metadata
+                && (ctx.declarations != summary.declarations
+                    || ctx.relationships != summary.relationships))
+        {
+            return Err(Q::Error::custom(
+                "Source index collection counts differ from summary",
+            ));
+        }
+        ctx.check()?;
+        Ok(Index {
+            documents,
+            assets,
+            symbols,
+            summary,
+            compatibility_gaps,
+            home: Default::default(),
+        })
+    }
+}
+impl<'de, D: Collection<Document>, A: Collection<AssetRecord>, S: Collection<Symbol>>
     DeserializeSeed<'de> for IndexSeed<'_, '_, D, A, S>
 {
     type Value = Index<D, A, S>;
@@ -595,61 +650,6 @@ impl<'de, D: Collection<Document>, A: Collection<AssetRecord>, S: Collection<Sym
         self,
         deserializer: X,
     ) -> std::result::Result<Self::Value, X::Error> {
-        impl<'de, D: Collection<Document>, A: Collection<AssetRecord>, S: Collection<Symbol>>
-            Visitor<'de> for IndexSeed<'_, '_, D, A, S>
-        {
-            type Value = Index<D, A, S>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a complete current Source index")
-            }
-            fn visit_seq<Q: SeqAccess<'de>>(
-                self,
-                mut seq: Q,
-            ) -> std::result::Result<Self::Value, Q::Error> {
-                let ctx = self.ctx;
-                ctx.check()?;
-                let summary: SourceSummary<&str> = seq
-                    .next_element()?
-                    .ok_or_else(|| Q::Error::custom("missing index summary"))?;
-                validate_summary(&summary, self.identity, ctx.control)
-                    .map_err(|error| ctx.stop::<Q::Error>(error))?;
-                let summary = own_summary::<Q::Error>(summary, ctx)?;
-                let documents: D = seq
-                    .next_element_seed(RowsSeed::<D, Document>(ctx, PhantomData))?
-                    .ok_or_else(|| Q::Error::custom("missing index documents"))?;
-                let assets: A = seq
-                    .next_element_seed(RowsSeed::<A, AssetRecord>(ctx, PhantomData))?
-                    .ok_or_else(|| Q::Error::custom("missing index assets"))?;
-                let symbols: S = if self.metadata {
-                    S::reserve::<Q::Error>(0, ctx)?
-                } else {
-                    seq.next_element_seed(RowsSeed::<S, Symbol>(ctx, PhantomData))?
-                        .ok_or_else(|| Q::Error::custom("missing index symbols"))?
-                };
-                let compatibility_gaps = seq
-                    .next_element_seed(GapsSeed(ctx))?
-                    .ok_or_else(|| Q::Error::custom("missing compatibility categories"))?;
-                if documents.len() != summary.documents
-                    || assets.len() != summary.assets
-                    || (!self.metadata
-                        && (ctx.declarations != summary.declarations
-                            || ctx.relationships != summary.relationships))
-                {
-                    return Err(Q::Error::custom(
-                        "Source index collection counts differ from summary",
-                    ));
-                }
-                ctx.check()?;
-                Ok(Index {
-                    documents,
-                    assets,
-                    symbols,
-                    summary,
-                    compatibility_gaps,
-                    home: Default::default(),
-                })
-            }
-        }
         deserializer.deserialize_tuple(if self.metadata { 4 } else { 5 }, self)
     }
 }
@@ -1094,8 +1094,6 @@ fn encode_mode<S: BuiltSymbols>(
 
 fn check_control(control: &OperationControl) -> Result<()> {
     #[cfg(test)]
-    decode_diagnostic::observe_check();
-    #[cfg(test)]
     CANCEL_AT_STEP.with(|slot| {
         if let Some((left, token)) = slot.borrow_mut().as_mut() {
             *left = left.saturating_sub(1);
@@ -1134,9 +1132,3 @@ impl Drop for CancelAtStep {
 }
 #[cfg(test)]
 pub(super) mod tests;
-
-#[cfg(test)]
-mod export_tests;
-
-#[cfg(test)]
-mod decode_diagnostic;

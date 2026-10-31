@@ -262,6 +262,7 @@ fn cross_process_measurement_and_killed_owner_release_actual_kernel_locks() {
         .args([
             "--exact",
             "workspace::data_resources::tests::data_resource_helper_process",
+            "--ignored",
             "--nocapture",
         ])
         .env("LYCHEEDEV_DATA_ADMISSION_HELPER", &home)
@@ -297,10 +298,10 @@ fn cross_process_measurement_and_killed_owner_release_actual_kernel_locks() {
 }
 #[cfg(windows)]
 #[test]
+#[ignore = "subprocess helper; invoked by the cross-process measurement regression"]
 fn data_resource_helper_process() {
-    let Some(home) = std::env::var_os("LYCHEEDEV_DATA_ADMISSION_HELPER") else {
-        return;
-    };
+    let home = std::env::var_os("LYCHEEDEV_DATA_ADMISSION_HELPER")
+        .expect("required data admission helper home");
     let home = PathBuf::from(home);
     let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(20));
     let owner = acquire(&home, Policy::Measurement, &control).unwrap();

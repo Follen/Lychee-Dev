@@ -55,9 +55,9 @@ fn fixed_blizzard_catalog_real_native_semantics() {
     )
     .unwrap();
     let compiler_manifest: serde_json::Value = serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler = luac::Runtime::verified(
+    let compiler = luac::Runtime::verified_with_ordered_control(
         &PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed compiler")),
-        serde_json::from_value(compiler_manifest["runtime"].clone()).unwrap(),
+        serde_json::from_value(compiler_manifest["runtime"].clone()).unwrap(), &Default::default(),
     ).unwrap();
     let addon = staging.join(format!("native-addon-{}", std::process::id()));
     fs::create_dir(&addon).unwrap();

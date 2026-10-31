@@ -1,6 +1,6 @@
 //! Strict Data admission configuration retains fixed-Go decoding semantics.
 //! Only the new Data policy decoder is also shared by historical config APIs.
-use crate::{Result, ToolkitError, control::OperationControl, evidence, storage};
+use crate::{Result, ToolkitError, control::OperationControl, storage};
 use serde::{
     Deserialize, Deserializer,
     de::{MapAccess, Visitor},

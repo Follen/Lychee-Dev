@@ -98,9 +98,6 @@ fn ordinary_argument(value: &str) -> std::borrow::Cow<'_, str> {
 
 /// Explicit byte transport, never a shell, no inherited Git routing/config/filter/replacements.
 /// Both pipes are drained concurrently with caps. Timeout/output overflow kills and reaps.
-pub fn bytes(directory: Option<&Path>, args: &[&str], cap: usize) -> Result<Vec<u8>> {
-    bytes_with_input(directory, args, cap, None)
-}
 pub fn bytes_with_control(
     directory: Option<&Path>,
     args: &[&str],
@@ -114,25 +111,8 @@ pub fn bytes_with_control(
         cap,
         None,
         control.remaining()?,
-        Some(control),
+        control,
     )
-}
-fn bytes_with_input(
-    directory: Option<&Path>,
-    args: &[&str],
-    cap: usize,
-    input: Option<Vec<u8>>,
-) -> Result<Vec<u8>> {
-    bytes_with_deadline(directory, args, cap, input, Duration::from_secs(180))
-}
-fn bytes_with_deadline(
-    directory: Option<&Path>,
-    args: &[&str],
-    cap: usize,
-    input: Option<Vec<u8>>,
-    timeout: Duration,
-) -> Result<Vec<u8>> {
-    bytes_controlled(directory, args, cap, input, timeout, None)
 }
 fn bytes_controlled(
     directory: Option<&Path>,
@@ -140,11 +120,10 @@ fn bytes_controlled(
     cap: usize,
     input: Option<Vec<u8>>,
     timeout: Duration,
-    control: Option<&OperationControl>,
+    control: &OperationControl,
 ) -> Result<Vec<u8>> {
     let cmd = command(directory, args);
-    let default_control = OperationControl::default();
-    let out = crate::process::run_with_limits(cmd, cap, 32768, timeout, input, control.unwrap_or(&default_control)).map_err(
+    let out = crate::process::run_with_limits(cmd, cap, 32768, timeout, input, control).map_err(
         |mut error| {
             error.code = match error.code.as_str() {
                 "source.process_unavailable" => "codebase.source_not_ready",
@@ -216,29 +195,6 @@ mod originals;
 pub(crate) use originals::{Originals, read_object_frame};
 /// Read only objects already authenticated by the pinned immutable tree. One
 /// batch is bounded to 64 MiB plus framing; every returned object is rehashed.
-pub fn visit_blobs(
-    home: &Path,
-    pin: &SourcePin,
-    files: &[TreeFile],
-    visit: impl FnMut(&TreeFile, Vec<u8>) -> Result<()>,
-) -> Result<usize> {
-    visit_blobs_until(
-        home,
-        pin,
-        files,
-        std::time::Instant::now() + Duration::from_secs(180),
-        visit,
-    )
-}
-pub(crate) fn visit_blobs_until(
-    home: &Path,
-    pin: &SourcePin,
-    files: &[TreeFile],
-    deadline: std::time::Instant,
-    visit: impl FnMut(&TreeFile, Vec<u8>) -> Result<()>,
-) -> Result<usize> {
-    visit_blobs_controlled(home, pin, files, deadline, None, visit)
-}
 pub fn visit_blobs_with_control(
     home: &Path,
     pin: &SourcePin,
@@ -247,7 +203,7 @@ pub fn visit_blobs_with_control(
     visit: impl FnMut(&TreeFile, Vec<u8>) -> Result<()>,
 ) -> Result<usize> {
     control.check()?;
-    visit_blobs_controlled(home, pin, files, control.deadline(), Some(control), visit)
+    visit_blobs_controlled(home, pin, files, control.deadline(), control, visit)
 }
 /// Typed boundaries for consumers with pure work in flight. A batch end is
 /// visited before its tail is checked and before another Git process starts,
@@ -265,14 +221,14 @@ pub(crate) fn visit_blob_batches_with_control(
     visit: impl FnMut(BlobBatchVisit<'_>) -> Result<()>,
 ) -> Result<usize> {
     control.check()?;
-    visit_blob_batches_controlled(home, pin, files, control.deadline(), Some(control), visit)
+    visit_blob_batches_controlled(home, pin, files, control.deadline(), control, visit)
 }
 fn visit_blobs_controlled(
     home: &Path,
     pin: &SourcePin,
     files: &[TreeFile],
     deadline: std::time::Instant,
-    control: Option<&OperationControl>,
+    control: &OperationControl,
     mut visit: impl FnMut(&TreeFile, Vec<u8>) -> Result<()>,
 ) -> Result<usize> {
     visit_blob_batches_controlled(home, pin, files, deadline, control, |event| match event {
@@ -285,7 +241,7 @@ fn visit_blob_batches_controlled(
     pin: &SourcePin,
     files: &[TreeFile],
     deadline: std::time::Instant,
-    control: Option<&lycheedev_core::control::OperationControl>,
+    control: &lycheedev_core::control::OperationControl,
     mut visit: impl FnMut(BlobBatchVisit<'_>) -> Result<()>,
 ) -> Result<usize> {
     validate_pin(pin)?;
@@ -297,9 +253,7 @@ fn visit_blob_batches_controlled(
     let mut first = 0;
     let mut batches = 0;
     while first < admitted.len() {
-        if let Some(control) = control {
-            control.check()?;
-        }
+        control.check()?;
         if std::time::Instant::now() >= deadline {
             return Err(ToolkitError::new(
                 "codebase.source_budget",
@@ -342,14 +296,12 @@ fn visit_blob_batches_controlled(
 fn visit_batch_data(
     data: &[u8],
     files: &[&TreeFile],
-    control: Option<&OperationControl>,
+    control: &OperationControl,
     visit: &mut impl FnMut(BlobBatchVisit<'_>) -> Result<()>,
 ) -> Result<()> {
     let mut at = 0;
     for f in files {
-        if let Some(control) = control {
-            control.check()?;
-        }
+        control.check()?;
         let end = data[at..]
             .iter()
             .position(|b| *b == b'\n')
@@ -420,9 +372,6 @@ pub fn validate_pin(pin: &SourcePin) -> Result<()> {
         ));
     }
     Ok(())
-}
-pub fn resolve_source(home: &Path, key: &str, product: &str, reference: &str) -> Result<SourcePin> {
-    resolve_source_with_control(home, key, product, reference, &Default::default())
 }
 pub fn resolve_source_with_control(
     home: &Path,
@@ -561,39 +510,31 @@ pub fn is_asset(ext: &str) -> bool {
     ]
     .contains(&ext)
 }
-pub fn tree(home: &Path, pin: &SourcePin) -> Result<Vec<TreeFile>> {
-    tree_listing(home, pin, false, None)
-}
 pub fn tree_with_control(
     home: &Path,
     pin: &SourcePin,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<Vec<TreeFile>> {
-    tree_listing(home, pin, false, Some(control))
+    tree_listing(home, pin, false, control)
 }
 /// Complete regular-file checkout admission, including files outside source
 /// query extensions. Symlinks/submodules fail admission instead of disappearing.
-pub fn regular_tree(home: &Path, pin: &SourcePin) -> Result<Vec<TreeFile>> {
-    tree_listing(home, pin, true, None)
-}
 pub fn regular_tree_with_control(
     home: &Path,
     pin: &SourcePin,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<Vec<TreeFile>> {
-    tree_listing(home, pin, true, Some(control))
+    tree_listing(home, pin, true, control)
 }
 fn tree_listing(
     home: &Path,
     pin: &SourcePin,
     all_regular: bool,
-    control: Option<&lycheedev_core::control::OperationControl>,
+    control: &lycheedev_core::control::OperationControl,
 ) -> Result<Vec<TreeFile>> {
     validate_pin(pin)?;
     let dir = mirror(home, &pin.repository);
-    if let Some(control) = control {
-        control.check()?;
-    }
+    control.check()?;
     let raw = bytes_controlled(
         Some(&dir),
         &[
@@ -606,18 +547,13 @@ fn tree_listing(
         ],
         32 << 20,
         None,
-        control
-            .map(|c| c.remaining())
-            .transpose()?
-            .unwrap_or(Duration::from_secs(180)),
+        control.remaining()?,
         control,
     )?;
     let mut files = Vec::new();
     let (mut documents, mut assets, mut total) = (0, 0, 0usize);
     for entry in raw.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-        if let Some(control) = control {
-            control.check()?;
-        }
+        control.check()?;
         let Some(split) = entry.iter().position(|b| *b == b'\t') else {
             return Err(ToolkitError::new(
                 "codebase.source_integrity",
@@ -703,22 +639,19 @@ fn tree_listing(
 /// Verify one admitted checkout file against the Git framed blob hash. The
 /// caller must guard its managed checkout boundary; this helper rejects links,
 /// nonregular files, length changes and differing content.
-pub fn verify_file(path: &Path, file: &TreeFile, max: usize) -> Result<()> {
-    verify_file_controlled(path, file, max, None)
-}
 pub fn verify_file_with_control(
     path: &Path,
     file: &TreeFile,
     max: usize,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<()> {
-    verify_file_controlled(path, file, max, Some(control))
+    verify_file_controlled(path, file, max, control)
 }
 fn verify_file_controlled(
     path: &Path,
     file: &TreeFile,
     max: usize,
-    control: Option<&lycheedev_core::control::OperationControl>,
+    control: &lycheedev_core::control::OperationControl,
 ) -> Result<()> {
     if file.bytes > max || max > 128 << 20 || !valid_digest(&file.object, 40) {
         return Err(ToolkitError::new(
@@ -739,52 +672,50 @@ fn verify_file_controlled(
         ));
     }
     let mut input = fs::File::open(path)?;
-    let mut hash = Sha1::new();
-    hash.update(format!("blob {}\0", file.bytes).as_bytes());
-    let deadline = std::time::Instant::now() + Duration::from_secs(180);
-    let mut count = 0usize;
-    let mut buffer = [0u8; 65536];
-    loop {
-        if let Some(control) = control {
+    let result = (|| {
+        let mut hash = Sha1::new();
+        hash.update(format!("blob {}\0", file.bytes).as_bytes());
+        let deadline = std::time::Instant::now() + Duration::from_secs(180);
+        let mut count = 0usize;
+        let mut buffer = [0u8; 65536];
+        loop {
             control.check()?;
+            if std::time::Instant::now() >= deadline {
+                return Err(ToolkitError::new(
+                    "codebase.source_budget",
+                    "Checkout verification deadline exceeded",
+                    3,
+                ));
+            }
+            let n = input.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            count = count
+                .checked_add(n)
+                .ok_or_else(|| ToolkitError::invalid("Checkout byte count overflow"))?;
+            if count > file.bytes {
+                return Err(ToolkitError::new(
+                    "codebase.worktree_modified",
+                    "Checkout file grew during verification",
+                    4,
+                ));
+            }
+            hash.update(&buffer[..n]);
         }
-        if std::time::Instant::now() >= deadline {
-            return Err(ToolkitError::new(
-                "codebase.source_budget",
-                "Checkout verification deadline exceeded",
-                3,
-            ));
-        }
-        let n = input.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        count = count
-            .checked_add(n)
-            .ok_or_else(|| ToolkitError::invalid("Checkout byte count overflow"))?;
-        if count > file.bytes {
+        if count != file.bytes
+            || input.metadata()?.len() != file.bytes as u64
+            || format!("{:x}", hash.finalize()) != file.object
+        {
             return Err(ToolkitError::new(
                 "codebase.worktree_modified",
-                "Checkout file grew during verification",
+                "Checkout file content differs from pinned Git blob",
                 4,
             ));
         }
-        hash.update(&buffer[..n]);
-    }
-    if count != file.bytes
-        || input.metadata()?.len() != file.bytes as u64
-        || format!("{:x}", hash.finalize()) != file.object
-    {
-        return Err(ToolkitError::new(
-            "codebase.worktree_modified",
-            "Checkout file content differs from pinned Git blob",
-            4,
-        ));
-    }
-    Ok(())
-}
-pub fn blob(home: &Path, pin: &SourcePin, path: &str, max: usize) -> Result<(Vec<u8>, String)> {
-    blob_controlled(home, pin, path, max, MAX_SOURCE_BYTES, None)
+        Ok(())
+    })();
+    lycheedev_core::storage::finish_file(input, result, control)
 }
 pub fn blob_with_control(
     home: &Path,
@@ -794,7 +725,7 @@ pub fn blob_with_control(
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Vec<u8>, String)> {
     control.check()?;
-    blob_controlled(home, pin, path, max, MAX_SOURCE_BYTES, Some(control))
+    blob_controlled(home, pin, path, max, MAX_SOURCE_BYTES, control)
 }
 /// Asset originals have the existing 64 MiB archive bound, independently of
 /// the 32 MiB document-analysis bound. Both routes authenticate the same pinned
@@ -813,7 +744,7 @@ pub(crate) fn asset_blob_with_control(
         path,
         max,
         crate::assets::MAX_BYTES,
-        Some(control),
+        control,
     )
 }
 fn blob_controlled(
@@ -822,7 +753,7 @@ fn blob_controlled(
     path: &str,
     max: usize,
     maximum: usize,
-    control: Option<&lycheedev_core::control::OperationControl>,
+    control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Vec<u8>, String)> {
     validate_pin(pin)?;
     if !source_path(path) {
@@ -858,10 +789,7 @@ fn blob_controlled(
         &["cat-file", "--batch"],
         max + (16 << 20) + (1 << 20) + 8192,
         Some(requests.into_bytes()),
-        control
-            .map(|c| c.remaining())
-            .transpose()?
-            .unwrap_or(Duration::from_secs(180)),
+        control.remaining()?,
         control,
     )?;
     let mut at = 0;
@@ -877,9 +805,7 @@ fn blob_controlled(
         .to_owned();
     let mut tree_bytes = 0usize;
     for (i, component) in components.iter().enumerate() {
-        if let Some(control) = control {
-            control.check()?;
-        }
+        control.check()?;
         let tree = take_batch_object(&batch, &mut at, &expected, "tree", 4 << 20)?;
         tree_bytes += tree.len();
         if tree_bytes > 16 << 20 {
@@ -1026,10 +952,6 @@ mod tests {
         // of the size of the object that might exist at the pinned path.
         for maximum in [MAX_SOURCE_BYTES + 1, crate::assets::MAX_BYTES] {
             assert_eq!(
-                blob(home, &pin, "Image.png", maximum).unwrap_err().code,
-                "codebase.source_budget"
-            );
-            assert_eq!(
                 blob_with_control(home, &pin, "Image.png", maximum, &control)
                     .unwrap_err()
                     .code,
@@ -1155,7 +1077,7 @@ mod tests {
         );
         fs::create_dir_all(home.join("mirrors")).unwrap();
         let dir = mirror(&home, "wow-ui-source");
-        bytes(
+        bytes_with_control(
             None,
             &[
                 "init",
@@ -1163,7 +1085,7 @@ mod tests {
                 "--object-format=sha1",
                 &dir.to_string_lossy(),
             ],
-            4096,
+            4096, &Default::default(),
         )
         .unwrap();
         let health =
@@ -1174,29 +1096,29 @@ mod tests {
         assert_eq!(health["objectsVerified"], false);
         let input = b"function Exact()\r\n return 2\r\nend\r\n";
         let object = String::from_utf8(
-            bytes_with_input(
+            bytes_controlled(
                 Some(&dir),
                 &["hash-object", "-w", "--stdin"],
                 128,
-                Some(input.to_vec()),
+                Some(input.to_vec()), Duration::from_secs(180), &Default::default(),
             )
             .unwrap(),
         )
         .unwrap();
         let object = object.trim();
         let tree = String::from_utf8(
-            bytes_with_input(
+            bytes_controlled(
                 Some(&dir),
                 &["mktree"],
                 128,
-                Some(format!("100644 blob {object}\tFixture.lua\n").into_bytes()),
+                Some(format!("100644 blob {object}\tFixture.lua\n").into_bytes()), Duration::from_secs(180), &Default::default(),
             )
             .unwrap(),
         )
         .unwrap();
         let tree = tree.trim();
         let commit = String::from_utf8(
-            bytes(
+            bytes_with_control(
                 Some(&dir),
                 &[
                     "-c",
@@ -1208,7 +1130,7 @@ mod tests {
                     "-m",
                     "isolated immutable source fixture",
                 ],
-                128,
+                128, &Default::default(),
             )
             .unwrap(),
         )
@@ -1221,18 +1143,18 @@ mod tests {
             parser_revision: PARSER.into(),
         };
         let canonical_home = fs::canonicalize(&home).unwrap();
-        let canonical_files = tree_fn(&canonical_home, &pin);
-        let files = tree_fn(&home, &pin);
+        let canonical_files = tree_with_control(&canonical_home, &pin, &Default::default()).unwrap();
+        let files = tree_with_control(&home, &pin, &Default::default()).unwrap();
         assert_eq!(canonical_files[0].object, files[0].object);
         let mut canonical_bytes = vec![];
-        visit_blobs(&canonical_home, &pin, &canonical_files, |_, bytes| {
+        visit_blobs_with_control(&canonical_home, &pin, &canonical_files, &Default::default(), |_, bytes| {
             canonical_bytes = bytes;
             Ok(())
         })
         .unwrap();
         assert_eq!(canonical_bytes, input);
         let mut observed = vec![];
-        visit_blobs(&home, &pin, &files, |f, data| {
+        visit_blobs_with_control(&home, &pin, &files, &Default::default(), |f, data| {
             observed.push((f.path.clone(), data));
             Ok(())
         })
@@ -1293,7 +1215,7 @@ mod tests {
         assert_eq!(documents, 4096);
 
         assert_eq!(
-            blob(&home, &pin, "Fixture.lua", MAX_SOURCE_BYTES)
+            blob_with_control(&home, &pin, "Fixture.lua", MAX_SOURCE_BYTES, &Default::default())
                 .unwrap()
                 .0,
             input
@@ -1302,7 +1224,7 @@ mod tests {
         let before_status =
             crate::query_store::status_with_control(&home, &pin, &status_control).unwrap();
         assert_eq!(before_status["ready"], false);
-        let first_index = crate::index::build(&home, &pin).unwrap();
+        let first_index = crate::index::build_with_control(&home, &pin, &Default::default()).unwrap();
         let status = crate::query_store::status_with_control(&home, &pin, &status_control).unwrap();
         assert_eq!(status["ready"], true);
         assert_eq!(status["snapshotFiles"], 1);
@@ -1321,7 +1243,7 @@ mod tests {
         );
         assert_eq!(first_query["analysis"]["semantic"], "not_requested");
         assert!(serde_json::to_vec(&first_query).unwrap().len() < 4096);
-        let hot = crate::index::build(&home, &pin).unwrap();
+        let hot = crate::index::build_with_control(&home, &pin, &Default::default()).unwrap();
         assert_eq!(hot.summary.io["cachedFacts"], 1);
         assert_eq!(hot.symbols[0].id, first_index.symbols[0].id);
         let hot_query = hot
@@ -1352,22 +1274,19 @@ mod tests {
         );
         let generation = metadata.generation(&key).unwrap();
         metadata.put(&key, &old_index, generation).unwrap();
-        let rebuilt = crate::index::build(&home, &pin).unwrap();
+        let rebuilt = crate::index::build_with_control(&home, &pin, &Default::default()).unwrap();
         assert_eq!(rebuilt.summary.io["parsedDocuments"], 1);
         assert_eq!(rebuilt.symbols[0].id, first_index.symbols[0].id);
         let mut tampered = files.clone();
         tampered[0].bytes += 1;
         assert_eq!(
-            visit_blobs(&home, &pin, &tampered, |_, _| Ok(()))
+            visit_blobs_with_control(&home, &pin, &tampered, &Default::default(), |_, _| Ok(()))
                 .unwrap_err()
                 .code,
             "codebase.source_integrity"
         );
         drop(metadata);
         fs::remove_dir_all(home).unwrap();
-    }
-    fn tree_fn(home: &Path, pin: &SourcePin) -> Vec<TreeFile> {
-        tree(home, pin).unwrap()
     }
     #[test]
     fn path_admission() {
@@ -1415,7 +1334,7 @@ mod batch_boundary_tests {
     fn authenticated_document_precedes_its_final_batch_boundary() {
         let (file, batch) = fixture();
         let mut order = Vec::new();
-        visit_batch_data(&batch, &[&file], None, &mut |event| {
+        visit_batch_data(&batch, &[&file], &Default::default(), &mut |event| {
             order.push(match event {
                 BlobBatchVisit::Blob(f, raw) => {
                     assert_eq!(f.path, "One.lua");
@@ -1436,7 +1355,7 @@ mod batch_boundary_tests {
     fn original_document_commit_error_precedes_a_bad_batch_tail() {
         let (file, mut batch) = fixture();
         batch.extend_from_slice(b"unexpected");
-        let error = visit_batch_data(&batch, &[&file], None, &mut |event| match event {
+        let error = visit_batch_data(&batch, &[&file], &Default::default(), &mut |event| match event {
             BlobBatchVisit::Blob(_, _) | BlobBatchVisit::BatchStart { .. } => Ok(()),
             BlobBatchVisit::BatchEnd => Err(ToolkitError::new(
                 "test.commit",
@@ -1446,7 +1365,7 @@ mod batch_boundary_tests {
         })
         .unwrap_err();
         assert_eq!(error.code, "test.commit");
-        let error = visit_batch_data(&batch, &[&file], None, &mut |_| Ok(())).unwrap_err();
+        let error = visit_batch_data(&batch, &[&file], &Default::default(), &mut |_| Ok(())).unwrap_err();
         assert_eq!(error.code, "codebase.source_integrity");
         assert_eq!(error.message, "Unexpected batch tail");
     }
@@ -1456,7 +1375,7 @@ mod batch_boundary_tests {
         let raw_start = batch.iter().position(|b| *b == b'\n').unwrap() + 1;
         batch[raw_start] = b'X';
         let mut events = 0;
-        let error = visit_batch_data(&batch, &[&file], None, &mut |_| {
+        let error = visit_batch_data(&batch, &[&file], &Default::default(), &mut |_| {
             events += 1;
             Ok(())
         })

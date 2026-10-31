@@ -1,5 +1,5 @@
 use super::super::{lifetime::*, *};
-use std::{collections::VecDeque, io, path::PathBuf, sync::atomic::AtomicU64};
+use std::{collections::VecDeque, io::{self, Read, Write}, path::PathBuf, sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}}};
 
 enum Wait {
     Pending,
@@ -381,11 +381,11 @@ fn directory(label: &str) -> PathBuf {
 #[test]
 fn successful_echo_and_nonzero_exit_keep_output_and_join_the_stdin_writer() {
     let bytes = b"fixture-input".to_vec();
-    let output = run_with_input(
+    let output = run_with_operation_control(
         super::helper("echo"),
         4096,
         Duration::from_secs(10),
-        Some(bytes.clone()),
+        Some(bytes.clone()), &Default::default(),
     )
     .unwrap();
     assert_eq!(output.status, 0);
@@ -396,11 +396,11 @@ fn successful_echo_and_nonzero_exit_keep_output_and_join_the_stdin_writer() {
             .windows(b"source-process-echo".len())
             .any(|value| value == b"source-process-echo")
     );
-    let output = run_with_input(
+    let output = run_with_operation_control(
         super::helper("nonzero"),
         4096,
         Duration::from_secs(10),
-        Some(vec![b'x'; 4 << 20]),
+        Some(vec![b'x'; 4 << 20]), &Default::default(),
     )
     .unwrap();
     assert_eq!(output.status, 17);
@@ -408,11 +408,11 @@ fn successful_echo_and_nonzero_exit_keep_output_and_join_the_stdin_writer() {
 }
 #[test]
 fn successful_child_with_failed_stdin_returns_joined_cleanup_evidence() {
-    let error = run_with_input(
+    let error = run_with_operation_control(
         super::helper("no-read"),
         4096,
         Duration::from_secs(10),
-        Some(vec![b'x'; 4 << 20]),
+        Some(vec![b'x'; 4 << 20]), &Default::default(),
     )
     .unwrap_err();
     assert_eq!(error.code, "source.process_check_failed");
@@ -427,7 +427,7 @@ fn success_retires_a_post_attachment_descendant_with_closed_output_pipes() {
     let ready = root.join("held");
     let mut command = super::helper("spawn-silent-descendant");
     command.env("LYCHEEDEV_SOURCE_TEST_READY", &ready);
-    let output = run_with_input(command, 4096, Duration::from_secs(20), Some(vec![b'G'])).unwrap();
+    let output = run_with_operation_control(command, 4096, Duration::from_secs(20), Some(vec![b'G']), &Default::default()).unwrap();
     assert_eq!(output.status, 0);
     assert!(ready.is_file(), "descendant must have started");
     // The exact descendant held this file without FILE_SHARE_DELETE while
@@ -500,7 +500,7 @@ fn root_exit_retires_inherited_pipes_and_preserves_status_and_tail() {
         let mut command = super::helper(mode);
         command.env("LYCHEEDEV_SOURCE_TEST_READY", &ready);
         let output =
-            run_with_input(command, 4096, Duration::from_secs(20), Some(vec![b'G'])).unwrap();
+            run_with_operation_control(command, 4096, Duration::from_secs(20), Some(vec![b'G']), &Default::default()).unwrap();
         assert_eq!(output.status, status);
         if status == 17 {
             assert!(output.stderr.ends_with(b"nonzero-stderr-tail"));

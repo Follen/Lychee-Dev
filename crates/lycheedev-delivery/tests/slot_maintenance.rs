@@ -73,8 +73,8 @@ fn fixture(parent: &Path) -> SlotPool {
     phase.finish(None);
     pool
 }
-// Match slots::install's original per-call default budget. Diagnostic output
-// is inside that same budget; fixture construction remains outside it.
+// Each mutation and its diagnostics share one fixture control. Fixture
+// construction remains outside that operation budget.
 fn install(parent: &Path, version: &str) -> lycheedev_core::Result<Value> {
     let control = OperationControl::default();
     let phase = SlotPhase::begin("maintenance.install", Some(&control));
@@ -90,7 +90,7 @@ fn upgrading(mut pool: SlotPool) -> SlotPool {
     pool
 }
 fn assert_current(parent: &Path, version: &str) -> Value {
-    let pool = slots::inspect(parent, version).unwrap();
+    let pool = slots::inspect_controlled(parent, version, &Default::default()).unwrap();
     assert_eq!(pool["schema"], slots::SCHEMA);
     assert_eq!(pool["files"].as_array().unwrap().len(), 500);
     for absent in [
@@ -140,7 +140,7 @@ fn unresolved_pending_or_unknown_nonce_blocks_without_rewriting_marker() {
         save(&temp.0, &pool);
         let before = raw(&temp.0);
         for error in [
-            slots::preflight(&temp.0, NEW).unwrap_err(),
+            slots::preflight_controlled(&temp.0, NEW, &Default::default()).unwrap_err(),
             install(&temp.0, NEW).unwrap_err(),
         ] {
             assert_eq!(error.code, "delivery.installation_conflict");
@@ -245,11 +245,11 @@ fn expanded_500_entry_manifest_is_bounded_at_256_kib_not_64_kib() {
     save(&temp.0, &pool);
     assert!(raw(&temp.0).len() > 65536);
     assert!(raw(&temp.0).len() <= 256 << 10);
-    slots::inspect(&temp.0, OLD).unwrap();
+    slots::inspect_controlled(&temp.0, OLD, &Default::default()).unwrap();
     let mut raw = raw(&temp.0);
     raw.resize((256 << 10) + 1, b' ');
     fs::write(temp.0.join(slots::MARKER), &raw).unwrap();
-    assert_eq!(slots::inspect(&temp.0, OLD).unwrap_err().exit_code, 4);
+    assert_eq!(slots::inspect_controlled(&temp.0, OLD, &Default::default()).unwrap_err().exit_code, 4);
     assert_eq!(fs::read(temp.0.join(slots::MARKER)).unwrap(), raw);
 }
 #[test]
@@ -260,16 +260,16 @@ fn inspection_recognizes_both_torn_payload_hashes_without_confirming_consumption
     pool.files[499].pending_hash = storage::sha256(pending);
     pool.files[499].nonce = "a".repeat(32);
     save(&temp.0, &pool);
-    slots::inspect(&temp.0, OLD).unwrap();
+    slots::inspect_controlled(&temp.0, OLD, &Default::default()).unwrap();
     fs::write(slots::directory(&temp.0, 500).join("Payload.lua"), pending).unwrap();
-    slots::inspect(&temp.0, OLD).unwrap();
+    slots::inspect_controlled(&temp.0, OLD, &Default::default()).unwrap();
     assert!(!load(&temp.0).files[499].consumed);
     fs::write(
         slots::directory(&temp.0, 500).join("Payload.lua"),
         b"foreign",
     )
     .unwrap();
-    assert_eq!(slots::inspect(&temp.0, OLD).unwrap_err().exit_code, 4);
+    assert_eq!(slots::inspect_controlled(&temp.0, OLD, &Default::default()).unwrap_err().exit_code, 4);
 }
 #[test]
 fn cancellation_preserves_original_marker_and_never_creates_slots() {
@@ -333,7 +333,7 @@ fn linked_slot_directory_is_rejected_without_following_it() {
     let temp = Temp::new();
     let outside = Temp::new();
     fixture(&temp.0);
-    slots::preflight(&temp.0, NEW).unwrap();
+    slots::preflight_controlled(&temp.0, NEW, &Default::default()).unwrap();
     let marker = raw(&temp.0);
     let first = slots::directory(&temp.0, 1).join("Lychee Dev Slot 01.toc");
     let first_bytes = fs::read(&first).unwrap();
@@ -375,7 +375,7 @@ fn linked_slot_directory_is_rejected_without_following_it() {
     }
 
     for error in [
-        slots::preflight(&temp.0, NEW).unwrap_err(),
+        slots::preflight_controlled(&temp.0, NEW, &Default::default()).unwrap_err(),
         install(&temp.0, NEW).unwrap_err(),
     ] {
         assert_eq!(error.code, "input.invalid");
@@ -404,7 +404,7 @@ fn linked_static_slot_member_is_rejected_without_following_it() {
     let temp = Temp::new();
     let outside = Temp::new();
     fixture(&temp.0);
-    slots::inspect(&temp.0, OLD).unwrap();
+    slots::inspect_controlled(&temp.0, OLD, &Default::default()).unwrap();
     let marker = raw(&temp.0);
     let member = slots::directory(&temp.0, 500).join("Loader.lua");
     let bytes = fs::read(&member).unwrap();
@@ -428,7 +428,7 @@ fn linked_static_slot_member_is_rejected_without_following_it() {
     );
     assert_eq!(fs::read(&member).unwrap(), bytes);
 
-    let error = slots::inspect(&temp.0, OLD).unwrap_err();
+    let error = slots::inspect_controlled(&temp.0, OLD, &Default::default()).unwrap_err();
     assert_eq!(error.code, "delivery.invalid_installation");
     assert_eq!(error.exit_code, 4);
     assert_eq!(error.message, "slot member is not a bounded regular file");

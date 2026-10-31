@@ -13,6 +13,49 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[test]
+fn public_required_diff_batch_and_prune_flags_enter_real_source_admission() {
+    let fixture = Fixture::new();
+    let batch = fixture.batch_file("required-batch.json", json!({"requests":[{"id":"query","query":{"text":"Target"}}]}));
+    let cases = [
+        (vec!["source".to_owned(), "diff".into(), "--from".into(), fixture.pin.clone(), "--to".into(), fixture.pin.clone()], vec!["--from", "--to"]),
+        (vec!["source".to_owned(), "batch".into(), "--snapshot".into(), fixture.pin.clone(), "--file".into(), batch.to_string_lossy().into()], vec!["--file"]),
+        (vec!["source".to_owned(), "prune".into(), "--target-bytes".into(), "0".into()], vec!["--target-bytes"]),
+    ];
+    for (words, required) in cases {
+        let mut inv = crate::parse(&words).unwrap();
+        inv.home = fixture.home.clone();
+        inv.cwd = fixture.root.join("project/nested");
+        match admit(&inv).unwrap() {
+            SourceCommand::Ordinary(Ordinary { request: SourceRequest::Diff(diff), .. }) => {
+                assert_eq!(diff.from.snapshot(), fixture.pin);
+                assert_eq!(diff.to.snapshot(), fixture.pin);
+                assert_eq!(diff.limit, 50);
+            }
+            SourceCommand::Research(Research { operation: Operation::Batch { request, flow }, .. }) => {
+                assert!(!flow);
+                assert_eq!(request.requests.len(), 1);
+                assert_eq!(request.requests[0].id, "query");
+                assert_eq!(request.requests[0].query.as_ref().unwrap().text, "Target");
+            }
+            SourceCommand::Ordinary(Ordinary { request: SourceRequest::Prune { target_bytes }, .. }) => assert_eq!(target_bytes, 0),
+            _ => panic!("wrong typed request for {}", inv.command),
+        }
+        for missing in required {
+            let mut incomplete = words.clone();
+            let index = incomplete.iter().position(|word| word == missing).unwrap();
+            incomplete.drain(index..index + 2);
+            let mut inv = crate::parse(&incomplete).unwrap();
+            inv.home = fixture.home.clone();
+            inv.cwd = fixture.root.join("project/nested");
+            let error = admit(&inv).err().unwrap();
+            assert_eq!(error.exit_code, 2);
+            assert!(error.message.contains(missing), "{error}");
+        }
+    }
+    assert_eq!(fixture.captures(), 0);
+}
+
 struct Fixture {
     root: PathBuf,
     home: PathBuf,
@@ -133,7 +176,7 @@ impl Fixture {
     }
 
     fn captures(&self) -> usize {
-        let mut metadata = Metadata::open(&self.home, false).unwrap();
+        let metadata = Metadata::open(&self.home, false).unwrap();
         let count = metadata.list::<Value>("capture/", 100).unwrap().len();
         metadata.close().unwrap();
         count

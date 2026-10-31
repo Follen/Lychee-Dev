@@ -14,9 +14,9 @@ fn actual_51_goto_identifier_structure() {
     let root = PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed stage"));
     let release: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler = Runtime::verified(
+    let compiler = Runtime::verified_with_ordered_control(
         &root,
-        serde_json::from_value(release["runtime"].clone()).unwrap(),
+        serde_json::from_value(release["runtime"].clone()).unwrap(), &Default::default(),
     )
     .unwrap();
     let cases=BTreeMap::from([
@@ -27,7 +27,7 @@ fn actual_51_goto_identifier_structure() {
     ]);
     let staging = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../.tmp/rust-source-luac-real/goto-identifiers");
-    let compiled = compiler.check(&staging, &cases).unwrap();
+    let compiled = compiler.check_with_control(&staging, &cases, &Default::default()).unwrap();
     assert_eq!(compiled["passed"], true);
     // Native Lua 5.1 permits goto identifiers. facts::lua is the separate fixed
     // external fixed reference scanner contract, where goto remains a keyword rather than a name.
@@ -36,12 +36,12 @@ fn actual_51_goto_identifier_structure() {
         .map(|(name, raw)| (name.clone(), SyntaxDocument::new(raw).unwrap().facts(false)))
         .collect();
     let invalid = compiler
-        .check(
+        .check_with_control(
             &staging,
             &BTreeMap::from([
                 ("GotoStatement.lua".into(), b"goto done\n".to_vec()),
                 ("Label.lua".into(), b"::done::\n".to_vec()),
-            ]),
+            ]), &Default::default(),
         )
         .unwrap();
     assert_eq!(invalid["passed"], false);
@@ -93,12 +93,12 @@ fn actual_51_syntax_unicode_early_error_and_no_bytecode() {
     let identity: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
     let manifest: Manifest = serde_json::from_value(identity["runtime"].clone()).unwrap();
-    let runtime = Runtime::verified(&runtime_root, manifest).unwrap();
+    let runtime = Runtime::verified_with_ordered_control(&runtime_root, manifest, &Default::default()).unwrap();
     let staging =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-luac-real/空 格目录");
     fs::create_dir_all(&staging).unwrap();
     let good=BTreeMap::from([("中文 子目录/合法.lua".to_string(),"-- 中文注释\nlocal function ok(...) local x={...}; return '字符串',unpack(x) end\nreturn ok(1,2)\n".as_bytes().to_vec())]);
-    let result = runtime.check(&staging, &good).unwrap();
+    let result = runtime.check_with_control(&staging, &good, &Default::default()).unwrap();
     assert_eq!(result["passed"], true, "{result}");
     let mut large = b"local =\n".to_vec();
     large.extend(std::iter::repeat_n(b' ', 4 << 20));
@@ -108,7 +108,7 @@ fn actual_51_syntax_unicode_early_error_and_no_bytecode() {
         ("Bitops.lua".into(), b"return 1 & 2\n".to_vec()),
         ("EOF.lua".into(), b"local function broken(\n".to_vec()),
     ]);
-    let bad = runtime.check(&staging, &cases).unwrap();
+    let bad = runtime.check_with_control(&staging, &cases, &Default::default()).unwrap();
     assert_eq!(bad["passed"], false);
     assert_eq!(bad["diagnostics"].as_array().unwrap().len(), 4);
     assert!(
@@ -119,7 +119,7 @@ fn actual_51_syntax_unicode_early_error_and_no_bytecode() {
             .any(|d| d["file"] == "中文 子目录/早期错误.lua" && d["line"] == 1)
     );
     let bytecode = BTreeMap::from([("Bytecode.lua".to_string(), b"\x1bLua".to_vec())]);
-    assert!(runtime.check(&staging, &bytecode).is_err());
+    assert!(runtime.check_with_control(&staging, &bytecode, &Default::default()).is_err());
     assert!(!staging.join("luac.out").exists());
     fs::write(
         staging.parent().unwrap().join("real-luac-report.json"),

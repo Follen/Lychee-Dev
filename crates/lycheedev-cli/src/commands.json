@@ -30,6 +30,9 @@
       "--product <track>",
       "--path <directory>"
     ],
+    "required": [
+      "--product"
+    ],
     "examples": [
       "lycheedev project init --path PROJECT_DIR --product retail --format json"
     ],
@@ -82,6 +85,9 @@
     ],
     "examples": [
       "lycheedev data hotfix --home EXAMPLE_HOME --source dbcache --snapshot DATA_PIN --dbcache DBCACHE_FILE --table-hash 0000002A --record 2 --format json"
+    ],
+    "required": [
+      "--source"
     ]
   },
   {
@@ -94,6 +100,9 @@
       "--format text|json|jsonl",
       "--snapshot <pin>",
       "--path <directory>"
+    ],
+    "required": [
+      "--snapshot"
     ],
     "examples": [
       "lycheedev project lock --home EXAMPLE_HOME --path PROJECT_DIR --snapshot SOURCE_PIN --format json"
@@ -134,6 +143,10 @@
     ],
     "constraints": [
       "PROBE_FILE contains Lua source bytes to store under the name example_read."
+    ],
+    "required": [
+      "--name",
+      "--file"
     ]
   },
   {
@@ -166,7 +179,12 @@
     "effects": {
       "gameProcess": true,
       "gameInput": true
-    }
+    },
+    "required": [
+      "--session",
+      "--request",
+      "--budget-seconds"
+    ]
   },
   {
     "path": "live probe list",
@@ -465,6 +483,9 @@
     ],
     "constraints": [
       "DATA_PIN fixes the product/build/locale selection; CLIENT_DIR supplies matching installation data. Replace 134400 with the FileDataID to inspect."
+    ],
+    "required": [
+      "--file-id"
     ]
   },
   {
@@ -492,6 +513,9 @@
     ],
     "examples": [
       "lycheedev asset search --home EXAMPLE_HOME --snapshot DATA_PIN --listfile community-csv --query BLP --limit 1 --offline --format json"
+    ],
+    "required": [
+      "--listfile"
     ]
   },
   {
@@ -523,6 +547,10 @@
     ],
     "constraints": [
       "DATA_PIN fixes the product/build/locale selection; CLIENT_DIR supplies matching installation data for file 134400. RAW_OUTPUT_FILE is a new output file under an existing parent directory; --encoding raw exports the original bytes."
+    ],
+    "required": [
+      "--file-id",
+      "--output"
     ]
   },
   {
@@ -552,6 +580,9 @@
     ],
     "constraints": [
       "AVI_FILE is a complete supported local AVI input; FRAMES_DIR is an existing output directory. The command writes extracted frames and their manifest there."
+    ],
+    "required": [
+      "--output"
     ]
   },
   {
@@ -812,7 +843,11 @@
     "effects": {
       "gameProcess": true,
       "gameInput": true
-    }
+    },
+    "required": [
+      "--session",
+      "--request"
+    ]
   },
   {
     "path": "live reload fallback",
@@ -840,7 +875,12 @@
     "effects": {
       "gameProcess": true,
       "gameInput": true
-    }
+    },
+    "required": [
+      "--installation",
+      "--pid",
+      "--request"
+    ]
   },
   {
     "path": "live bugs",
@@ -868,7 +908,11 @@
     "effects": {
       "gameProcess": true,
       "gameInput": true
-    }
+    },
+    "required": [
+      "--session",
+      "--request"
+    ]
   },
   {
     "path": "target resolve",
@@ -961,6 +1005,11 @@
     ],
     "examples": [
       "lycheedev target add example-retail --home EXAMPLE_HOME --installation CLIENT_DIR --product retail --region us --locale enUS --format json"
+    ],
+    "required": [
+      "--product",
+      "--region",
+      "--locale"
     ]
   },
   {
@@ -1158,6 +1207,10 @@
     ],
     "constraints": [
       "CAP_ID selects a capture and its dependency closure; BUNDLE_OUTPUT_FILE is a new output file for the bundle."
+    ],
+    "required": [
+      "--ids",
+      "--output"
     ]
   },
   {
@@ -1236,6 +1289,9 @@
     ],
     "constraints": [
       "BATCH_FILE contains a JSON request object, for example {\"requests\":[{\"id\":\"query-1\",\"query\":{\"text\":\"GetActionButtonForID\",\"topic\":\"lua\",\"mode\":\"precise\",\"limit\":1}}]}. SOURCE_PIN selects the fixed snapshot for every item."
+    ],
+    "required": [
+      "--file"
     ]
   },
   {
@@ -1249,6 +1305,10 @@
       "--source <key>",
       "--product <track>",
       "--ref <full-ref-or-commit>"
+    ],
+    "required": [
+      "--source",
+      "--product"
     ],
     "examples": [
       "lycheedev source sync --home EXAMPLE_HOME --source wow-ui-source --product retail --ref 31c7f7b9cc79e56c986b365c06a6afbcf3c9177b --format json"
@@ -1430,6 +1490,10 @@
     ],
     "constraints": [
       "SOURCE_PIN is an existing fixed selection. Using the same pin for --from and --to produces an empty comparison; use two fixed pins to inspect revision changes."
+    ],
+    "required": [
+      "--from",
+      "--to"
     ]
   },
   {
@@ -1447,6 +1511,9 @@
     ],
     "constraints": [
       "Removes eligible derived source cache from EXAMPLE_HOME toward --target-bytes, accounting for fixed-pin, project, capture and active-session references."
+    ],
+    "required": [
+      "--target-bytes"
     ]
   },
   {

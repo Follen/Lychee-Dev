@@ -152,14 +152,13 @@ fn compact_copy_chains_share_one_physical_slot_and_preserve_sorted_logical_rows(
             table.location(id).unwrap(),
             table.location(10).unwrap()
         ));
-        let row = table.row(id, 100).unwrap();
-        assert_eq!(row["ID"], Value::UInt(u64::from(id)));
-        assert_eq!(row["Value"], Value::Int(1));
-        assert_eq!(row["Parent"], Value::UInt(0));
+        let row = table.leased_row_values(id, 100).unwrap();
+        assert_eq!(row.value[0], Value::UInt(u64::from(id)));
+        assert_eq!(row.value[1], Value::Int(1));
+        assert_eq!(row.value[2], Value::UInt(0));
     }
-    assert_eq!(table.row(20, 100).unwrap()["Parent"], Value::Null);
+    assert_eq!(table.leased_row_values(20, 100).unwrap().value[2], Value::Null);
     assert_eq!(table.logical_count(), 4);
-    assert_eq!(table.page(Some(20), 1, 100).unwrap().after_id, Some(100));
 }
 
 #[test]
@@ -207,9 +206,9 @@ fn compact_record_index_fits_large_table_after_source_preparation() {
     assert_eq!(table.locations[&id], table.locations[&origin]);
     assert_eq!(table.location(id).unwrap().origin, origin);
     assert_eq!(table.raw_record(id).unwrap(), origin.to_le_bytes());
-    let row = table.row(id, 100).unwrap();
-    assert_eq!(row["ID"], Value::UInt(u64::from(id)));
-    assert_eq!(row["Value"], Value::Int(i64::from(origin)));
+    let row = table.leased_row_values(id, 100).unwrap();
+    assert_eq!(row.value[0], Value::UInt(u64::from(id)));
+    assert_eq!(row.value[1], Value::Int(i64::from(origin)));
     let logical_index =
         u64::from(PHYSICAL + COPIES) * 32 + u64::from(PHYSICAL) * 40 + u64::from(COPIES) * 72 + 4;
     assert_eq!(
@@ -298,8 +297,8 @@ fn wdc3_plus_same_offset_rows_keep_distinct_origins_and_relationships() {
             assert_eq!(table.location(20).unwrap().relation, Some(777));
             assert_eq!(table.location(10).unwrap().relation, None);
             assert_eq!(table.location(99).unwrap().relation, None);
-            assert_eq!(table.row(20, 100).unwrap()["Parent"], Value::UInt(777));
-            assert_eq!(table.row(99, 100).unwrap()["Parent"], Value::Null);
+            assert_eq!(table.leased_row_values(20, 100).unwrap().value[2], Value::UInt(777));
+            assert_eq!(table.leased_row_values(99, 100).unwrap().value[2], Value::Null);
             assert_eq!(
                 table.raw_record(10).unwrap().as_ptr(),
                 table.raw_record(20).unwrap().as_ptr()
@@ -329,8 +328,7 @@ fn compact_copy_uses_origin_common_override_and_requested_inline_identity() {
     };
     let table = open(&raw, &values_definition(), TableLimits::default()).unwrap();
     assert_eq!(table.physical.len(), 1);
-    assert_eq!(table.row(100, 100).unwrap()["Value"], Value::Int(99));
-    assert_eq!(table.raw_values(100, 0, 1).unwrap(), [99]);
+    assert_eq!(table.leased_row_values(100, 100).unwrap().value[1], Value::Int(99));
     let (mut raw, _, _) = fixture(3);
     put32(&mut raw, 108, 1);
     raw.extend(words(&[100, 1]));
@@ -340,8 +338,7 @@ fn compact_copy_uses_origin_common_override_and_requested_inline_identity() {
         TableLimits::default(),
     )
     .unwrap();
-    assert_eq!(table.row(100, 100).unwrap()["ID"], Value::UInt(100));
-    assert_eq!(table.raw_values(100, 0, 1).unwrap(), [100]);
+    assert_eq!(table.leased_row_values(100, 100).unwrap().value[0], Value::UInt(100));
     assert_eq!(table.raw_record(100).unwrap(), 1u32.to_le_bytes());
 }
 
@@ -403,7 +400,7 @@ fn compact_index_excludes_missing_partitions_without_changing_partial_coverage()
     .unwrap();
     assert_eq!(table.physical.len(), 1);
     assert_eq!(table.ids().collect::<Vec<_>>(), [10]);
-    assert_eq!(table.row(10, 100).unwrap()["Value"], Value::Int(11));
+    assert_eq!(table.leased_row_values(10, 100).unwrap().value[1], Value::Int(11));
     assert_eq!(table.coverage()["complete"], false);
     assert_eq!(table.coverage()["physicalRows"], 2);
     assert_eq!(table.coverage()["availableRows"], 1);
@@ -608,7 +605,7 @@ fn owned_table_moves_original_body_and_retains_it_through_shared_consumers() {
     let borrowed = table.clone();
     drop(table);
     assert!(!dropped.load(Ordering::SeqCst));
-    assert_eq!(borrowed.row(100, 1 << 20).unwrap()["Value"], Value::Int(1));
+    assert_eq!(borrowed.leased_row_values(100, 1 << 20).unwrap().value[1], Value::Int(1));
     drop(borrowed);
     assert!(dropped.load(Ordering::SeqCst));
 }
@@ -648,8 +645,8 @@ fn owned_table_does_not_rebuild_or_double_charge_compact_index() {
     assert_eq!(owned.locations[&101], owned.locations[&10]);
     for id in [10, 20, 100, 101] {
         assert_eq!(
-            borrowed.row(id, 1 << 20).unwrap(),
-            owned.row(id, 1 << 20).unwrap()
+            borrowed.leased_row_values(id, 1 << 20).unwrap().value,
+            owned.leased_row_values(id, 1 << 20).unwrap().value
         );
     }
 }

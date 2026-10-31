@@ -4,7 +4,6 @@ use lycheedev_core::{ToolkitError, control::OperationControl};
 mod http;
 #[cfg(test)]
 mod tests;
-use crate::request::DataContext;
 use lycheedev_core::{Result, evidence, storage};
 use serde::{
     Deserialize, Serialize,
@@ -168,17 +167,6 @@ pub struct Context {
     budget: Option<std::sync::Arc<crate::resource::Budget>>,
 }
 impl Context {
-    pub fn prepare(ctx: &DataContext, deadline: Instant) -> Result<Self> {
-        Self::prepare_budgeted(ctx, deadline, None)
-    }
-    pub fn prepare_budgeted(
-        ctx: &DataContext,
-        deadline: Instant,
-        budget: Option<std::sync::Arc<crate::resource::Budget>>,
-    ) -> Result<Self> {
-        Self::prepare_scoped(&ctx.home, ctx.source.key_file.as_deref(), ctx.source.offline,
-            &ctx.control, deadline, budget)
-    }
     pub(crate) fn prepare_scoped(
         home: &Path,
         key_file: Option<&str>,
@@ -302,3 +290,6 @@ impl Context {
         serde_json::to_value(&self.source).expect("serializable source identity")
     }
 }
+
+#[cfg(test)]
+mod input_tests;

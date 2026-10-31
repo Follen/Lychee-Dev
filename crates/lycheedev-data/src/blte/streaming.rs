@@ -158,7 +158,6 @@ impl<'a> Reader<'a> {
                 limits,
                 keys,
                 chunks,
-                allow_missing: false,
                 budget: Some(budget),
                 logical_layout: None,
                 source_check,
@@ -186,7 +185,7 @@ impl<'a> Reader<'a> {
     /// Only private staged publishers opt in. A partial chunk may reach their
     /// unpublished spool, never a public blob. On failure they stop immediately
     /// and retain the first observed error, then perform their checked cleanup.
-    /// The public eager Decode/unpack and other Reader consumers stay unchanged.
+    /// Range unpack and other Reader consumers retain whole-chunk admission.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_incremental_with_check(
         source: &'a mut dyn Read,

@@ -61,7 +61,7 @@ impl FlowTree {
             matches!(
                 node.kind,
                 FlowNodeKind::LoopLabel
-                    | FlowNodeKind::NamedLabel(_)
+                    | FlowNodeKind::NamedLabel
                     | FlowNodeKind::ForIStat(_)
                     | FlowNodeKind::Break
                     | FlowNodeKind::Continue
@@ -384,7 +384,7 @@ fn flow_node_position(kind: &FlowNodeKind) -> Option<TextSize> {
         | FlowNodeKind::Unreachable
         | FlowNodeKind::BranchLabel
         | FlowNodeKind::LoopLabel
-        | FlowNodeKind::NamedLabel(_)
+        | FlowNodeKind::NamedLabel
         | FlowNodeKind::Break
         | FlowNodeKind::Continue
         | FlowNodeKind::Return => None,

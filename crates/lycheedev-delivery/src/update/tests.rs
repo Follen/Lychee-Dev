@@ -45,13 +45,13 @@ impl Fixture {
         }]
     }
     fn install(&self) {
-        deploy::fresh(&self.old, &self.target, "skill", VERSION).unwrap();
+        deploy::fresh_controlled(&self.old, &self.target, "skill", VERSION, &Default::default()).unwrap();
     }
     fn pending(&self, name: &str) -> (PathBuf, Value) {
         let archive = self.root.join(".lycheedev-updates").join(name);
         fs::create_dir_all(&archive).unwrap();
-        let previous = installation::inspect(&self.target, "skill").unwrap()["receipt"].clone();
-        let next = deploy::fresh(&self.next, &archive.join("next"), "skill", VERSION).unwrap();
+        let previous = installation::inspect_main_controlled(&self.target, "skill", &Default::default()).unwrap()["receipt"].clone();
+        let next = deploy::fresh_controlled(&self.next, &archive.join("next"), "skill", VERSION, &Default::default()).unwrap();
         let record = json!({"schema":"lycheedev.replacement.v1","target":self.target,"previous":previous,"next":next});
         storage::atomic_json(&archive.join("replacement.json"), &record).unwrap();
         fs::rename(&self.target, archive.join("previous")).unwrap();
@@ -81,7 +81,7 @@ fn candidate(root: &Path, body: &[u8], commit: char) {
 fn remembered_removed_skill_is_not_reinstalled_but_explicit_target_is() {
     let f = Fixture::new();
     let targets = f.targets();
-    managed(&f.old, VERSION, &f.state, &targets, false).unwrap();
+    managed_with_control(&f.old, VERSION, &f.state, &targets, false, &Default::default()).unwrap();
     let ctx = RequestContext {
         home: f.root.join("home"),
         cwd: f.root.clone(),
@@ -101,10 +101,10 @@ fn remembered_removed_skill_is_not_reinstalled_but_explicit_target_is() {
     assert_eq!(remembered.len(), 1);
     let discovered = discover_targets(remembered, &control).unwrap();
     assert!(discovered.is_empty());
-    let result = managed(&f.next, VERSION, &f.state, &discovered, false).unwrap();
+    let result = managed_with_control(&f.next, VERSION, &f.state, &discovered, false, &Default::default()).unwrap();
     assert_eq!(result.data["complete"], true);
     assert!(!f.target.exists());
-    managed(&f.next, VERSION, &f.state, &targets, false).unwrap();
+    managed_with_control(&f.next, VERSION, &f.state, &targets, false, &Default::default()).unwrap();
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
 }
 #[test]
@@ -115,7 +115,7 @@ fn absent_target_with_original_recovery_is_discovered_and_other_release_is_rejec
     let control = OperationControl::default();
     assert_eq!(discover_targets(f.targets(), &control).unwrap().len(), 1);
     for plan in [true, false] {
-        let error = managed(&f.other, VERSION, &f.state, &f.targets(), plan).unwrap_err();
+        let error = managed_with_control(&f.other, VERSION, &f.state, &f.targets(), plan, &Default::default()).unwrap_err();
         assert_eq!(error.code, "delivery.installation_conflict");
         assert_eq!(
             error.details["recovery"],
@@ -127,13 +127,13 @@ fn absent_target_with_original_recovery_is_discovered_and_other_release_is_rejec
             record
         );
     }
-    let plan = managed(&f.next, VERSION, &f.state, &f.targets(), true).unwrap();
+    let plan = managed_with_control(&f.next, VERSION, &f.state, &f.targets(), true, &Default::default()).unwrap();
     assert_eq!(
         plan.data["targets"][0]["recovery"],
         serde_json::to_value(&archive).unwrap()
     );
     assert!(!f.state.exists());
-    let result = managed(&f.next, VERSION, &f.state, &f.targets(), false).unwrap();
+    let result = managed_with_control(&f.next, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap();
     assert_eq!(result.data["complete"], true);
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
     assert!(!archive.exists());
@@ -143,15 +143,15 @@ fn cleanup_marker_without_archive_freezes_original_release_and_recovers() {
     let f = Fixture::new();
     f.install();
     let (archive, record) = f.pending("replace-original");
-    deploy::upgrade(None, &f.target, &archive, "skill", VERSION, true).unwrap();
+    deploy::upgrade_controlled(None, &f.target, &archive, "skill", VERSION, true, &Default::default()).unwrap();
     let marker = cleanup_marker(&archive);
     storage::atomic_json(&marker, &record).unwrap();
     fs::remove_dir_all(&archive).unwrap();
-    let error = managed(&f.other, VERSION, &f.state, &f.targets(), false).unwrap_err();
+    let error = managed_with_control(&f.other, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap_err();
     assert_eq!(error.code, "delivery.installation_conflict");
     assert!(marker.exists());
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
-    let result = managed(&f.next, VERSION, &f.state, &f.targets(), false).unwrap();
+    let result = managed_with_control(&f.next, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap();
     assert_eq!(result.data["complete"], true);
     assert!(!marker.exists());
 }
@@ -170,7 +170,7 @@ fn duplicate_recoveries_conflict_but_archive_and_its_cleanup_marker_deduplicate(
     );
     let other = f.root.join(".lycheedev-updates/replace-two.cleanup.json");
     storage::atomic_json(&other, &record).unwrap();
-    let error = managed(&f.next, VERSION, &f.state, &f.targets(), false).unwrap_err();
+    let error = managed_with_control(&f.next, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap_err();
     assert_eq!(error.code, "delivery.installation_conflict");
     assert_eq!(error.details["recoveries"].as_array().unwrap().len(), 2);
     assert!(!f.target.exists());
@@ -182,7 +182,7 @@ fn changed_pending_inventory_is_rejected_before_any_target_changes() {
     f.install();
     let (archive, record) = f.pending("replace-original");
     fs::write(archive.join("next/SKILL.md"), b"foreign edit").unwrap();
-    let error = managed(&f.next, VERSION, &f.state, &f.targets(), false).unwrap_err();
+    let error = managed_with_control(&f.next, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap_err();
     assert_eq!(error.code, "delivery.installation_conflict");
     assert_eq!(error.details["result"]["targets"][0]["state"], "pending");
     assert!(!f.target.exists());
@@ -210,14 +210,14 @@ fn same_release_recovery_accepts_receipt_order_but_rejects_changed_resources() {
     changed["next"]["resources"][0]["sha256"] = json!("e".repeat(64));
     storage::atomic_json(&archive.join("replacement.json"), &changed).unwrap();
     assert_eq!(
-        managed(&f.next, VERSION, &f.state, &f.targets(), true)
+        managed_with_control(&f.next, VERSION, &f.state, &f.targets(), true, &Default::default())
             .unwrap_err()
             .code,
         "delivery.installation_conflict"
     );
     assert!(!f.target.exists());
     storage::atomic_json(&archive.join("replacement.json"), &record).unwrap();
-    managed(&f.next, VERSION, &f.state, &f.targets(), false).unwrap();
+    managed_with_control(&f.next, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap();
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
     assert!(!archive.exists());
 }
@@ -228,7 +228,7 @@ fn cancelled_second_target_reports_and_preserves_first_committed_target() {
     let mut targets = f.targets();
     let other = f.root.join("second/lycheedev");
     fs::create_dir(other.parent().unwrap()).unwrap();
-    deploy::fresh(&f.old, &other, "skill", VERSION).unwrap();
+    deploy::fresh_controlled(&f.old, &other, "skill", VERSION, &Default::default()).unwrap();
     targets.push(UpdateTarget {
         component: "skill".into(),
         path: other.clone(),
@@ -255,13 +255,13 @@ fn cancelled_second_target_reports_and_preserves_first_committed_target() {
     assert_eq!(error.details["result"]["targets"][1]["state"], "pending");
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
     assert_eq!(fs::read(other.join("SKILL.md")).unwrap(), b"old");
-    managed(&f.next, VERSION, &f.state, &targets, false).unwrap();
+    managed_with_control(&f.next, VERSION, &f.state, &targets, false, &Default::default()).unwrap();
     assert_eq!(fs::read(other.join("SKILL.md")).unwrap(), b"next");
 }
 #[test]
 fn empty_default_update_does_not_create_state_and_cancelled_update_never_creates_it() {
     let f = Fixture::new();
-    let result = managed(&f.next, VERSION, &f.state, &[], false).unwrap();
+    let result = managed_with_control(&f.next, VERSION, &f.state, &[], false, &Default::default()).unwrap();
     assert_eq!(result.data["complete"], true);
     assert!(!f.state.exists());
     let control = OperationControl::default();
@@ -311,7 +311,7 @@ fn recovery_appearing_after_preflight_blocks_new_release_under_target_lease() {
         storage::read_json::<Value>(&archive.join("replacement.json")).unwrap(),
         record
     );
-    managed(&f.next, VERSION, &f.state, &f.targets(), false).unwrap();
+    managed_with_control(&f.next, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap();
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
 }
 #[test]
@@ -332,19 +332,19 @@ fn authoritative_recovery_scan_and_moves_exclude_all_competing_deploy_entries() 
             }
             let archive = f.root.join("competing-archive");
             assert_eq!(
-                deploy::fresh(&f.other, &f.target, "skill", VERSION)
+                deploy::fresh_controlled(&f.other, &f.target, "skill", VERSION, &Default::default())
                     .unwrap_err()
                     .code,
                 "workspace.busy"
             );
             assert_eq!(
-                deploy::upgrade(Some(&f.other), &f.target, &archive, "skill", VERSION, false)
+                deploy::upgrade_controlled(Some(&f.other), &f.target, &archive, "skill", VERSION, false, &Default::default())
                     .unwrap_err()
                     .code,
                 "workspace.busy"
             );
             assert_eq!(
-                deploy::remove(&f.target, &archive, "skill")
+                deploy::remove_controlled(&f.target, &archive, "skill", &Default::default())
                     .unwrap_err()
                     .code,
                 "workspace.busy"
@@ -391,7 +391,7 @@ fn checked_update_state_close_failure_keeps_completed_business_result() {
         "current"
     );
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
-    managed(&f.next, VERSION, &f.state, &f.targets(), false).unwrap();
+    managed_with_control(&f.next, VERSION, &f.state, &f.targets(), false, &Default::default()).unwrap();
 }
 #[test]
 fn checked_update_state_close_failure_preserves_cancellation_and_prior_commits() {
@@ -400,7 +400,7 @@ fn checked_update_state_close_failure_preserves_cancellation_and_prior_commits()
     let mut targets = f.targets();
     let second = f.root.join("second/lycheedev");
     fs::create_dir(second.parent().unwrap()).unwrap();
-    deploy::fresh(&f.old, &second, "skill", VERSION).unwrap();
+    deploy::fresh_controlled(&f.old, &second, "skill", VERSION, &Default::default()).unwrap();
     targets.push(UpdateTarget {
         component: "skill".into(),
         path: second.clone(),
@@ -440,7 +440,7 @@ fn checked_update_state_close_failure_preserves_cancellation_and_prior_commits()
     assert_eq!(error.details["cleanup"]["code"], "fixture.close");
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
     assert_eq!(fs::read(second.join("SKILL.md")).unwrap(), b"old");
-    managed(&f.next, VERSION, &f.state, &targets, false).unwrap();
+    managed_with_control(&f.next, VERSION, &f.state, &targets, false, &Default::default()).unwrap();
 }
 
 fn seed_configured_targets(home: &Path, rows: &[(String, Vec<u8>)]) {

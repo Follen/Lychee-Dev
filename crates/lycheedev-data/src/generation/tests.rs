@@ -547,7 +547,6 @@ fn generation_identity_ignores_runtime_counters_but_binds_locale_schema_and_key_
         &[vec![Cell::U(1), Cell::U(42)]],
     )]);
     let inv = fx.context();
-    let request = request("Sample");
     let budget = Arc::new(Budget::query_controlled(
         inv.control.deadline(),
         inv.control.clone(),

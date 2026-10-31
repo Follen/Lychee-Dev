@@ -82,6 +82,7 @@ jobs:
         run: |
           node --test `
             tools/version.test.mjs `
+            tools/release-channel.test.mjs `
             tools/ci-changes.test.mjs `
             tools/ci-release.test.mjs `
             tools/ci-package-business.test.mjs `
@@ -469,6 +470,22 @@ jobs:
         run: |
           node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package lycheedev-live --target lycheedev_live --arguments 'mailbox::admission::tests::mailbox_admission_redirected_claim_file_fails,--ignored,--exact,--nocapture,--test-threads=1' --report .tmp/ci/validate-rust/${{ matrix.shard }}/symlink-claim.json
           if ($LASTEXITCODE -ne 0) { throw 'claim file-symlink boundary failed' }
+      - name: Exercise guarded process ownership and checked thread closure
+        if: matrix.shard == 'source-runtime'
+        run: |
+          $record = Get-Content .tmp/ci/build-test/test-programs.json -Raw | ConvertFrom-Json
+          $helpers = @($record.support | Where-Object { $_.package -eq 'lycheedev-windows' -and $_.target -eq 'guarded_spawn_fixture' })
+          if ($helpers.Count -ne 1) { throw 'one sealed guarded-spawn helper is required' }
+          $helper = Join-Path (Get-Location).Path $helpers[0].path
+          if ((Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash.ToLowerInvariant() -ne $helpers[0].sha256) { throw 'guarded-spawn helper identity differs' }
+          $guarded = Join-Path (Get-Location).Path '.tmp/ci/validate-rust/source-runtime/guarded'
+          New-Item -ItemType Directory -Path $guarded -Force | Out-Null
+          $env:LYCHEEDEV_SUSPENDED_HELPER = $helper
+          $env:LYCHEEDEV_SUSPENDED_HELPER_SHA256 = $helpers[0].sha256
+          $env:LYCHEEDEV_SUSPENDED_FIXTURE_ROOT = $guarded
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package lycheedev-windows --target lycheedev_windows --arguments 'guarded_spawn::tests::,--ignored,--nocapture,--test-threads=1' --report "$guarded/report.json" | Tee-Object -FilePath "$guarded/stdout.txt"
+          if ($LASTEXITCODE -ne 0) { throw 'guarded process regressions failed' }
+          if ((Get-Content "$guarded/stdout.txt" -Raw) -notmatch 'test result: ok\. 4 passed; 0 failed;') { throw 'all four guarded process regressions must execute' }
       - name: Preserve the validation report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

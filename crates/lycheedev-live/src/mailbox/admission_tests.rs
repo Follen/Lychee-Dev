@@ -871,10 +871,10 @@ fn mailbox_admission_redirected_claim_file_fails() {
 }
 
 #[test]
+#[ignore = "child fixture only; invoked by formal admission process regressions"]
 fn mailbox_admission_process_helper() {
-    let Some(root) = std::env::var_os("LYCHEEDEV_FORMAL_ADMISSION_ROOT") else {
-        return;
-    };
+    let root = std::env::var_os("LYCHEEDEV_FORMAL_ADMISSION_ROOT")
+        .expect("formal admission child fixture requires its owned root");
     let f = Fixture::at(PathBuf::from(root));
     let mut book = f.book();
     let mode = std::env::var("LYCHEEDEV_FORMAL_ADMISSION_MODE").unwrap();
@@ -915,8 +915,12 @@ fn spawn(f: &Fixture, mode: &str) -> OwnedChild {
     let output = File::create(f.root.join(format!("child-{mode}.log"))).unwrap();
     OwnedChild(
         Command::new(std::env::current_exe().unwrap())
-            .arg("mailbox_admission_process_helper")
-            .arg("--nocapture")
+            .args([
+                "--exact",
+                "mailbox::admission::tests::mailbox_admission_process_helper",
+                "--ignored",
+                "--nocapture",
+            ])
             .env("LYCHEEDEV_FORMAL_ADMISSION_ROOT", &f.root)
             .env("LYCHEEDEV_FORMAL_ADMISSION_MODE", mode)
             .stdin(Stdio::piped())

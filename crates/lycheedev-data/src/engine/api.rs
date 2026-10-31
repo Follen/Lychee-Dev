@@ -540,6 +540,72 @@ pub enum DomainRequest {
     CreatureDisplay { display_id: u32, file_data_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
     CreatureModel { file_data_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
 }
+impl DomainRequest {
+    pub(crate) fn binding(&self) -> (&SourceMode, &[String]) {
+        match self {
+            Self::ItemGet {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::ItemModels {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::ItemTextures {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::ItemGeosets {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::SpellInfo {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::SpellAuras {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::SpellSummons {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::EncounterGet {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::DecorList {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::DecorGet {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::CreatureDisplay {
+                mode,
+                hotfix_captures,
+                ..
+            }
+            | Self::CreatureModel {
+                mode,
+                hotfix_captures,
+                ..
+            } => (mode, hotfix_captures),
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DecorSelector { Id, ItemId, ModelFileDataId }

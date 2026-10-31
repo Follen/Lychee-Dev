@@ -15,13 +15,20 @@ pub(crate) struct Journal {
     created_at: String,
     #[serde(default)]
     completed_at: Option<String>,
-    #[serde(default)]
-    markers: Vec<String>,
-    steps: Vec<Step>,
+    // Inspection validates these typed wire fields without replaying their work.
+    #[serde(default, rename = "markers")]
+    _markers: Vec<String>,
+    #[serde(rename = "steps")]
+    _steps: Vec<Step>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Step { id: String, detail: String }
+struct Step {
+    #[serde(rename = "id")]
+    _id: String,
+    #[serde(rename = "detail")]
+    _detail: String,
+}
 fn invalid(detail: impl fmt::Display) -> ToolkitError {
     ToolkitError::new(
         "vault.archive_state",

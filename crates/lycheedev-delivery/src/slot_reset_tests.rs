@@ -179,14 +179,14 @@ fn reset_resumes_durable_archiving_and_installing_intents() {
 fn reset_completed_retry_preserves_later_reservation_and_checks_original_archive() {
     let f = Fixture::new();
     let control = OperationControl::default();
-    let mut pool = slots::read_pool(&f.parent).unwrap();
+    let mut pool = slots::read_pool_controlled(&f.parent, &Default::default()).unwrap();
     pool.files[0].nonce = "a".repeat(32);
     pool.files[0].pending_hash = "b".repeat(64);
     slots::save_pool(&f.parent, &pool, &control).unwrap();
     let original = fs::read(f.parent.join(slots::MARKER)).unwrap();
     f.run().unwrap();
     assert_eq!(fs::read(f.archive.join(slots::MARKER)).unwrap(), original);
-    let mut pool = slots::read_pool(&f.parent).unwrap();
+    let mut pool = slots::read_pool_controlled(&f.parent, &Default::default()).unwrap();
     pool.files[1].nonce = "c".repeat(32);
     slots::save_pool(&f.parent, &pool, &control).unwrap();
     let later = fs::read(f.parent.join(slots::MARKER)).unwrap();

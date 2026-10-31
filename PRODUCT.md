@@ -36,11 +36,12 @@ authoritative. UI changes preserve the existing capabilities, opt-in
 investigation resources, bounded lifetimes, protected UI boundaries, paired
 English and Simplified Chinese copy and exact operation identity.
 
-The addon supports the current client profiles declared by
-`addon/Core/ClientGate.lua`: Retail, Classic, Classic Era, Titan, Forever Asia
-Beta, Forever CN Beta and Anniversary. The two Forever betas are independent
-products even when their build numbers or addon files match; support in code is
-not proof of interactive acceptance on every client.
+The addon selects six runtime profile families from
+`addon/Core/ClientGate.lua`: Retail, Classic, Classic Era, Titan, Forever and
+Anniversary. Retail has two admitted interface baselines. The CLI distinguishes
+seven delivery products: the two Forever betas share an addon profile but retain
+independent Data and Live identities. Support in code is not proof of interactive
+acceptance on every client.
 
 ## Brand Commitments
 

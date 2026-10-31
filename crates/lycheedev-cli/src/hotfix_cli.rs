@@ -559,6 +559,25 @@ fn render_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn public_hotfix_source_is_required_before_input_or_pin_reads() {
+        let home = std::env::temp_dir().join(format!("cli-admission-unused-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let words = ["data", "hotfix", "--source", "dbcache", "--snapshot", "PIN-explicit", "--dbcache", "not-created.bin"].map(str::to_owned);
+        let mut inv = crate::parse(&words).unwrap();
+        inv.home = home.clone();
+        let (_, Request::Local(local)) = admit(&inv).unwrap() else { panic!("local hotfix"); };
+        assert_eq!(local.snapshot, "PIN-explicit");
+        assert!(matches!(local.input, LocalInput::File(ref file) if file == &inv.cwd.join("not-created.bin")));
+        let mut incomplete = words.to_vec();
+        incomplete.drain(2..4);
+        let mut inv = crate::parse(&incomplete).unwrap();
+        inv.home = home.clone();
+        let error = admit(&inv).unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains("--source"));
+        assert!(!home.exists());
+    }
     use lycheedev_data::resource::Cost;
     use std::{
         collections::BTreeMap,

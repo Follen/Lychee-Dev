@@ -60,13 +60,13 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     .unwrap();
     assert_eq!(original["version"], "3.0.2");
     assert_eq!(
-        slots::inspect(&parent, "3.0.2").unwrap()["files"]
+        slots::inspect_controlled(&parent, "3.0.2", &Default::default()).unwrap()["files"]
             .as_array()
             .unwrap()
             .len(),
         500
     );
-    let mut pool = slots::inspect(&parent, "3.0.2").unwrap();
+    let mut pool = slots::inspect_controlled(&parent, "3.0.2", &Default::default()).unwrap();
     pool["files"][0]["nonce"] = json!("unresolved owner");
     storage::atomic_json(&parent.join(".lycheedev-slots.json"), &pool).unwrap();
     assert_eq!(
@@ -149,7 +149,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     );
     let journal = PathBuf::from(error.details["result"]["journal"].as_str().unwrap());
     assert!(journal.exists());
-    assert!(installation::verify_clean(&target, "3.1.2", slots::TRANSPORT, 500).is_err());
+    assert!(installation::verify_clean_controlled(&target, "3.1.2", slots::TRANSPORT, 500, &Default::default()).is_err());
     let changed = temp.0.join("changed");
     candidate(&changed, "3.1.2", b"-- alternate candidate\n");
     assert_eq!(
@@ -205,7 +205,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     .unwrap();
     assert_eq!(result["receipt"]["version"], "3.1.2");
     assert_eq!(
-        slots::inspect(&parent, "3.1.2").unwrap()["schema"],
+        slots::inspect_controlled(&parent, "3.1.2", &Default::default()).unwrap()["schema"],
         slots::SCHEMA
     );
     let after: serde_json::Value = storage::read_json(&journal).unwrap();
@@ -243,7 +243,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     )
     .unwrap();
     assert_eq!(third_result["receipt"]["version"], "3.1.3");
-    let final_pool = slots::inspect(&parent, "3.1.3").unwrap();
+    let final_pool = slots::inspect_controlled(&parent, "3.1.3", &Default::default()).unwrap();
     assert_eq!(final_pool["schema"], slots::SCHEMA);
     assert!(final_pool.get("pendingVersion").is_none());
     assert!(final_pool.get("sourceSchema").is_none());

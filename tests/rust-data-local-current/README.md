@@ -13,7 +13,7 @@ From the current product checkout on Windows, supply an existing request JSON:
 ```json
 {
   "goArtifact": "<existing fixed Go 3.2.4 reference artifact.json>",
-  "installation": "<selected current Retail client directory>"
+  "installation": "<selected current CN Retail client directory>"
 }
 ```
 
@@ -26,7 +26,8 @@ node tests/rust-data-local-current/prepare.mjs --execute-main <request.json>
 ```
 
 The producer runs version/help/describe before initializing its fresh home.
-`target resolve` reads the current active installed build and fixes
+`target resolve` requires an active CN Retail installation, fixes region `cn` and locale
+`zhCN`, reads its current installed build and fixes
 `refs/heads/master` to the returned exact definition commit. Every subsequent
 Data/asset command uses that same pin and local installation. Map's entire
 verified DB2 body, all ordered IDs/rows, schema, record/page/search/foreign-key,

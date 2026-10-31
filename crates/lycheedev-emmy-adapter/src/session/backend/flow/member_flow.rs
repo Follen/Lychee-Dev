@@ -111,31 +111,6 @@ impl<E> OwnedQuery<'_, '_, E> {
             None => self.flow_member_fallback(member),
         }
     }
-    pub fn type_of_member_before_at(
-        &mut self,
-        member: &SemanticId,
-        offset: u32,
-    ) -> QueryResult<OwnedValue, E> {
-        let Some(tree) = self.owned_flow_tree()? else {
-            return self.flow_member_fallback(member);
-        };
-        let Some(node) = tree
-            .get_flow_id_at(offset.into())
-            .and_then(|flow| tree.get_flow_node(flow))
-        else {
-            return self.flow_member_fallback(member);
-        };
-        match self.walk_member_flow(
-            member,
-            &tree,
-            node.antecedent.as_ref(),
-            &mut HashSet::new(),
-            &mut PathState::default(),
-        )? {
-            Some(value) => Ok(value),
-            None => self.flow_member_fallback(member),
-        }
-    }
     fn trace_member_flow(
         &mut self,
         member: &SemanticId,

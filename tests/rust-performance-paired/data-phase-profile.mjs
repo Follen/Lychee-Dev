@@ -15,12 +15,6 @@ export const DATA_DETAIL_NAMES = Object.freeze([
   'encoded_chunk_read', 'encoded_chunk_md5', 'zlib_inflate',
   'whole_content_key_hash', 'decoded_cache_commit',
 ]);
-// Historical v3 combines private and final stage sealing. Keep its exact
-// vector separate; neither historical records nor their bytes are upgraded.
-export const DATA_PUBLISHER_NAMES_V3 = Object.freeze([
-  'source_to_spool_inclusive', 'spool_to_shard_inclusive', 'final_verify_inclusive',
-  'stage_create', 'stage_seal', 'digest_lock', 'shard_open', 'rename', 'winner_open', 'checked_close',
-]);
 export const DATA_PUBLISHER_NAMES = Object.freeze([
   'source_to_spool_inclusive', 'spool_to_shard_inclusive', 'final_verify_inclusive',
   'stage_create', 'private_spool_read_ready', 'final_stage_seal', 'digest_lock',
@@ -31,17 +25,7 @@ export const DATA_CLI_PROFILE_VARIABLE = 'LYCHEEDEV_DATA_CLI_PROFILE';
 export const DATA_CLI_TIMING = 'wall-clock from instrumented main entry; excludes pre-main startup and this CLI profile emission; dispatch includes nested Data phases and Data profile emission; external elapsed remainder is unattributed, not startup or CPU time';
 export const DATA_PHASE_TIMING = 'wall-clock; phases may nest or overlap across workers; not additive; budget lifetime and phases are diagnostics, not accepted command total or CPU time';
 export const DATA_CAPTURE_TIMING = 'capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed';
-const VARIABLE = 'LYCHEEDEV_DATA_PHASE_PROFILE';
-
-export function dataPhaseEnvironment(environment, {enabled = false, measured = false, engine = null} = {}) {
-  // Windows environment names are case-insensitive. An inherited opt-in must
-  // not leak into Go, preparation, ordinary measurement or startup-only mode.
-  const result = Object.fromEntries(Object.entries(environment).filter(([key]) => ![VARIABLE, DATA_CLI_PROFILE_VARIABLE].includes(key.toUpperCase())));
-  if (enabled && measured && engine === 'rust') result[VARIABLE] = '1';
-  return result;
-}
-
-export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}) {
+export function dataPhaseProfile(stderr) {
   assert(Buffer.isBuffer(stderr), 'Data phase stderr must retain original bytes');
   assert(stderr.length > 0 && stderr.length <= 16384, 'missing or oversized Data phase profile');
   const text = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(stderr);
@@ -51,17 +35,8 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
   // The recorder emits compact JSON. Round-trip identity also rejects duplicate
   // keys, lossy numbers, BOMs, and additional non-profile stderr bytes.
   assert.equal(JSON.stringify(value), line, 'Data phase record must be compact, exact JSON without duplicate keys');
-  const sql = value.schema === 'lycheedev.data-query-phases.v5';
-  const publisherNames = sql || value.schema === 'lycheedev.data-query-phases.v4' ? DATA_PUBLISHER_NAMES
-    : value.schema === 'lycheedev.data-query-phases.v3' ? DATA_PUBLISHER_NAMES_V3 : null;
-  const publisher = publisherNames !== null;
-  const detailed = publisher || value.schema === 'lycheedev.data-query-phases.v2';
-  assert(detailed || value.schema === 'lycheedev.data-query-phases.v1', 'known Data profile schema required');
-  assert.deepEqual(Object.keys(value).sort(), sql
-    ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'publisher', 'schema', 'sql', 'timing']
-    : publisher ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'publisher', 'schema', 'timing']
-    : detailed ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'schema', 'timing']
-      : ['captureTiming', 'elapsedMicros', 'phases', 'schema', 'timing']);
+  assert.equal(value.schema, 'lycheedev.data-query-phases.v5', 'complete v5 Data profile required');
+  assert.deepEqual(Object.keys(value).sort(), ['captureTiming', 'details', 'elapsedMicros', 'phases', 'publisher', 'schema', 'sql', 'timing']);
   assert.equal(value.timing, DATA_PHASE_TIMING); assert.equal(value.captureTiming, DATA_CAPTURE_TIMING);
   const integer = (value, label) => assert(Number.isSafeInteger(value) && value >= 0, `${label}: nonnegative exact integer required`);
   integer(value.elapsedMicros, 'budget elapsedMicros');
@@ -76,18 +51,9 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
     }
   }
   counters(value.phases, DATA_PHASE_NAMES);
-  if (detailed) counters(value.details, DATA_DETAIL_NAMES);
-  if (publisher) counters(value.publisher, publisherNames);
-  if (sql) counters(value.sql, DATA_SQL_NAMES);
-  // Only these authenticated twelve fixture paths require these known scopes
-  // on success. Early product failures legitimately finish before any phase.
-  const image = entry?.kind === 'image' && /^B04-(palette|bgra8|bc1|bc2|bc3)-(png|webp)$/.test(entry.id);
-  const physical = entry?.kind === 'sql' && entry.id === 'B04-sql-correctness'
-    || entry?.kind === 'content' && entry.id === 'B04-blte-17MiB';
-  if (successful && (image || physical)) {
-    const required = image ? DATA_PHASE_NAMES : ['admission', 'prepare_inclusive', 'payload_inclusive', 'source_capture_metadata_inclusive', 'source_close'];
-    for (const name of required) assert(value.phases.find(phase => phase.phase === name).calls > 0, `${name}: required successful fixture scope was not observed`);
-  }
+  counters(value.details, DATA_DETAIL_NAMES);
+  counters(value.publisher, DATA_PUBLISHER_NAMES);
+  counters(value.sql, DATA_SQL_NAMES);
   return value;
 }
 

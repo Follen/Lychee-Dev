@@ -944,7 +944,7 @@ mod tests {
     fn blocked_helper() -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
-            .args(["--exact", "process::tests::helper_process", "--nocapture"])
+            .args(["--exact", "process::tests::helper_process", "--ignored", "--nocapture"])
             .env("LYCHEEDEV_SOURCE_TEST_PROCESS", "block");
         command
     }

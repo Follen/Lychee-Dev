@@ -18,7 +18,7 @@ fn return_count_family_uses_selected_native_slots_and_source_control_flow() {
     let addon=stage.join("addon");fs::create_dir(&addon).unwrap();
     fs::write(addon.join("Main.toc"),format!("## Interface: {}\nmain.lua\n",selection::source_interface(source).unwrap())).unwrap();
     let manifest:Value=serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler=luac::Runtime::verified(&PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed luac")),serde_json::from_value(manifest["runtime"].clone()).unwrap()).unwrap();
+    let compiler=luac::Runtime::verified_with_ordered_control(&PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed luac")),serde_json::from_value(manifest["runtime"].clone()).unwrap(), &Default::default()).unwrap();
     let catalog=environment::from_pin(&home,source,&Default::default()).unwrap();
     let after=catalog.facts.iter().find(|record|record.name=="C_Timer.After"&&record.namespace=="C_Timer"&&record.kind=="function"&&record.owner.is_none()).expect("real C_Timer.After declaration");
     assert!(after.returns.is_empty(),"actual pinned declaration establishes the API zero-return case");

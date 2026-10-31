@@ -1,5 +1,5 @@
 // Source query prototype: investigated Lua is parsed and never executed.
-use std::{collections::BTreeMap,path::PathBuf,sync::{Arc,atomic::AtomicBool},time::{Duration,Instant}};
+use std::{collections::BTreeMap,path::PathBuf,time::{Duration,Instant}};
 use emmylua_code_analysis::{Emmyrc,EmmyrcLuaVersion};
 use lycheedev_core::control::OperationControl;
 use lycheedev_source::native::*;

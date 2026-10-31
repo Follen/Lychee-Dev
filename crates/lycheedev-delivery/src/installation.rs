@@ -59,17 +59,6 @@ pub(crate) fn same_receipt_value(left: &Value, right: &Value) -> Result<bool> {
         &serde_json::from_value(right.clone())?,
     )
 }
-pub fn inspect(path: &Path, component: &str) -> Result<Value> {
-    inspect_main_controlled(path, component, &Default::default())
-}
-pub fn verify_clean(
-    path: &Path,
-    release: &str,
-    protocol: &str,
-    slots: u16,
-) -> Result<VerifiedInstallation> {
-    verify_clean_controlled(path, release, protocol, slots, &Default::default())
-}
 pub fn verify_clean_controlled(
     path: &Path,
     release: &str,

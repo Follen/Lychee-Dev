@@ -23,7 +23,7 @@ fn original_operator_pool_enforces_try_grow_releases_and_disables_spill() {
     let (context, owner) = runtime::context(budget.clone(), 4096, 1).unwrap();
     let runtime = context.runtime_env();
     assert!(!runtime.disk_manager.tmp_files_enabled());
-    let mut reservation =
+    let reservation =
         MemoryConsumer::new("provider-qualification").register(&runtime.memory_pool);
     reservation.try_grow(4096).unwrap();
     assert!(reservation.try_grow(1).is_err());
@@ -50,7 +50,7 @@ fn cancelled_or_unadmitted_operator_pool_does_not_grant_new_reservations() {
     assert!(runtime::context(budget.clone(), 65536, 1).is_err());
     assert_eq!(budget.refundable_retained_bytes(), 0);
     let (context, owner) = runtime::context(budget.clone(), 4096, 1).unwrap();
-    let mut reservation =
+    let reservation =
         MemoryConsumer::new("cancelled-qualification").register(&context.runtime_env().memory_pool);
     token.cancel();
     assert_eq!(

@@ -1,6 +1,6 @@
 //! Immutable declaration lookup ownership and compatibility regressions.
 use super::*;
-use std::{sync::atomic::{AtomicBool,Ordering},time::{Duration,Instant}};
+use std::{sync::atomic::Ordering,time::{Duration,Instant}};
 
 fn declaration(id:usize,file:usize,start:u32,end:u32)->IndexedDeclaration {
     IndexedDeclaration{id:DeclarationId::parse(&format!("{id:064x}")).unwrap(),name:format!("name_{id}"),

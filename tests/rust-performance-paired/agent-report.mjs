@@ -3,9 +3,9 @@ import {verifyTool} from './agent-tool-identity.mjs';
 // Rebuild conclusions from archived bytes and native custody, never valid booleans.
 import assert from 'node:assert/strict';
 import {dirname,join} from 'node:path';
-import {createRequire} from 'node:module';
+
 import {parse} from './agent-json.mjs';
-import {bounded,digest,loadOwnedAgentFixture,decodeDataImage,validateDataOutput,CSV_ROWS} from './agent-fixture-inputs.mjs';
+import {digest, loadOwnedAgentFixture, decodeDataImage, validateDataOutput, CSV_ROWS} from './agent-fixture-inputs.mjs';
 import {ownerFor,reader,sealed,authenticate,openArchive} from './agent-custody.mjs';
 import {auditQuery,generationProof,metadata} from './agent-audit.mjs';
 import {auditGoQuery} from './agent-go-replay.mjs';

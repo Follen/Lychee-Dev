@@ -30,7 +30,7 @@ fn whole_query_wdc_admission_is_shared_across_tables_and_caller_control() {
     let admitted = first.admitted_metadata_bytes();
     assert!(admitted > 0 && admitted < 4096);
     assert_eq!(unconstrained.snapshot().unwrap().metadata_bytes, admitted);
-    assert_eq!(first.row(1, 100).unwrap()["ID"], Value::UInt(1));
+    assert_eq!(first.leased_row_values(1, 100).unwrap().value[0], Value::UInt(1));
     let shared = Arc::new(Budget::new(
         Cost {
             metadata_bytes: admitted * 2 - 1,
@@ -80,7 +80,7 @@ fn whole_query_wdc_admission_is_shared_across_tables_and_caller_control() {
     )
     .unwrap();
     token.cancel();
-    assert_eq!(table.row(1, 100).unwrap_err().code, "command.cancelled");
+    assert_eq!(table.leased_row_values(1, 100).err().unwrap().code, "command.cancelled");
     assert_eq!(table.raw_record(1).unwrap_err().exit_code, 7);
     let denial = Arc::new(Budget::new(
         Cost {
@@ -190,7 +190,7 @@ fn all_supported_headers_bind_exact_hashes_without_materializing_rows() {
         assert_eq!(layout.layout_hash, 0x12345678);
         assert_eq!(layout.metadata_end, start);
         let table = table::open(&raw, &def, limits()).unwrap();
-        assert_eq!(table.row(2, 100).unwrap()["ID"], Value::UInt(2));
+        assert_eq!(table.leased_row_values(2, 100).unwrap().value[0], Value::UInt(2));
         assert_eq!(table.raw_record(1).unwrap().as_ptr(), raw[start..].as_ptr());
     }
 }
@@ -230,15 +230,15 @@ fn copied_ids_keep_origin_typed_integer_and_null_relationship_distinct_from_zero
     );
     let table = table::open(&raw, &def, limits()).unwrap();
     for id in [10, 100, 101] {
-        let row = table.row(id, 100).unwrap();
-        assert_eq!(row["ID"], Value::UInt(id as u64));
-        assert_eq!(row["Value"], Value::Int(1));
-        assert_eq!(row["Parent"], Value::UInt(0));
+        let row = table.leased_row_values(id, 100).unwrap();
+        assert_eq!(row.value[0], Value::UInt(id as u64));
+        assert_eq!(row.value[1], Value::Int(1));
+        assert_eq!(row.value[2], Value::UInt(0));
     }
-    assert_eq!(table.row(20, 100).unwrap()["Parent"], Value::Null);
+    assert_eq!(table.leased_row_values(20, 100).unwrap().value[2], Value::Null);
     assert_eq!(table.ids().collect::<Vec<_>>(), [10, 20, 100, 101]);
     assert_eq!(
-        table.row(999, 100).err().unwrap().code,
+        table.leased_row_values(999, 100).err().unwrap().code,
         "table.record_not_found"
     );
 }
@@ -350,7 +350,7 @@ fn common_pallet_signed_and_array_codecs_retain_exact_values() {
         raw.extend(words(&[7]));
         let def = definition("int ID\nint Value", &format!("$noninline,id$ID\n{field}"));
         let table = table::open(&raw, &def, limits()).unwrap();
-        assert_eq!(table.row(7, 100).unwrap()["Value"], want, "codec {codec}");
+        assert_eq!(table.leased_row_values(7, 100).unwrap().value[1], want, "codec {codec}");
     }
 }
 fn typed_sparse() -> Vec<u8> {
@@ -400,20 +400,20 @@ fn sparse_ordered_utf8_signed_float_arrays_and_copy_relations_match_go() {
     );
     let table = table::open(&raw, &def, limits()).unwrap();
     for id in [10, 99] {
-        let row = table.row(id, 3).unwrap();
-        assert_eq!(row["Name"], Value::String("猫".into()));
-        assert_eq!(row["Score"], Value::Int(-7));
-        assert_eq!(row["Ratio"], Value::Float32(1.25));
+        let row = table.leased_row_values(id, 3).unwrap();
+        assert_eq!(row.value[1], Value::String("猫".into()));
+        assert_eq!(row.value[2], Value::Int(-7));
+        assert_eq!(row.value[3], Value::Float32(1.25));
         assert_eq!(
-            row["Flags"],
+            row.value[4],
             Value::Array(vec![Value::UInt(3), Value::UInt(65535)])
         );
-        assert_eq!(row["Parent"], Value::UInt(0));
+        assert_eq!(row.value[5], Value::UInt(0));
     }
-    assert_eq!(table.row(10, 2).err().unwrap().code, "table.limit_exceeded");
+    assert_eq!(table.leased_row_values(10, 2).err().unwrap().code, "table.limit_exceeded");
 }
 #[test]
-fn projection_still_rejects_corrupt_unused_fields() {
+fn ordered_row_rejects_corrupt_fields() {
     let mut raw = typed_sparse();
     raw[229..233].copy_from_slice(&f32::NAN.to_bits().to_le_bytes());
     let def = definition(
@@ -423,7 +423,7 @@ fn projection_still_rejects_corrupt_unused_fields() {
     let table = table::open(&raw, &def, limits()).unwrap();
     assert_eq!(
         table
-            .row_projected(10, 100, Some(&BTreeSet::from(["ID".into()])))
+            .leased_row_values(10, 100)
             .err()
             .unwrap()
             .code,
@@ -432,7 +432,7 @@ fn projection_still_rejects_corrupt_unused_fields() {
 }
 #[test]
 fn real_wdc5_fixture_identity_is_exact_and_empty_is_honest() {
-    let raw = include_bytes!("../../../tests/fixtures/db2/JournalEncounterSection-classic-era.db2");
+    let raw = include_bytes!("../../../../tests/fixtures/db2/JournalEncounterSection-classic-era.db2");
     assert_eq!(
         lycheedev_core::storage::sha256(raw),
         "992c9edb6bdaa11a0001e846d267b89a8477d3fed6fb7b4497c9dc642235c73a"
@@ -447,20 +447,16 @@ fn real_wdc5_fixture_identity_is_exact_and_empty_is_honest() {
     assert_eq!(layout.schema_build, "WOWSTATIC_1_15_8_63631");
 }
 #[test]
-fn decode_work_and_pagination_are_bounded_and_views_are_concurrently_readable() {
+fn decode_work_is_bounded_and_leased_views_are_concurrently_readable() {
     let raw = records(true, &[99, 10], &[]);
     let def = definition("int ID\nint Value", "$noninline,id$ID\nValue<32>");
     let table = table::open(&raw, &def, limits()).unwrap();
-    let page = table.page(None, 1, 100).unwrap();
-    assert!(page.truncated);
-    assert_eq!(page.after_id, Some(10));
-    assert_eq!(table.page(page.after_id, 100, 100).unwrap().rows.len(), 2);
     std::thread::scope(|scope| {
         for _ in 0..8 {
             let table = &table;
             scope.spawn(move || {
                 for _ in 0..100 {
-                    assert_eq!(table.row(99, 100).unwrap()["Value"], Value::Int(1));
+                    assert_eq!(table.leased_row_values(99, 100).unwrap().value[1], Value::Int(1));
                 }
             });
         }
@@ -500,10 +496,10 @@ fn missing_partition_ranges_do_not_turn_encrypted_placeholders_into_rows() {
     )
     .unwrap();
     assert_eq!(table.ids().collect::<Vec<_>>(), [10]);
-    assert_eq!(table.row(10, 100).unwrap()["Value"], Value::Int(11));
+    assert_eq!(table.leased_row_values(10, 100).unwrap().value[1], Value::Int(11));
     assert_eq!(table.coverage()["complete"], false);
     assert_eq!(
-        table.row(20, 100).err().unwrap().code,
+        table.leased_row_values(20, 100).err().unwrap().code,
         "table.record_not_found"
     );
     assert!(
@@ -644,9 +640,9 @@ fn packed_unsigned_64_never_rounds_through_float() {
     raw.extend(words(&[7]));
     let def = definition("int ID\nint Value", "$noninline,id$ID\nValue<u64>");
     let table = table::open(&raw, &def, limits()).unwrap();
-    assert_eq!(table.row(7, 100).unwrap()["Value"], Value::UInt(u64::MAX));
+    assert_eq!(table.leased_row_values(7, 100).unwrap().value[1], Value::UInt(u64::MAX));
     assert_eq!(
-        serde_json::to_string(&table.row(7, 100).unwrap()["Value"]).unwrap(),
+        serde_json::to_string(&table.leased_row_values(7, 100).unwrap().value[1]).unwrap(),
         "18446744073709551615"
     );
 }
@@ -664,18 +660,18 @@ fn source_float32_serialization_keeps_original_precision_for_arrays_and_negative
     raw.extend(words(&[1, 2]));
     let def = definition("int ID\nfloat Corpse", "$noninline,id$ID\nCorpse[2]");
     let table = table::open(&raw, &def, limits()).unwrap();
-    let first = table.row(1, 100).unwrap();
+    let first = table.leased_row_values(1, 100).unwrap();
     assert_eq!(
-        serde_json::to_string(&first["Corpse"]).unwrap(),
+        serde_json::to_string(&first.value[1]).unwrap(),
         "[-230.989,1571.57]"
     );
-    let envelope = serde_json::json!({"schema":"lycheedev.result.v1","result":serde_json::to_value(&first).unwrap()});
+    let envelope = serde_json::json!({"schema":"lycheedev.result.v1","result":serde_json::to_value(&first.value).unwrap()});
     assert_eq!(
-        envelope["result"]["Corpse"].to_string(),
+        envelope["result"][1].to_string(),
         "[-230.989,1571.57]"
     );
-    let second = table.row(2, 100).unwrap();
-    match &second["Corpse"] {
+    let second = table.leased_row_values(2, 100).unwrap();
+    match &second.value[1] {
         Value::Array(values) => match values[0] {
             Value::Float32(value) => assert_eq!(value.to_bits(), 0x80000000),
             _ => panic!("source width lost"),
@@ -686,43 +682,7 @@ fn source_float32_serialization_keeps_original_precision_for_arrays_and_negative
     bad[start + 4..start + 8].copy_from_slice(&f32::INFINITY.to_bits().to_le_bytes());
     let damaged = table::open(&bad, &def, limits()).unwrap();
     assert_eq!(
-        damaged.row(1, 100).err().unwrap().code,
+        damaged.leased_row_values(1, 100).err().unwrap().code,
         "table.invalid_format"
     );
-}
-
-#[test]
-#[ignore = "explicit local same-work performance experiment; not a functional acceptance skip"]
-fn local_wdc_same_work_benchmark() {
-    let input = std::env::var("LYCHEEDEV_WDC_BENCH_FILE").expect("explicit benchmark file");
-    let output = std::env::var("LYCHEEDEV_WDC_BENCH_OUTPUT").expect("explicit benchmark output");
-    let raw = std::fs::read(input).unwrap();
-    let def = definition("int ID\nint Value", "$id$ID<u32>\nValue<u64>");
-    let budget = TableLimits {
-        file_bytes: 8 << 20,
-        metadata_bytes: 64 << 20,
-        rows: 50000,
-        columns: 100,
-        partitions: 100,
-        decode_work: 2_000_000,
-    };
-    let mut samples = vec![];
-    for _ in 0..20 {
-        let start = std::time::Instant::now();
-        let table = table::open(&raw, &def, budget).unwrap();
-        let prepare = start.elapsed().as_nanos();
-        let start = std::time::Instant::now();
-        let mut checksum = 0u64;
-        for index in 0..100000u64 {
-            let id = ((index * 7919) % 50000 + 1) as u32;
-            let row = table.row(id, 100).unwrap();
-            match row["Value"] {
-                Value::UInt(value) => checksum = checksum.wrapping_add(value),
-                _ => panic!("integer type lost"),
-            }
-        }
-        let decode = start.elapsed().as_nanos();
-        samples.push(serde_json::json!({"prepareNs":prepare,"decodeNs":decode,"totalNs":prepare+decode,"checksum":checksum.to_string()}));
-    }
-    std::fs::write(output,serde_json::to_vec_pretty(&serde_json::json!({"schema":"lycheedev.wdc-local-performance.v1","backend":"rust","records":50000,"lookups":100000,"samples":samples,"scope":"prepare view plus typed integer row lookups; excludes CLI/CASC/DBD resolution and I/O"})).unwrap()).unwrap();
 }

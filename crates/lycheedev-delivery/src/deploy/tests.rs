@@ -38,7 +38,7 @@ impl Fixture {
         }
     }
     fn installed(&self) {
-        fresh(&self.old, &self.target, "skill", VERSION).unwrap();
+        fresh_controlled(&self.old, &self.target, "skill", VERSION, &Default::default()).unwrap();
     }
     fn assert_old(&self) {
         assert_eq!(fs::read(self.target.join("SKILL.md")).unwrap(), b"old");
@@ -109,7 +109,7 @@ fn cancellation_after_real_staging_prevents_fresh_publication() {
     assert!(observed);
     assert_eq!(error.code, "command.cancelled");
     assert!(!f.target.exists());
-    fresh(&f.old, &f.target, "skill", VERSION).unwrap();
+    fresh_controlled(&f.old, &f.target, "skill", VERSION, &Default::default()).unwrap();
     f.assert_old();
 }
 #[test]
@@ -140,13 +140,14 @@ fn cancelled_upgrade_preparation_never_publishes_archive_and_is_retryable() {
         assert_eq!(error.code, "command.cancelled");
         f.assert_old();
         assert!(!f.archive.exists());
-        upgrade(
+        upgrade_controlled(
             Some(&f.next),
             &f.target,
             &f.archive,
             "skill",
             VERSION,
             false,
+            &Default::default(),
         )
         .unwrap();
         f.assert_next();
@@ -181,7 +182,7 @@ fn cancellation_after_old_move_keeps_exact_recovery_and_resumes_without_release(
     );
     assert_eq!(fs::read(f.archive.join("next/SKILL.md")).unwrap(), b"next");
     let journal = fs::read(f.archive.join("replacement.json")).unwrap();
-    let done = upgrade(None, &f.target, &f.archive, "skill", VERSION, true).unwrap();
+    let done = upgrade_controlled(None, &f.target, &f.archive, "skill", VERSION, true, &Default::default()).unwrap();
     f.assert_next();
     assert_eq!(done["receipt"]["commit"], "b".repeat(40));
     assert_eq!(
@@ -282,14 +283,14 @@ fn failed_replacement_move_preserves_foreign_target_and_both_recovery_trees() {
     );
     assert_eq!(fs::read(f.archive.join("next/SKILL.md")).unwrap(), b"next");
     assert_eq!(
-        upgrade(None, &f.target, &f.archive, "skill", VERSION, true)
+        upgrade_controlled(None, &f.target, &f.archive, "skill", VERSION, true, &Default::default())
             .unwrap_err()
             .code,
         "delivery.installation_conflict"
     );
     fs::remove_file(f.target.join("foreign.txt")).unwrap();
     fs::remove_dir(&f.target).unwrap();
-    upgrade(None, &f.target, &f.archive, "skill", VERSION, true).unwrap();
+    upgrade_controlled(None, &f.target, &f.archive, "skill", VERSION, true, &Default::default()).unwrap();
     f.assert_next();
 }
 #[test]
@@ -298,7 +299,7 @@ fn receipt_order_is_immaterial_for_fresh_and_interrupted_upgrade() {
     f.installed();
     reverse_receipt(&f.target.join(installation::MARKER));
     let before = fs::read(f.target.join(installation::MARKER)).unwrap();
-    fresh(&f.old, &f.target, "skill", VERSION).unwrap();
+    fresh_controlled(&f.old, &f.target, "skill", VERSION, &Default::default()).unwrap();
     assert_eq!(
         fs::read(f.target.join(installation::MARKER)).unwrap(),
         before
@@ -322,11 +323,11 @@ fn receipt_order_is_immaterial_for_fresh_and_interrupted_upgrade() {
     .unwrap_err();
     reverse_receipt(&f.archive.join("previous").join(installation::MARKER));
     reverse_receipt(&f.archive.join("next").join(installation::MARKER));
-    upgrade(None, &f.target, &f.archive, "skill", VERSION, true).unwrap();
+    upgrade_controlled(None, &f.target, &f.archive, "skill", VERSION, true, &Default::default()).unwrap();
     f.assert_next();
     fs::write(f.target.join("SKILL.md"), b"edited").unwrap();
     assert_eq!(
-        fresh(&f.next, &f.target, "skill", VERSION)
+        fresh_controlled(&f.next, &f.target, "skill", VERSION, &Default::default())
             .unwrap_err()
             .code,
         "delivery.installation_conflict"
@@ -372,7 +373,7 @@ fn checked_installation_close_failure_keeps_committed_receipt_and_consumes_once(
     assert_eq!(error.details["result"]["commit"], "a".repeat(40));
     f.assert_old();
     // The original lock was consumed, so retry can acquire the same owner.
-    fresh(&f.old, &f.target, "skill", VERSION).unwrap();
+    fresh_controlled(&f.old, &f.target, "skill", VERSION, &Default::default()).unwrap();
 }
 #[test]
 fn checked_installation_close_failure_preserves_primary_error_and_its_details() {

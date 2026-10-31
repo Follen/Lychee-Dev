@@ -1,6 +1,6 @@
 // Exact, bounded custody for the two pinned Windows TLS name adaptations.
 import assert from 'node:assert/strict';
-import {constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync} from 'node:fs';
+import {lstatSync, readFileSync, readdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {join, resolve} from 'node:path';
 
@@ -43,35 +43,4 @@ export function inspectTlsNameAdaptation(root) {
     return {...pkg, path, manifestPath: join(root, path, 'Cargo.toml')};
   });
   return {schema: record.schema, manifestPath, manifestSHA256, patch: record.patch, patchSHA256: record.patchSHA256, packages};
-}
-function stageDirectory(root, relative) {
-  let current = root;
-  assert(lstatSync(current).isDirectory() && !lstatSync(current).isSymbolicLink(), 'tls.stage_root');
-  for (const name of relative.split('/')) {
-    current = join(current, name);
-    if (!existsSync(current)) mkdirSync(current);
-    const info = lstatSync(current);
-    assert(info.isDirectory() && !info.isSymbolicLink(), 'tls.stage_reparse');
-  }
-}
-export function stageTlsNameSources(root, destination) {
-  root = resolve(root); destination = resolve(destination);
-  assert(root !== destination, 'tls.distinct_stage');
-  const before = inspectTlsNameAdaptation(root);
-  const paths = [manifestPath, before.patch, 'vendor/TLS-NAME-ADAPTATION.md',
-    ...before.packages.flatMap(pkg => pkg.files.map(file => `${pkg.path}/${file.path}`))];
-  // The caller owns a fresh corresponding-source directory. Never replace
-  // pre-existing files or combine the path packages with the registry scan.
-  for (const path of paths) assert(!existsSync(join(destination, path)), 'tls.stage_exists');
-  for (const path of paths) {
-    regular(root, path);
-    stageDirectory(destination, path.split('/').slice(0,-1).join('/'));
-    copyFileSync(join(root, path), join(destination, path), constants.COPYFILE_EXCL);
-  }
-  const staged = inspectTlsNameAdaptation(destination);
-  const after = inspectTlsNameAdaptation(root);
-  assert.equal(after.manifestSHA256, before.manifestSHA256);
-  assert.equal(staged.manifestSHA256, before.manifestSHA256);
-  return {schema: before.schema, manifestSHA256: before.manifestSHA256, patchSHA256: before.patchSHA256,
-    packages: before.packages.map(pkg => ({name: pkg.name, version: pkg.version, path: pkg.path, archiveSHA256: pkg.archiveSHA256}))};
 }

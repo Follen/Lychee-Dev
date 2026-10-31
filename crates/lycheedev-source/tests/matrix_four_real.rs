@@ -107,9 +107,9 @@ fn four_distinct_client_pins_default_resolver_actual_catalog_luac_native() {
     .unwrap();
     let compiler_manifest: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler = luac::Runtime::verified(
+    let compiler = luac::Runtime::verified_with_ordered_control(
         &PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed compiler")),
-        serde_json::from_value(compiler_manifest["runtime"].clone()).unwrap(),
+        serde_json::from_value(compiler_manifest["runtime"].clone()).unwrap(), &Default::default(),
     )
     .unwrap();
     let ctx = lycheedev_source::request::SourceContext {

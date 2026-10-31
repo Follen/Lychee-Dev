@@ -790,6 +790,7 @@ fn completed_request_is_readable_in_a_fresh_process_model() {
         .args([
             "--exact",
             "mailbox::connection::tests::fresh_process_history_helper",
+            "--ignored",
             "--nocapture",
         ])
         .env("LYCHEEDEV_CON_HISTORY_ROOT", &f.root)
@@ -812,10 +813,10 @@ fn completed_request_is_readable_in_a_fresh_process_model() {
     assert_eq!(before, fs::read(f.log()).unwrap());
 }
 #[test]
+#[ignore = "child fixture only; invoked by the completed request history regression"]
 fn fresh_process_history_helper() {
-    let Some(root) = std::env::var_os("LYCHEEDEV_CON_HISTORY_ROOT") else {
-        return;
-    };
+    let root = std::env::var_os("LYCHEEDEV_CON_HISTORY_ROOT")
+        .expect("connection history child fixture requires its owned root");
     let id = std::env::var("LYCHEEDEV_CON_HISTORY_ID").unwrap();
     let root = PathBuf::from(root);
     let record = ConnectionBook::open(&root)

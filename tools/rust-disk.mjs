@@ -1,7 +1,7 @@
 // Project-local disk admission and explicit ownership; no age-based cleanup.
 import {closeSync,copyFileSync,existsSync,lstatSync,mkdirSync,openSync,readFileSync,readdirSync,realpathSync,renameSync,rmSync,statfsSync,writeFileSync} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
-import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
+import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 const GiB=1024**3;
 export const defaults=Object.freeze({cacheBytes:50*GiB,scratchBytes:5*GiB,freeReserveBytes:2*GiB,maxEntries:500000});
 export const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');

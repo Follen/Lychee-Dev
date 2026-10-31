@@ -229,11 +229,6 @@ impl PreparedSnapshot {
         control.check()?;
         result
     }
-    /// Syntax verification remains pending until a separate trusted checker executes.
-    pub fn syntax_requirement(&self) -> Value {
-        json!({"state":"pending","luac":self.inputs.corpus.luac,"inputIdentity":self.inputs.identity_sha256(),
-            "files":self.inputs.corpus.files.iter().map(|file|&file.identity).collect::<Vec<_>>()})
-    }
 }
 
 struct ControlledWriter<'a> {

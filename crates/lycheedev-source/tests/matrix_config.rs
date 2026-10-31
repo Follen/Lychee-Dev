@@ -1,10 +1,9 @@
 use lycheedev_core::control::OperationControl;
 use lycheedev_source::matrix;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     fs,
-    path::{Path, PathBuf},
-    sync::{Arc, atomic::AtomicBool},
+    path::PathBuf,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 fn directory() -> PathBuf {

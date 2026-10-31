@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {parse} from './agent-json.mjs';
 import {columnsFor,rowsFor,metadata as storedMetadata} from './agent-audit.mjs';
-import {SQL,PROOF,auditCache} from './data-contract.mjs';
+import {SQL, auditCache} from './data-contract.mjs';
 import {CSV_SQL,blob,bounded,digest,captureCanonical,goJSON,expectedNumericCSV,CSV_COLUMNS,CSV_ROWS,CSV_BYTES,CSV_SHA256} from './agent-fixture-inputs.mjs';
 export function auditGoQuery(envelope,{kind,fixture,cacheMode,format,home,output,readBlob=ref=>blob(home,ref),metadata=id=>storedMetadata(home,id,'go'),readOutput=path=>bounded(path)}){
  assert.equal(envelope.schema,'lycheedev.result.v1');assert.equal(envelope.ok,true);assert.equal(envelope.error,null);assert.equal(envelope.context.snapshot,fixture.identity.snapshot);

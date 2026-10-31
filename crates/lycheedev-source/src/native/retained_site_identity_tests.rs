@@ -1,7 +1,7 @@
 //! Current retained closure and parameter identity behavior.
 use super::*;
 use std::{
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 

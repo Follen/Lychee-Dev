@@ -230,6 +230,28 @@ test('file-symlink boundaries execute explicitly on their owning Windows runners
   }
 });
 
+test('guarded process regressions consume the sealed helper and execute every existing case', () => {
+  const step=oneStep(jobs.get('validate-rust'),/--target lycheedev_windows --arguments/);
+  assert.match(step,/if: matrix.shard == 'source-runtime'/);
+  assert.match(step,/\$record\.support/);
+  assert.match(step,/\$helpers\.Count -ne 1/);
+  assert.match(step,/Get-FileHash -LiteralPath \$helper -Algorithm SHA256/);
+  for(const name of ['HELPER','HELPER_SHA256','FIXTURE_ROOT']) assert(step.includes(`$env:LYCHEEDEV_SUSPENDED_${name} =`));
+  assert(step.includes("--arguments 'guarded_spawn::tests::,--ignored,--nocapture,--test-threads=1'"));
+  assert(step.includes('test result: ok\\. 4 passed; 0 failed;'));
+  assert.match(step,/if \(\$LASTEXITCODE -ne 0\) \{ throw /);
+  assert.doesNotMatch(step,/continue-on-error|rust-build|rust-cargo|cargo (?:test|build)/);
+  const source=readFileSync(join(repository,'crates/lycheedev-windows/src/guarded_spawn_tests.rs'),'utf8');
+  const names=[...source.matchAll(/#\[test\]\s*#\[ignore[^\n]*\]\s*fn (\w+)\(/g)].map(match=>match[1]);
+  assert.deepEqual(names,[
+    'real_child_cannot_run_before_resume_and_stdio_descendant_are_owned',
+    'cancelled_or_injected_prepare_failure_never_resumes_and_reaps_original_child',
+    'primary_thread_close_failure_after_resume_cannot_return_success',
+    'primary_thread_close_failure_preserves_prepare_error_and_retirement',
+  ]);
+  assert.match(readFileSync(join(repository,'crates/lycheedev-windows/src/guarded_spawn.rs'),'utf8'),/#\[path = "guarded_spawn_tests\.rs"\]\s*mod tests;/);
+});
+
 test('the workflow uses the shared Rust partition and every workspace package belongs to exactly one runner', () => {
   const shards = rustShards(jobs.get('validate-rust'));
   assert.deepEqual([...shards].sort(), Object.keys(TEST_SHARDS).sort());

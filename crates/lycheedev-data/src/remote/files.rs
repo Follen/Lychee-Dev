@@ -468,7 +468,7 @@ impl<'a> Files<'a> {
                 .checked_add(c.fragment_loads)
                 .ok_or_else(limit)?;
             self.block_hits
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
                     n.checked_add(c.block_cache_hits)
                 })
                 .map_err(|_| limit())?;
@@ -514,7 +514,7 @@ impl<'a> SourceState<'a> {
             if block.as_ref().is_some_and(|(saved, _)| *saved == base) {
                 files
                     .block_hits
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
                     .map_err(|_| limit())?;
             } else {
                 // Preserve the old reusable block until replacement succeeds,

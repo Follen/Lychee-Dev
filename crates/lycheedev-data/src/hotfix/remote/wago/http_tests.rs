@@ -656,10 +656,12 @@ fn stop_before_fetch_charges_no_attempt() {
 }
 
 #[test]
+#[ignore = "subprocess helper; invoked by the isolated CGI proxy regression"]
 fn cgi_child_case() {
-    if std::env::var_os("LYCHEE_WAGO_CGI_FIXTURE").is_none() {
-        return;
-    }
+    assert_eq!(
+        std::env::var("LYCHEE_WAGO_CGI_FIXTURE").expect("required CGI child fixture flag"),
+        "1"
+    );
     let (control, budget) = scope(Cost::defaults());
     let failure = PublicFetcher
         .fetch("http://127.0.0.1:1/", &control, &budget)
@@ -676,7 +678,7 @@ fn cgi_proxy_is_checked_before_loopback_and_no_proxy_in_isolated_process() {
         module_path!().split_once("::").unwrap().1
     );
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", &test, "--test-threads=1"])
+        .args(["--exact", &test, "--ignored", "--test-threads=1"])
         .env("LYCHEE_WAGO_CGI_FIXTURE", "1")
         .env("REQUEST_METHOD", "GET")
         // Windows environment keys are case-insensitive: remove the Unix alias

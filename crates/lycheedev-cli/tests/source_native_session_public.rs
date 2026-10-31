@@ -20,7 +20,6 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
 
@@ -377,7 +376,7 @@ APIDocumentation:AddDocumentationTable(API)
     let manifest: luac::Manifest =
         serde_json::from_slice(&fs::read(release.join("payload/tool/luac/runtime.json")).unwrap())
             .unwrap();
-    let runtime = luac::Runtime::verified(&release.join("payload/tool/luac"), manifest).unwrap();
+    let runtime = luac::Runtime::verified_with_ordered_control(&release.join("payload/tool/luac"), manifest, &source_context.control).unwrap();
     let snapshot = native_research::snapshot_request(
         &source_context,
         source,

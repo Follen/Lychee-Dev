@@ -35,9 +35,9 @@ fn two_target_actual_luac_native_keeps_independent_failure_and_matrix_capture() 
     fs::write(&config,serde_json::to_vec(&json!({"targets":[{"id":"retail-lua","toc":"A.toc","product":pin.product,"ref":pin.exact_commit},{"id":"retail-xml","toc":"B.toc","product":pin.product,"ref":pin.exact_commit}]})).unwrap()).unwrap();
     let manifest: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler = luac::Runtime::verified(
+    let compiler = luac::Runtime::verified_with_ordered_control(
         &PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed compiler")),
-        serde_json::from_value(manifest["runtime"].clone()).unwrap(),
+        serde_json::from_value(manifest["runtime"].clone()).unwrap(), &Default::default(),
     )
     .unwrap();
     let ctx = lycheedev_source::request::SourceContext {

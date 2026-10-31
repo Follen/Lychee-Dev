@@ -294,7 +294,7 @@ pub(crate) fn source(
         offline,
         budget.deadline,
         Some(budget),
-        Some(control),
+        control,
     )?
     .remove(0);
     let table = definition.identity.name;

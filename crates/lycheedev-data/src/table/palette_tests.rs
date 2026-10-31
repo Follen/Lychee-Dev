@@ -79,17 +79,17 @@ fn check(version: u8, array_first: bool) {
     let definition = document.select("12.1.5.69848", "12345678").unwrap();
     let raw = fixture(version, array_first);
     let table = table::open(&raw, &definition, TableLimits::default()).unwrap();
-    let row = table.row(7, 100).unwrap();
-    assert_eq!(row["ID"], Value::UInt(7));
+    let row = table.leased_row_values(7, 100).unwrap();
+    assert_eq!(row.value[0], Value::UInt(7));
     assert_eq!(
-        row["Array"],
+        row.value[if array_first { 1 } else { 2 }],
         Value::Array(vec![Value::UInt(100), Value::UInt(200)]),
-        "WDC{version} array_first={array_first}, row={row:?}"
+        "WDC{version} array_first={array_first}, row={:?}", row.value
     );
     assert_eq!(
-        row["Scalar"],
+        row.value[if array_first { 2 } else { 1 }],
         Value::UInt(900),
-        "WDC{version} array_first={array_first}, row={row:?}"
+        "WDC{version} array_first={array_first}, row={:?}", row.value
     );
 }
 
@@ -203,24 +203,11 @@ fn check_interleaved(raw: &[u8]) {
         (7, 902, 801, 777, [110, 111], [210, 211, 212]),
         (8, 900, 800, 700, [100, 101], [200, 201, 202]),
     ] {
-        let expected = [
-            ("ID".to_owned(), Value::UInt(id as u64)),
-            (
-                "ArrayA".to_owned(),
-                Value::Array(array_a.map(Value::UInt).to_vec()),
-            ),
-            ("ScalarA".to_owned(), Value::UInt(scalar_a)),
-            ("Common".to_owned(), Value::UInt(common)),
-            (
-                "ArrayB".to_owned(),
-                Value::Array(array_b.map(Value::UInt).to_vec()),
-            ),
-            ("ScalarB".to_owned(), Value::UInt(scalar_b)),
-        ]
-        .into_iter()
-        .collect::<std::collections::BTreeMap<_, _>>();
+        let expected = [Value::UInt(id as u64),
+            Value::Array(array_a.map(Value::UInt).to_vec()), Value::UInt(scalar_a),
+            Value::UInt(common), Value::Array(array_b.map(Value::UInt).to_vec()), Value::UInt(scalar_b)];
         assert_eq!(
-            table.row(id, 100).unwrap(),
+            table.leased_row_values(id, 100).unwrap().value,
             expected,
             "WDC{} ID {id}",
             table.layout().version
@@ -255,7 +242,7 @@ fn wdc5_palette_indexes_cannot_read_into_another_fields_palette() {
         raw[start] = (raw[start] & !(3 << shift)) | (invalid_index << shift);
         let table = table::open(&raw, &definition, TableLimits::default()).unwrap();
         assert_eq!(
-            table.row(7, 100).unwrap_err().code,
+            table.leased_row_values(7, 100).err().unwrap().code,
             "table.invalid_format",
             "index at bit {shift}"
         );

@@ -14,6 +14,7 @@ mod data_cli;
 mod data_phase_profile;
 mod discovery;
 mod formal_live;
+mod formal_live_validation;
 mod live_aux;
 mod source_cli;
 mod hotfix_cli;
@@ -124,6 +125,7 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
             "products":crate::discovery::products(),
             "exitCodes":crate::discovery::exit_codes(),
             "result":crate::discovery::result_contract(),
+            "updatePolicy":lycheedev_delivery::npm_update::update_policy(),
             "discovery":["lycheedev cli search \"<task>\"","lycheedev schema <command...>","lycheedev <command> --help"],
         }))),
         "target resolve" => dispatch_target(inv),
@@ -219,7 +221,7 @@ fn dispatch_source(inv: &Invocation) -> Result<Outcome> {
             );
         }
         release_result?;
-        source_runtime_bundle_from_release(&root)
+        source_runtime_bundle_from_release(&root, &inv.control)
     })();
     match tools_result {
         Ok(tools) => request.dispatch(
@@ -517,20 +519,11 @@ fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
         Ok(providers)
     })
 }
-fn source_runtime_bundle_from_release(root: &std::path::Path) -> Result<SourceRuntimeBundle> {
-    let identity: Value = serde_json::from_str(include_str!("../../../release/tools/luac.json"))?;
-    let runtime: lycheedev_source::luac::Manifest =
-        serde_json::from_value(identity["runtime"].clone())?;
-    let packaged: Value =
-        lycheedev_core::storage::read_json(&root.join("payload/tool/luac/runtime.json"))?;
-    if packaged != identity["runtime"] {
-        return Err(ToolkitError::new(
-            "luac.unavailable",
-            "bundled compiler manifest differs from pinned identity",
-            3,
-        ));
-    }
-    let luac = lycheedev_source::luac::Runtime::verified(&root.join("payload/tool/luac"), runtime)?;
+fn source_runtime_bundle_from_release(
+    root: &std::path::Path,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<SourceRuntimeBundle> {
+    let luac = formal_live_validation::compiler(root, control)?;
     Ok(SourceRuntimeBundle { luac })
 }
 fn envelope(result: &Result<Outcome>) -> Value {
@@ -1271,6 +1264,59 @@ mod project_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_runtime_original_stop_precedes_invalid_release_manifest() {
+        use lycheedev_core::control::{OperationControl, TrackedCancellation};
+        use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+        let root = std::env::temp_dir().join(format!(
+            "lycheedev-source-runtime-stop-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = root.join("payload/tool/luac/runtime.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{").unwrap();
+        // The same actual manifest fails JSON admission with a live control;
+        // neither case can reach compiler startup.
+        let error = source_runtime_bundle_from_release(&root, &OperationControl::default())
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "input.invalid");
+        for expired in [false, true] {
+            let signal = TrackedCancellation::new();
+            if !expired {
+                signal.cancel();
+            }
+            let now = Instant::now();
+            let control = OperationControl::tracked(
+                if expired {
+                    now - Duration::from_secs(1)
+                } else {
+                    now + Duration::from_secs(30)
+                },
+                signal,
+            );
+            let expected = control.check().unwrap_err();
+            let error = source_runtime_bundle_from_release(&root, &control)
+                .err()
+                .unwrap();
+            assert_eq!(
+                error.code,
+                if expired { "command.deadline" } else { "command.cancelled" }
+            );
+            assert_eq!(
+                serde_json::to_value(error).unwrap(),
+                serde_json::to_value(expected).unwrap()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), b"{");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn normal_exit_code_returns_every_portable_status_unchanged() {
         for code in 0..=u8::MAX {

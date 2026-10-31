@@ -185,7 +185,7 @@ fn public_acquisition(point: AcquirePoint, stop: Stop, plan: bool) {
     if point == AcquirePoint::UpdateMutation {
         let old = f.root.join("old");
         candidate(&old, b"old skill", 'a');
-        crate::deploy::fresh(&old, &f.skill, "skill", VERSION).unwrap();
+        crate::deploy::fresh_controlled(&old, &f.skill, "skill", VERSION, &Default::default()).unwrap();
     }
     let (mut ctx, request) = f.request(point, plan);
     if matches!(stop, Stop::Deadline) {
@@ -245,9 +245,9 @@ fn public_acquisition(point: AcquirePoint, stop: Stop, plan: bool) {
         assert!(error.details["result"]["targets"][1]["activation"].is_null());
         assert_eq!(error.details["cause"], expected_error.details);
         assert_eq!(fs::read(f.skill.join("SKILL.md")).unwrap(), b"next skill");
-        let release = crate::release::inspect(&f.next, VERSION).unwrap();
+        let release = crate::release::inspect_with_control(&f.next, VERSION, &Default::default()).unwrap();
         assert_eq!(
-            crate::installation::inspect(&f.skill, "skill").unwrap()["receipt"],
+            crate::installation::inspect_main_controlled(&f.skill, "skill", &Default::default()).unwrap()["receipt"],
             serde_json::to_value(crate::release::receipt(&release, "skill")).unwrap(),
         );
         let remembered: Vec<crate::update::UpdateTarget> =

@@ -115,14 +115,6 @@ impl<'a> Encoding<'a> {
     }
     /// Resolve the physical size from the independently authenticated EKey
     /// page; CKey logical sizes cannot substitute for this archive extent.
-    pub fn find_encoding(
-        &self,
-        key: &str,
-        limits: Limits,
-        cancel: Option<&TrackedCancellation>,
-    ) -> Result<EncodedRecord> {
-        self.find_encoding_with_check(key, limits, cancel, || Ok(()))
-    }
     pub(crate) fn find_encoding_with_check(
         &self,
         key: &str,
@@ -160,7 +152,7 @@ impl<'a> Encoding<'a> {
         key: &str,
         limits: Limits,
         cancel: Option<&TrackedCancellation>,
-        mut supplemental: impl FnMut() -> Result<()>,
+        supplemental: impl FnMut() -> Result<()>,
     ) -> Result<EncodingRecord> {
         find_content(
             &self.directory,
@@ -218,7 +210,7 @@ pub(crate) fn lookup_root_with_check(
     ids: &[u32],
     limits: RootLimits,
     cancel: Option<&TrackedCancellation>,
-    mut supplemental: impl FnMut() -> Result<()>,
+    supplemental: impl FnMut() -> Result<()>,
 ) -> Result<Vec<RootRecord>> {
     scan_root(content, ids, limits, cancel, supplemental, None, None)
 }
@@ -700,3 +692,50 @@ mod prepared;
 pub(crate) use prepared::PreparedEncoding;
 mod root_index;
 pub(crate) use root_index::{RootContent, RootIndex};
+
+#[cfg(test)]
+mod physical_directory_tests {
+use super::*;
+#[test]
+fn ckey_lookup_does_not_touch_unavailable_physical_ekey_directory() {
+    use crate::blte::{Content, Missing};
+    let mut raw = vec![0; 22 + 32 + 1024 + 32 + 1024];
+    raw[..5].copy_from_slice(&[b'E', b'N', 1, 16, 16]);
+    raw[5..7].copy_from_slice(&1u16.to_be_bytes());
+    raw[7..9].copy_from_slice(&1u16.to_be_bytes());
+    raw[9..13].copy_from_slice(&1u32.to_be_bytes());
+    raw[13..17].copy_from_slice(&1u32.to_be_bytes());
+    raw[22..38].fill(1);
+    let at = 54;
+    raw[at] = 1;
+    raw[at + 5] = 8;
+    raw[at + 6..at + 22].fill(1);
+    raw[at + 22..at + 38].fill(9);
+    let sum = Md5::digest(&raw[at..at + 1024]);
+    raw[38..54].copy_from_slice(&sum);
+    let content = Content {
+        bytes: raw,
+        missing: vec![Missing {
+            offset: 1078,
+            bytes: 1056,
+            key_id: "1234".into(),
+            chunk: 1,
+        }],
+    };
+    let encoding = Encoding::open(&content, casc::Limits::default(), None).unwrap();
+    assert_eq!(
+        encoding
+            .find(&"01".repeat(16), casc::Limits::default(), None)
+            .unwrap()
+            .decoded_bytes,
+        8
+    );
+    assert_eq!(
+        encoding
+            .physical(&std::collections::BTreeMap::new(), &"09".repeat(16), casc::Limits::default(), &mut || Ok(()))
+            .unwrap_err()
+            .code,
+        "container.key_unavailable"
+    );
+}
+}

@@ -15,7 +15,7 @@ typed game data, exported assets or an authorized observation on a running
 client, and keeps the result inspectable.
 
 The released platform is **Windows amd64**. The product version is defined only
-by [release/version.json](release/version.json) and is currently **3.5.0**.
+by [release/version.json](release/version.json).
 
 ## Capabilities
 
@@ -45,8 +45,12 @@ logged-in client with the managed addon loaded.
 
 ## Install and deploy
 
+Replace the example path with the reviewed package you intend to install.
+For registry installation, select that release's explicit published version or
+tag; an unqualified package name can select a different release.
+
 ```powershell
-npm install --global lycheedev
+npm install --global 'C:\Downloads\lycheedev-X.Y.Z.tgz' # selected release tarball
 lycheedev version --format json
 ```
 
@@ -65,6 +69,7 @@ lycheedev skill install --release $release --path $skill
 Inspect targets first and apply later updates through the managed updater:
 
 ```powershell
+lycheedev schema update
 lycheedev update --plan --format json
 lycheedev update
 ```
@@ -143,7 +148,7 @@ lycheedev live instances --format json
 lycheedev doctor --pid <pid> --format json             # read-only readiness
 lycheedev live connect --installation $client --format json
 lycheedev live probe put --name <name> --file <probe.lua>
-lycheedev live execute --session <CON-id> --probe <name> --request <key> --format json
+lycheedev live execute --session <CON-id> --probe <name> --request <key> --budget-seconds 30 --format json
 lycheedev live disconnect <CON-id>
 ```
 

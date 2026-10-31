@@ -1,15 +1,13 @@
 //! Explicit local build identity and authenticated configurations. Reading a
 //! client never selects a region, locale or definition revision implicitly.
 use crate::{
-    blte, casc, fault,
-    metadata_format::{Encoding, EncodingRecord},
+    casc, fault,
     resource::{Budget, Cost, RetainedReservation},
     schema,
 };
 use lycheedev_core::{
     Result, ToolkitError,
     client::{self, ClientInstallation, MetadataControl, MetadataCost},
-    control::TrackedCancellation,
     installation_selection, storage,
 };
 use md5::{Digest, Md5};
@@ -536,9 +534,6 @@ fn version(value: &str, budget: Option<&Budget>) -> Result<[u32; 4]> {
 fn map_entry<K, V>() -> usize {
     16 * size_of::<(K, V)>() + 128
 }
-pub fn installed_rows(raw: &[u8]) -> Result<Vec<InstalledBuild>> {
-    installed_rows_budgeted(raw, None)
-}
 pub fn installed_rows_budgeted(raw: &[u8], budget: Option<&Budget>) -> Result<Vec<InstalledBuild>> {
     if raw.len() > 1 << 20 {
         return Err(exceeds());
@@ -640,9 +635,6 @@ pub fn installed_rows_budgeted(raw: &[u8], budget: Option<&Budget>) -> Result<Ve
         reservation.commit();
     }
     Ok(rows)
-}
-pub fn parse_configuration(raw: Vec<u8>, key: &str) -> Result<ConfigDocument> {
-    parse_configuration_budgeted(raw, key, None)
 }
 pub fn parse_configuration_budgeted(
     raw: Vec<u8>,
@@ -788,9 +780,6 @@ fn read(root: &Path, path: &Path, max: usize, budget: Option<&Budget>) -> Result
     }
     Ok(raw)
 }
-pub fn resolve_local(root: &Path, product_code: &str, full_build: &str) -> Result<BuildMetadata> {
-    resolve_local_budgeted(root, product_code, full_build, None)
-}
 pub fn resolve_local_budgeted(
     root: &Path,
     product_code: &str,
@@ -806,8 +795,23 @@ pub fn resolve_local_budgeted(
     let root = root.as_path();
     let product_code = product_code.as_str();
     let _catalog_path = temporary(budget, root.as_os_str().len() * 2 + 64)?;
-    let raw = read(root, &root.join(".build.info"), 1 << 20, budget)?;
-    let rows = installed_rows_budgeted(&raw, budget)?;
+    let catalog_path = root.join(".build.info");
+    let (raw, rows) = (|| {
+        let raw = read(root, &catalog_path, 1 << 20, budget)?;
+        let rows = installed_rows_budgeted(&raw, budget)?;
+        Ok((raw, rows))
+    })().map_err(|mut error: ToolkitError| {
+        if error.code == "records.invalid_metadata" {
+            if error.details.is_null() {
+                error.details = serde_json::json!({});
+            }
+            if let Some(details) = error.details.as_object_mut() {
+                details.entry("sourcePath").or_insert_with(|| serde_json::json!(catalog_path));
+                details.entry("formatHint").or_insert_with(|| serde_json::json!("Pipe-delimited launcher build catalog with a header and row boundary"));
+            }
+        }
+        error
+    })?;
     let exact = rows
         .iter()
         .any(|row| row.active && row.product == product_code && row.full_build == full_build);
@@ -894,26 +898,9 @@ pub fn resolve_local_budgeted(
         cdn_document,
     })
 }
-/// Inspect a client or game root using the shared installation selector.
-/// Readers with an existing pin must use `data_installation_root` instead.
-pub fn installation_root(directory: &Path) -> Result<(PathBuf, String)> {
-    let client = select_client_budgeted(directory, "", None)?;
-    let root = Path::new(&client.directory)
-        .parent()
-        .ok_or_else(invalid)?
-        .to_owned();
-    Ok((root, observed_slot(&client).to_owned()))
-}
 /// Go records.dataInstallationRoot: an explicit CASC root retains the supplied
 /// pin, while a selected client must match canonical product or actual slot and
 /// full build before its parent archives can be used. Never borrow a sibling.
-pub fn data_installation_root(
-    directory: &Path,
-    product_code: &str,
-    full_build: &str,
-) -> Result<(PathBuf, String)> {
-    data_installation_root_budgeted(directory, product_code, full_build, None)
-}
 pub fn data_installation_root_budgeted(
     directory: &Path,
     product_code: &str,
@@ -947,76 +934,6 @@ pub fn data_installation_root_budgeted(
         root.as_os_str().len() + observed_slot(&selected).len(),
     )?;
     Ok((root, observed_slot(&selected).to_owned()))
-}
-pub fn open_encoding(
-    root: &Path,
-    metadata: &BuildMetadata,
-    limits: casc::Limits,
-    keys: &BTreeMap<u64, Vec<u8>>,
-    cancel: Option<&TrackedCancellation>,
-) -> Result<blte::Content> {
-    if metadata.content_bytes > 256 << 20 || metadata.encoding_bytes > limits.encoded_bytes {
-        return Err(exceeds());
-    }
-    let object = casc::open_local(
-        root,
-        &metadata.encoding_key,
-        metadata.encoding_bytes,
-        limits,
-        cancel,
-    )?;
-    let content = object.decode(
-        &metadata.encoding_content_key,
-        blte::Limits {
-            decoded_bytes: metadata.content_bytes,
-            ..Default::default()
-        },
-        keys,
-    )?;
-    if content.bytes.len() != metadata.content_bytes {
-        return Err(invalid());
-    }
-    Ok(content)
-}
-pub fn read_content(
-    root: &Path,
-    encoding: &Encoding<'_>,
-    record: &EncodingRecord,
-    limits: casc::Limits,
-    keys: &BTreeMap<u64, Vec<u8>>,
-    cancel: Option<&TrackedCancellation>,
-) -> Result<(casc::LocalObject, blte::Content)> {
-    let mut unavailable = None;
-    for ekey in &record.encoding_keys {
-        let physical = encoding.find_encoding(ekey, limits, cancel)?;
-        let size = usize::try_from(physical.encoded_bytes).map_err(|_| exceeds())?;
-        match casc::open_local(root, ekey, size, limits, cancel) {
-            Ok(object) => {
-                let content = object.decode(
-                    &record.content_key,
-                    blte::Limits {
-                        decoded_bytes: usize::try_from(record.decoded_bytes)
-                            .map_err(|_| exceeds())?,
-                        ..Default::default()
-                    },
-                    keys,
-                )?;
-                if content.bytes.len() as u64 != record.decoded_bytes {
-                    return Err(invalid());
-                }
-                return Ok((object, content));
-            }
-            Err(e) if e.code == "records.local_object_unavailable" => unavailable = Some(e),
-            Err(e) => return Err(e),
-        }
-    }
-    Err(unavailable.unwrap_or_else(|| {
-        fault(
-            "records.local_object_unavailable",
-            3,
-            "No local encoding alternative available",
-        )
-    }))
 }
 
 mod target;

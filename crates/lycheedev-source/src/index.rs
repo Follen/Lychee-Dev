@@ -398,9 +398,6 @@ fn fingerprint_fields_checked(
     Ok(format!("{:x}", hash.finalize()))
 }
 
-pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
-    build_with_control(home, pin, &Default::default())
-}
 pub fn build_with_control(
     home: &Path,
     pin: &SourcePin,
@@ -561,9 +558,6 @@ where
 }
 /// Existing authenticated-index registration gate. Readiness never builds or
 /// hashes a replacement: build() authenticates the cached content separately.
-pub fn is_ready(home: &Path, pin: &SourcePin) -> Result<bool> {
-    is_ready_with_control(home, pin, &Default::default())
-}
 pub fn is_ready_with_control(
     home: &Path,
     pin: &SourcePin,
@@ -1943,7 +1937,6 @@ mod facts_cache_tests {
     #[test]
     fn static_facts_non_xml_and_stop_boundaries_never_initialize_catalog() {
         use std::{
-            sync::{Arc, atomic::AtomicBool},
             time::{Duration, Instant},
         };
         let fixture = Fixture::new();

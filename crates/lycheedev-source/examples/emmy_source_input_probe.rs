@@ -1,5 +1,5 @@
 // Admission-only checks. No investigated source or executable config is run.
-use std::{path::PathBuf,sync::{Arc,atomic::AtomicBool},time::{Duration,Instant}};
+use std::{path::PathBuf,time::{Duration,Instant}};
 use emmylua_code_analysis::{Emmyrc,EmmyrcLuaVersion};
 use lycheedev_core::control::OperationControl;
 use lycheedev_source::native::{ENGINE_ARCHIVE_SHA256,ENGINE_COMMIT,SourceInputs,SourceInputSpec,SourceFileInput,SourceMap,SourceLimits,TrustedHostEnvironment,LuacIdentity,hash,prepare};

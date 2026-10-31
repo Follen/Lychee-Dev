@@ -13,7 +13,7 @@ Lychee Dev 是面向开发者与 Agent 的魔兽世界调查工具：Rust 原生
 类型化游戏数据、导出的资源或指定客户端上的受权观察，并保留可复查的结果。
 
 发布平台为 **Windows amd64**。产品版本只以
-[release/version.json](release/version.json) 为准，当前为 **3.5.0**。
+[release/version.json](release/version.json) 为准。
 
 ## 能力
 
@@ -39,8 +39,11 @@ Lychee Dev 是面向开发者与 Agent 的魔兽世界调查工具：Rust 原生
 
 ## 安装与部署
 
+将示例路径换成准备安装的已核验发布包。使用 registry 时指定该发布的明确版本或标签；
+不带选择的包名可能装到另一个版本。
+
 ```powershell
-npm install --global lycheedev
+npm install --global 'C:\Downloads\lycheedev-X.Y.Z.tgz' # 所选版本的发布包
 lycheedev version --format json
 ```
 
@@ -58,6 +61,7 @@ lycheedev skill install --release $release --path $skill
 先检查目标，之后用受管更新器更新：
 
 ```powershell
+lycheedev schema update
 lycheedev update --plan --format json
 lycheedev update
 ```
@@ -128,15 +132,15 @@ lycheedev asset export --snapshot $dataPin --installation $client --file-id 1234
 
 ```powershell
 lycheedev live instances --format json
-lycheedev live doctor --pid <pid> --format json        # 只读就绪检查
+lycheedev doctor --pid <pid> --format json        # 只读就绪检查
 lycheedev live connect --installation $client --format json
 lycheedev live probe put --name <name> --file <probe.lua>
-lycheedev live execute --session <CON-id> --probe <name> --request <key> --format json
+lycheedev live execute --session <CON-id> --probe <name> --request <key> --budget-seconds 30 --format json
 lycheedev live disconnect <CON-id>
 ```
 
 实机工作绑定单个已验证进程/runtime，并保留持久归属、请求身份与恢复 journal。
-`live doctor --fix` 只在受权安装/目标范围内修复；没有当前输入协议时，首次激活可能
+`doctor --fix` 只在受权安装/目标范围内修复；没有当前输入协议时，首次激活可能
 需要一次手动 reload。已提交或结果未知的输入不会重放。`live status`、`live resume`
 与 `live session` 用于检查和恢复原工作。
 

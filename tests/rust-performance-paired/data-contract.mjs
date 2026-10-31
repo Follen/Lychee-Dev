@@ -1,8 +1,5 @@
 // Narrow B04 contracts. No Go312 driver, product fallback or timing subtraction.
 import assert from 'node:assert/strict';
-import {isDeepStrictEqual} from 'node:util';
-import {GO_COMMIT, REPETITIONS, TARGET_RATIO, orderFor, statistics} from './contract.mjs';
-export {GO_COMMIT, REPETITIONS, TARGET_RATIO, orderFor};
 export const SQL = 'SELECT ID, Name_lang, ModelFileDataID FROM HouseDecor ORDER BY ID';
 export const SQL_ROWS = [[10, '无模型🙂', 0], [20, '第二', 501], [30, '第三', 501]];
 export const CONTENT_BYTES = 17 << 20;
@@ -105,31 +102,4 @@ export function semanticData(entry, envelope, engine, cacheMode) {
     if (engine === 'rust') { accounting(result.resourceAccounting, true); observations.accounting = result.resourceAccounting; delete result.resourceAccounting; }
   }
   return {value: copy, observations};
-}
-
-export function compareData(go, rust) {
-  assert(isDeepStrictEqual(go, rust), 'full stable Go323 Data envelopes differ; raw outputs retained');
-  return true;
-}
-export function summarizeData(entries, pairs, acceptance, {allowLegacyTerminal = false} = {}) {
-  return entries.flatMap(entry => ['cold', 'warm'].map(cacheMode => {
-    const needed = acceptance && entry.performance ? REPETITIONS : 1;
-    const rows = pairs.filter(row => row.caseId === entry.id && row.cacheMode === cacheMode);
-    const homes = new Set(rows.flatMap(row => ['go', 'rust'].map(engine => row[engine]?.home)));
-    const terminalRows = rows.flatMap(row => [row, pairs.find(other => other.caseId === row.caseId && other.iteration === row.iteration && other.cacheMode === 'cold')]);
-    const terminalVerified = terminalRows.every(row => row && (row.pairTerminal?.state === 'verified' || allowLegacyTerminal && row.pairTerminal === undefined));
-    const failedFinalIntegrity = terminalRows.some(row => row?.pairTerminal?.state === 'failed_final_integrity');
-    const failedDiagnostics = terminalRows.some(row => row?.pairTerminal?.state === 'failed_diagnostics');
-    const correct = terminalVerified && rows.length === needed && homes.size === needed * 2 && !homes.has(undefined) && new Set(rows.map(row => row.iteration)).size === needed && rows.every((row, index) => {
-      const cold = pairs.find(other => other.caseId === row.caseId && other.iteration === row.iteration && other.cacheMode === 'cold');
-      return row.iteration === index && row.resultEquivalent === true && cold?.resultEquivalent === true && row.order?.join() === orderFor(index).join() && ['go', 'rust'].every(engine => row[engine]?.valid === true && row[engine]?.reuse?.verified === true && cold?.[engine]?.valid === true && row[engine]?.home === cold?.[engine]?.home && row[engine]?.binary === cold?.[engine]?.binary && row[engine]?.snapshot === cold?.[engine]?.snapshot);
-    });
-    const timed = rows.length > 0 && rows.every(row => ['go', 'rust'].every(engine => Number.isFinite(row[engine]?.controllableMillis) && row[engine].controllableMillis > 0));
-    const timings = timed ? Object.fromEntries(['go', 'rust'].map(engine => [engine, statistics(rows.map(row => row[engine].controllableMillis))])) : null;
-    const ratio = timings ? timings.rust.median / timings.go.median : null;
-    const evaluated = acceptance && entry.performance;
-    return {caseId: entry.id, cacheMode, requiredPairs: needed, attemptedPairs: rows.length, correctAndComplete: correct, pairTerminalVerified: rows.length > 0 && terminalVerified, timings,
-      performanceAcceptanceEvaluated: evaluated, medianRatio: evaluated ? ratio : null, targetRatio: evaluated ? TARGET_RATIO : null,
-      state: !rows.length ? 'not_run' : failedFinalIntegrity ? 'failed_final_integrity' : failedDiagnostics ? 'failed_diagnostics' : !correct ? 'failed_correctness_or_missing_samples' : !evaluated ? 'equivalent_observation_only' : ratio !== null && ratio <= TARGET_RATIO ? 'passed_selected_path' : 'failed_performance'};
-  }));
 }

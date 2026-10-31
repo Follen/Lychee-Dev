@@ -1,13 +1,10 @@
 #[path = "support/current_local_data.rs"]
 mod current_local_data;
-use blte::ByteSource;
 use lycheedev_data::{
     blte, casc, installed,
-    metadata_format::{self, Encoding, RootLimits},
     resource::{Budget, Cost},
 };
 use std::{
-    collections::BTreeMap,
     path::Path,
     time::{Duration, Instant},
 };
@@ -77,11 +74,9 @@ fn parser_admits_token_storage_before_copying_and_releases_borrowed_scratch() {
     assert_eq!(tight.snapshot().unwrap().metadata_bytes, 0);
     let budget = parser_budget(Cost::defaults());
     let actual = installed::parse_configuration_budgeted(raw.clone(), &key, Some(&budget)).unwrap();
-    let expected = installed::parse_configuration(raw, &key).unwrap();
-    assert_eq!(
-        serde_json::to_value(actual).unwrap(),
-        serde_json::to_value(expected).unwrap()
-    );
+    assert_eq!(actual.key, key);
+    assert_eq!(actual.raw, raw);
+    assert_eq!(actual.fields["dense"], vec!["x"; 4096]);
     assert!(budget.snapshot().unwrap().metadata_bytes >= (4096 * size_of::<String>()) as u64);
 
     let raw = format!(
@@ -89,7 +84,12 @@ fn parser_admits_token_storage_before_copying_and_releases_borrowed_scratch() {
     );
     let budget = parser_budget(Cost::defaults());
     let actual = installed::installed_rows_budgeted(raw.as_bytes(), Some(&budget)).unwrap();
-    assert_eq!(actual, installed::installed_rows(raw.as_bytes()).unwrap());
+    assert_eq!(actual.len(), 1);
+    assert_eq!(actual[0].product, "wow");
+    assert_eq!(actual[0].full_build, "12.1.0.69933");
+    assert_eq!(actual[0].build_config, key);
+    assert_eq!(actual[0].cdn_config, key);
+    assert!(actual[0].active);
     let used = budget.snapshot().unwrap();
     assert!(used.retained_bytes > 0, "owned row strings and Vec escape");
     assert!(
@@ -166,26 +166,26 @@ fn budgeted_parsers_preserve_authentication_and_field_limit_error_order() {
 fn strict_catalog_and_content_addressed_configuration() {
     let header = "Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\n";
     let row = format!("wow|12.1.0.69933|{}|{}|1\n", "a".repeat(32), "b".repeat(32));
-    let rows = installed::installed_rows(format!("{header}{row}").as_bytes()).unwrap();
+    let rows = installed::installed_rows_budgeted(format!("{header}{row}").as_bytes(), None).unwrap();
     assert_eq!(rows[0].product, "wow");
     assert!(rows[0].active);
-    assert!(installed::installed_rows(format!("{header}{row}x|1|2\n").as_bytes()).is_err());
-    assert!(installed::installed_rows(header.replace("Product!", "Version!").as_bytes()).is_err());
+    assert!(installed::installed_rows_budgeted(format!("{header}{row}x|1|2\n").as_bytes(), None).is_err());
+    assert!(installed::installed_rows_budgeted(header.replace("Product!", "Version!").as_bytes(), None).is_err());
     let raw =
         b"# config\nroot = 01234567890123456789012345678901\nencoding-size = 20 30\n".to_vec();
-    let doc = installed::parse_configuration(raw.clone(), &md5(&raw)).unwrap();
+    let doc = installed::parse_configuration_budgeted(raw.clone(), &md5(&raw), None).unwrap();
     assert_eq!(doc.fields["encoding-size"], vec!["20", "30"]);
     let mut changed = raw.clone();
     changed.push(b' ');
     assert_eq!(
-        installed::parse_configuration(changed, &md5(&raw))
+        installed::parse_configuration_budgeted(changed, &md5(&raw), None)
             .unwrap_err()
             .code,
         "records.configuration_integrity"
     );
     let duplicate = b"root = a\nroot = b\n".to_vec();
     assert_eq!(
-        installed::parse_configuration(duplicate.clone(), &md5(&duplicate))
+        installed::parse_configuration_budgeted(duplicate.clone(), &md5(&duplicate), None)
             .unwrap_err()
             .exit_code,
         4
@@ -582,8 +582,6 @@ fn target_root_and_client_share_metadata_selection() {
         assert_eq!(exact.installation, client);
         assert_eq!(root.installation, client);
         assert_eq!(exact.metadata.installed.product, slot);
-        let selected = installed::installation_root(&fixture.root).unwrap();
-        assert_eq!(selected, (fixture.root.clone(), slot.to_owned()));
     }
 }
 
@@ -597,7 +595,7 @@ fn pin_reader_casc_root_precedes_client_markers_but_target_needs_client() {
             .code,
         "selection.installation_missing"
     );
-    let metadata = installed::resolve_local(&fixture.root, "wow", "12.1.0.69933").unwrap();
+    let metadata = installed::resolve_local_budgeted(&fixture.root, "wow", "12.1.0.69933", None).unwrap();
     let pin = lycheedev_core::selection::DataPin {
         product: "retail".into(),
         region: "cn".into(),
@@ -645,11 +643,11 @@ fn pin_reader_preserves_canonical_family_and_exact_regional_slot() {
     ] {
         let target = installed::resolve_target(&fixture.request(path, Some(product))).unwrap();
         assert_eq!(
-            installed::data_installation_root(path, "wow_forever", build).unwrap(),
+            installed::data_installation_root_budgeted(path, "wow_forever", build, None).unwrap(),
             (fixture.root.clone(), slot.to_owned())
         );
         assert_eq!(
-            installed::resolve_local(path, slot, build)
+            installed::resolve_local_budgeted(path, slot, build, None)
                 .unwrap()
                 .installed
                 .product,
@@ -668,7 +666,7 @@ fn pin_reader_preserves_canonical_family_and_exact_regional_slot() {
             "records.pinned_build_changed"
         );
         assert_eq!(
-            installed::data_installation_root(path, slot, "1.60.1.70000")
+            installed::data_installation_root_budgeted(path, slot, "1.60.1.70000", None)
                 .unwrap_err()
                 .code,
             "records.pinned_build_changed"
@@ -681,21 +679,21 @@ fn pin_reader_preserves_canonical_family_and_exact_regional_slot() {
         "selection.installation_ambiguous"
     );
     assert_eq!(
-        installed::resolve_local(&fixture.root, "wow_forever", build)
+        installed::resolve_local_budgeted(&fixture.root, "wow_forever", build, None)
             .unwrap_err()
             .code,
         "records.build_ambiguous"
     );
     fixture.catalog(&[("wow_cn_beta", build, true)]);
     assert_eq!(
-        installed::resolve_local(&fixture.root, "wow_forever", build)
+        installed::resolve_local_budgeted(&fixture.root, "wow_forever", build, None)
             .unwrap()
             .installed
             .product,
         "wow_cn_beta"
     );
     assert_eq!(
-        installed::resolve_local(&fixture.root, "wow_classic_beta", build)
+        installed::resolve_local_budgeted(&fixture.root, "wow_classic_beta", build, None)
             .unwrap_err()
             .code,
         "records.build_unavailable"
@@ -839,19 +837,19 @@ fn installation_selection_and_pinned_reads_share_cancellation_and_budget() {
 fn data_root_missing_and_catalog_errors_keep_wire_sentinels() {
     let fixture = InstallationFixture::new();
     assert_eq!(
-        installed::data_installation_root(&fixture.root.join("absent"), "wow", "12.1.0.69933")
+        installed::data_installation_root_budgeted(&fixture.root.join("absent"), "wow", "12.1.0.69933", None)
             .unwrap_err()
             .code,
         "selection.installation_missing"
     );
     let header = "Product|Version|Build Key|CDN Key|Active\n";
     assert!(
-        installed::installed_rows(header.as_bytes())
+        installed::installed_rows_budgeted(header.as_bytes(), None)
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        installed::installed_rows(header.trim_end().as_bytes())
+        installed::installed_rows_budgeted(header.trim_end().as_bytes(), None)
             .unwrap_err()
             .code,
         "records.invalid_metadata"
@@ -861,16 +859,15 @@ fn data_root_missing_and_catalog_errors_keep_wire_sentinels() {
         format!("wow|12.1.0.69933|bad|{}|0\n", "b".repeat(32)),
     ] {
         std::fs::write(fixture.root.join(".build.info"), format!("{header}{row}")).unwrap();
-        assert_eq!(
-            installed::resolve_local(&fixture.root, "wow", "12.1.0.69933")
-                .unwrap_err()
-                .code,
-            "records.invalid_metadata"
-        );
+        let error = installed::resolve_local_budgeted(&fixture.root, "wow", "12.1.0.69933", None).unwrap_err();
+        assert_eq!(error.code, "records.invalid_metadata");
+        assert_eq!(error.exit_code, 4);
+        assert_eq!(error.details["sourcePath"], serde_json::json!(fixture.root.join(".build.info")));
+        assert!(error.details["formatHint"].as_str().unwrap().contains("Pipe-delimited"));
     }
     fixture.catalog(&[("wow_classic_beta", "5.5.4.69934", true)]);
     let metadata =
-        installed::resolve_local(&fixture.root, "wow_classic_beta", "5.5.4.69934").unwrap();
+        installed::resolve_local_budgeted(&fixture.root, "wow_classic_beta", "5.5.4.69934", None).unwrap();
     let pin = lycheedev_core::selection::DataPin {
         product: "forever-asia-beta".into(),
         full_build: "5.5.4.69934".into(),
@@ -981,7 +978,7 @@ fn catalog_branch_is_internal_and_does_not_change_admission_or_wire_shape() {
         "Product|Version|Build Key|CDN Key|Active|Branch\nunknown|1.2.3.4|{key}|{key}|0|cn beta\n"
     );
     assert_eq!(
-        installed::installed_rows(inactive.as_bytes()).unwrap()[0].metadata_branch,
+        installed::installed_rows_budgeted(inactive.as_bytes(), None).unwrap()[0].metadata_branch,
         "cn beta"
     );
 }
@@ -996,7 +993,7 @@ fn configuration_validation_precedes_integrity_and_preserves_wire_size_bounds() 
         };
         for key in ["bad".to_owned(), "a".repeat(32), md5(&raw)] {
             assert_eq!(
-                installed::parse_configuration(raw.clone(), &key)
+                installed::parse_configuration_budgeted(raw.clone(), &key, None)
                     .unwrap_err()
                     .code,
                 expected
@@ -1005,7 +1002,7 @@ fn configuration_validation_precedes_integrity_and_preserves_wire_size_bounds() 
     }
     let raw = b"valid = text\n".to_vec();
     assert_eq!(
-        installed::parse_configuration(raw, &"a".repeat(32))
+        installed::parse_configuration_budgeted(raw, &"a".repeat(32), None)
             .unwrap_err()
             .code,
         "records.configuration_integrity"
@@ -1029,7 +1026,7 @@ fn configuration_validation_precedes_integrity_and_preserves_wire_size_bounds() 
             format!("Product|Version|Build Key|CDN Key|Active\nwow|12.1.0.69933|{key}|{key}|1\n"),
         )
         .unwrap();
-        let result = installed::resolve_local(&fixture.root, "wow", "12.1.0.69933");
+        let result = installed::resolve_local_budgeted(&fixture.root, "wow", "12.1.0.69933", None);
         if size > 0 && size <= 1 << 50 {
             let metadata = result.unwrap();
             assert_eq!(metadata.content_bytes as u64, size);

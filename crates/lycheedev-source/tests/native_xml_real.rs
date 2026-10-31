@@ -38,7 +38,7 @@ fn run_xml_case(selected:&str){
     let pin_id=std::env::var("LYCHEEDEV_ENVIRONMENT_PIN").expect("fixed pin");
     let pin=selection::load_pinned(&home,&pin_id).unwrap();
     let manifest:Value=serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler=luac::Runtime::verified(&PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed Lua51 compiler")),serde_json::from_value(manifest["runtime"].clone()).unwrap()).unwrap();
+    let compiler=luac::Runtime::verified_with_ordered_control(&PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed Lua51 compiler")),serde_json::from_value(manifest["runtime"].clone()).unwrap(), &Default::default()).unwrap();
     let stage=std::env::var_os("LYCHEEDEV_XML_OUTPUT").map(PathBuf::from).unwrap_or_else(||std::env::temp_dir().join(format!("lycheedev-native-xml-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())));
     fs::create_dir(&stage).expect("fresh XML output directory");
     let cases=[

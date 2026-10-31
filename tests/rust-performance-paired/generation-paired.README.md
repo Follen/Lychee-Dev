@@ -20,8 +20,9 @@ the explicit external fixed Go 3.2.4 reference artifact directory (artifact.json
 + dev-npm-stage/ + private tarball); the repository never builds Go.
 See [the current owner](agent-paired-owned.mjs) for the exact request contract.
 
-Preparation uses the ordinary existing target, default stack, locked/offline
-`-j 1`, fixed 600 seconds, no one-shot and isolated user state. Reuse a matching
+Fixture preparation uses a 600-second controller deadline. Importer compilation
+uses the ordinary existing target, default stack, locked/offline `-j 1`, isolated
+user state and the owned Cargo runner's default 60-minute compilation deadline. Reuse a matching
 optimized artifact; otherwise prepare it explicitly with
 `node tools/rust-build.mjs <new-artifact-directory> release` before measurement.
 The current acceptance mode preserves twenty pairs and full result/CAP replay.

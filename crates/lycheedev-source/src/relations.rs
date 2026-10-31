@@ -1,6 +1,6 @@
 //! Structural relations remain candidates until an independent semantic binding resolves a site.
 use crate::{
-    environment, git,
+    environment,
     index::{self, Index},
     request::{RelationRequest, ResearchMode, ResearchSelection, SourceContext},
 };

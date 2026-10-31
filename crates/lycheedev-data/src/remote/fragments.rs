@@ -3,7 +3,7 @@
 //! belongs to the encoded/index/decoded consumer, never to this cache entry.
 use super::{
     availability_failure,
-    cache::{self, BlobRef, MetadataFetcher, PublicMetadata, Route, Store, pure_expected},
+    cache::{self, BlobRef, MetadataFetcher, Route, Store, pure_expected},
     catalog, invalid, limit, target,
     transport::{self, RangeReply, RangeRequest},
 };

@@ -123,12 +123,12 @@ fn diff_preserves_duplicate_declarations_signature_lines_and_original_blob_proof
         "after",
     );
     assert_eq!(
-        diff::compare(&f.home, &left, &right, 20).unwrap_err().code,
+        diff::compare_with_control(&f.home, &left, &right, 20, &Default::default()).unwrap_err().code,
         "codebase.index_not_ready"
     );
-    index::build(&f.home, &left).unwrap();
-    index::build(&f.home, &right).unwrap();
-    let result = diff::compare(&f.home, &left, &right, 20).unwrap();
+    index::build_with_control(&f.home, &left, &Default::default()).unwrap();
+    index::build_with_control(&f.home, &right, &Default::default()).unwrap();
+    let result = diff::compare_with_control(&f.home, &left, &right, 20, &Default::default()).unwrap();
     assert_eq!(result["documentChanges"], 5);
     assert_eq!(result["declarationChanges"], 5);
     let shared = result["declarations"]
@@ -152,11 +152,11 @@ fn diff_preserves_duplicate_declarations_signature_lines_and_original_blob_proof
     assert_eq!(moved["before"][0]["line"], 1);
     assert_eq!(moved["after"][0]["line"], 3);
     let proof = &result["sourceProofs"][0]["after"];
-    let (raw, object) = git::blob(&f.home, &right, "added.lua", 1024).unwrap();
+    let (raw, object) = git::blob_with_control(&f.home, &right, "added.lua", 1024, &Default::default()).unwrap();
     assert_eq!(proof["commit"], right.exact_commit);
     assert_eq!(proof["gitObject"], object);
     assert_eq!(proof["sha256"], storage::sha256(&raw));
-    let bounded = diff::compare(&f.home, &left, &right, 1).unwrap();
+    let bounded = diff::compare_with_control(&f.home, &left, &right, 1, &Default::default()).unwrap();
     assert_eq!(bounded["documents"].as_array().unwrap().len(), 1);
     assert_eq!(bounded["declarations"].as_array().unwrap().len(), 1);
     assert_eq!(bounded["documentChanges"], 5);
@@ -198,8 +198,8 @@ fn diff_preserves_duplicate_declarations_signature_lines_and_original_blob_proof
 fn diff_same_commit_no_change_and_incomplete_syntax_cannot_prove_absence() {
     let f = Fixture::new();
     let valid = f.pin(&[("valid.lua", "function Kept() end\n")], "valid");
-    index::build(&f.home, &valid).unwrap();
-    let same = diff::compare(&f.home, &valid, &valid, 1).unwrap();
+    index::build_with_control(&f.home, &valid, &Default::default()).unwrap();
+    let same = diff::compare_with_control(&f.home, &valid, &valid, 1, &Default::default()).unwrap();
     assert_eq!(same["documentChanges"], 0);
     assert_eq!(same["declarationChanges"], 0);
     assert_eq!(same["truncated"], false);
@@ -210,14 +210,14 @@ fn diff_same_commit_no_change_and_incomplete_syntax_cannot_prove_absence() {
         ],
         "broken",
     );
-    index::build(&f.home, &broken).unwrap();
-    let fault = diff::compare(&f.home, &valid, &broken, 10).unwrap_err();
+    index::build_with_control(&f.home, &broken, &Default::default()).unwrap();
+    let fault = diff::compare_with_control(&f.home, &valid, &broken, 10, &Default::default()).unwrap_err();
     assert_eq!(fault.code, "codebase.incomplete_index");
     assert_eq!(fault.details["coverage"]["to"]["complete"], false);
     let mut other = valid.clone();
     other.repository = "elvui".into();
     assert_eq!(
-        diff::compare(&f.home, &valid, &other, 10).unwrap_err().code,
+        diff::compare_with_control(&f.home, &valid, &other, 10, &Default::default()).unwrap_err().code,
         "codebase.incompatible_comparison"
     );
     assert_eq!(
@@ -251,7 +251,7 @@ fn checkout(f: &Fixture, pin: &SourcePin) -> PathBuf {
             &pin.exact_commit,
         ],
     );
-    let manifest = prune::verify(&f.home, pin, &path).unwrap();
+    let manifest = prune::verify_with_control(&f.home, pin, &path, &Default::default()).unwrap();
     storage::atomic_json(
         &f.home
             .join("source/v1/manifests")
@@ -313,11 +313,11 @@ fn prune_keeps_active_owner_and_immutable_evidence_then_reclaims_only_verified_c
     assert!(path.exists());
     drop(lease);
     fs::write(path.join("note.txt"), b"modified").unwrap();
-    let modified = prune::prune(&f.home, 0).unwrap();
+    let modified = prune::prune_with_control(&f.home, 0, &Default::default()).unwrap();
     assert!(modified.skipped[0].ends_with(":modified"));
     assert!(path.exists());
     fs::write(path.join("note.txt"), b"original").unwrap();
-    let removed = prune::prune(&f.home, 0).unwrap();
+    let removed = prune::prune_with_control(&f.home, 0, &Default::default()).unwrap();
     assert!(removed.complete);
     assert_eq!(
         removed.removed,
@@ -330,7 +330,7 @@ fn prune_keeps_active_owner_and_immutable_evidence_then_reclaims_only_verified_c
         b"retained bytes"
     );
     assert!(f.mirror.exists());
-    assert_eq!(git::regular_tree(&f.home, &source).unwrap().len(), 2);
+    assert_eq!(git::regular_tree_with_control(&f.home, &source, &Default::default()).unwrap().len(), 2);
 }
 #[test]
 fn prune_preserves_unknown_roots_extra_files_and_live_broker_without_ttl_stealing() {
@@ -342,13 +342,13 @@ fn prune_preserves_unknown_roots_extra_files_and_live_broker_without_ttl_stealin
     let unknown = f.home.join("source/v1/worktrees/foreign");
     fs::create_dir_all(&unknown).unwrap();
     fs::write(unknown.join("keep.bin"), b"owner").unwrap();
-    let result = prune::prune(&f.home, 0).unwrap();
+    let result = prune::prune_with_control(&f.home, 0, &Default::default()).unwrap();
     assert!(!result.complete);
     assert!(result.skipped.iter().any(|s| s.ends_with(":modified")));
     assert!(result.skipped.iter().any(|s| s == "foreign:untrusted"));
     assert_eq!(fs::read(unknown.join("keep.bin")).unwrap(), b"owner");
     let broker = ExclusiveLock::resource(&f.home.join("locks"), "source:v1:broker-owner").unwrap();
-    assert_eq!(prune::prune(&f.home, 0).unwrap_err().exit_code, 6);
+    assert_eq!(prune::prune_with_control(&f.home, 0, &Default::default()).unwrap_err().exit_code, 6);
     drop(broker);
     assert!(path.exists());
 }
@@ -363,14 +363,14 @@ fn prune_exact_stale_registration_and_invalid_manifest_boundaries() {
         .join(&source.repository)
         .join(format!("{}.json", source.exact_commit));
     fs::remove_dir_all(&path).unwrap();
-    let result = prune::prune(&f.home, 0).unwrap();
+    let result = prune::prune_with_control(&f.home, 0, &Default::default()).unwrap();
     assert!(result.complete);
     assert!(result.removed[0].ends_with(":stale-manifest"));
     assert!(!manifest_path.exists());
-    let raw = git::bytes(
+    let raw = git::bytes_with_control(
         Some(&f.mirror),
         &["worktree", "list", "--porcelain", "-z"],
-        1 << 20,
+        1 << 20, &Default::default(),
     )
     .unwrap();
     assert!(
@@ -382,7 +382,7 @@ fn prune_exact_stale_registration_and_invalid_manifest_boundaries() {
     let mut record: Value = storage::read_json(&manifest_path).unwrap();
     record["commit"] = json!("a".repeat(40));
     storage::atomic_json(&manifest_path, &record).unwrap();
-    assert_eq!(prune::prune(&f.home, 0).unwrap_err().exit_code, 4);
+    assert_eq!(prune::prune_with_control(&f.home, 0, &Default::default()).unwrap_err().exit_code, 4);
     assert!(path.exists());
 }
 
@@ -400,7 +400,7 @@ fn prune_rejects_foreign_git_binding_and_preserves_the_other_repository() {
         format!("gitdir: {}\n", foreign.display()),
     )
     .unwrap();
-    let result = prune::prune(&f.home, 0).unwrap();
+    let result = prune::prune_with_control(&f.home, 0, &Default::default()).unwrap();
     assert!(!result.complete);
     assert!(result.removed.is_empty());
     assert!(result.skipped[0].ends_with(":modified"));
@@ -410,5 +410,5 @@ fn prune_rejects_foreign_git_binding_and_preserves_the_other_repository() {
     );
     assert!(path.join("a.lua").exists());
     fs::write(path.join(".git"), original).unwrap();
-    assert!(prune::prune(&f.home, 0).unwrap().complete);
+    assert!(prune::prune_with_control(&f.home, 0, &Default::default()).unwrap().complete);
 }

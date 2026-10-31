@@ -6,9 +6,11 @@ pub(crate) mod removal;
 use crate::{control::OperationControl, storage::ExclusiveLock};
 use std::{
     collections::BTreeSet,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+#[cfg(test)]
+use std::time::Instant;
 pub struct OwnedMutation<'a> {
     pub key: &'a str,
     pub expected_generation: i64,

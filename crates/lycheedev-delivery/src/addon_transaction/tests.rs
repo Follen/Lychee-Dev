@@ -143,7 +143,7 @@ impl Fixture {
         )
     }
     fn intent(&self, release: &Path, archive: Option<&Path>, version: &str) -> PathBuf {
-        let wanted = release::receipt(&release::inspect(release, version).unwrap(), "addon");
+        let wanted = release::receipt(&release::inspect_with_control(release, version, &Default::default()).unwrap(), "addon");
         journal(&self.target, archive, &wanted).unwrap()
     }
     fn snapshot(&self) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
@@ -343,7 +343,7 @@ fn source_change_during_prepared(
     assert!(
         !installation::same_receipt_value(
             &serde_json::to_value(release::receipt(
-                &release::inspect(&f.release, VERSION).unwrap(),
+                &release::inspect_with_control(&f.release, VERSION, &Default::default()).unwrap(),
                 "addon"
             ))
             .unwrap(),
@@ -470,7 +470,7 @@ fn assert_slots_replacement_rejected(commit_only: bool) {
             &control,
         )
         .unwrap();
-        installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+        installation::verify_clean_controlled(&f.target, VERSION, slots::TRANSPORT, slots::COUNT, &Default::default()).unwrap();
         let installed_b =
             installation::inspect_main_controlled(&f.target, "addon", &control).unwrap();
         assert_eq!(result_b["receipt"], installed_b["receipt"]);
@@ -615,7 +615,7 @@ fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
                     Some(request_kind),
                     "verify-begin",
                 );
-                installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT)
+                installation::verify_clean_controlled(&f.target, VERSION, slots::TRANSPORT, slots::COUNT, &Default::default())
                     .unwrap();
                 #[cfg(windows)]
                 {
@@ -859,7 +859,7 @@ fn prepared_archive_checkpoint_resumes_each_matching_nested_state() {
                 fs::read(f.target.join("Bridge/SlotRuntime.lua")).unwrap(),
                 b"-- release A\n"
             );
-            installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+            installation::verify_clean_controlled(&f.target, VERSION, slots::TRANSPORT, slots::COUNT, &Default::default()).unwrap();
             let before = f.snapshot();
             assert_eq!(
                 f.apply(
@@ -909,7 +909,7 @@ fn prepared_checkpoint_resumes_matching_fresh_and_upgrade_without_nested_record(
         assert_eq!(done["wanted"], record["wanted"]);
         assert_eq!(done["previous"], record["previous"]);
         assert_eq!(done["result"], result);
-        installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+        installation::verify_clean_controlled(&f.target, VERSION, slots::TRANSPORT, slots::COUNT, &Default::default()).unwrap();
         guard.close().unwrap();
     }
 }
@@ -982,7 +982,7 @@ fn main_checkpoint_resumes_matching_and_reordered_receipts() {
         assert_eq!(done["phase"], "complete");
         assert_eq!(done["wanted"], record["wanted"]);
         assert_eq!(done["previous"], record["previous"]);
-        installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+        installation::verify_clean_controlled(&f.target, VERSION, slots::TRANSPORT, slots::COUNT, &Default::default()).unwrap();
         guard.close().unwrap();
     }
 }
@@ -1071,7 +1071,7 @@ fn completed_intent_rejects_same_version_replacement_without_replay_or_mutation(
             )
             .unwrap();
         assert_ne!(result_b, result_a);
-        installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+        installation::verify_clean_controlled(&f.target, VERSION, slots::TRANSPORT, slots::COUNT, &Default::default()).unwrap();
         let installed_b =
             installation::inspect_main_controlled(&f.target, "addon", &control).unwrap();
         let before = f.snapshot();
@@ -1338,6 +1338,6 @@ fn pending_original_release_reorders_resume_the_same_journal_and_changed_bytes_d
         fs::read(archive.join("previous/Bridge/SlotRuntime.lua")).unwrap(),
         b"-- old\n"
     );
-    installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+    installation::verify_clean_controlled(&f.target, VERSION, slots::TRANSPORT, slots::COUNT, &Default::default()).unwrap();
     guard.close().unwrap();
 }

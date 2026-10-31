@@ -16,7 +16,7 @@ use lycheedev_windows::filesystem::destination::{QuotaIntent, StagedFile, Staged
 use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
-    io::{Read, Write},
+    io::Read,
 };
 
 const INTENT_BYTES: usize = 48;

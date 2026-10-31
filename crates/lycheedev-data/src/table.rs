@@ -9,15 +9,13 @@ use crate::{
 use lycheedev_core::Result;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     ops::Range,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
-mod row_projection;
-use row_projection::{RowCollector, RowSelection};
 mod availability;
 pub(crate) use availability::{Availability, inspect_available_budgeted};
 fn invalid<T>() -> Result<T> {
@@ -130,15 +128,6 @@ pub enum Value {
     String(String),
     Array(Vec<Value>),
 }
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Page {
-    pub rows: Vec<BTreeMap<String, Value>>,
-    pub after_id: Option<u32>,
-    pub truncated: bool,
-    pub complete: bool,
-    pub row_count: usize,
-}
 #[derive(Debug, Clone, Copy)]
 struct Location {
     offset: usize,
@@ -157,14 +146,12 @@ struct Program {
 /// original table work and cumulative metadata charges are never refunded.
 struct RowAllocation<'a> {
     budget: Option<&'a Budget>,
-    scoped: bool,
     reservation: Option<crate::resource::RetainedReservation<'a>>,
 }
 impl<'a> RowAllocation<'a> {
-    fn new(budget: Option<&'a Budget>, scoped: bool) -> Self {
+    fn new(budget: Option<&'a Budget>) -> Self {
         Self {
             budget,
-            scoped,
             reservation: None,
         }
     }
@@ -172,18 +159,12 @@ impl<'a> RowAllocation<'a> {
         let Some(budget) = self.budget else {
             return Ok(());
         };
-        if self.scoped {
-            if let Some(reservation) = &mut self.reservation {
-                reservation.grow(bytes)?;
-            } else {
-                self.reservation = Some(budget.reserve_retained(bytes)?);
-            }
-            Ok(())
+        if let Some(reservation) = &mut self.reservation {
+            reservation.grow(bytes)?;
         } else {
-            // The legacy owned-row/page API keeps its previous lifetime: its
-            // caller can retain the returned map after the table is dropped.
-            budget.charge(Cost::retained(bytes))
+            self.reservation = Some(budget.reserve_retained(bytes)?);
         }
+        Ok(())
     }
 }
 /// A decoded row and the exact refundable allocation that owns its contents.
@@ -214,7 +195,7 @@ impl<T> OwnedLeasedRow<T> {
 impl<T> LeasedRow<'_, T> {
     pub(crate) fn into_owned(self, budget: &Arc<Budget>) -> Result<OwnedLeasedRow<T>> {
         let Self { value, allocation } = self;
-        if !allocation.scoped || allocation.budget.is_some_and(|original| !std::ptr::eq(original, budget.as_ref())) {
+        if allocation.budget.is_some_and(|original| !std::ptr::eq(original, budget.as_ref())) {
             return Err(fault("records.internal", 8, "Owned row requires its original scoped budget"));
         }
         let allocation = allocation.reservation.map(|lease| lease.into_owned(budget)).transpose()?;
@@ -295,12 +276,6 @@ impl<'a> Source<'a> {
         }
         self.metadata_bytes
             .fetch_add(bytes as u64, Ordering::Relaxed);
-        Ok(())
-    }
-    fn temporary(&self, bytes: usize) -> Result<()> {
-        if let Some(budget) = &self.budget {
-            budget.charge(Cost::retained(bytes))?;
-        }
         Ok(())
     }
     fn read(&self, offset: usize, length: usize) -> Result<&[u8]> {
@@ -1037,33 +1012,6 @@ impl<'a> Table<'a> {
         let location = self.location(id)?;
         self.source.read(location.offset, location.length as usize)
     }
-    pub fn raw_values(&self, id: u32, column: usize, elements: u32) -> Result<Vec<u64>> {
-        if self.layout.flags & 1 != 0 {
-            return unsupported();
-        }
-        if elements == 0 || elements > 65536 {
-            return limit();
-        }
-        self.source
-            .temporary(elements as usize * std::mem::size_of::<u64>())?;
-        let location = *self.location(id)?;
-        if self.layout.partitions[location.partition].identity_bytes == 0
-            && column == self.layout.identity_column as usize
-        {
-            if elements != 1 {
-                return invalid();
-            }
-            return Ok(vec![id as u64]);
-        }
-        self.values(
-            self.source
-                .read(location.offset, location.length as usize)?,
-            location.origin,
-            column,
-            elements,
-            None,
-        )
-    }
     fn bind(&mut self) -> Result<()> {
         if self.definition.r#match == "layout"
             && self.definition.layout.to_ascii_uppercase()
@@ -1740,47 +1688,24 @@ impl<'a> Table<'a> {
         }
         Ok(strings)
     }
-    pub fn row(&self, id: u32, text_bytes: usize) -> Result<BTreeMap<String, Value>> {
-        self.row_projected(id, text_bytes, None)
-    }
-    pub fn row_projected(
-        &self,
-        id: u32,
-        text_bytes: usize,
-        selected: Option<&BTreeSet<String>>,
-    ) -> Result<BTreeMap<String, Value>> {
-        let mut allocation = RowAllocation::new(self.source.budget.as_deref(), false);
-        self.row_projected_inner(id, text_bytes, selected, &mut allocation)
-    }
-    fn row_projected_inner(
-        &self,
-        id: u32,
-        text_bytes: usize,
-        selected: Option<&BTreeSet<String>>,
-        allocation: &mut RowAllocation<'_>,
-    ) -> Result<BTreeMap<String, Value>> {
-        self.decode_row(id, text_bytes, RowSelection::Names(selected), allocation)
-    }
     pub(crate) fn leased_row_values(
         &self,
         id: u32,
         text_bytes: usize,
     ) -> Result<LeasedRow<'_, Vec<Value>>> {
-        let mut allocation = RowAllocation::new(self.source.budget.as_deref(), true);
-        let value = self.decode_row(id, text_bytes, RowSelection::Names(None), &mut allocation)?;
+        let mut allocation = RowAllocation::new(self.source.budget.as_deref());
+        let value = self.decode_row(id, text_bytes, &mut allocation)?;
         Ok(LeasedRow { value, allocation })
     }
-    fn decode_row<C: RowCollector>(
+    fn decode_row(
         &self,
         id: u32,
         text_bytes: usize,
-        selected: RowSelection<'_>,
         allocation: &mut RowAllocation<'_>,
-    ) -> Result<C> {
+    ) -> Result<Vec<Value>> {
         if text_bytes == 0 || text_bytes > 1 << 20 {
             return limit();
         }
-        selected.validate(&self.definition.fields)?;
         self.charge(
             1 + self
                 .definition
@@ -1796,7 +1721,7 @@ impl<'a> Table<'a> {
         let sparse = self.layout.flags & 1 != 0;
         let mut cursor = 0u64;
         let mut remaining = text_bytes;
-        let mut result = C::default();
+        let mut result = Vec::new();
         let temporary = self
             .definition
             .fields
@@ -1814,24 +1739,15 @@ impl<'a> Table<'a> {
                     .ok_or_else(|| fault("table.limit_exceeded", 3, "Row allocation overflow"))
             })?;
         allocation.retain(temporary)?;
-        result.prepare(selected.count(self.definition.fields.len()))?;
-        let mut next_selected = 0;
+        result.try_reserve_exact(self.definition.fields.len())
+            .map_err(|_| fault("table.limit_exceeded", 3, "Row allocation failed"))?;
         for (index, field) in self.definition.fields.iter().enumerate() {
-            let wanted = selected.wanted(index, field, &mut next_selected);
             let Some(column) = self.column_mapping[index] else {
-                if wanted {
-                    result.field(
-                        field,
-                        if field.identity {
-                            Value::UInt(id as u64)
-                        } else {
-                            location
-                                .relation
-                                .map(|v| Value::UInt(v as u64))
-                                .unwrap_or(Value::Null)
-                        },
-                    );
-                }
+                result.push(if field.identity {
+                    Value::UInt(id as u64)
+                } else {
+                    location.relation.map(|v| Value::UInt(v as u64)).unwrap_or(Value::Null)
+                });
                 continue;
             };
             let storage = &self.programs[column].storage;
@@ -1841,14 +1757,10 @@ impl<'a> Table<'a> {
                     if value != location.origin as u64 {
                         return invalid();
                     }
-                    if wanted {
-                        result.field(field, Value::UInt(id as u64));
-                    }
+                    result.push(Value::UInt(id as u64));
                 } else {
                     let value = typed(value, field)?;
-                    if wanted {
-                        result.field(field, value);
-                    }
+                    result.push(value);
                 }
                 continue;
             }
@@ -1899,18 +1811,13 @@ impl<'a> Table<'a> {
                         allocation,
                     )?
                 };
-                if wanted {
-                    result.field(
-                        field,
-                        if field.array {
-                            Value::Array(strings.into_iter().map(Value::String).collect())
-                        } else {
-                            Value::String(strings.into_iter().next().ok_or_else(|| {
-                                fault("table.invalid_format", 4, "Empty scalar string")
-                            })?)
-                        },
-                    );
-                }
+                result.push(if field.array {
+                    Value::Array(strings.into_iter().map(Value::String).collect())
+                } else {
+                    Value::String(strings.into_iter().next().ok_or_else(|| {
+                        fault("table.invalid_format", 4, "Empty scalar string")
+                    })?)
+                });
                 continue;
             }
             let values = if sparse && storage.codec == 0 {
@@ -1942,31 +1849,21 @@ impl<'a> Table<'a> {
                 if values.len() != 1 || values[0] != location.origin as u64 {
                     return invalid();
                 }
-                if wanted {
-                    result.field(field, Value::UInt(id as u64));
-                }
+                result.push(Value::UInt(id as u64));
                 continue;
             }
-            let mut converted = Vec::with_capacity(if wanted { values.len() } else { 0 });
+            let mut converted = Vec::with_capacity(values.len());
             for value in values {
                 let value = typed(value, field)?;
-                if wanted {
-                    converted.push(value);
-                }
+                converted.push(value);
             }
-            if wanted {
-                result.field(
-                    field,
-                    if field.array {
-                        Value::Array(converted)
-                    } else {
-                        converted
-                            .into_iter()
-                            .next()
-                            .ok_or_else(|| fault("table.invalid_format", 4, "Empty scalar value"))?
-                    },
-                );
-            }
+            result.push(if field.array {
+                Value::Array(converted)
+            } else {
+                converted.into_iter().next().ok_or_else(|| {
+                    fault("table.invalid_format", 4, "Empty scalar value")
+                })?
+            });
         }
         if sparse {
             let total = record.len() as u64 * 8;
@@ -1980,38 +1877,7 @@ impl<'a> Table<'a> {
         }
         Ok(result)
     }
-    pub fn page(
-        &self,
-        after_id: Option<u32>,
-        limit_rows: usize,
-        text_bytes: usize,
-    ) -> Result<Page> {
-        if limit_rows == 0 || limit_rows > 5000 {
-            return limit();
-        }
-        let start = after_id
-            .map(|id| self.ids.partition_point(|v| *v <= id))
-            .unwrap_or(0);
-        let end = (start + limit_rows).min(self.ids.len());
-        self.source
-            .temporary((end - start) * std::mem::size_of::<BTreeMap<String, Value>>())?;
-        let mut rows = Vec::with_capacity(end - start);
-        for id in &self.ids[start..end] {
-            rows.push(self.row(*id, text_bytes)?);
-        }
-        let truncated = end < self.ids.len();
-        Ok(Page {
-            rows,
-            after_id: if truncated {
-                self.ids.get(end - 1).copied()
-            } else {
-                None
-            },
-            truncated,
-            complete: self.unavailable.is_empty() && !truncated,
-            row_count: self.ids.len(),
-        })
-    }
+
 }
 fn typed(value: u64, field: &Field) -> Result<Value> {
     if field.kind == "float" {
@@ -2041,3 +1907,11 @@ mod compact_tests;
 
 #[cfg(test)]
 mod string_partial_tests;
+
+#[cfg(test)]
+mod decode_tests;
+#[cfg(test)]
+mod palette_tests;
+
+#[cfg(test)]
+mod row_projection_tests;

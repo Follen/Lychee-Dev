@@ -1,30 +1,20 @@
 # Secret values and secure taint
 
-Read for a concrete value, consuming operation or taint report. Pin the addon
-and relevant client API source; start from the reported operation/location.
-Preserve `SecretReturns`, `SecretPayloads` and `SecretArguments` as written.
-Do not assume Forever follows Retail rules or lacks secrets because it is older.
-Modes such as `AllowedWhenTainted` and `AllowedWhenUntainted` are conditional
-permissions, not proof of this caller's state. An API marker identifies a possible
-source, not that this call produced a secret or its consumer forbids one.
+Pin the addon and matching client API source, starting at the reported consuming
+operation. Preserve `SecretReturns`, `SecretPayloads` and `SecretArguments` as
+written. Conditional taint permissions do not establish this caller's state;
+an API marker does not prove this call produced a secret or that a consumer
+forbids it. Older clients do not inherit Retail rules by assumption.
 
-Use query/inspect for the actual path, and flow context only when supported and
-relevant. Select the containing Lua declaration, not just the generated API.
-Interpret steps, conditions, rule identity, boundaries and outer coverage.
-`bounded_complete` covers only the selected closure and modeled operations.
-Event payload metadata alone does not establish handler registration/routing;
-more depth cannot resolve an unsupported edge.
+Select the containing Lua declaration and inspect supported flow context: fixed
+steps, aliases, branches, conditions, rule identity and coverage. A guard applies
+to its checked value/branch before reassignment; calling `issecretvalue` alone
+proves no later operation safe. `bounded_complete` covers only the selected,
+modeled closure. Unknown routing, aliases, dynamic calls and dependencies remain
+open. Secret propagation and secure execution taint are separate.
 
-Track assignments, fields, arguments and returns at fixed locations. A guard
-applies to its checked value and branch before reassignment. Merely calling
-`issecretvalue` proves no later operation safe. Check the consumer's versioned
-restrictions; leave unknown aliases, dynamic calls and missing dependencies open.
-Secret propagation and secure execution taint are separate. A Blizzard-only stack
-does not identify who caused taint, and no findings is not proof of safety.
-
-Source-only work stays static. When live work is authorized, carry the missing
-link into [hypothesis testing](live-probes.md#test-source-hypotheses), then reconcile
-the observation with this path. Do not coerce/extract secrets, repeat known
-forbidden operations, mutate protected frames or replace Blizzard handlers.
-Report a minimal correction only when supported; defaults/coercion are not a
-generic secrecy fix.
+No findings does not establish safety; a Blizzard-only stack does not identify
+the cause. For an authorized runtime check, carry the missing link into a
+[discriminating probe](live-probes.md#test-source-hypotheses). Do not coerce/extract
+secrets, repeat known forbidden operations or replace protected Blizzard objects.
+Recommend a correction supported by the actual value/consumer path.

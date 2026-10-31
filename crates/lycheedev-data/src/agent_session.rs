@@ -5,6 +5,7 @@ mod handles;
 mod domain;
 mod navigation;
 mod wire_schema;
+mod response_schema;
 #[path = "agent_tasks.rs"]
 pub mod tasks;
 
@@ -94,12 +95,19 @@ pub fn schema() -> Value {
     let query = crate::engine::query_schema();
     let business = tasks::schema();
     let navigate = navigation::schema();
-    let request_schema = wire_schema::request_schema(&query, &business, &navigate);
+    let mut request_schema = wire_schema::request_schema(&query, &business, &navigate);
+    let result_schemas = response_schema::results(&request_schema);
+    for variant in request_schema["oneOf"].as_array_mut().unwrap() {
+        let task = variant["properties"]["task"]["const"].as_str().unwrap();
+        variant["x-resultSchema"] = json!(format!("#/resultSchemas/{task}"));
+    }
     let task_names: Vec<_> = request_schema["oneOf"].as_array().unwrap().iter()
         .map(|variant| variant["properties"]["task"]["const"].clone()).collect();
     json!({"protocol":PROTOCOL,"transport":"stdin/stdout JSONL", "worker":"caller-owned supervisor plus one isolated reusable engine worker; no installed daemon", "processMemory":{"windows":"Job aggregate commit ceiling: --max-bytes plus 268435456 runtime/ingress bytes; not RSS", "otherTargets":"not shipped; Windows amd64 is required"},
         "request":{"protocol":PROTOCOL,"id":"strictly increasing positive u64; never replayed","timeout_ms":"1..3600000, includes queue wait; default 30000","task":task_names},
         "requestSchema":request_schema,
+        "responseSchema":response_schema::frames(),
+        "resultSchemas":result_schemas,
         "identity":"one immutable invocation snapshot/product/build/locale; explicit ordered Hotfix capture history is bound per table; handles do not survive worker restart",
         "query":query,
         "business":business,
@@ -374,6 +382,9 @@ mod tests;
 
 #[cfg(test)]
 mod schema_tests;
+
+#[cfg(test)]
+mod response_schema_tests;
 
 #[cfg(test)]
 #[path="agent_session/navigation_tests.rs"]

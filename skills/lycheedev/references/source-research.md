@@ -1,70 +1,36 @@
-# Source research
-
-Use pinned definitions, Lua/XML/TOC and relationships to answer the question.
-The CLI owns Git preparation, source mapping and analysis worker/session lifetime.
-Structural mapping, Lua 5.1 compilation and semantic analysis provide different
-evidence. Preserve the returned source/environment identities, locations,
-captures and coverage. Never execute studied Lua or repository configuration.
+# Source investigation
 
 ## Route source evidence
 
-Use LycheeDev by default. Reuse matching pins and retained locations; a fixed
-original declaration and its constraints can already answer an API question.
-Use `source list` / `source sync` only when selection is missing; see
-[source preparation](source-preparation.md). Query or inspect the relevant source;
-add [relationships](source-relations.md) only when callers or context matter.
-No full-index or live prerequisite is imposed on a simple lookup.
+Use LycheeDev by default for WoW source/API research. A fixed original declaration
+and its constraints may already answer the question. Reuse pins and returned
+locations; discover repositories/tracks through `source list` only when selection
+is missing. Sync the requested revision and retain the resolved commit. Source
+track, addon revision and client API environment are separate identities.
 
-A miss calls for checking topic, terms, selected revision and coverage. Broaden
-within the fixed source when useful. Use web/GitHub only for an actual missing
-source/version/capability or an explicit external-lookup request. State that gap
-or purpose and distinguish external provenance. Subsequent reads use verified or
-tool-returned paths/URLs. Never guess GitHub raw URLs, file paths or release tags,
-or silently replace a pin with latest.
+For a named release, resolve its actual ref from repository evidence. Use external
+web/GitHub for an explicit lookup request or a concrete missing source/version/
+capability, and label that provenance. Follow verified or returned paths/URLs;
+never guess tags/raw URLs or silently replace an unavailable revision.
 
-## Choose evidence
+## Choose evidence that answers the question
 
-Inspect an exact returned file/location; query an API/event/name; use refs/context
-for relationships, `source diff` for two fixed revisions of the same repository,
-or [validation](addon-validation.md) for load closure. For secret values or taint,
-read [value flow](source-value-flow.md). Use installed help for syntax.
+Query declarations; inspect original bytes at returned locations; use refs/context
+when callers, implementation or loading context matter. Resolve equal names by
+repository, commit, path and scope, then retain symbol IDs. Generated API stubs
+need not contain implementation. Semantic edges, static candidates and unknown
+edges have different strength. Use [validation](addon-validation.md) for ordered
+TOC/XML closure and [value flow](source-value-flow.md) for secrets/taint.
 
-Search hits are candidates. Resolve name collisions by repository, commit, path
-and scope; keep returned symbol IDs. A data pin is not a source reference. An
-addon track and its client API environment are separate pins; neither a folder
-nor an installed file proves the version loaded at runtime.
+Check coverage and truncation even after exit 0. Relation previews are bounded;
+a complete file capture does not mean the displayed excerpt includes every line.
+Continue only pages that can change the answer, preserving their exact scope.
+Changed terms, symbol, environment or analysis options require a new page set.
+Static evidence does not establish runtime loading or behavior.
 
-Coverage and truncation survive a successful exit. Relation previews are not all
-callers. Continue only pages that can change the answer, with the original scope
-and cursor type. A changed term, symbol, environment or budget starts a new page
-set. A complete file capture does not mean the returned excerpt included every
-line. Diff truncation and line movement do not prove removed or broken APIs.
-
-## Several questions on one pin
-
-`source batch` shares preparation. Its file holds 1–32 items, at most 64 KiB:
-
-```json
-{"requests":[{"id":"definition","query":{"text":"C_Spell.GetSpellInfo","topic":"api","limit":10}}]}
-```
-
-Each item contains exactly one query, refs or context object; an optional ID
-labels the item. Fields use camelCase (`symbolId`, `maxBytes`, `maxLines`); each
-item owns its cursor and coverage. All share source/environment. An item failure
-is not a completed batch.
-Use `lycheedev schema source batch` and its `fileInput` for the complete typed
-file schema, defaults and bounds. Unknown or repeated fields and malformed
-Unicode are rejected.
-
-## Optional native session reuse
-
-One-shot analysis is the default. Opt into session reuse only for repeated
-semantic cache misses on the same source/environment. Static queries and result
-cache hits do not require a broker. Inspect or close sessions through the CLI;
-do not kill another owner or override leases. Reuse cannot strengthen coverage,
-move cursors between scopes or renew deadlines.
-
-For preparation failures, follow [bounded recovery](source-preparation.md#recover-without-changing-the-revision).
-Static evidence does not prove the client loaded it or behaved that way. If live
-work is already in scope, carry the unresolved conditions into a bounded
-[hypothesis check](live-probes.md#test-source-hypotheses) and reconcile both results.
+For related questions, discover `source batch` and its typed `fileInput` schema.
+Optional session reuse changes cost, not evidence strength. Never execute studied
+Lua/configuration or alter managed worktrees. Correct the named preparation fault
+while retaining the original revision; unreadable/unparsed source is not absent.
+If runtime evidence is authorized and needed, carry the unresolved condition into
+a [discriminating probe](live-probes.md#test-source-hypotheses).

@@ -328,15 +328,6 @@ pub fn dispatch(ctx: &RequestContext, request: &Request) -> Result<Outcome> {
     }
 }
 
-pub fn managed(
-    root: &Path,
-    version: &str,
-    state: &Path,
-    targets: &[UpdateTarget],
-    plan: bool,
-) -> Result<Outcome> {
-    managed_with_control(root, version, state, targets, plan, &Default::default())
-}
 pub fn managed_with_control(
     root: &Path,
     version: &str,

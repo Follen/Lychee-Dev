@@ -10,10 +10,7 @@ mod fixture;
 use fixture::{Cell, Fixture, table};
 use lycheedev_data::{assets::{self, request::ExportRequest}, request::{DataContext, SourceOptions}};
 use lycheedev_data::query_source;
-use std::{
-    io::{Read, Seek, SeekFrom, Write},
-    time::{Duration, Instant},
-};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 fn input() -> (Fixture, Vec<u8>) {
     let table = table("ContentBudget", 501, &[("ID", "uint")], &[vec![Cell::U(7)]]);
@@ -25,30 +22,27 @@ fn context(fx: &Fixture, maximum: usize) -> DataContext {
         source: SourceOptions { snapshot: Some(fx.pin.clone()), installation: Some(fx.client.clone()), offline: true,
             max_file_bytes: maximum, ..Default::default() } }
 }
-fn read(ctx: &DataContext) -> lycheedev_core::Result<Vec<query_source::File>> {
-    let pin = ctx.resolve_pinned()?;
-    query_source::read_files(
-        ctx,
-        pin.data.as_ref().unwrap(),
-        &[501],
-        Instant::now() + Duration::from_secs(30),
-    )
+fn read(ctx: &DataContext) -> lycheedev_core::Result<lycheedev_core::Outcome> {
+    query_source::asset(ctx, 501)
+}
+fn bytes(ctx: &DataContext, found: &lycheedev_core::Outcome) -> Vec<u8> {
+    lycheedev_core::evidence::read_blob(&ctx.home, &found.data["content"], ctx.source.max_file_bytes).unwrap()
 }
 
 #[test]
 fn maximum_content_allowance_small_file_cold_and_warm() {
     let (fx, expected) = input();
     let ctx = context(&fx, 512 << 20);
-    let cold = read(&ctx).unwrap().remove(0);
-    assert_eq!(cold.bytes.as_ref(), expected.as_slice());
-    assert_eq!(cold.reading["decodedCache"]["hits"], 0);
-    assert_eq!(cold.reading["decodedCache"]["contentDecodeCalls"], 2);
-    let warm = read(&ctx).unwrap().remove(0);
-    assert_eq!(warm.bytes.as_ref(), expected.as_slice());
-    assert_eq!(warm.reading["decodedCache"]["hits"], 2);
-    assert_eq!(warm.reading["decodedCache"]["contentDecodeCalls"], 0);
+    let cold = read(&ctx).unwrap();
+    assert_eq!(bytes(&ctx, &cold), expected);
+    assert_eq!(cold.data["decodedCache"]["hits"], 0);
+    assert_eq!(cold.data["decodedCache"]["contentDecodeCalls"], 2);
+    let warm = read(&ctx).unwrap();
+    assert_eq!(bytes(&ctx, &warm), expected);
+    assert_eq!(warm.data["decodedCache"]["hits"], 2);
+    assert_eq!(warm.data["decodedCache"]["contentDecodeCalls"], 0);
     assert_eq!(
-        warm.reading["verification"]["contentWholeDecodedCKey"],
+        warm.data["verification"]["contentWholeDecodedCKey"],
         true
     );
 }
@@ -116,7 +110,7 @@ fn selected_encoded_and_decoded_lengths_are_bounded_on_cold_and_warm_reads() {
     let maximum = expected.len() + 9;
     let ctx = context(&fx, maximum);
     for _ in 0..2 {
-        assert_eq!(read(&ctx).unwrap()[0].bytes.as_ref(), expected.as_slice());
+        assert_eq!(bytes(&ctx, &read(&ctx).unwrap()), expected);
     }
     for too_small in [expected.len() - 1, expected.len(), expected.len() + 8] {
         let ctx = context(&fx, too_small);
@@ -125,32 +119,6 @@ fn selected_encoded_and_decoded_lengths_are_bounded_on_cold_and_warm_reads() {
         let ctx = context(&fresh, too_small);
         assert_eq!(read(&ctx).err().unwrap().code, "records.metadata_limit");
     }
-}
-
-#[test]
-#[ignore = "prepare a shared real CASC fixture for explicit frozen-Go/Rust public cold/warm boundary calls"]
-fn prepare_content_budget_public_fixture() {
-    let root = std::path::PathBuf::from(
-        std::env::var_os("LYCHEEDEV_CONTENT_BUDGET_FIXTURE").expect("fixture output directory"),
-    );
-    let table = table("ContentBudget", 501, &[("ID", "uint")], &[vec![Cell::U(7)]]);
-    let decoded = table.raw.len();
-    let fx = Fixture::at(root, &[table], "zhCN", 0x40);
-    std::fs::write(
-        fx.root.join("content-boundaries.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "fileDataID":501,"decodedBytes":decoded,"encodedBytes":decoded+9,
-            "cases":[
-                {"name":"below-decoded","maximum":decoded-1,"expectedExit":3},
-                {"name":"decoded-only","maximum":decoded,"expectedExit":3},
-                {"name":"below-encoded","maximum":decoded+8,"expectedExit":3},
-                {"name":"exact-encoded","maximum":decoded+9,"expectedExit":0},
-                {"name":"maximum-allowance","maximum":536870912,"expectedExit":0}
-            ],
-            "errorCode":"records.metadata_limit",
-            "runs":"asset inspect in json and jsonl; independent cold homes and warm homes primed at maximum-allowance; use input-identity.json snapshot/installation; verify complete capture bytes on success"
-        })).unwrap(),
-    ).unwrap();
 }
 
 #[test]
@@ -168,7 +136,6 @@ fn maximum_allowance_preserves_cancellation_and_rechecks_warm_encoded_source() {
     let before = captures();
     ctx.control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(read(&ctx).err().unwrap().exit_code, 7);
-    assert_eq!(query_source::asset(&ctx, 501).unwrap_err().exit_code, 7);
     assert_eq!(
         captures(),
         before,

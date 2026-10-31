@@ -6,7 +6,7 @@ use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
     Decl, GenericTplId, LuaMemberKey, LuaType, LuaTypeDeclId, SemanticId, VariadicType,
 };
-use emmylua_parser::{LuaAstNode, LuaCallExpr, LuaDocType, LuaExpr, LuaForRangeStat};
+use emmylua_parser::{LuaAstNode, LuaDocType, LuaExpr, LuaForRangeStat};
 
 impl<E> OwnedQuery<'_, '_, E> {
     pub(super) fn infer_owned_iteration(

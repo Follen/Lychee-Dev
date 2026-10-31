@@ -13,7 +13,7 @@ mod return_cast;
 mod signature_return;
 pub(super) use return_cast::ReturnCast;
 mod type_guard;
-use super::{OwnedQuery, OwnedQueryCapability, OwnedQueryFailure, QueryResult, cfg};
+use super::{OwnedQuery, OwnedQueryFailure, QueryResult, cfg};
 use crate::session::{OwnedValue, SelectedProjectionBackend, SelectedProjector};
 use cfg::{FlowAntecedent, FlowEffect, FlowId, FlowNodeKind, FlowTree};
 use emmylua_code_analysis::{DeclKind, LuaType, SemanticId};
@@ -182,33 +182,6 @@ impl<E> OwnedQuery<'_, '_, E> {
             &tree,
             start,
             Options::TARGET,
-            Mode::Point,
-            &mut HashSet::new(),
-            &mut PathState::default(),
-        )? {
-            Some(value) => Ok(value),
-            None => self.declared_or_unknown(declaration),
-        }
-    }
-    pub fn type_of_decl_before_at(
-        &mut self,
-        declaration: &SemanticId,
-        offset: u32,
-    ) -> QueryResult<OwnedValue, E> {
-        let Some(tree) = self.owned_flow_tree()? else {
-            return self.declared_or_unknown(declaration);
-        };
-        let Some(flow) = tree.get_flow_id_at(offset.into()) else {
-            return self.declared_or_unknown(declaration);
-        };
-        let Some(node) = tree.get_flow_node(flow) else {
-            return self.declared_or_unknown(declaration);
-        };
-        match self.walk_decl(
-            declaration,
-            &tree,
-            node.antecedent.as_ref(),
-            Options::READ,
             Mode::Point,
             &mut HashSet::new(),
             &mut PathState::default(),

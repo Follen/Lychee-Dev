@@ -604,21 +604,7 @@ impl Fixture {
     pub fn core_context(&self) -> RequestContext {
         RequestContext { home: self.home.clone(), cwd: self.root.clone(), control: Default::default() }
     }
-    pub fn verify(&self, outcome: &lycheedev_core::Outcome) {
-        assert_eq!(outcome.provenance.len(), 1);
-        let capture = &outcome.provenance[0];
-        let id = capture["id"].as_str().unwrap();
-        assert_eq!(evidence::read_capture(&self.home, id).unwrap(), *capture);
-        let raw = evidence::read_blob(&self.home, &capture["blob"], 16 << 20).unwrap();
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
-            outcome.data
-        );
-        assert_eq!(capture["complete"], outcome.complete);
-        assert_eq!(capture["truncated"], outcome.data["truncated"]);
-        let verified = evidence::dispatch(&self.core_context(), evidence::EvidenceRequest::Verify { id: id.into() }).unwrap();
-        assert_eq!(verified.data["verified"], true);
-    }
+
 }
 
 /// Two real WDC3 sections: readable ID 1/42 and encrypted ID 2/99.

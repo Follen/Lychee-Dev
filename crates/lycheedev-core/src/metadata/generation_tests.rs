@@ -228,14 +228,13 @@ fn remove(metadata: &mut Metadata, kind: usize, control: &OperationControl) -> R
         1 => metadata.consume::<bool, _>("key", |_| Ok(())),
         2 => metadata.consume_controlled::<bool, _>("key", control, |_| Ok(())),
         3 => metadata.consume_generation_controlled::<bool, _>("key", 2, control, |_| Ok(())),
-        4 => metadata.delete_checked(&["key".into()], &[("key".into(), 2)], |_| Ok(())),
         _ => unreachable!(),
     }
 }
 
 #[test]
 fn every_default_removal_preserves_history_for_historical_and_default_recreation() {
-    for kind in 0..5 {
+    for kind in 0..4 {
         let fixture = Fixture::new();
         let control = OperationControl::default();
         let mut metadata = fixture.open(kind % 2 == 0, true);
@@ -275,7 +274,7 @@ fn every_default_removal_preserves_history_for_historical_and_default_recreation
 
 #[test]
 fn failed_delete_rolls_back_new_tombstone_and_preserves_older_history() {
-    for kind in 0..5 {
+    for kind in 0..4 {
         let fixture = Fixture::new();
         let control = OperationControl::default();
         let mut metadata = fixture.open(true, true);
@@ -299,45 +298,6 @@ fn failed_delete_rolls_back_new_tombstone_and_preserves_older_history() {
     }
 }
 
-#[test]
-fn checked_batch_deletion_and_recovery_share_one_generation_transaction() {
-    let fixture = Fixture::new();
-    let mut metadata = fixture.open(true, true);
-    for key in ["first", "second", "recovery"] {
-        metadata.put(key, &true, None).unwrap();
-    }
-    metadata.delete("recovery").unwrap();
-    metadata.connection.execute_batch("CREATE TRIGGER reject_second BEFORE DELETE ON documents WHEN OLD.key='second' BEGIN SELECT RAISE(ABORT,'injected second failure'); END;").unwrap();
-    let keys = ["first".into(), "second".into()];
-    let expected = [("first".into(), 1), ("second".into(), 1)];
-    assert!(
-        metadata
-            .delete_checked_record(&keys, &expected, |_| Ok((
-                (),
-                Some(("recovery".into(), serde_json::json!(true)))
-            )))
-            .is_err()
-    );
-    assert_eq!(metadata.generation("first").unwrap(), Some(1));
-    assert_eq!(metadata.generation("second").unwrap(), Some(1));
-    assert_eq!(metadata.generation("recovery").unwrap(), None);
-    assert_eq!(tombstone(&metadata, "first"), None);
-    assert_eq!(tombstone(&metadata, "second"), None);
-    assert_eq!(tombstone(&metadata, "recovery"), Some(1));
-    metadata
-        .connection
-        .execute_batch("DROP TRIGGER reject_second")
-        .unwrap();
-    metadata
-        .delete_checked_record(&keys, &expected, |_| {
-            Ok(((), Some(("recovery".into(), serde_json::json!(true)))))
-        })
-        .unwrap();
-    assert_eq!(metadata.generation("recovery").unwrap(), Some(2));
-    assert_eq!(tombstone(&metadata, "first"), Some(1));
-    assert_eq!(tombstone(&metadata, "second"), Some(1));
-    metadata.close().unwrap();
-}
 
 #[test]
 fn stopped_recreation_preserves_deleted_generation_and_independent_budget() {

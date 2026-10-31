@@ -1,6 +1,6 @@
 // No builds, game, publish, arbitrary artifact or per-child ownership exemptions.
 import assert from 'node:assert/strict';
-import {existsSync, lstatSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
+import {existsSync, lstatSync, readdirSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {verifyArtifact, sourceDigest, hashFile, ownedUserEnvironment} from './rust-build.mjs';
 import {beginScratch, contained} from './rust-disk.mjs';

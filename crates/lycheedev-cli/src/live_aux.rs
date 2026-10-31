@@ -68,6 +68,28 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    #[test]
+    fn public_probe_put_flags_admit_without_reading_the_named_file() {
+        let home = std::env::temp_dir().join(format!("cli-admission-unused-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let words = ["live", "probe", "put", "--name", "audit", "--file", "not-created.lua"].map(str::to_owned);
+        let mut inv = crate::parse(&words).unwrap();
+        inv.home = home.clone();
+        let LiveRequest::Probe(ProbeRequest::Put { name, file }) = admit(&inv).unwrap() else { panic!("probe put"); };
+        assert_eq!(name, "audit");
+        assert_eq!(file, inv.cwd.join("not-created.lua"));
+        for missing in ["--name", "--file"] {
+            let mut incomplete = words.to_vec();
+            let index = incomplete.iter().position(|word| word == missing).unwrap();
+            incomplete.drain(index..index + 2);
+            let mut inv = crate::parse(&incomplete).unwrap();
+            inv.home = home.clone();
+            let error = admit(&inv).unwrap_err();
+            assert_eq!(error.exit_code, 2);
+            assert!(error.message.contains(missing));
+        }
+        assert!(!home.exists());
+    }
 
     fn invocation(command: &str) -> Invocation {
         Invocation {

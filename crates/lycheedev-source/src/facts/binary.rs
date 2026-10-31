@@ -345,6 +345,4 @@ pub(crate) fn decode(raw: &[u8], input: &str, control: &OperationControl) -> Res
 }
 
 #[cfg(test)]
-mod export_tests;
-#[cfg(test)]
 mod tests;

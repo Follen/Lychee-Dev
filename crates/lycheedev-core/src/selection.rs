@@ -359,17 +359,11 @@ fn inherit_parent(spec: &mut SelectionSpec, parent: PinnedSet) -> Result<()> {
     spec.changes = spec.changes.take().or(parent.spec.changes);
     Ok(())
 }
-pub fn find_project(start: &Path) -> Result<PathBuf> {
-    find_project_controlled(start, &crate::control::OperationControl::default())
-}
 pub fn find_project_controlled(
     start: &Path,
     control: &crate::control::OperationControl,
 ) -> Result<PathBuf> {
     project_controlled::find_controlled(start, control)
-}
-pub fn inspect_project(path: &Path) -> Result<Value> {
-    inspect_project_controlled(path, &crate::control::OperationControl::default())
 }
 pub fn inspect_project_controlled(
     path: &Path,

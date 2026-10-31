@@ -392,10 +392,11 @@ impl RuntimeControl for ExternalControl {
 #[test]
 fn retained_control_observes_changes_but_preserves_original_os_failure() {
     let cancel = Arc::new(AtomicBool::new(false));
-    let b = RuntimeBudget::with_control(
+    let b = RuntimeBudget::with_control_factory(
         RuntimeLimits::defaults(),
         Instant::now() + Duration::from_secs(10),
-        ExternalControl(cancel.clone()),
+        0,
+        || ExternalControl(cancel.clone()),
     )
     .unwrap();
     cancel.store(true, Ordering::Release);
@@ -475,10 +476,11 @@ fn temporary_scopes_keep_original_ledger_and_all_nested_cancellations() {
     let parent = Arc::new(AtomicBool::new(false));
     let first = Arc::new(AtomicBool::new(false));
     let second = Arc::new(AtomicBool::new(false));
-    let mut b = RuntimeBudget::with_control(
+    let mut b = RuntimeBudget::with_control_factory(
         RuntimeLimits::defaults(),
         Instant::now() + Duration::from_secs(10),
-        ExternalControl(parent.clone()),
+        0,
+        || ExternalControl(parent.clone()),
     )
     .unwrap();
     let id = b.request_id();

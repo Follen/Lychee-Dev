@@ -29,9 +29,9 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
     .unwrap();
     let manifest: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler = luac::Runtime::verified(
+    let compiler = luac::Runtime::verified_with_ordered_control(
         &PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed luac")),
-        serde_json::from_value(manifest["runtime"].clone()).unwrap(),
+        serde_json::from_value(manifest["runtime"].clone()).unwrap(), &Default::default(),
     )
     .unwrap();
     let ctx = SourceContext {

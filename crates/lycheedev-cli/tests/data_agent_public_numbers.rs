@@ -67,7 +67,19 @@ fn request(run: &mut Running, mut task: Value) -> (Value,String) {
     (value["result"].clone(),raw_field(&raw,"result"))
 }
 fn finish(mut run:Running) {
+    // Cancelling already completed work is a real successful control response;
+    // it must not replay it or terminate this still usable session.
+    let (cancelled,_)=request(&mut run,json!({"task":"cancel","request_id":1}));
+    assert_eq!(cancelled,json!({"requestId":1,"cancellationRequested":false,"replayed":false}));
     let (closed,_)=request(&mut run,json!({"task":"close"}));assert_eq!(closed,json!({"closed":true,"handlesReleased":true}));
+    let descriptor=lycheedev_data::agent_session::schema();
+    for (task,payload) in [("cancel",&cancelled),("close",&closed)] {
+        let schema=&descriptor["resultSchemas"][task];
+        for required in schema["required"].as_array().unwrap() {
+            let name=required.as_str().unwrap();assert!(payload.get(name).is_some(),"{task} requires {name}");
+            if let Some(expected)=schema["properties"][name].get("const") {assert_eq!(&payload[name],expected,"{task}.{name}");}
+        }
+    }
     run.input.take();let deadline=Instant::now()+Duration::from_secs(15);
     let status=loop {if let Some(status)=run.child.as_mut().unwrap().try_wait().unwrap(){break status;}
         assert!(Instant::now()<deadline,"supervisor cleanup deadline");thread::sleep(Duration::from_millis(10));};

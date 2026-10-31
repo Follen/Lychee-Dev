@@ -522,7 +522,6 @@ impl<'a, 'b, 'control> BindEngine<'a, 'b, 'control> {
                 let return_flow_id = self.binder.create_return();
                 self.binder.cache_goto_flow(
                     closure_id,
-                    label_token.clone(),
                     label_name,
                     return_flow_id,
                 );

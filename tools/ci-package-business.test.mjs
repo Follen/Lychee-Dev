@@ -1,7 +1,7 @@
 // Node-only custody and failure-boundary checks. No native program is launched.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {dirname, join, relative, resolve} from 'node:path';
 import {after, test} from 'node:test';
 import {authenticateBusinessInputs, businessEnvironment, packageBusiness, parseBusinessOptions} from './ci-package-business.mjs';

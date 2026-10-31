@@ -63,9 +63,24 @@ fn supervisor_cancel_of_submitted_work_terminates_epoch_without_replay() {
     );
     let (code, _out, err) = finish(run);
     assert_eq!(code, 7, "{err}");
-    assert!(err.contains("command.cancelled"), "{err}");
-    assert!(err.contains("sessionInvalidated"), "{err}");
-    assert!(err.contains("\"replayed\":false"), "{err}");
+    let diagnostic: Value = serde_json::from_str(err.trim()).unwrap();
+    assert_eq!(diagnostic["error"]["code"], "command.cancelled");
+    assert_eq!(diagnostic["error"]["details"]["requestId"], 1);
+    assert_eq!(diagnostic["error"]["details"]["cancelRequestId"], 2);
+    assert_eq!(diagnostic["error"]["details"]["sessionInvalidated"], true);
+    assert_eq!(diagnostic["error"]["details"]["replayed"], false);
+    let schema = lycheedev_data::agent_session::schema()["responseSchema"].clone();
+    let terminal = &schema["$defs"]["TerminalDiagnostic"];
+    for required in terminal["required"].as_array().unwrap() {
+        assert!(diagnostic.get(required.as_str().unwrap()).is_some());
+    }
+    assert!(terminal["properties"]["protocol"]["enum"].as_array().unwrap().contains(&diagnostic["protocol"]));
+    assert_eq!(diagnostic["ok"], terminal["properties"]["ok"]["const"]);
+    assert!(diagnostic.get("id").is_none());
+    assert!(diagnostic.get("result").is_none());
+    for required in schema["$defs"]["ToolkitError"]["required"].as_array().unwrap() {
+        assert!(diagnostic["error"].get(required.as_str().unwrap()).is_some());
+    }
 }
 
 #[test]

@@ -40,6 +40,10 @@ test('test-program builds forward default and explicit jobs to Cargo and the sea
     const directory=buildFixture(`jobs-${jobs??'default'}`),output=join(directory,'artifact');let calls=0,received;
     const built=buildTestPrograms({root:directory,output,...(jobs===undefined?{}:{jobs}),execute(command,args,options){
       calls++;assert.equal(command,'cargo');received=args;
+      assert(options.env.HOME.startsWith(join(directory,'.tmp','rust-scratch') + (process.platform==='win32'?'\\':'/')));
+      assert.equal(options.env.USERPROFILE,options.env.HOME);
+      assert.equal(options.env.CODEX_HOME,join(options.env.HOME,'.codex'));
+      assert.equal(options.env.LYCHEEDEV_HOME,join(options.env.HOME,'..','home'));
       const target=join(options.env.CARGO_TARGET_DIR,'debug/deps');mkdirSync(target,{recursive:true});
       const executable=join(target,'fixture.exe');writeFileSync(executable,'mock libtest program');
       const messages=[{reason:'compiler-artifact',executable,package_id:'path+file:///fixture#fixture@0.1.0',target:{kind:['lib'],name:'fixture'},profile:{test:true}},{reason:'build-finished',success:true}];
@@ -56,6 +60,45 @@ test('invalid build jobs refuse admission before creating output or launching Ca
   const directory=buildFixture('invalid-jobs'),output=join(directory,'artifact');let calls=0;
   for(const jobs of [0,5,2.5,'bad',null,true])assert.throws(()=>buildTestPrograms({root:directory,output,jobs,execute(){calls++;throw new Error('compiler must not start');}}),/build.invalid_jobs/);
   assert.equal(calls,0);assert.equal(existsSync(output),false);assert.equal(existsSync(join(directory,'.tmp')),false);
+});
+
+test('harnessless fixture programs are sealed as support without entering the test plan',()=>{
+  const directory=buildFixture('helper-support'), output=join(directory,'artifact');
+  writeFileSync(join(directory,'crates/fixture/Cargo.toml'),'[[test]]\nname = "guarded_spawn_fixture"\npath = "tests/guarded_spawn_fixture.rs"\nharness = false\n');
+  const built=buildTestPrograms({root:directory,output,execute(_command,_args,options){
+    const target=join(options.env.CARGO_TARGET_DIR,'debug/deps');mkdirSync(target,{recursive:true});
+    const messages=[['fixture','lib','test harness'],['guarded_spawn_fixture','test','owned child helper']].map(([name,kind,body])=>{
+      const executable=join(target,`${name}.exe`);writeFileSync(executable,body);
+      return {reason:'compiler-artifact',executable,package_id:'path+file:///fixture#fixture@0.1.0',target:{kind:[kind],name},profile:{test:true}};
+    });
+    return {status:0,handlesReaped:true,stdout:Buffer.from([...messages,{reason:'build-finished',success:true}].map(value=>JSON.stringify(value)).join('\n')),stderr:Buffer.alloc(0)};
+  }});
+  assert.deepEqual(built.programs.map(row=>row.target),['fixture']);
+  assert.deepEqual(built.support.map(row=>row.target),['guarded_spawn_fixture']);
+  assert.deepEqual(built.excluded.map(row=>row.target),['guarded_spawn_fixture']);
+  const helper=built.support[0],bytes=readFileSync(join(directory,helper.path));
+  assert.equal(bytes.toString(),'owned child helper');
+  assert.equal(helper.sha256,createHash('sha256').update(bytes).digest('hex'));
+  assert.deepEqual(readFileSync(helper.destination),bytes);
+});
+
+test('explicit test filters reject zero execution even when libtest exits successfully',()=>{
+  const executable=join(base,'filtered.exe'),bytes=Buffer.from('sealed filter fixture');writeFileSync(executable,bytes);
+  const program={package:'lycheedev-windows',target:'fixture',kinds:['lib'],path:executable,sha256:createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length};
+  const reportPath=join(base,'filtered-report.json');
+  for(const stdout of [
+    '',
+    'running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out;\n',
+    'test result: ok. 1 passed; 0 failed; 0 ignored;\ntest result: ok. 0 passed; 0 failed; 1 ignored;\n',
+  ]){
+    write(record({programs:[program]}));
+    assert.throws(()=>runTestPrograms({recordPath,reportPath,arguments:['missing_test','--exact','--ignored'],executor(){return {status:0,handlesReaped:true,stdout:Buffer.from(stdout)};}}),/tests_failed/);
+    const report=JSON.parse(readFileSync(reportPath));
+    assert.equal(report.state,'failed');assert.equal(report.results[0].exit,0);assert.equal(report.results[0].error,'ci-test-programs.filtered_no_tests_executed');
+  }
+  write(record({programs:[program]}));
+  const success=runTestPrograms({recordPath,arguments:['existing_test','--exact','--ignored'],executor(){return {status:0,handlesReaped:true,stdout:Buffer.from('test result: ok. 1 passed; 0 failed; 0 ignored;\n')};}});
+  assert.equal(success.state,'passed');assert.equal(success.results[0].executedTests,1);
 });
 
 test('test-program artifact preserves producer receipt, fingerprint logs and explicit Cargo timings',()=>{

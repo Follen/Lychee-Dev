@@ -42,9 +42,9 @@ fn selected_value_call_families_use_native_diagnostics_and_honest_coverage() {
     .unwrap();
     let manifest: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
-    let compiler = luac::Runtime::verified(
+    let compiler = luac::Runtime::verified_with_ordered_control(
         &PathBuf::from(std::env::var_os("LYCHEEDEV_LUAC_STAGE").expect("fixed luac")),
-        serde_json::from_value(manifest["runtime"].clone()).unwrap(),
+        serde_json::from_value(manifest["runtime"].clone()).unwrap(), &Default::default(),
     )
     .unwrap();
     let cases = [

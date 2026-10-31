@@ -209,7 +209,7 @@ fn finish(
 ) -> Result<DomainResult> {
     let owner = owner(memory).bind_request(request)?;
     owner.budget().charge(Cost::retained(8192)).unwrap();
-    let captures = binding(request).1;
+    let captures = request.binding().1;
     let sources = sources
         .into_iter()
         .map(|value| owned(memory, value, captures.to_vec()))

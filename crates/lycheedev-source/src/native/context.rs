@@ -1214,7 +1214,7 @@ fn owned_byte_range(range: TextRange) -> lycheedev_emmy_adapter::ByteRange {
 #[cfg(test)]
 mod call_return_evidence_tests {
     use super::*;
-    use lycheedev_emmy_adapter::session::{DiagnosticRun, OwnedQuery, SelectedProjectionBackend};
+    use lycheedev_emmy_adapter::session::{DiagnosticRun, OwnedQuery};
 
     #[test]
     fn deferred_selected_calls_keep_declared_types_without_claiming_observed_arity() {

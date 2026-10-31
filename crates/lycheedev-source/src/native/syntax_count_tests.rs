@@ -1,6 +1,6 @@
 // Current syntax index counting, admission and cancellation boundaries.
 use emmylua_parser::{LuaLanguageLevel,LuaParser,ParserConfig,LuaSyntaxNode,LuaSyntaxKind};
-use std::{sync::atomic::{AtomicBool,Ordering},time::{Duration,Instant}};
+use std::{sync::atomic::Ordering,time::{Duration,Instant}};
 
 fn parsed(source:&str)->LuaSyntaxNode {
     LuaParser::parse(source,ParserConfig::with_level(LuaLanguageLevel::Lua51)).get_red_root()

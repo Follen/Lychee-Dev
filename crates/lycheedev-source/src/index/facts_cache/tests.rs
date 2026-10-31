@@ -3,7 +3,6 @@ use crate::index::{self, facts_cache_tests::Fixture};
 use std::{
     collections::BTreeMap,
     fs,
-    sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 

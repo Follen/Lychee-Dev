@@ -178,13 +178,6 @@ fn reference(value: &str) -> Option<&str> {
     }
     Some(value)
 }
-/// Online symbolic resolutions refresh each call. Offline aliases are the last
-/// validated observation for that exact full ref, never an invented latest pin.
-pub fn resolve_revision(home: &Path, value: &str, offline: bool) -> Result<String> {
-    let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(30));
-    resolve_revision_controlled(home, value, offline, &control, None)
-}
-
 pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .max_redirects(0)
@@ -198,35 +191,6 @@ pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
         .build()
         .new_agent()
 }
-pub fn prepare(home: &Path, commit: &str, name: &str, offline: bool) -> Result<(Bundle, Vec<u8>)> {
-    prepare_until(
-        home,
-        commit,
-        name,
-        offline,
-        Instant::now() + Duration::from_secs(60),
-    )
-}
-pub fn prepare_until(
-    home: &Path,
-    commit: &str,
-    name: &str,
-    offline: bool,
-    deadline: Instant,
-) -> Result<(Bundle, Vec<u8>)> {
-    prepare_budgeted(home, commit, name, offline, deadline, None)
-}
-pub fn prepare_budgeted(
-    home: &Path,
-    commit: &str,
-    name: &str,
-    offline: bool,
-    deadline: Instant,
-    budget: Option<&crate::resource::Budget>,
-) -> Result<(Bundle, Vec<u8>)> {
-    Ok(prepare_many_budgeted(home, commit, &[name], offline, deadline, budget)?.remove(0))
-}
-
 /// Actual invocation scope is kept distinct from the Data budget's owner.
 pub(crate) fn prepare_controlled(
     home: &Path,
@@ -244,22 +208,9 @@ pub(crate) fn prepare_controlled(
         offline,
         deadline,
         budget,
-        Some(control),
+        control,
     )?
     .remove(0))
-}
-
-/// One fixed manifest read and one definition read per distinct table. A domain
-/// request shares its caller's deadline and admission ledger across the batch.
-pub(crate) fn prepare_many_budgeted(
-    home: &Path,
-    commit: &str,
-    names: &[&str],
-    offline: bool,
-    deadline: Instant,
-    budget: Option<&crate::resource::Budget>,
-) -> Result<Vec<(Bundle, Vec<u8>)>> {
-    prepare_many_controlled(home, commit, names, offline, deadline, budget, None)
 }
 
 // Fixed Go definitions.go: charge actual bytes, not the HTTP buffer bound.
@@ -321,10 +272,8 @@ pub(crate) fn prepare_many_controlled(
     offline: bool,
     deadline: Instant,
     budget: Option<&crate::resource::Budget>,
-    control: Option<&OperationControl>,
+    control: &OperationControl,
 ) -> Result<Vec<(Bundle, Vec<u8>)>> {
-    let fallback = OperationControl::uncancelable(deadline);
-    let control = control.unwrap_or(&fallback);
     let check = || check_definition(deadline, budget, control);
     check()?;
     if !lycheedev_core::selection::valid_digest(commit, 40)
@@ -442,13 +391,15 @@ mod batch_tests {
             deadline,
             OperationControl::tracked(deadline, cancel.clone()),
         );
-        let prepared = prepare_many_budgeted(
+        let control = OperationControl::tracked(deadline, cancel.clone());
+        let prepared = prepare_many_controlled(
             &home,
             commit,
             &["Item", "ItemSparse", "item"],
             true,
             deadline,
             Some(&budget),
+            &control,
         )
         .unwrap();
         assert_eq!(prepared.len(), 2);
@@ -469,13 +420,14 @@ mod batch_tests {
             None,
         );
         assert_eq!(
-            prepare_many_budgeted(
+            prepare_many_controlled(
                 &home,
                 commit,
                 &["Item", "ItemSparse"],
                 true,
                 deadline,
-                Some(&tight)
+                Some(&tight),
+                &control,
             )
             .unwrap_err()
             .code,
@@ -483,13 +435,14 @@ mod batch_tests {
         );
         cancel.cancel();
         assert_eq!(
-            prepare_many_budgeted(
+            prepare_many_controlled(
                 &home,
                 commit,
                 &["Item", "ItemSparse"],
                 true,
                 deadline,
-                Some(&budget)
+                Some(&budget),
+                &control,
             )
             .unwrap_err()
             .exit_code,

@@ -362,10 +362,6 @@ fn exact_members(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-#[cfg(test)]
-pub(crate) fn read_pool(parent: &Path) -> Result<SlotPool> {
-    read_pool_controlled(parent, &OperationControl::default())
-}
 pub(crate) fn read_pool_controlled(parent: &Path, control: &OperationControl) -> Result<SlotPool> {
     control.check()?;
     let marker = parent.join(MARKER);
@@ -569,9 +565,6 @@ fn upgrade_plan(
     Ok(plan)
 }
 /// Read-only maintenance admission; no existing or extension bytes are adopted.
-pub fn preflight(parent: &Path, version: &str) -> Result<()> {
-    preflight_controlled(parent, version, &OperationControl::default())
-}
 pub fn preflight_controlled(
     parent: &Path,
     version: &str,
@@ -620,9 +613,6 @@ pub fn preflight_controlled(
         upgrade_plan(parent, &pool, version, control)?;
     }
     Ok(())
-}
-pub fn install(parent: &Path, version: &str) -> Result<Value> {
-    install_controlled(parent, version, &OperationControl::default())
 }
 pub fn install_controlled(
     parent: &Path,
@@ -741,9 +731,6 @@ fn upgrade(
     };
     save_pool(parent, &pool, control)?;
     Ok(serde_json::to_value(pool)?)
-}
-pub fn inspect(parent: &Path, version: &str) -> Result<Value> {
-    inspect_controlled(parent, version, &OperationControl::default())
 }
 pub fn inspect_controlled(
     parent: &Path,

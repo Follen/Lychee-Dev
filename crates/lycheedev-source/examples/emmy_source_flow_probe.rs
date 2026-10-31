@@ -1,5 +1,5 @@
 // One fixed request through the production native query seam. No source execution.
-use std::{path::PathBuf,sync::{Arc,atomic::AtomicBool},time::{Duration,Instant}};
+use std::{path::PathBuf,time::{Duration,Instant}};
 use emmylua_code_analysis::{Emmyrc,EmmyrcLuaVersion};
 use lycheedev_core::control::OperationControl;
 use lycheedev_source::native::*;

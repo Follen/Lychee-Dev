@@ -18,6 +18,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::LazyLock,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 #[derive(Serialize, Deserialize)]
@@ -97,9 +98,56 @@ fn finish_update_file(
     // File teardown must not discard an already completed prefix/target result.
     deploy::finish_close(result, storage::finish_file(file, Ok(()), control))
 }
-// Release channels are explicitly version-bound; historical fixtures stay on next.
-pub(crate) fn release_channel(version: &str) -> &'static str {
-    if version == "3.5.0" { "beta" } else { "next" }
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChannelPolicy {
+    schema: String,
+    version: String,
+    dist_tag: String,
+    preserve_latest: String,
+}
+fn stable_version(value: &str) -> bool {
+    let mut parts = value.split('.');
+    (0..3).all(|_| {
+        parts.next().is_some_and(|part| {
+            !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    }) && parts.next().is_none()
+}
+fn policy() -> &'static ChannelPolicy {
+    static POLICY: LazyLock<ChannelPolicy> = LazyLock::new(|| {
+        // These are build-input invariants, not assertions on incoming packages.
+        // include_str also makes Cargo track authority changes for recompilation.
+        let policy: ChannelPolicy = serde_json::from_str(include_str!(
+            "../../../release/npm-channel.json"
+        )).expect("release/npm-channel.json must be a channel policy");
+        assert_eq!(policy.schema, "lycheedev.npm-channel.v1");
+        assert_eq!(policy.version, env!("CARGO_PKG_VERSION"), "compiled version and channel authority differ");
+        assert!(stable_version(&policy.version));
+        assert!(stable_version(&policy.preserve_latest));
+        assert_ne!(policy.version, policy.preserve_latest);
+        assert!(policy.dist_tag.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+            && policy.dist_tag.bytes().all(|byte| byte.is_ascii_lowercase()
+                || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-'))
+            && policy.dist_tag != "latest", "channel authority must name an explicit non-latest tag");
+        policy
+    });
+    &POLICY
+}
+/// Pure compiled release policy for CLI discovery. No registry, filesystem,
+/// workspace or worker is opened, and no version-to-channel fallback exists.
+pub fn update_policy() -> Value {
+    let policy = policy();
+    json!({"schema":"lycheedev.update-policy.v1","runtime":"rust",
+        "version":env!("CARGO_PKG_VERSION"),"npmChannel":policy,
+        "registrySelector":format!("lycheedev@{}", policy.dist_tag),
+        "selectors":{"version":false,"channel":false},
+        "modes":{
+            "registry":"Without --release or --plan, prepare the npm package from registrySelector, verify the exact TGZ and hand off to its verified Rust helper.",
+            "plan":"Inspect the selected installed release and target plan without fetching a registry version or applying changes.",
+            "release":"With --release, apply that exact release's managed payload offline; do not fetch npm or replace the CLI executable."},
+        "targets":"Explicit selectors disable discovery; an empty explicit target array selects CLI/tools only.",
+        "recovery":"Resume an existing frozen Handoff with its original exact tarball, targets, home and deadline; do not reselect a registry version or replay uncertain work."})
 }
 /// Match the published channel manifest contract. preserveLatest records the
 /// publisher's protected stable tag; runtime admission does not pin its value.
@@ -113,26 +161,15 @@ pub(crate) fn valid_channel_binding(channel: &Value, version: &str) -> bool {
     ) else {
         return false;
     };
-    let stable = |value: &str| {
-        let mut parts = value.split('.');
-        (0..3).all(|_| {
-            parts.next().is_some_and(|part| {
-                !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
-            })
-        }) && parts.next().is_none()
-    };
     fields.len() == 4
         && fields.get("schema").and_then(Value::as_str) == Some("lycheedev.npm-channel.v1")
-        && fields.get("distTag").and_then(Value::as_str) == Some(release_channel(bound_version))
+        && fields.get("distTag").and_then(Value::as_str) == Some(policy().dist_tag.as_str())
         && bound_version == version
-        && stable(bound_version)
-        && stable(preserved)
+        && stable_version(bound_version)
+        && stable_version(preserved)
         && preserved != bound_version
 }
-pub fn binding(root: &Path, version: &str) -> Result<()> {
-    binding_controlled(root, version, &OperationControl::default())
-}
-fn binding_controlled(root: &Path, version: &str, control: &OperationControl) -> Result<()> {
+pub(crate) fn binding_controlled(root: &Path, version: &str, control: &OperationControl) -> Result<()> {
     let manifest: Value = read_controlled(&root.join("release.json"), 1 << 20, control)?;
     if manifest["runtime"] != "rust" || !valid_channel_binding(&manifest["npmChannel"], version) {
         return Err(fault(
@@ -520,7 +557,7 @@ pub fn prepare(
             }
             record
         } else {
-            let package = format!("lycheedev@{}", release_channel(env!("CARGO_PKG_VERSION")));
+            let package = format!("lycheedev@{}", policy().dist_tag);
             let bytes = call(
                 node,
                 &npm,
@@ -940,7 +977,7 @@ mod tests {
     #[test]
     fn channel_binding_refuses_unbound_or_latest_version_before_mutation() {
         let temp = fixture();
-        let channel = json!({"schema":"lycheedev.npm-channel.v1","version":"3.1.2","distTag":"next","preserveLatest":"2.5.1"});
+        let channel = json!({"schema":"lycheedev.npm-channel.v1","version":"3.1.2","distTag":policy().dist_tag,"preserveLatest":"2.5.1"});
         // Negative evidence: a historical Go runtime record is not a current
         // runtime and must be refused before any update mutation.
         storage::atomic_json(
@@ -949,7 +986,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            binding(&temp.0, "3.1.2").unwrap_err().code,
+            binding_controlled(&temp.0, "3.1.2", &Default::default()).unwrap_err().code,
             "update.runtime_incompatible"
         );
         storage::atomic_json(
@@ -957,8 +994,8 @@ mod tests {
             &json!({"runtime":"rust","npmChannel":channel}),
         )
         .unwrap();
-        assert!(binding(&temp.0, "3.1.2").is_ok());
-        assert!(binding(&temp.0, "3.1.3").is_err());
+        assert!(binding_controlled(&temp.0, "3.1.2", &Default::default()).is_ok());
+        assert!(binding_controlled(&temp.0, "3.1.3", &Default::default()).is_err());
         let mut latest = channel;
         latest["distTag"] = json!("latest");
         storage::atomic_json(
@@ -966,13 +1003,15 @@ mod tests {
             &json!({"runtime":"rust","npmChannel":latest}),
         )
         .unwrap();
-        assert_eq!(binding(&temp.0, "3.1.2").unwrap_err().exit_code, 3);
+        assert_eq!(binding_controlled(&temp.0, "3.1.2", &Default::default()).unwrap_err().exit_code, 3);
         assert!(!temp.0.join(".lycheedev-update").exists());
     }
     #[test]
-    fn independent_rust_350_requires_beta_and_rejects_other_channels() {
+    fn candidate_requires_compiled_channel_and_exact_version_binding() {
         let temp = fixture();
-        for tag in ["beta", "next", "latest"] {
+        let channel = &policy().dist_tag;
+        let other = if channel.as_str() == "beta" { "next" } else { "beta" };
+        for tag in [channel.as_str(), other, "latest"] {
             storage::atomic_json(
                 &temp.0.join("release.json"),
                 &json!({"runtime":"rust","npmChannel":{
@@ -981,10 +1020,23 @@ mod tests {
                 }}),
             )
             .unwrap();
-            assert_eq!(binding(&temp.0, "3.5.0").is_ok(), tag == "beta");
-            assert!(binding(&temp.0, "3.2.2").is_err());
+            assert_eq!(binding_controlled(&temp.0, "3.5.0", &Default::default()).is_ok(), tag == channel.as_str());
+            assert!(binding_controlled(&temp.0, "3.2.2", &Default::default()).is_err());
         }
         assert!(!temp.0.join(".lycheedev-update").exists());
+    }
+    #[test]
+    fn compiled_update_policy_exports_original_authority_and_no_selector_fallback() {
+        let authority: Value = serde_json::from_str(include_str!("../../../release/npm-channel.json")).unwrap();
+        let actual = update_policy();
+        assert_eq!(actual["schema"], "lycheedev.update-policy.v1");
+        assert_eq!(actual["runtime"], "rust");
+        assert_eq!(actual["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(authority["version"], actual["version"]);
+        assert_eq!(actual["npmChannel"], authority);
+        assert_eq!(actual["registrySelector"], format!("lycheedev@{}", authority["distTag"].as_str().unwrap()));
+        assert_eq!(actual["selectors"], json!({"version":false,"channel":false}));
+        assert_ne!(authority["distTag"], "latest");
     }
     #[cfg(windows)]
     #[test]
@@ -1082,14 +1134,14 @@ mod tests {
             "schema":"lycheedev.release.v1","version":lycheedev_core::VERSION,"commit":"a".repeat(40),
             "runtime":"rust","npmChannel":{
                 "schema":"lycheedev.npm-channel.v1","version":lycheedev_core::VERSION,
-                "distTag":release_channel(lycheedev_core::VERSION),"preserveLatest":"3.2.7"
+                "distTag":policy().dist_tag,"preserveLatest":policy().preserve_latest
             },
             "binaries":{"windows-amd64":{"path":"native/windows-amd64/lycheedev.exe","bytes":native.len(),"sha256":storage::sha256(native)}},
             "resources":resources,
         })).unwrap();
         // Establish that the selected prefix passes the same channel and full
         // inventory gates used by prepare, rather than failing an earlier gate.
-        binding(&installed, lycheedev_core::VERSION).unwrap();
+        binding_controlled(&installed, lycheedev_core::VERSION, &Default::default()).unwrap();
         release::inspect_with_control(
             &installed,
             lycheedev_core::VERSION,

@@ -3,7 +3,7 @@
 // Lua, installed-tool change, network download in consumers, or release action.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beginScratch, contained } from './rust-disk.mjs';

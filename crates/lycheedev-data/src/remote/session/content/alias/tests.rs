@@ -1,7 +1,6 @@
 use super::*;
 use lycheedev_core::{
     control::OperationControl,
-    metadata::{Metadata, OwnedMutation},
     storage,
 };
 use std::{

@@ -8,7 +8,7 @@ immutable PRB revision. Registration stores source and does not execute it.
 
 For a simple state query, inspect only the required fields/APIs. For diagnosis,
 identify the remaining explanations and a small observation that separates them.
-Match fixed client source/addon revision to the verified runtime; latest source
+Match fixed client source/addon revision to the verified runtime; newer source
 and installed files alone do not prove what loaded. If an interface is unknown,
 retain the gap and use a safe capability observation within live scope.
 
@@ -74,7 +74,7 @@ unavailable/truncated values instead of substituting defaults.
 ## Test source hypotheses
 
 Carry [fixed source/value-flow evidence](source-value-flow.md), version identity,
-conditions and missing links into the check. Consult [retained errors](error-diagnosis.md)
+conditions and missing links into the check. Consult [retained errors](live-investigation.md#observe-only-the-missing-fact)
 first when relevant. The bridge cannot recover arbitrary locals or a complete
 historical taint chain. For secrets, report the marker or unavailable state,
 never raw/coerced values. Do not repeat known forbidden operations or hook/

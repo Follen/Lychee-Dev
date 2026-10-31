@@ -177,9 +177,6 @@ fn checkpoint(
 ) -> Result<()> {
     control.finish(observe(phase, path))
 }
-pub fn plan(root: &Path) -> Result<Value> {
-    plan_observed(root, InitControl(None), &mut |_, _| Ok(()))
-}
 pub fn plan_controlled(root: &Path, control: &OperationControl) -> Result<Value> {
     plan_observed(root, InitControl(Some(control)), &mut |_, _| Ok(()))
 }
@@ -257,17 +254,11 @@ fn plan_observed(
     })();
     control.finish(result)
 }
-pub fn fresh(root: &Path) -> Result<Value> {
-    archive_observed(root, false, InitControl(None), &mut |_, _| Ok(()))
-}
 pub fn fresh_controlled(root: &Path, control: &OperationControl) -> Result<Value> {
     archive_observed(root, false, InitControl(Some(control)), &mut |_, _| Ok(()))
 }
 /// Resume only the recorded switch. Missing intent must never create either
 /// its workspace, parent, or lease directory.
-pub fn resume(root: &Path) -> Result<Value> {
-    archive_observed(root, true, InitControl(None), &mut |_, _| Ok(()))
-}
 pub fn resume_controlled(root: &Path, control: &OperationControl) -> Result<Value> {
     archive_observed(root, true, InitControl(Some(control)), &mut |_, _| Ok(()))
 }

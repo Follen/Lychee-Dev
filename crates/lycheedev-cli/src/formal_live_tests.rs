@@ -13,6 +13,55 @@ use std::{
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn public_required_live_flags_preserve_offline_typed_action_admission() {
+    let f = Fixture::new();
+    fs::write(f.0.join("probe.lua"), b"return 17\n").unwrap();
+    let cases: &[(&[&str], &[&str])] = &[
+        (&["live", "execute", "--session", "CON-original", "--request", "run-1", "--budget-seconds", "7", "--file", "probe.lua"], &["--session", "--request", "--budget-seconds"]),
+        (&["live", "bugs", "--session", "CON-original", "--request", "bugs-1"], &["--session", "--request"]),
+        (&["live", "reload", "fallback", "--installation", "synthetic-client", "--pid", "17", "--request", "activate-1"], &["--installation", "--pid", "--request"]),
+    ];
+    for (words, required) in cases {
+        let inv = invocation(words, &f.0);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let response = run(&inv, fake(&f.0, calls.clone()));
+        assert!(response.error.is_none());
+        match &calls.borrow()[0] {
+            Call::Execute(session, key, code, budget, _) if inv.command == "live execute" => {
+                assert_eq!((session.as_str(), key.as_str(), *budget), ("CON-original", "run-1", 7));
+                assert_eq!(code.as_slice(), b"return 17\n");
+            }
+            Call::Execute(session, key, code, budget, OperationPolicy::Observation) => {
+                assert_eq!((session.as_str(), key.as_str(), *budget), ("CON-original", "bugs-1", 5));
+                assert!(String::from_utf8(code.clone()).unwrap().contains("SnapshotRecentErrors(80,"));
+            }
+            Call::Activate(installation, pid, key) => {
+                assert_eq!((installation.as_str(), *pid, key.as_str()), ("synthetic-client", 17, "activate-1"));
+            }
+            call => panic!("unexpected {call:?}"),
+        }
+        for missing in *required {
+            let mut incomplete = words.to_vec();
+            let index = incomplete.iter().position(|word| word == missing).unwrap();
+            incomplete.drain(index..index + 2);
+            let inv = invocation(&incomplete, &f.0);
+            let calls = Rc::new(RefCell::new(Vec::new()));
+            let response = run(&inv, fake(&f.0, calls.clone()));
+            assert_eq!(response.exit_code(), 2, "{missing}: {:?}", response.error);
+            assert!(calls.borrow().is_empty());
+        }
+        assert!(!inv.home.exists());
+    }
+    // Missing reload keys are rejected by the actual service before any
+    // environment/process lookup. Only an isolated local book is constructed.
+    let inv = invocation(&["live", "reload", "--session", "CON-original"], &f.0);
+    let response = dispatch_with(&inv, open_native);
+    let error = response.error.unwrap();
+    assert_eq!((error.code.as_str(), error.exit_code), ("live.channel_request_key_invalid", 2));
+    assert!(!inv.home.exists());
+}
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
@@ -1782,7 +1831,13 @@ fn snapshot_connect_preflight_uses_fixed_build_and_retains_selection_arguments()
     let mut inv = snapshot_connect_fixture(&f);
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls.clone());
-    prepare_and_run(&inv, &mut services, &inv.control).unwrap();
+    let ServiceOutcome::Completed(result) = prepare_and_run(&inv, &mut services, &inv.control).unwrap() else {
+        panic!("fixed snapshot preflight must preserve the completed service outcome");
+    };
+    assert_eq!(result.session, "CON-original");
+    assert_eq!(result.report_state, "verified");
+    assert_eq!(result.cleanup, "pending");
+    assert!(!result.complete);
     assert_eq!(
         *calls.borrow(),
         [Call::Connect(

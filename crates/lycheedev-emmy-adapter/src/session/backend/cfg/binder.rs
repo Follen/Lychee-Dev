@@ -2,7 +2,7 @@
 // Owned per-query CFG; public AST/facts only, no upstream private types.
 use std::collections::HashMap;
 
-use emmylua_parser::{LuaNameToken, LuaSyntaxId};
+use emmylua_parser::LuaSyntaxId;
 use rowan::TextSize;
 
 use super::{
@@ -87,7 +87,7 @@ impl<'a, 'control> FlowBinder<'a, 'control> {
     }
 
     pub fn create_name_label(&mut self, name: &str, closure_id: LuaClosureId) -> FlowId {
-        let label_id = self.create_node(FlowNodeKind::NamedLabel(name.to_owned()));
+        let label_id = self.create_node(FlowNodeKind::NamedLabel);
         self.labels
             .entry(closure_id)
             .or_default()
@@ -172,21 +172,14 @@ impl<'a, 'control> FlowBinder<'a, 'control> {
     pub fn cache_goto_flow(
         &mut self,
         closure_id: LuaClosureId,
-        label_token: LuaNameToken,
         label: &str,
         flow_id: FlowId,
     ) {
         self.goto_stats.push(GotoCache {
             closure_id,
-            label_token,
             label: label.to_owned(),
             flow_id,
         });
-    }
-
-    #[allow(unused)]
-    pub fn get_goto_caches(&mut self) -> Vec<GotoCache> {
-        std::mem::take(&mut self.goto_stats)
     }
 
     pub fn get_flow(&self, flow_id: FlowId) -> Option<&FlowNode> {
@@ -225,7 +218,6 @@ impl<'a, 'control> FlowBinder<'a, 'control> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GotoCache {
     pub closure_id: LuaClosureId,
-    pub label_token: LuaNameToken,
     pub label: String,
     pub flow_id: FlowId,
 }

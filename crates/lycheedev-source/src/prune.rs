@@ -260,9 +260,6 @@ fn scan(
     }
     Ok((bytes, files))
 }
-pub fn verify(home: &Path, source: &SourcePin, checkout: &Path) -> Result<Manifest> {
-    verify_with_control(home, source, checkout, &Default::default())
-}
 pub fn verify_with_control(
     home: &Path,
     source: &SourcePin,
@@ -320,9 +317,6 @@ pub fn verify_with_control(
         bytes,
         state: "ready".into(),
     })
-}
-pub fn prune(home: &Path, budget: u64) -> Result<PruneResult> {
-    prune_with_control(home, budget, &Default::default())
 }
 pub fn prune_with_control(
     home: &Path,

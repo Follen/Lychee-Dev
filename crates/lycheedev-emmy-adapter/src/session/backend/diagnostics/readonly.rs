@@ -1,8 +1,8 @@
 //! Owned query-sensitive diagnostic; query failures preserve caller control.
 use super::super::{OwnedQuery, QueryResult};
 use super::CheckContext;
-use crate::session::{OwnedValue, SelectedProjectionBackend};
-use emmylua_code_analysis::{DiagnosticCode, LuaType};
+use crate::session::SelectedProjectionBackend;
+use emmylua_code_analysis::DiagnosticCode;
 use emmylua_parser::{LuaAssignStat, LuaAstNode, LuaExpr, LuaVarExpr};
 impl<E> OwnedQuery<'_, '_, E> {
     pub(in crate::session::backend) fn check_readonly(

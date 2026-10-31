@@ -68,13 +68,6 @@ impl Chunk<'_> {
         (self.end + (self.size & 1)).min(bound)
     }
 }
-pub fn parse<'a>(
-    data: &'a [u8],
-    limits: Limits,
-    control: &OperationControl,
-) -> Result<Container<'a>> {
-    parse_scoped(data, limits, control, None)
-}
 fn check(control: &OperationControl, budget: Option<&crate::resource::Budget>) -> Result<()> {
     control.check()?;
     budget.map_or(Ok(()), crate::resource::Budget::check)
@@ -357,7 +350,7 @@ mod tests {
     fn frames_keep_exact_payload_offsets_timing_and_total_after_partial() {
         let raw = sample();
         let control = OperationControl::default();
-        let parsed = parse(&raw, Limits::default(), &control).unwrap();
+        let parsed = parse_scoped(&raw, Limits::default(), &control, None).unwrap();
         assert_eq!(parsed.frame_rate, 25.0);
         assert_eq!(parsed.enumerated_frames, 2);
         assert_eq!(parsed.enumerated_bytes, 5);
@@ -368,34 +361,32 @@ mod tests {
             &raw[parsed.frames[1].offset..parsed.frames[1].offset + 2],
             &[4, 5]
         );
-        let partial = parse(
+        let partial = parse_scoped(
             &raw,
             Limits {
                 max_frames: 1,
                 allow_partial: true,
                 ..Limits::default()
             },
-            &control,
-        )
+            &control, None)
         .unwrap();
         assert_eq!(partial.frames.len(), 1);
         assert_eq!(partial.enumerated_frames, 2);
         assert_eq!(partial.truncation_reason, "frame_limit");
         assert_eq!(
-            parse(
+            parse_scoped(
                 &raw,
                 Limits {
                     max_frames: 1,
                     ..Limits::default()
                 },
-                &control
-            )
+                &control, None)
             .unwrap_err()
             .code,
             "records.frame_limit_exceeded"
         );
         assert_eq!(
-            parse(
+            parse_scoped(
                 &raw,
                 Limits {
                     max_frames: 1,
@@ -403,8 +394,7 @@ mod tests {
                     allow_partial: true,
                     ..Limits::default()
                 },
-                &control
-            )
+                &control, None)
             .unwrap_err()
             .code,
             "records.frame_limit_exceeded"
@@ -415,14 +405,13 @@ mod tests {
         let control = OperationControl::default();
         let raw = sample();
         assert_eq!(
-            parse(
+            parse_scoped(
                 &raw[..raw.len() - 1],
                 Limits {
                     allow_partial: true,
                     ..Limits::default()
                 },
-                &control
-            )
+                &control, None)
             .unwrap_err()
             .code,
             "records.avi_truncated"
@@ -430,12 +419,12 @@ mod tests {
         let mut bad = raw.clone();
         bad[0] = 0;
         assert_eq!(
-            parse(&bad, Limits::default(), &control).unwrap_err().code,
+            parse_scoped(&bad, Limits::default(), &control, None).unwrap_err().code,
             "records.avi_invalid"
         );
         let missing = record(b"RIFF", b"AVI ");
         assert_eq!(
-            parse(&missing, Limits::default(), &control)
+            parse_scoped(&missing, Limits::default(), &control, None)
                 .unwrap_err()
                 .code,
             "records.avi_movi_missing"
@@ -443,14 +432,14 @@ mod tests {
         let mut mismatch = raw.clone();
         mismatch[4..8].copy_from_slice(&4u32.to_le_bytes());
         assert_eq!(
-            parse(&mismatch, Limits::default(), &control)
+            parse_scoped(&mismatch, Limits::default(), &control, None)
                 .unwrap()
                 .warnings,
             ["riff_size_mismatch"]
         );
         control.tracked_cancel_handle().unwrap().cancel();
         assert_eq!(
-            parse(&raw, Limits::default(), &control)
+            parse_scoped(&raw, Limits::default(), &control, None)
                 .unwrap_err()
                 .exit_code,
             7

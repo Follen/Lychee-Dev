@@ -793,39 +793,7 @@ impl Metadata {
     ) -> Result<U> {
         self.consume_controlled(key, &crate::control::OperationControl::default(), validate)
     }
-    /// Hold a single SQLite write transaction through bounded reference validation and precise deletions.
-    pub fn delete_checked<T>(
-        &mut self,
-        keys: &[String],
-        expected: &[(String, i64)],
-        validate: impl FnOnce(&[Document]) -> Result<T>,
-    ) -> Result<T> {
-        self.delete_checked_record(keys, expected, |documents| Ok((validate(documents)?, None)))
-    }
-    /// Commit an owned recovery record alongside the checked deletion, never after it.
-    pub fn delete_checked_record<T>(
-        &mut self,
-        keys: &[String],
-        expected: &[(String, i64)],
-        validate: impl FnOnce(&[Document]) -> Result<(T, Option<(String, serde_json::Value)>)>,
-    ) -> Result<T> {
-        self.delete_checked_record_controlled(
-            keys,
-            expected,
-            &crate::control::OperationControl::default(),
-            validate,
-        )
-    }
-    pub(crate) fn delete_checked_record_controlled<T>(
-        &mut self,
-        keys: &[String],
-        expected: &[(String, i64)],
-        control: &crate::control::OperationControl,
-        validate: impl FnOnce(&[Document]) -> Result<(T, Option<(String, serde_json::Value)>)>,
-    ) -> Result<T> {
-        self.require_write_capability()?;
-        evidence_catalog::checked_delete(&self.home, keys, expected, control, validate)
-    }
+
 }
 
 fn checked_sql<T>(
@@ -1356,7 +1324,6 @@ mod capture_write;
 pub(crate) use capture_write::CaptureWriteState;
 mod source_controlled;
 
-mod listfile_controlled;
 
 #[cfg(test)]
 mod generation_tests;

@@ -395,21 +395,21 @@ fn fresh_archive_preserves_opaque_legacy_bytes_and_refuses_new_workspace() {
     fs::create_dir(&temp.0).unwrap();
     let old = vec![0xff, 0, 0x80, 1, 2, 3];
     fs::write(temp.0.join("profiles"), &old).unwrap();
-    let planned = lycheedev_core::archive::plan(&temp.0).unwrap();
+    let planned = lycheedev_core::archive::plan_controlled(&temp.0, &Default::default()).unwrap();
     assert_eq!(planned["state"], "planned");
     assert!(
         !lycheedev_core::archive::journal_path(&temp.0)
             .unwrap()
             .exists()
     );
-    let completed = lycheedev_core::archive::fresh(&temp.0).unwrap();
+    let completed = lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).unwrap();
     let archive = PathBuf::from(completed["plan"]["archivePath"].as_str().unwrap());
     assert_eq!(fs::read(archive.join("profiles")).unwrap(), old);
     assert!(temp.0.join("workspace.json").exists());
-    assert_eq!(lycheedev_core::archive::fresh(&temp.0).unwrap(), completed);
+    assert_eq!(lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).unwrap(), completed);
     let new = initialized();
     assert_eq!(
-        lycheedev_core::archive::plan(&new.0).err().unwrap().code,
+        lycheedev_core::archive::plan_controlled(&new.0, &Default::default()).err().unwrap().code,
         "vault.workspace_exists"
     );
     let _ = fs::remove_dir_all(archive);
@@ -420,12 +420,12 @@ fn archive_recovers_move_before_state_checkpoint_without_reimport() {
     let temp = Temp::new();
     fs::create_dir(&temp.0).unwrap();
     fs::write(temp.0.join("opaque.bin"), b"original legacy bytes").unwrap();
-    let plan = lycheedev_core::archive::plan(&temp.0).unwrap();
+    let plan = lycheedev_core::archive::plan_controlled(&temp.0, &Default::default()).unwrap();
     let journal = lycheedev_core::archive::journal_path(&temp.0).unwrap();
     storage::atomic_json(&journal, &plan).unwrap();
     let archive = PathBuf::from(plan["archivePath"].as_str().unwrap());
     fs::rename(&temp.0, &archive).unwrap();
-    let result = lycheedev_core::archive::fresh(&temp.0).unwrap();
+    let result = lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).unwrap();
     assert_eq!(result["plan"]["state"], "complete");
     assert!(!temp.0.join("opaque.bin").exists());
     assert_eq!(
@@ -440,12 +440,12 @@ fn archive_rejects_redirected_intent_destination_before_any_move() {
     let temp = Temp::new();
     fs::create_dir(&temp.0).unwrap();
     fs::write(temp.0.join("owner.bin"), b"kept").unwrap();
-    let mut plan = lycheedev_core::archive::plan(&temp.0).unwrap();
+    let mut plan = lycheedev_core::archive::plan_controlled(&temp.0, &Default::default()).unwrap();
     let journal = lycheedev_core::archive::journal_path(&temp.0).unwrap();
     plan["archivePath"] = json!(temp.0.parent().unwrap().join("unrelated-owner"));
     storage::atomic_json(&journal, &plan).unwrap();
     assert_eq!(
-        lycheedev_core::archive::fresh(&temp.0).err().unwrap().code,
+        lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).err().unwrap().code,
         "vault.archive_state"
     );
     assert_eq!(fs::read(temp.0.join("owner.bin")).unwrap(), b"kept");
@@ -876,7 +876,7 @@ fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
         .unwrap();
         selection::execute_project(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &selection::ProjectRequest::Lock { path: Some(path.into()), snapshot: pin.id.clone() })
         .unwrap();
-        let status = selection::inspect_project(std::path::Path::new(path)).unwrap();
+        let status = selection::inspect_project_controlled(std::path::Path::new(path), &Default::default()).unwrap();
         assert_eq!(status["state"], "locked");
         assert_eq!(status["lock"]["selection"]["source"]["product"], "forever");
         assert_eq!(status["lock"]["selection"]["data"]["product"], product);

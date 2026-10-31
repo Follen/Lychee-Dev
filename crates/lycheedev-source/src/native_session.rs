@@ -682,7 +682,7 @@ pub fn analyze(inv: &SourceContext, work: WorkerRequest) -> Result<Value> {
                 &inv.cwd.canonicalize().map_err(ToolkitError::from).map_err(|error| crate::persistence::retained_intent(error, &store_key, generation))?,
                 &[("LYCHEEDEV_NATIVE_SOURCE_START".into(), token.into())],
             );
-            let mut child = match spawned {
+            let child = match spawned {
                 Ok(child) => child,
                 Err(message) => {
                     return lycheedev_core::metadata::owned_write::finish_owned(

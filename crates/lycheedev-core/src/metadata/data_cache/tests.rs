@@ -786,3 +786,64 @@ fn migrated_cache_supplemental_stop_checks_close_and_cannot_become_absence() {
         .unwrap()
     );
 }
+
+#[test]
+fn raw_reader_preserves_exact_tokens_generation_and_rejects_oversized_rows() {
+    let f = Fixture::new();
+    let original = serde_json::value::RawValue::from_string(r#"{"a":1,"a":null,"n":-0}"#.into()).unwrap();
+    f.put(&original, None).unwrap();
+    let row = f.read().unwrap();
+    assert_eq!(row.generation, 1);
+    assert_eq!(row.bytes, original.get().as_bytes());
+    let connection = Connection::open(f.path()).unwrap();
+    connection.execute("UPDATE documents SET value=?1,generation=2 WHERE key='remote-config/fixture'", [b"not JSON".as_slice()]).unwrap();
+    connection.close().unwrap();
+    let row = f.read().unwrap();
+    assert_eq!(row.generation, 2);
+    assert_eq!(row.bytes, b"not JSON");
+    let connection = Connection::open(f.path()).unwrap();
+    connection.execute_batch("PRAGMA ignore_check_constraints=ON").unwrap();
+    connection.execute("UPDATE documents SET value=?1 WHERE key='remote-config/fixture'", [vec![b' '; DOCUMENT_LIMIT + 1]]).unwrap();
+    connection.execute_batch("PRAGMA ignore_check_constraints=OFF").unwrap();
+    connection.close().unwrap();
+    assert_eq!(f.read().unwrap_err().code, "vault.data_metadata_integrity");
+}
+
+#[test]
+fn raw_reader_busy_stop_keeps_original_control_and_independent_cause() {
+    let f = Fixture::new();
+    f.put(&true, None).unwrap();
+    for cancel in [false, true] {
+        reset();
+        let holder = Connection::open(f.path()).unwrap();
+        holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let control = OperationControl::default();
+        let before = super::super::sql_busy_observations();
+        let error = DataCacheMetadata::read_document_raw_controlled_with_check(
+            &f.home, "remote-config/fixture", &control, || {
+                if super::super::sql_busy_observations() > before {
+                    if cancel { control.tracked_cancel_handle()?.cancel(); control.check() }
+                    else { Err(ToolkitError::new("records.query_resource_budget", "independent stop", 3)) }
+                } else { Ok(()) }
+            },
+        ).unwrap_err();
+        assert!(super::super::sql_busy_observations() > before);
+        assert_eq!(error.code, if cancel { "command.cancelled" } else { "records.query_resource_budget" });
+        assert!(seen(Point::Closed));
+        if !cancel { control.check().unwrap(); }
+        holder.execute_batch("ROLLBACK").unwrap();
+        holder.close().unwrap();
+        assert_eq!(f.read().unwrap().bytes, b"true");
+    }
+    let control = OperationControl::default();
+    control.tracked_cancel_handle().unwrap().cancel();
+    let checks = Cell::new(0);
+    let error = DataCacheMetadata::read_document_raw_controlled_with_check(
+        &f.home, "remote-config/fixture", &control, || {
+            checks.set(checks.get() + 1);
+            Err(ToolkitError::new("records.query_resource_budget", "independent stop", 3))
+        },
+    ).unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(checks.get(), 0);
+}

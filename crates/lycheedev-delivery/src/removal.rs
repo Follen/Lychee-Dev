@@ -346,9 +346,6 @@ fn validate_slot(
     }
     Ok(())
 }
-pub fn addon(target: &Path, archive: &Path) -> Result<Value> {
-    addon_controlled(target, archive, &OperationControl::default())
-}
 pub fn addon_controlled(
     target: &Path,
     archive: &Path,
@@ -634,7 +631,7 @@ mod tests {
         let slot_archive = companion(&archive, ".slots");
         assert!(slots::directory(&slot_archive, 1).exists());
         assert!(slots::directory(target.parent().unwrap(), 2).exists());
-        let result = addon(&target, &archive).unwrap();
+        let result = addon_controlled(&target, &archive, &Default::default()).unwrap();
         assert_eq!(result["state"], "archived");
         assert_eq!(fs::read(journal).unwrap(), before);
         assert!(slots::directory(&slot_archive, 500).exists());
@@ -671,9 +668,9 @@ mod tests {
         let temp = Temp::new();
         let (target, archive) = fixture(&temp.0);
         let parent = target.parent().unwrap();
-        let pool = slots::read_pool(parent).unwrap();
+        let pool = slots::read_pool_controlled(parent, &Default::default()).unwrap();
         let receipt = serde_json::from_value(
-            installation::inspect(&target, "addon").unwrap()["receipt"].clone(),
+            installation::inspect_main_controlled(&target, "addon", &Default::default()).unwrap()["receipt"].clone(),
         )
         .unwrap();
         let intent = Removal {
@@ -692,7 +689,7 @@ mod tests {
             &slots::directory(&slot_archive, 1),
         )
         .unwrap();
-        assert_eq!(addon(&target, &archive).unwrap()["state"], "archived");
+        assert_eq!(addon_controlled(&target, &archive, &Default::default()).unwrap()["state"], "archived");
         assert!(archive.exists());
     }
     #[cfg(windows)]
@@ -767,8 +764,8 @@ mod tests {
         let temp = Temp::new();
         let (target, archive) = fixture(&temp.0);
         let parent = target.parent().unwrap();
-        let pool = slots::read_pool(parent).unwrap();
-        let mut receipt = installation::inspect(&target, "addon").unwrap()["receipt"].clone();
+        let pool = slots::read_pool_controlled(parent, &Default::default()).unwrap();
+        let mut receipt = installation::inspect_main_controlled(&target, "addon", &Default::default()).unwrap()["receipt"].clone();
         let object = receipt.as_object_mut().unwrap();
         let mut cased = serde_json::Map::new();
         for (key, value) in std::mem::take(object) {
@@ -799,9 +796,9 @@ mod tests {
         let mut changed: Value = serde_json::from_slice(&original).unwrap();
         changed["unknownReceipt"] = json!(true);
         fs::write(&marker, serde_json::to_vec(&changed).unwrap()).unwrap();
-        assert!(installation::inspect(&target, "addon").is_err());
+        assert!(installation::inspect_main_controlled(&target, "addon", &Default::default()).is_err());
         fs::write(&marker, &original).unwrap();
-        assert_eq!(addon(&target, &archive).unwrap()["state"], "archived");
+        assert_eq!(addon_controlled(&target, &archive, &Default::default()).unwrap()["state"], "archived");
         assert_eq!(fs::read(&journal).unwrap(), text.as_bytes());
         assert!(slots::directory(&companion(&archive, ".slots"), 500).exists());
     }
@@ -827,14 +824,14 @@ mod tests {
         let temp = Temp::new();
         let (target, archive) = fixture(&temp.0);
         let parent = target.parent().unwrap();
-        let pool = slots::read_pool(parent).unwrap();
-        let receipt = installation::inspect(&target, "addon").unwrap()["receipt"].clone();
+        let pool = slots::read_pool_controlled(parent, &Default::default()).unwrap();
+        let receipt = installation::inspect_main_controlled(&target, "addon", &Default::default()).unwrap()["receipt"].clone();
         let mut intent = json!({"schema":"lycheedev.addon-removal.v1","parent":parent,"archive":archive,"pool":pool,"receipt":receipt});
         intent["receipt"]["resources"][0]["bytes"] = json!(-1);
         let journal = companion(&archive, ".removal.json");
         let raw = serde_json::to_vec(&intent).unwrap();
         fs::write(&journal, &raw).unwrap();
-        let error = addon(&target, &archive).unwrap_err();
+        let error = addon_controlled(&target, &archive, &Default::default()).unwrap_err();
         assert_eq!(error.code, "delivery.installation_conflict");
         assert_eq!(error.exit_code, 3);
         assert!(target.exists());
@@ -846,7 +843,7 @@ mod tests {
             .unwrap()
             .replace("\"bytes\":-1", "\"bytes\":-1,\"Bytes\":10");
         fs::write(&journal, &raw).unwrap();
-        assert_eq!(addon(&target, &archive).unwrap()["state"], "archived");
+        assert_eq!(addon_controlled(&target, &archive, &Default::default()).unwrap()["state"], "archived");
         assert_eq!(fs::read(journal).unwrap(), raw.as_bytes());
     }
 }

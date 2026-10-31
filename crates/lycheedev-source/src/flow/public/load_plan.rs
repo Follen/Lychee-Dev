@@ -483,10 +483,6 @@ fn collect_with<'a>(
 mod tests {
     use super::*;
     use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
         time::{Duration, Instant},
     };
     fn document(path: &str, raw: &[u8]) -> index::Document {

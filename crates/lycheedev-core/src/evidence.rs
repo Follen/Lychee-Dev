@@ -3,7 +3,7 @@ use crate::{
     Outcome, Result, ToolkitError,
     metadata::Metadata,
     selection::valid_digest,
-    storage::{self, ExclusiveLock},
+    storage,
     workspace,
 };
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+#[cfg(test)]
+use crate::storage::ExclusiveLock;
 mod archive_commands;
 mod bounded;
 pub(crate) use bounded::{
@@ -26,7 +28,7 @@ mod read_commands;
 mod remove_commands;
 pub use bounded::{
     CaptureInput, DEFAULT_CAPTURE_BYTES, MAX_CAPTURE_BYTES, VerifiedBlob, commit_capture_bounded,
-    commit_capture_bounded_with_check, commit_verified_capture, open_verified_blob_bounded,
+    commit_capture_bounded_with_check, open_verified_blob_bounded,
     open_verified_blob_bounded_optional_with_check, open_verified_blob_bounded_with_check,
     publish_blob_bounded, publish_blob_bounded_with_check, publish_blob_reader_bounded,
     publish_blob_reader_bounded_with_check, publish_blob_stream_bounded_with_check,
@@ -35,7 +37,7 @@ pub use bounded::{
 };
 pub use budgeted::{
     BlobStreamPhase, CaptureAccounting, CaptureHeader, commit_capture_budgeted,
-    commit_capture_budgeted_referencing, commit_capture_budgeted_referencing_with_metadata,
+    commit_capture_budgeted_referencing,
     commit_capture_budgeted_with_dependencies,
     commit_capture_budgeted_with_dependencies_and_metadata,
     commit_capture_budgeted_with_references, commit_data_capture_bounded_with_check,

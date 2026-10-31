@@ -15,7 +15,7 @@
 // host `lua` on PATH can never silently satisfy the suite.
 import { createHash } from 'node:crypto';
 import { existsSync,readdirSync,readFileSync,statSync } from 'node:fs';
-import { basename,dirname,join,resolve,sep } from 'node:path';
+import {dirname, join, resolve, sep} from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { verifyInterpreter as verifyManagedInterpreter } from '../../tools/rust-formal-lua.mjs';

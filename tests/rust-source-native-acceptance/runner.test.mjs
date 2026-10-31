@@ -5,7 +5,7 @@ import {readFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync} from 'node:fs
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ownedUserEnvironment} from '../../tools/rust-build.mjs';
-import {assertApiType, assertContextSnippets, assertExecutedContext, assertExecutionAccounting, assertFullNative, assertNestedControllerRetired, extractXmlMaps, mappingDigest, rebuildXmlInventory, semanticOperationDigest, semanticPlanDigest, assertMaterial, assertPrerequisite, assertReuse, fixturePin, groupBudget} from './assertions.mjs';
+import {assertApiType, assertContextSnippets, assertExecutedContext, assertExecutionAccounting, assertFullNative, assertNestedControllerRetired, extractXmlMaps, rebuildXmlInventory, semanticOperationDigest, semanticPlanDigest, assertMaterial, assertPrerequisite, assertReuse, fixturePin, groupBudget} from './assertions.mjs';
 import {corpusDigest, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {GO_CONTRACT, GO_VERSION, NATIVE_CALLSITE} from './runner-inputs.mjs';
 const commit = 'a'.repeat(40), callsite = {source: 'Caller', referenceExpression: 'Helper', caller: {kind: 'named', name: 'Caller', line: 1}, path: 'a.lua', line: 2, kind: 'call', target: 'Helper', site: {file: 'a.lua', start: 20, end: 26}};

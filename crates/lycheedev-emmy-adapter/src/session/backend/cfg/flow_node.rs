@@ -67,7 +67,7 @@ pub enum FlowNodeKind {
     /// Label for loops (while, for, repeat)
     LoopLabel,
     /// Named label (goto target)
-    NamedLabel(String),
+    NamedLabel,
     /// Declaration position
     DeclPosition(TextSize),
     /// Variable assignment
@@ -94,38 +94,7 @@ pub enum FlowNodeKind {
     Return,
 }
 
-#[allow(unused)]
 impl FlowNodeKind {
-    pub fn is_branch_label(&self) -> bool {
-        matches!(self, FlowNodeKind::BranchLabel)
-    }
-
-    pub fn is_loop_label(&self) -> bool {
-        matches!(self, FlowNodeKind::LoopLabel)
-    }
-
-    pub fn is_named_label(&self) -> bool {
-        matches!(self, FlowNodeKind::NamedLabel(_))
-    }
-
-    pub fn is_change_flow(&self) -> bool {
-        matches!(
-            self,
-            FlowNodeKind::Break | FlowNodeKind::Return | FlowNodeKind::Continue
-        )
-    }
-
-    pub fn is_assignment(&self) -> bool {
-        matches!(self, FlowNodeKind::Assignment(_))
-    }
-
-    pub fn is_conditional(&self) -> bool {
-        matches!(
-            self,
-            FlowNodeKind::TrueCondition(_) | FlowNodeKind::FalseCondition(_)
-        )
-    }
-
     pub fn is_unreachable(&self) -> bool {
         matches!(self, FlowNodeKind::Unreachable)
     }
@@ -153,15 +122,5 @@ impl LuaClosureId {
         });
 
         flow_id.unwrap_or_else(|| LuaClosureId(TextRange::default()))
-    }
-
-    #[allow(unused)]
-    pub fn get_position(&self) -> TextSize {
-        self.0.start()
-    }
-
-    #[allow(unused)]
-    pub fn get_range(&self) -> TextRange {
-        self.0
     }
 }

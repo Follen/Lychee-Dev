@@ -17,7 +17,6 @@ use lycheedev_data::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     fs,
     path::PathBuf,
     time::{Duration, Instant},
@@ -513,7 +512,7 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
     let pins_after_scan = snapshot("pin/");
     assert!(!captures_after_scan.is_empty());
     for expired in [false, true] {
-        let mut request = fixture.request();
+        let request = fixture.request();
         let control = OperationControl::uncancelable(if expired {
             Instant::now() - Duration::from_secs(1)
         } else {

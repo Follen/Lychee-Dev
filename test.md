@@ -71,13 +71,13 @@ Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取�
 | --- | --- | --- |
 | [agent_current_local.rs](crates/lycheedev-data/tests/agent_current_local.rs)、[local_domain.rs](crates/lycheedev-data/tests/local_domain.rs) | 实际安装的固定数据进入生产 Agent Session/DataFusion；领域报告、缺钥/损坏与安装选择。 | 保留；需真实安装/独立预期 |
 | [installed_inputs.rs](crates/lycheedev-data/tests/installed_inputs.rs)、[casc_inputs.rs](crates/lycheedev-data/tests/casc_inputs.rs)、[encoded_ranges.rs](crates/lycheedev-data/tests/encoded_ranges.rs) | 当前安装产品/build/config/Root/Encoding 身份、CASC 范围读取、未访问块与缺钥覆盖。 | 保留 |
-| [table_decode.rs](crates/lycheedev-data/tests/table_decode.rs)、[wdc_palette.rs](crates/lycheedev-data/tests/wdc_palette.rs) | 受支持 WDC header、palette、copy ID、关系与 null、布局顺序和解码限制。 | 保留 |
+| [table/decode_tests.rs](crates/lycheedev-data/src/table/decode_tests.rs)、[table/palette_tests.rs](crates/lycheedev-data/src/table/palette_tests.rs) | 原始WDC header、palette、copy ID、关系、整数/浮点/text/array边界，直接走当前leased-row decoder；Engine投影另核实际访问完整物理行及partial。 | 模块内保留 |
 | [hotfix_tables.rs](crates/lycheedev-data/tests/hotfix_tables.rs)、[hotfix_scan.rs](crates/lycheedev-data/tests/hotfix_scan.rs) | Hotfix 字段/数组/关系/Unicode、物理行状态、不可变分页/筛选、证据与引用释放。 | 保留 |
-| [cache_keys.rs](crates/lycheedev-data/tests/cache_keys.rs)、[content_budget.rs](crates/lycheedev-data/tests/content_budget.rs) | 解密钥匙/缺钥、缓存认证、冷/热读取额度和取消；不单独证明 Data 全盘 5 GB 总账。 | 保留 |
+| [keys/input_tests.rs](crates/lycheedev-data/src/keys/input_tests.rs)、[streaming/source_tests.rs](crates/lycheedev-data/src/decoded_cache/streaming/source_tests.rs)、[content_budget.rs](crates/lycheedev-data/tests/content_budget.rs) | 原始密钥与缺钥、nested BLTE、CASC选定索引/extent、流式解码/缓存认证/checked-close；真实asset入口冷暖额度和取消。 | 当前scoped/streaming路径 |
 | [assets_business.rs](crates/lycheedev-data/tests/assets_business.rs)、[image_export_business.rs](crates/lycheedev-data/tests/image_export_business.rs) | 资源搜索、raw/demux/image 导出、像素/通道、CAP、已有目标冲突和文件发布。 | 保留 |
-| [agent_fixture_import.rs](crates/lycheedev-data/tests/agent_fixture_import.rs)、[agent_fixture_prepare.rs](crates/lycheedev-data/tests/agent_fixture_prepare.rs)、[skill_data_fixture.rs](crates/lycheedev-data/tests/skill_data_fixture.rs) | 导入 Agent 输入、构造当前 catalog 三表/16,384 行精确数值 WDC 和准备 partial 数据；均不预热查询，不计为查询通过。 | 辅助 |
+| [agent_fixture_import.rs](crates/lycheedev-data/tests/agent_fixture_import.rs)、[agent_fixture_prepare.rs](crates/lycheedev-data/tests/agent_fixture_prepare.rs) | 正式包/Agent控制器使用的独立输入导入与三表/16,384行精确数值WDC构造；准备不等于查询通过。 | 辅助 |
 
-### Source：固定源码与实际 native 分析（21 个目标）
+### Source：固定源码与实际 native 分析
 
 | 入口 | 验证的业务或边界 | 处置 |
 | --- | --- | --- |
@@ -91,7 +91,7 @@ Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取�
 | [matrix_config.rs](crates/lycheedev-source/tests/matrix_config.rs)、[matrix_real.rs](crates/lycheedev-source/tests/matrix_real.rs)、[matrix_four_real.rs](crates/lycheedev-source/tests/matrix_four_real.rs) | 严格的 matrix 输入及多个固定产品各自的分析/失败/CAP；不合并客户端身份。 | 保留 |
 | [diff_prune.rs](crates/lycheedev-source/tests/diff_prune.rs) | 声明/签名/位置差异、同提交无变化、未完整分析的缺失语义，以及活动源码/证据保护和可回收对象。 | 保留 |
 
-### Emmy adapter 与共享类型（19 个目标）
+### Emmy adapter 与共享类型
 
 这些目标直接验证当前适配接口。涉及自有表达式编排时必须仍以原版 Emmy 为语义来源，不能以测试存在为理由保留第二套 evaluator。
 
@@ -104,12 +104,12 @@ Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取�
 | [object_member_contract.rs](crates/lycheedev-emmy-adapter/tests/object_member_contract.rs)、[object_carrier_contract.rs](crates/lycheedev-emmy-adapter/tests/object_carrier_contract.rs)、[dense_tuple_contract.rs](crates/lycheedev-emmy-adapter/tests/dense_tuple_contract.rs) | 对象身份/成员顺序、嵌套值、数组/tuple 与缺失项。 | 保留 |
 | [function_call_contract.rs](crates/lycheedev-emmy-adapter/tests/function_call_contract.rs)、[expression_plan_contract.rs](crates/lycheedev-emmy-adapter/tests/expression_plan_contract.rs)、[expression_execution_contract.rs](crates/lycheedev-emmy-adapter/tests/expression_execution_contract.rs)、[binary_core_contract.rs](crates/lycheedev-emmy-adapter/tests/binary_core_contract.rs) | 调用、表达式顺序、二元运算、短路/未知值和控制中断。 | 保留 |
 
-### Core、Delivery、Live 与 Windows（20 个目标）
+### Core、Delivery、Live 与 Windows
 
 | 入口 | 验证的业务或边界 | 处置 |
 | --- | --- | --- |
 | [mailbox_contract.rs](crates/lycheedev-core/tests/mailbox_contract.rs) | 当前Mailbox JSON、Unicode/code bytes和精确数字。 | 保留 |
-| [capture_dependency_contract.rs](crates/lycheedev-core/tests/capture_dependency_contract.rs)、[capture_query_references.rs](crates/lycheedev-core/tests/capture_query_references.rs) | CAP 依赖、查询引用、身份与生命周期。`capture_dependency_contract` 由原固定 Go 3.2.0 oracle 文件退役重命名而来：保留 6 个当前 typed 合同用例（依赖发布/顺序身份/非引用 payload/显式依赖权威/demux frames typed 依赖/并发删除互斥/ledger 回滚），旧 Go wire 用例（raw 顺序/重复/null、raw timestamp escape、legacy locator/payload typed 字段、Go UTF-8 替换/规范化）已删除；typed manifest payload 引用保护由 core dependencies 单测 + data assets_business 覆盖。 | 保留当前 typed |
+| [capture_dependency_contract.rs](crates/lycheedev-core/tests/capture_dependency_contract.rs)、[capture_query_references.rs](crates/lycheedev-core/tests/capture_query_references.rs) | typed CAP依赖发布、顺序身份、显式引用、非引用payload、demux依赖、并发删除与回滚；实际query引用和生命周期。 | 保留当前合同 |
 | [budgeted_capture.rs](crates/lycheedev-core/tests/budgeted_capture.rs)、[bounded_evidence.rs](crates/lycheedev-core/tests/bounded_evidence.rs)、[durability.rs](crates/lycheedev-core/tests/durability.rs) | CAP 大结果/预算/取消/发布失败、原子替换、CAS、锁与实际持久化。 | 保留 |
 | [transactions.rs](crates/lycheedev-delivery/tests/transactions.rs)、[combined_addon.rs](crates/lycheedev-delivery/tests/combined_addon.rs) | 受管安装幂等、addon/槽组合更新、事务中断和恢复、不接管未受管文件。 | 保留 |
 | [slot_maintenance.rs](crates/lycheedev-delivery/tests/slot_maintenance.rs)、[release_control.rs](crates/lycheedev-delivery/tests/release_control.rs) | 当前 500 槽、预约/unknown 状态和 release 清单读取边界。 | 保留 |
@@ -121,7 +121,7 @@ Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取�
 | [formal_lua_bridge.rs](crates/lycheedev-live/tests/formal_lua_bridge.rs) | 当前 addon Lua writer 与 Rust Driver/journal 的双向结果、精确浮点、恢复与不重放；已改接当前 addon/受管 Lua 5.1 admission，移除冻结 Go 来源。 | 保留 |
 | [runtime_module.rs](crates/lycheedev-windows/tests/runtime_module.rs)、[native.rs](crates/lycheedev-windows/tests/native.rs)、[destination.rs](crates/lycheedev-windows/tests/destination.rs) | OS 模块/内存/文件边界、精确进程身份、资源计量、原子替换、Job 退出与目标发布。 | 保留 |
 | [process_lifetime.rs](crates/lycheedev-windows/tests/process_lifetime.rs)、[native_source_retirement.rs](crates/lycheedev-windows/tests/native_source_retirement.rs)、[detached.rs](crates/lycheedev-windows/tests/detached.rs) | PID 复用/创建时间、持有生命周期、Source owner 退出/回收、管道不继承及失败启动。 | 保留 |
-| [mailbox_input_fixture.rs](crates/lycheedev-windows/tests/mailbox_input_fixture.rs) | 自有窗口上的实际双绑定、取消后按键释放、新鲜目标检查与不抢焦点/不写聊天；不替代 H03。 | 保留 |
+| [mailbox_input_fixture.rs](crates/lycheedev-windows/tests/mailbox_input_fixture.rs) | 自有窗口上的实际双绑定、取消后按键释放、新鲜目标检查与不抢焦点/不写聊天；readiness间接安装全局键盘钩子，仅CI干净runner执行，不替代 H03。 | 保留 |
 | [guarded_spawn_fixture.rs](crates/lycheedev-windows/tests/guarded_spawn_fixture.rs) | harness=false 的受控子进程程序，只供父测试使用。 | 辅助 |
 | [guarded_spawn.rs](crates/lycheedev-windows/src/guarded_spawn.rs)、[guarded_spawn_tests.rs](crates/lycheedev-windows/src/guarded_spawn_tests.rs) | 目标进程PSS线程快照拒绝多线程，保留取消/deadline；真实子进程核恢复执行前Job归属、参数/环境/stdio、后代进程及失败回收。后两项需显式helper路径、哈希与自有临时根；已按该入口实际运行通过，不涉及游戏。 | 保留 |
 
@@ -135,16 +135,15 @@ Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取�
 
 | 入口 | 验证的业务或边界 |
 | --- | --- |
-| [version.test.mjs](tools/version.test.mjs)、[addon-package.test.mjs](tools/addon-package.test.mjs)、[tar.test.mjs](tools/tar.test.mjs) | 版本源同步、addon TOC/资源打包与归档字节/CJK 路径；addon 打包已去掉旧 Go 用例。 |
+| [version.test.mjs](tools/version.test.mjs)、[release-channel.test.mjs](tools/release-channel.test.mjs)、[addon-package.test.mjs](tools/addon-package.test.mjs)、[tar.test.mjs](tools/tar.test.mjs) | 版本源同步、单源渠道选择/无未知版本fallback与原TGZ authority审计、addon TOC/资源打包与归档字节/CJK 路径；addon 打包已去掉旧 Go 用例。 |
 | [skill-contract.test.mjs](tools/skill-contract.test.mjs)、[skill-launcher.test.mjs](tools/skill-launcher.test.mjs)、[rust-package-smoke.test.mjs](tools/rust-package-smoke.test.mjs) | Skill 合同/链接、嵌套staging父目录及目标排他、Windows npm 启动。package produce一次组装/pack，validate只安装原TGZ；真实归档fixture检查搬运、旧提交/字节篡改、安装CLI和资源、失败报告，不允许消费阶段重建或重打包。N09 的实际安装另行验证。 |
 | [workflow-structure.test.mjs](tools/workflow-structure.test.mjs)、[ci-changes.test.mjs](tools/ci-changes.test.mjs) | 每PR完整Release/包验收的依赖图；固定工具先验、Rust/addon独立消费、唯一TGZ、分配置缓存、失败诊断和报告上传。两项文件symlink边界在所属Windows runner显式执行ignored exact用例，复用原测试程序并保留独立报告，环境错误仍失败。实际PowerShell执行工具链拒绝与required汇总的成功/失败/取消/跳过分支。嵌入与打包目录中的Markdown仍触发产品验收；普通文档才跳过。结构测试不代替Actions。 |
 | [ci-test-programs.test.mjs](tools/ci-test-programs.test.mjs) | 预编译程序与support复用，默认/显式编译并发、timings传递与非法参数零启动；原生产receipt/日志随产物传递。两组选择共用唯一包映射，汇总检查同一record哈希/提交、计划与实际程序身份、互斥完整覆盖和回收；漏组、重复、篡改及缩小测试参数不能算通过。普通程序或Lua bridge未回收时保留原失败报告并停止后续启动，已回收的业务失败仍允许后续测试。 |
 | [rust-build.test.mjs](tools/rust-build.test.mjs)、[rust-disk.test.mjs](tools/rust-disk.test.mjs) | owned 构建、60分钟编译期限与独立的依赖查询期限、并发、产物/工具链、build cache/scratch 额度（50 GiB/5 GiB）。源码摘要包含实际嵌入fixtures；receipt/日志复制保留原字节，本次Cargo timing报告不能用旧文件冒充，记录真实耗时与重建原因；不是产品Data容量验证。 |
-| [rust-owned-process.test.mjs](tools/rust-owned-process.test.mjs)、[rust-owned-process-atomic-job.test.mjs](tools/rust-owned-process-atomic-job.test.mjs)、[rust-local-owned-process.test.mjs](tools/rust-local-owned-process.test.mjs)、[rust-owned-recovery.test.mjs](tools/rust-owned-recovery.test.mjs)、[rust-owned-memory.test.mjs](tools/rust-owned-memory.test.mjs) | Job/进程创建、启动记录、I/O、取消、资源回收与测量。Cargo helper许可使用固定清单内的精确Rustup启动器哈希，启动与恢复共同验证；未知哈希仍拒绝，Job与root wrapper绑定保持。 |
+| [rust-owned-process.test.mjs](tools/rust-owned-process.test.mjs)、[rust-owned-process-atomic-job.test.mjs](tools/rust-owned-process-atomic-job.test.mjs)、[rust-owned-recovery.test.mjs](tools/rust-owned-recovery.test.mjs)、[rust-owned-memory.test.mjs](tools/rust-owned-memory.test.mjs) | Job/进程创建、启动记录、I/O、取消、资源回收与测量。Cargo helper许可使用固定清单内的精确Rustup启动器哈希，启动与恢复共同验证；未知哈希仍拒绝，Job与root wrapper绑定保持。 |
 | [rust-unsafe-boundaries.test.mjs](tools/rust-unsafe-boundaries.test.mjs)、[rust-license-inventory.test.mjs](tools/rust-license-inventory.test.mjs)、[rust-emmy-identity.test.mjs](tools/rust-emmy-identity.test.mjs)、[luac.test.mjs](tools/luac.test.mjs) | FFI 边界、许可证、固定 Emmy 上游身份与 luac 打包；CI 复用已有原生产物。 |
 | [lua-tool-supply.test.mjs](tools/lua-tool-supply.test.mjs)、[rust-formal-lua.test.mjs](tools/rust-formal-lua.test.mjs)、[rust-formal-lua-bridge.test.mjs](tools/rust-formal-lua-bridge.test.mjs) | 固定Lua供应包按清单、原生产记录/receipt、源码/许可证/EXE哈希导入，不依赖旧业务HEAD或绝对路径。原记录不改写；bridge仅为本轮执行生成路径映射并保留原摘要。篡改、目录覆盖及身份不符拒绝；当前addon与Mailbox测试继续使用同一解释器。 |
 | [ci-release.test.mjs](tools/ci-release.test.mjs)、[ci-package-business.test.mjs](tools/ci-package-business.test.mjs) | 生产/安装/内容审计/业务报告绑定同一TGZ与CLI；候选还要求完整当前addon×client矩阵、同一Lua解释器及成功的addon/Skill报告。声明的哈希/字节/清单与复制后字节均核对，渠道不能改变。包验收和候选共用安装CLI的版本/编译提交/dirty状态校验；同版本旧binary不能冒充本轮产物。missing、not_run、partial、输入变化或未回收不能封存。业务入口复用tiny Source与预编译Data输入，实际查询使用安装包内Release；Node边界测试不代替真实执行。 |
-| [rust-source-pack-evidence.test.mjs](tools/rust-source-pack-evidence.test.mjs) | Source 导出/结果比较辅助逻辑；辅助，不计业务通过。 |
 | `tools/ci-{changes,docs,test-programs,artifacts,release}.mjs` | CI 变更分类、文档检查、测试程序构建/执行、产物 manifest seal/verify、候选封存；纯工具逻辑，需一次真实 CI 才能证明产物复用生效（N12）。 |
 
 ### Source/Data/Live 业务 runner
@@ -153,27 +152,22 @@ Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取�
 | --- | --- | --- |
 | [session-ipc.test.mjs](tests/rust-source-native-acceptance/session-ipc.test.mjs)、[runner.test.mjs](tests/rust-source-native-acceptance/runner.test.mjs)、[diagnostics.test.mjs](tests/rust-source-native-acceptance/diagnostics.test.mjs) | 实际 Source native IPC、诊断与会话验收的工具编排；复用当前 Release。 | 改接 |
 | [runner.test.mjs](tests/rust-source-full-corpus/runner.test.mjs) | 完整固定源码 corpus 的准备/执行/结果读取；全量业务用当前 Source 产物实际运行。 | 改接 |
-| rust-skill-usage 旧迁移对账 runner | 已彻底删除（task-13，累计 48 文件）。`tests/rust-source-native-acceptance` 改用自包含 `native-contract.mjs`（native 证据断言）与 `runner-inputs.mjs`（固定 GO_CONTRACT/NATIVE_CALLSITE、当前 package/Skill 校验、json/inventory helper），不再读取 workflow/baseline 迁移输入；perf source-pack RUNNER_FILES 改为 `native-contract.mjs`。 | 退役（自包含改接） |
 | [prepare.test.mjs](tests/rust-data-local-current/prepare.test.mjs) | 为实际本地数据测试生成固定独立预期；可以读取仓库外参考产物，不构建/嵌入 Go，不算当前查询通过。 | 辅助/改接 |
 
-### 性能工具（已改接外部参考模型）
+### 当前独立输入与有界测量工具
 
-用户已接受当前实测性能，性能工具和历史测量保留，不再为原20对及≤50%目标补跑。后续使用仍须比较相同完整业务结果；性能工具不能把生产Rust调用回退到旧SQL，也不能重新构建候选程序。外部固定Go 3.2.4参考只作为**仓库外显式输入目录**（`.tmp/paired-go-3.2.4-artifact/`：artifact.json + dev-npm-stage + tgz，忽略不提交），当前Rust候选使用本轮构建出的optimized artifact；工具只做静态字节/身份校验，不在仓库内构建Go、校验`go version -m`/CGO身份或LuaLS payload。
+用户已接受性能，不重跑比较。保留当前Agent Data/generation/Live控制器、完整独立输入
+及已有结果；旧Source pack格式/exporter/B01—B02执行器已退役。当前用途见
+[目录说明](tests/rust-performance-paired/README.md)。
 
-当前`rust-performance-paired.mjs`的实际执行范围仅为B01 describe、B02固定Retail index/query，三个case各有冷/热组，每组20对。已有报告的比值和判定保持原样；用户接受当前性能不改写历史结果。Live继续保留正式业务及实机验证。报告明确`fullB01B07Acceptance=false`；选定路径通过不证明其他Source、Data或Live已验证。
+| 入口 | 证明范围 |
+| --- | --- |
+| [agent-consumers.test.mjs](tests/rust-performance-paired/agent-consumers.test.mjs) | 当前Agent请求、精确数值、完整响应及退出/回收；固定输入认证与原始控制器总时。 |
+| [generation-contract.test.mjs](tests/rust-performance-paired/generation-contract.test.mjs)、[generation-evidence.test.mjs](tests/rust-performance-paired/generation-evidence.test.mjs)、[generation-profile.test.mjs](tests/rust-performance-paired/generation-profile.test.mjs) | 当前prepare/generation、完整结果与CAP、各阶段身份和诊断记录。 |
+| [live-runner.test.mjs](tests/rust-performance-paired/live-runner.test.mjs) | 离线Mailbox控制器与结果收集；无游戏访问，不能证明实机。 |
 
-Data/generation 的现有 Agent 成对消费者使用 `agent-prepare-fixtures.mjs` 和同一 receipt replay 合同。默认准备 catalog/content/images，也可显式选择单类或 `--csv-numeric`；四类均走当前 Rust fixture 构造器，不调用旧执行器。数值 WDC/DBD/逐行预期保持原固定哈希，ABI 只记录当前编译观察。容量报告计入持久化外部导出声明，历史未归属临时文件仍明确不在完整覆盖范围内。
-
-| 入口 | 验证的业务或边界 | 处置 |
-| --- | --- | --- |
-| [runner.test.mjs](tests/rust-performance-paired/runner.test.mjs)、[agent-consumers.test.mjs](tests/rust-performance-paired/agent-consumers.test.mjs) | 成对运行、顺序/完整响应及精确Agent数值；双方业务进程完整生命周期、原始控制器总时保留和退出完整性；复用本轮Release和外部固定参考目录。 | 保留（外部参考模型） |
-| [generation-contract.test.mjs](tests/rust-performance-paired/generation-contract.test.mjs)、[generation-evidence.test.mjs](tests/rust-performance-paired/generation-evidence.test.mjs)、[generation-profile.test.mjs](tests/rust-performance-paired/generation-profile.test.mjs) | generation/完整结果/CAP 比较及阶段测量；当前 Go 仅作外部生产端身份记录。 | 保留 |
-| [source-pack-scenarios.test.mjs](tests/rust-performance-paired/source-pack-scenarios.test.mjs)、[source-pack-scenarios-postcard-fresh.test.mjs](tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.test.mjs)、[source-pack-custody.test.mjs](tests/rust-performance-paired/source-pack-custody.test.mjs) | 固定 Source 输入、首次/复用场景与输入来源检查；当前二进制格式和正式 Source 入口。旧 retained/continuation 历史证据认证用例已退役（旧 runner closure 不可认证），生产续跑代码是否退役待 REVIEW 决定。 | 改接（部分历史用例退役） |
-| [read-index-postcard.test.mjs](tests/rust-performance-paired/read-index-postcard.test.mjs)、[read-fact-delta-postcard.test.mjs](tests/rust-performance-paired/read-fact-delta-postcard.test.mjs)、[owned-proof.mjs](tests/rust-performance-paired/owned-proof.mjs) | 当前二进制 Index/Facts 的比较辅助读取与自有 custody 断言（替代冻结 oracle helper）。 | 辅助 |
-| [live-runner.test.mjs](tests/rust-performance-paired/live-runner.test.mjs) | 有界 Live 计时和结果采集；离线工具通过不代表真实 Live 性能。 | 保留；实机见 H08 |
-| [tools/rust-performance-paired.mjs](tools/rust-performance-paired.mjs) | 真实20对比较入口：`<Rust artifact.json> <外部 Go 参考目录> <machine-conditions.json>`；需本轮optimized artifact与外部输入。当前候选的describe及Retail index/query冷、热六组各20对已完成，结果一致；Source四组达到原Go 50%目标，describe不设比值门槛。详细结果见handover，`fullB01B07Acceptance=false`；用户已接受当前性能，保留原测量范围与限制。 | 已接受的实测基线 |
-
-`tests/rust-parity/` 本轮已全部删除；旧 oracle/冻结产品/历史发布合同不再作为测试入口，也不要求重新跑绿。`tools/rust-performance-prepare-go.mjs`（仓库内构建 Go 包）已删除。
+正式包继续复用实际消费的agent fixture producer/importer。外部固定参考只做显式输入；
+当前仓库不构建Go或保存旧执行器。数据、业务覆盖、测量与实机结果分开说明。
 
 ## 5. 现有 addon 的 Lua 回归
 
@@ -200,35 +194,31 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 
 ## 7. 当前架构的业务回归范围
 
-这些是覆盖要求，不意味着每项都要新建文件。先核对上面的当前测试，已经通过正式路径覆盖的就复用；缺口才增加用例。每项结果进入 handover，未闭合项保留在 todo。
+这些是当前正式路径的覆盖要求。复用已有独立输入和有效断言，只为确认缺口增加用例。
+测试用途留在这里；本批实际执行结果进入handover，未完成项进入todo。
 
-| ID / 待办 | 正式业务入口与输入 | 必须说明的结果与限制 |
-| --- | --- | --- |
-| N01 / AGENT-01—02 | 已安装 Skill → CLI search/describe/schema/help、data agent schema。 | 常用称呼与 build ID 范围准确；两 Forever beta 身份独立；68项命令的业务示例统一来自 commands.json，现有合同测试逐项核解析后的命令身份及 help/schema/input/describe 一致性；实际业务运行仍按对应固定输入核实；发现不建 home、不联网、不起 worker；产品使用面无历史迁移内容。 |
-| N02 / APP-01 | CLI 与 Agent 转换成当前类型化请求，Source/Data/Live 独立会话。 | Source 单测与集成直接构造 SourceContext、固定 selection 和类型化请求，覆盖 query/inspect/diff/prune、单目标与矩阵验证、batch/refs/context、分页、CAP、取消和 native 会话。source_cli_tests 覆盖参数范围与优先级、项目解析、runtime admission，以及接收请求后项目锁或矩阵文件改变时仍使用已固定输入。Live 实例/probe 测试直接使用 LiveContext/LiveRequest；CLI 存入相对路径 probe 后，正式 execute 复用同一 revision/原字节的回归已通过。Data 测试已改接 DataContext、SourceOptions、SessionConfig 和类型化 Hotfix/资产请求；CLI 分别解析会话内存与物理文件上限，终端 transport 留在 CLI。实际进程隔离回归接入 source_native_session_public：Data 断管终止后旧句柄失效、CAP 可读，Source owner/analysis 继续复用；Live 用正式 journal/claim/lease API 核原恢复事实保持，不替代游戏验证。Data 完整库回归已通过。Core 共享入口与 Delivery 改接 RequestContext/业务 enum，CLI admission 负例与原项目选择、证据/缓存、安装恢复回归随同迁移；本批最新 workspace 编译通过，CLI 和 Core 受影响行为回归已通过，Delivery 及实际进程隔离回归均已通过；Live 部分只证明正式持久化记录与租约，不证明游戏行为。 |
-| N03 / DATA-01—02 | 正式 Agent 的通用查询与 12 项领域任务，固定完整与 partial 输入。 | 发现/ID/Join/聚合/子查询/Iterate 等真实运算；领域结果/关系/顺序完整；精确整数、浮点、null 与数组；Page/Export/CAP 不重跑，Analyze 一次。agent_session 的 UnionAll/Iterate 用例核固定行序、重复与宽整数，并在关闭 Engine、破坏自有输入且 fresh query 确认失败后验证原句柄仍可分页/导出/CAP；领域测试独立核模型/纹理/geoset 和完整关系顺序。Engine 的冷 Lookup Analyze 实际加载一次，分析后普通查询复用相同精确源数据；Explain 不加载源。`session_recovery_tests` 另覆盖默认512 MiB下16,384行全量数值排序、缓存复用及关闭退款；全量裸列扫描、投影和排序共用有界输入及DataFusion输出批次，表达式错误和filter/project/limit继续保留逐行读取边界。 |
-| N04 / DATA-03 | 实际安装数据经 Agent Session → Engine/DataFusion，独立固定预期。 | 本批新包 Retail Map 冷/预备缓存各完整 1,187 行，Classic 285、Classic Era 59、Anniversary 83、Titan 130 行均逐值、顺序、CSV、CAP、来源与关闭通过。两 Forever beta 独立 PIN 各有 73 行可读、8 行缺失；可读全值、缺失 ID/分段/哈希、缓存复用和 CAP `complete=false` 均核对，不能声称完整数据可用。Retail FID 134400 的 inspect/raw/PNG/WebP/CAP 已通过独立原字节及全 RGBA 对照。共享读取、Arrow 批次/稀疏选择、同步源准备、取消/恢复回归另随正式 Data 套件；上述实际覆盖不扩大到所有表/资源。 |
-| N05 / SOURCE-01 | 固定真实源码 → 当前 Release/native Emmy/luac/TOC/XML。 | 实际声明、引用、调用、位置、加载与语义覆盖；会话复用和关闭；当前二进制缓存冷/热一致。冷查询发布同一缓存后直接使用完整索引，热查询继续认证并投影；现有回归核完整结果、关系、游标、正文、资产、非UTF8及原字节按需发布，IO记录分别反映实际路径。research 已补接同 site/context 的 WriteVersion；真实 ResearchSession 正负例、原 projection 44 项和读写索引回归通过，新 Release 显式 refs_context 的 3 项也全部通过，包括原先失败的全关系和 128 outgoing 调用。原 semantic complete 断言不变，未知/条件写仍保持 partial。 |
-| N06 / LIVE-01 | 当前 addon Lua writer ↔ 正式 Rust Mailbox Driver/SessionOwner。 | JSON/数字/字节与恢复一致；原请求/deadline、未知输入不重放、报告/cleanup 分开；已去掉冻结 Go 测试来源（formal bridge 已改接）。 |
-| N07 / DATA-03 | 真实 supervisor/worker，排队、stdout 背压/断管、EOF/取消与CPU执行中取消。 | 现有实际用例覆盖输出阻塞时deadline与取消、排队deadline、EOF排空、epoch句柄失效不重放及已提交CAP保留。新增CPU用例先完成16384行scan，再执行常量字段自连接COUNT，持续排空stdout；观测owned Job内确切worker身份及用户CPU增量后取消，核原15秒deadline内回收、旧句柄失效和不重放；本批实际supervisor七项均已通过。该证据不证明某次DataFusion poll完全不yield。测试helper关闭已退出根句柄后，沿用原deadline等待同一Job归零；超时保留成员身份，强制清理不算通过。 |
-| N08 / DATA-04 | 实际 Data 归属文件与共享 blob、generation、活跃结果、CAP、staging/spill/export。 | 十进制 5 GB 的 Data 归属口径及峰值、共享一次计费、冷缓存回收、活跃/CAP 保护。外部 raw/图片/CSV/demux 发布前持久化额度；output/scoped_tests 用实际子进程退出验证写入中遗留与发布后未结算均继续占额，并保留用户文件；正常连续发布释放额度。Core external_export 与 Windows managed 声明覆盖精确物理边界、Unknown/清理失败、撤销失败与原句柄关闭。inventory_tests 核元数据最终盘点、只读范围和quota释放；Windows目录及retirement回归核父目录复用后的原身份与锁定范围；共享blob盘点复用一次打开的根目录，核两份正文计费、取消和关闭错误，以及共享子目录在父句柄关闭后的身份与reparse边界。shared_blobs成对发布回归覆盖第二份的精确峰值、失败后首份与receipt保留、重复内容和超限零增长读取。固定slot扫描回归覆盖大小写、高编号槽位、后续新记录、坏记录保留及精确峰值恢复；新建slot仍走原占用检查。已有/缺失root回归覆盖full/held-parent/shared-home三路原生身份锁定、共享祖先写属性、取消后不创建与checked-close；初始化两个关闭失败仍保留全部原因并释放quota，CAP目录原写锁等待及取消回归保持；Spool占位探测回归保留foreign payload并核staging锁定直到关闭。历史未归属内容仍显式在覆盖范围外；不能用 build scratch 测试代替。 |
-| N09 / DELIVERY-01 | 统一 Release/npm 包在隔离 prefix/HOME 安装，包内 Skill/CLI/luac/addon。 | 真正完成 Source/Data/安装任务，路径/版本/许可证与包内容一致；旧 Go install smoke 已删，当前入口 tools/rust-package-smoke + CI validate-package。 |
-| N10 / LIVE-CLIENT | 真实客户端和已授权实例操作。 | 按 handover 最后 H01—H08 记录七产品、当前绑定、500 槽、多实例、恢复和所需性能；离线通过不代替本项。 |
-| N11 / SOURCE-02 | 含非 UTF-8 注释/字符串的固定 Lua 输入；当前 Source query/inspect/context/validate/closure/native。 | 见 7.1；单文件编码告警不能中断全快照或伪造语义。最终已安装 Release 的实际 Forever 冷/热索引、inspect、同提交 diff、受管 luac、完整 native IPC 告警与会话复用均通过。research-material CAS 回归覆盖注释分析视图、不可转换 token/字符串 gap、篡改及普通 UTF-8 快路径；32 MiB+17 文件的超限冷/热索引回归也已通过。 |
-| N12 / CI-01—04 | 实际workflow、构建产物和下游runner；结构检查与真实CI结果。 | 每种配置编译一次，两个命名组共用同一93+1构建记录；汇总逐程序核计划/结果、哈希、提交、覆盖及回收。41182067569的十二个job全通过：两组24/69程序、222项Lua、两个显式文件symlink、固定资源、跨job路径、许可证closure、Release、唯一TGZ生产/审计/安装、包内Source/Data及候选封存。已独立下载并核全部11项SHA256SUMS和各报告共同身份；候选只复制原TGZ，输入缺失无隐式重建。实际验收commit、哈希与证明范围见handover。 |
+| 方向 | 正式入口与必须验证的事实 |
+| --- | --- |
+| N01 / Agent自解释 | 安装Skill→search/schema/help/describe。命令示例、必填/条件输入、更新policy与实际typed admission一致；Data请求和响应字段、普通/Agent framing、错误纠正可用；发现不创建home、不联网、不起worker。 |
+| N02 / 类型化编排 | CLI/Agent转正式领域请求，固定项目/矩阵/原始probe输入；Source/Data/Live各有独立归属。实际Data断管、CAP保留、Source复用与持久Live恢复互不冒充游戏行为。 |
+| N03 / Data查询与领域 | 原始DB2/CASC→Session/Engine/DataFusion；通用plan及全部领域任务、关系/顺序/精确数/数组/null、真实partial与完整空来源；page/export/CAP复用同handle，Explain/Analyze按声明执行。 |
+| N04 / 真实数据范围 | 固定原BLTE与独立逐行/像素预期；七产品独立PIN，两Forever保持缺密钥/分区事实。明确synthetic元数据与真实当前安装分别证明什么；旧build不冒充更新后安装。 |
+| N05 / Source语义 | 固定源码和环境→实际Emmy/luac/TOC/XML；声明、引用、调用、位置、关系与值流，冷暖认证/按需原文、unknown/partial、会话复用与关闭。 |
+| N06 / Mailbox离线 | 当前addon writer↔正式Rust Driver/SessionOwner；精确JSON/字节、原request/deadline、取消、未知输入不重放、report/cleanup分离；formal Lua bridge只证明离线协议。 |
+| N07 / 实际worker | 排队、背压、断管、EOF、CPU执行中取消与deadline；同Job全部回收、epoch失效、不重放、已提交CAP保留。单根退出或强制清理不算原正常回收成功。 |
+| N08 / 资源与存储 | Data十进制5GB、共享blob一次计费、峰值、活跃/CAP保护、staging/spill/export；实际进程中断、原身份/锁/reparse/checked-close、发布后未知状态与退款。构建scratch不是产品Data总账。 |
+| N09 / 正式包 | 唯一TGZ的隔离npm/Skill/addon/luac、同包实际Source/Data与安装恢复；manifest/版本/提交/dirty/许可证/完整资源匹配，验证阶段无重建。 |
+| N10 / 实机 | 按handover最后H01—H08，七产品、500槽、绑定、多实例与恢复逐项实机；用户安排前不占用。 |
+| N11 / 原始源码编码 | 下述非UTF8与原位置合同，单文件告警不丢全快照或伪造语义。 |
+| N12 / CI产物流 | 测试/Release每配置生产一次，两shard覆盖唯一record；Lua/addon/Skill、安装/业务/审计/候选复用原物，漏程序/缺输入/篡改/未回收均失败。 |
 
-### 7.1 N11：Source 编码回归的具体业务
+### 7.1 Source原始编码
 
-来源为 [main 修复 c3450d9](https://github.com/Follen/Lychee-Dev/commit/c3450d9a32d6ea1334f0209897cc02ab06502ba6)。Rust 当前实现（本批已完成并验证）在 index/original_cache/lua_tree/closure/luac/inspect/context/native 边界统一处理，不能只删一处检查。
-
-- 最小输入在前后各放一个合法声明，中间注释包含 0x92；声明、原位置、AST 数与完整性保持，编码告警有文件、行号和原始零起始字节偏移。
-- query、inspect、context 对同一行采用一致 U+FFFD 显示；原归档逐字节及哈希不变，含非法 UTF-8 的 CAP 不标成 UTF-8 文本。覆盖 CRLF、BOM 和多字节字符邻接，防止显示转换造成位置漂移。
-- 冷构建、热索引、原文缓存、同提交 diff、addon 加载检查和实际 luac/native 都保持上述事实。当前缓存格式更新会重建，固定 PIN 不变。
-- 非法字节位于真正 token/标识符时仍报告语法问题，不能造出声明；字符串中的原始字节值与语义不被 U+FFFD 显示值替换；native 边界等宽分析视图不得输出替换后的字符串值/伪造声明，无法表达的 observation 标 gap/unknown。
-- 单文件超限另报路径、实际大小与上限，仍如实影响 coverage，不与编码错误混用。[index.rs](crates/lycheedev-source/src/index.rs) 的 `public_index_reports_oversized_source_without_losing_valid_ast_or_encoding_warning` 已用实际 32 MiB+17 文件验证冷/热完整 index 与查询：超限文件跳过，另外两份合法 Lua 保留 AST/声明，其中非 UTF-8 注释独立告警，coverage 明确不完整。
-- 实际输入使用 Forever 1.60.1.70450、源码提交 `172a387e3ab85b26e6640d3058d5ec1e6ccd4c63`：`Interface/AddOns/Blizzard_NewPlayerExperience/Camelot/Blizzard_TutorialData.lua` 第 400 行，0x92 在偏移 12719。最终已安装 Release 已通过包内 Source sync 获取并验证 4,481 文档/AST、0 跳过、0 语法诊断、1 编码告警，以及原字节、U+FFFD、同提交 diff 和受管 luac。公共 native refs 首次/复用均通过，第二次命中同一输入的缓存并只传快照标识，编码告警不变，随后 session 关闭。
-- 完整 XML 来源映射的响应回归使用真实提取的实体、换行、合成 wrapper、空映射及 null 原始位置，对照 canonical JSON 字节和输入身份；[raw_response_tests.rs](crates/lycheedev-source/src/native_session/raw_response_tests.rs) 覆盖 typed reply、固定帧上限、owner 原字节转发、公开 Value 解码及同会话第二次查询。该回归不代替上述真实全快照的内存与 IPC 验证。
-- 旧参考缺少这个修复时，不以旧结果为正确性标准；不把 Go 源码、旧 JSON cache 或发行版本改动带回 Rust。
+- 合法Lua的非UTF8注释继续保AST、声明、关系和符号位置，单独报告编码告警；展示转换不改变原始字节CAP和位置。
+- 真实token/标识符中的非法字节仍是语法问题；字符串值不能由U+FFFD伪造。native等宽分析视图保留gap/unknown。
+- 冷暖索引、原文、同提交diff、加载闭包和实际luac/native遵守同一合同；超限与编码错误分开，跳过保持coverage不完整。
+- [index.rs](crates/lycheedev-source/src/index.rs)保32MiB+17超限文件与两个合法Lua的独立输入；[raw_response_tests.rs](crates/lycheedev-source/src/native_session/raw_response_tests.rs)核XML实体/换行/wrapper映射、精确wire字节、原始位置和同会话第二次查询。
+- 真实Forever固定输入为`172a387e3ab85b26e6640d3058d5ec1e6ccd4c63`，含原0x92注释字节；按完整4,481文档、原字节与独立位置核对，不用旧参考的错误拒绝行为定义当前正确性。
 
 ### 7.2 最终安装包的非Live业务验收
 
@@ -252,9 +242,16 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 
 CI 按 DESIGN 的产物流运行：先验证并导入 [Lua供应包](release/tool-supply/lua-5.1.5-windows-amd64/manifest.json)，生成一次addon ZIP，再并行编译测试与Release配置。两个原生job在Cargo fetch/build前用 `python third_party/emmy/prepare.py --download` 认证固定Emmy上游，保留本次timings与原receipt/日志；编译失败也上传owned证据。Rust/addon检查各自尽早运行；正式npm生产入口只pack一次，安装、独立内容审计和候选封存共用该TGZ。npm脚本路径与检查的固定版本一致。包内Source用tiny本地Git输入验证真实native查询，Data用预编译fixture仅构造DB2/CASC输入，再由安装Release完成query/page/CAP/release/close。缺输入、ignored和实机范围独立记录，下游没有构建回退。
 
+Windows guarded-spawn的4个现有真实进程用例需要同批编译并封存的standalone helper。
+该harness=false程序仅作为support传给下游，不计业务测试程序。Source-runtime job显式运行
+这4项，验证辅助程序哈希并要求实际执行4项；本机也只使用自有helper。显式exact/ignored
+过滤若实际执行0项，即使libtest退出0也必须失败；不能把筛选错名或全ignored记绿。
+
 Rust验证使用 `ci-test-programs.mjs run <record> --shard data-delivery` 与 `--shard source-runtime` 两组；命名组不接受额外包/目标或测试过滤参数。包分组由工具中的TEST_SHARDS维护，新增workspace包须进入完整覆盖。release-ready使用 `aggregate <record> --shard-report <第一组报告> --shard-report <第二组报告> --report <汇总报告>` 校验所有程序恰好完成一次，再封存候选；每组失败报告独立保存。
 
-当前默认跳过62个测试实例（Source 38、Data 14、Windows 4、CLI 3、Live 2、Delivery 1）。源码有47处 `#[ignore]`，其中XML宏展开为16个实例，因此不能直接用属性行数统计用例。它们分别需要真实安装/客户端、真实游戏输入、真实固定源码/外部产物或symlink权限，也包含显式输入构造器；CI与默认测试都不把它们当业务通过。逐目标的原因在对应测试内注明。
+默认ignored项按当前预编译程序的 `--list --ignored` 清点。fixture producer、真实外部输入、慢生命周期与子进程helper分别说明；helper只能由真实父测试带明确角色启动，不计空跑成功。当前数量在新构建验证后更新。
+
+本机不运行全局键盘钩子：排除整个`mailbox_input_fixture`程序，并在`lycheedev_windows`中跳过`passive_monitor_installs_and_closes_without_input`及`class_and_executable_mismatch_block_normal_and_emergency_posts_on_owned_hwnd`。后者虽替换readiness检查，constructor仍安装钩子。纯输入引擎、键盘状态、其余自有身份检查和event_only测试按原入口执行；完整桌面集成由CI保留原期限与业务断言验证。
 
 纯 Node 套件可用 `node --test <明确的套件路径>`，只选当前相关组；不要全量 glob 把已删除/已退役的历史套件再次当验收。Lua 使用第 5 节入口。主路径的原生/包/实机验证按任务风险执行，不为简单文档编辑运行整套产品测试。
 

@@ -26,8 +26,7 @@ use std::{
 #[path = "formal_live_output.rs"]
 mod output;
 pub use output::render;
-#[path = "formal_live_validation.rs"]
-mod validation;
+use crate::formal_live_validation as validation;
 
 pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
 

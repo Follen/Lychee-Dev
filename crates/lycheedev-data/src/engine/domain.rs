@@ -35,7 +35,7 @@ impl DomainOwner {
             return Err(identity());
         }
         validate_input(request)?;
-        let (_, captures) = binding(request);
+        let (_, captures) = request.binding();
         let bytes =
             captures
                 .iter()
@@ -172,72 +172,8 @@ fn completeness(report: &Value, key: &str) -> Result<bool> {
         )
     })
 }
-fn binding(request: &DomainRequest) -> (&SourceMode, &[String]) {
-    match request {
-        DomainRequest::ItemGet {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::ItemModels {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::ItemTextures {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::ItemGeosets {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::SpellInfo {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::SpellAuras {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::SpellSummons {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::EncounterGet {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::DecorList {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::DecorGet {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::CreatureDisplay {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::CreatureModel {
-            mode,
-            hotfix_captures,
-            ..
-        } => (mode, hotfix_captures),
-    }
-}
 fn validate_input(request: &DomainRequest) -> Result<()> {
-    let (mode, captures) = binding(request);
+    let (mode, captures) = request.binding();
     if captures.len() > 16 || (matches!(mode, SourceMode::Static) != captures.is_empty()) {
         return Err(identity());
     }
@@ -447,7 +383,7 @@ fn source_identity(
     request: &DomainRequest,
     report_complete: bool,
 ) -> Result<()> {
-    let (mode, captures) = binding(request);
+    let (mode, captures) = request.binding();
     let mode = match mode {
         SourceMode::Static => "static",
         SourceMode::Effective => "effective",
@@ -696,7 +632,7 @@ fn validate_bound(
     let mut observed = 0u16;
     for source in sources {
         budget.check()?;
-        budget.charge(Cost::work(64 + binding(request).1.len() * 32))?;
+        budget.charge(Cost::work(64 + request.binding().1.len() * 32))?;
         let source_task = task(source.value())?;
         source_identity(source, &source_task, request, complete)?;
         let bit = role(request, report, &source_task).ok_or_else(identity)?;

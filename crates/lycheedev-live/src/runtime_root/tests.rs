@@ -33,7 +33,6 @@ impl lycheedev_windows::process::RuntimeControl for FixtureFlagControl {
 struct Read {
     rva: u64,
     bytes: usize,
-    kind: RuntimeReadKind,
 }
 enum Change {
     Bytes(u64, Vec<u8>),
@@ -50,6 +49,7 @@ struct Trigger {
 }
 struct Fixture {
     bytes: RefCell<Vec<u8>>,
+    image: Image,
     geometry: Cell<Geometry>,
     identity: Cell<u64>,
     text_bytes: usize,
@@ -88,8 +88,45 @@ impl Fixture {
             bytes[start + 16..start + 24].fill(0xfe);
             bytes[start + 36..start + 40].copy_from_slice(&flags.to_le_bytes());
         }
+        // The scanner receives locating metadata already admitted by the
+        // production disk-image boundary. These explicit fixture values are
+        // not a second parser of the mutable runtime PE header.
+        let text = Section {
+            start: TEXT,
+            end: TEXT + text_bytes as u64,
+            flags: READ | EXECUTE,
+            text: true,
+        };
+        let image = Image {
+            sections: vec![
+                text,
+                Section {
+                    start: data,
+                    end: data + 0x1000,
+                    flags: READ | WRITE,
+                    text: false,
+                },
+            ],
+            text,
+            headers: [
+                (0, 2),
+                (0x3c, 4),
+                (0x80, 4),
+                (0x86, 2),
+                (0x94, 2),
+                (0x98, 2),
+                (TABLE, 80),
+            ]
+            .into_iter()
+            .map(|(rva, length)| HeaderGuard {
+                rva: rva as u64,
+                bytes: bytes[rva..rva + length].to_vec(),
+            })
+            .collect(),
+        };
         Self {
             bytes: RefCell::new(bytes),
+            image,
             geometry: Cell::new(Geometry {
                 base: 0x140000000,
                 size,
@@ -107,8 +144,8 @@ impl Fixture {
     fn write(&self, at: u64, bytes: &[u8]) {
         self.bytes.borrow_mut()[at as usize..at as usize + bytes.len()].copy_from_slice(bytes);
     }
-    fn word(&self, at: usize, value: u32) {
-        self.write(at as u64, &value.to_le_bytes());
+    fn image(&self) -> Image {
+        self.image.clone()
     }
     fn anchor(&self, recipe: RecipeId, anchor: u64, root: u64) {
         let code: Vec<_> = recipe
@@ -202,7 +239,6 @@ impl Source for Fixture {
         self.reads.borrow_mut().push(Read {
             rva,
             bytes: into.len(),
-            kind,
         });
         let occurrence = self
             .reads
@@ -269,7 +305,10 @@ fn both_templates_derive_negative_rip_roots_under_aslr_and_protected_headers() {
             });
             let original = source.bytes.borrow().clone();
             let mut budget = defaults();
-            let proof = resolve(&source, &mut budget).unwrap();
+            let mut candidates =
+                resolve_candidates_with_image(&source, &mut budget, source.image()).unwrap();
+            assert_eq!(candidates.len(), 1);
+            let proof = candidates.remove(0);
             assert_eq!(
                 (proof.root, proof.anchor, proof.recipe),
                 (0x1010, TEXT + 0x100, recipe)
@@ -304,7 +343,10 @@ fn current_positive_displacements_move_the_root_without_any_known_rva() {
     for root in [0x5010, 0x5080] {
         let source = Fixture::with_data(8192, 0x5000);
         source.anchor(RecipeId::Retail, TEXT + 0x100, root);
-        let proof = resolve(&source, &mut defaults()).unwrap();
+        let mut candidates =
+            resolve_candidates_with_image(&source, &mut defaults(), source.image()).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let proof = candidates.remove(0);
         assert_eq!(proof.root, root);
         assert_eq!(proof.evidence.scanned_bytes, 8192);
     }
@@ -319,7 +361,10 @@ fn instruction_crossing_a_one_mib_chunk_boundary_is_counted_once() {
         let source = Fixture::new(CHUNK + 4096);
         let anchor = TEXT + CHUNK as u64 - 20;
         source.anchor(recipe, anchor, 0x1010);
-        let proof = resolve(&source, &mut defaults()).unwrap();
+        let mut candidates =
+            resolve_candidates_with_image(&source, &mut defaults(), source.image()).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let proof = candidates.remove(0);
         assert_eq!(proof.anchor, anchor);
         assert_eq!(proof.evidence.pattern_hits, 1);
         assert_eq!(proof.evidence.scanned_bytes, (CHUNK + 4096) as u64);
@@ -335,17 +380,19 @@ fn instruction_crossing_a_one_mib_chunk_boundary_is_counted_once() {
 #[test]
 fn zero_raw_hits_retains_complete_search_coverage_without_a_binding() {
     let source = Fixture::new(8192);
-    let failure = resolve(&source, &mut defaults()).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "root.anchor_missing");
     assert_eq!(failure.evidence.pattern_hits, 0);
     assert_eq!(failure.evidence.scanned_bytes, 8192);
     assert!(failure.evidence.full_text_pass);
     assert!(!failure.evidence.stable_guards);
 }
-// Fixed Go 3.2.0 filters bad RIP candidates and deduplicates roots. The old
-// prototype's raw-second-hit rejection is intentionally superseded here.
+// Valid roots remain candidates for the production layout-admission layer;
+// invalid raw pattern matches never remove an independently valid root.
 #[test]
-fn go320_valid_distinct_roots_are_ambiguous_but_invalid_raw_hits_are_rejected() {
+fn distinct_roots_remain_candidates_and_invalid_raw_hits_are_rejected() {
     for second in [
         RecipeId::Retail,
         RecipeId::Forever,
@@ -358,7 +405,11 @@ fn go320_valid_distinct_roots_are_ambiguous_but_invalid_raw_hits_are_rejected() 
                 source.operand(second, TEXT + 0x300, 0, -1);
             }
             if invalid {
-                let proof = resolve(&source, &mut defaults()).unwrap();
+                let mut candidates =
+                    resolve_candidates_with_image(&source, &mut defaults(), source.image())
+                        .unwrap();
+                assert_eq!(candidates.len(), 1);
+                let proof = candidates.remove(0);
                 assert_eq!(proof.root, 0x1010);
                 assert_eq!(
                     (
@@ -369,16 +420,23 @@ fn go320_valid_distinct_roots_are_ambiguous_but_invalid_raw_hits_are_rejected() 
                     (2, 1, 1)
                 );
             } else {
-                let failure = resolve(&source, &mut defaults()).err().unwrap();
-                assert_eq!(failure.cause, "root.ambiguous_root");
+                let candidates =
+                    resolve_candidates_with_image(&source, &mut defaults(), source.image())
+                        .unwrap();
                 assert_eq!(
-                    (
-                        failure.evidence.pattern_hits,
-                        failure.evidence.root_candidates
-                    ),
-                    (2, 2)
+                    candidates
+                        .iter()
+                        .map(|proof| proof.root)
+                        .collect::<Vec<_>>(),
+                    vec![0x1010, 0x1020]
                 );
-                assert!(failure.evidence.full_text_pass && failure.evidence.stable_guards);
+                for proof in candidates {
+                    assert_eq!(
+                        (proof.evidence.pattern_hits, proof.evidence.root_candidates),
+                        (2, 2)
+                    );
+                    assert!(proof.evidence.full_text_pass && proof.evidence.stable_guards);
+                }
             }
         }
     }
@@ -390,7 +448,10 @@ fn go320_late_invalid_hit_is_counted_without_overriding_valid_root() {
     let second = TEXT + CHUNK as u64 + 300;
     source.anchor(RecipeId::Forever, second, 0x1020);
     source.operand(RecipeId::Forever, second, 0, -1);
-    let proof = resolve(&source, &mut defaults()).unwrap();
+    let mut candidates =
+        resolve_candidates_with_image(&source, &mut defaults(), source.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let proof = candidates.remove(0);
     assert_eq!(proof.root, 0x1010);
     assert_eq!(proof.evidence.rejected_matches, 1);
     assert_eq!(proof.evidence.scanned_bytes, (CHUNK + 4096) as u64);
@@ -413,14 +474,19 @@ fn each_rip_operand_uses_its_actual_one_four_or_eight_byte_width() {
             source.operand(recipe, anchor, index, target as i64);
         }
         assert_eq!(
-            resolve(&source, &mut defaults()).unwrap().root,
+            resolve_candidates_with_image(&source, &mut defaults(), source.image())
+                .unwrap()
+                .remove(0)
+                .root,
             source.data + 0x1000 - 8
         );
     }
     for (operand, target) in [(1, 0x1ffc), (2, 0x1ffd)] {
         let source = ready(RecipeId::Retail);
         source.operand(RecipeId::Retail, TEXT + 0x100, operand, target);
-        let failure = resolve(&source, &mut defaults()).err().unwrap();
+        let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+            .err()
+            .unwrap();
         assert_eq!(failure.cause, "root.anchor_missing");
         assert_eq!(failure.evidence.rejected_matches, 1);
         assert_eq!(failure.evidence.pattern_hits, 1);
@@ -437,14 +503,7 @@ fn signed_rip_overflow_module_range_alignment_and_target_permissions_are_indepen
     ] {
         let source = ready(RecipeId::Retail);
         source.operand(RecipeId::Retail, TEXT + 0x100, index, target);
-        let mut b = defaults();
-        let mut access = Access {
-            source: &source,
-            budget: &mut b,
-            geometry: source.geometry(),
-            evidence: RootEvidence::default(),
-        };
-        let image = access.image().unwrap();
+        let image = source.image();
         let bytes = source.bytes.borrow();
         let length = RecipeId::Retail.text().split_whitespace().count();
         assert_eq!(
@@ -459,7 +518,9 @@ fn signed_rip_overflow_module_range_alignment_and_target_permissions_are_indepen
             cause
         );
         drop(bytes);
-        let failure = resolve(&source, &mut defaults()).err().unwrap();
+        let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+            .err()
+            .unwrap();
         assert_eq!(failure.cause, "root.anchor_missing");
         assert_eq!(failure.evidence.rejected_matches, 1);
         assert!(failure.evidence.full_text_pass);
@@ -469,7 +530,9 @@ fn signed_rip_overflow_module_range_alignment_and_target_permissions_are_indepen
 fn forever_repeated_getter_calls_must_have_one_target() {
     let source = ready(RecipeId::Forever);
     source.operand(RecipeId::Forever, TEXT + 0x100, 4, (TEXT + 0x30) as i64);
-    let failure = resolve(&source, &mut defaults()).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "root.anchor_missing");
     assert_eq!(failure.evidence.rejected_matches, 1);
     assert_eq!(failure.evidence.pattern_hits, 1);
@@ -496,45 +559,13 @@ fn os_geometry_is_required_even_when_runtime_headers_look_plausible() {
         let source = ready(RecipeId::Retail);
         source.geometry.set(geometry);
         assert_eq!(
-            resolve(&source, &mut defaults()).err().unwrap().cause,
+            resolve_candidates_with_image(&source, &mut defaults(), source.image())
+                .err()
+                .unwrap()
+                .cause,
             "root.module_identity"
         );
         assert!(source.reads.borrow().is_empty());
-    }
-}
-#[test]
-fn malformed_locating_headers_and_sections_never_begin_a_text_scan() {
-    for mode in [
-        "nt_far",
-        "count",
-        "magic",
-        "overlap",
-        "text_missing",
-        "text_duplicate",
-        "text_permissions",
-        "section_range",
-    ] {
-        let source = ready(RecipeId::Retail);
-        match mode {
-            "nt_far" => source.word(0x3c, 0x10000000),
-            "count" => source.write(0x86, &97u16.to_le_bytes()),
-            "magic" => source.write(0x98, &0x10bu16.to_le_bytes()),
-            "overlap" => source.word(TABLE + 40 + 12, TEXT as u32),
-            "text_missing" => source.write(TABLE as u64, b".other\0\0"),
-            "text_duplicate" => source.write((TABLE + 40) as u64, b".text\0\0\0"),
-            "text_permissions" => source.word(TABLE + 36, READ | WRITE),
-            _ => source.word(TABLE + 8, u32::MAX),
-        }
-        let failure = resolve(&source, &mut defaults()).err().unwrap();
-        assert!(failure.cause.starts_with("root."), "{mode}: {failure:?}");
-        assert_eq!(failure.evidence.scanned_bytes, 0);
-        assert!(
-            source
-                .reads
-                .borrow()
-                .iter()
-                .all(|r| r.kind == RuntimeReadKind::Metadata)
-        );
     }
 }
 #[test]
@@ -567,7 +598,9 @@ fn anchor_root_header_and_process_races_do_not_issue_a_binding() {
                 "fixture.process_reused"
             }
         };
-        let failure = resolve(&source, &mut defaults()).err().unwrap();
+        let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+            .err()
+            .unwrap();
         assert_eq!(failure.cause, cause, "{mode}");
         assert_eq!(failure.evidence.pattern_hits, 1);
     }
@@ -582,7 +615,9 @@ fn source_failures_and_incomplete_code_reads_remain_fatal_without_salvage() {
     ] {
         let source = ready(RecipeId::Retail);
         source.trigger(TEXT, 1, Change::Error(cause.into()));
-        let failure = resolve(&source, &mut defaults()).err().unwrap();
+        let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+            .err()
+            .unwrap();
         assert_eq!(failure.cause, cause);
         assert_eq!(failure.evidence.pattern_hits, 0);
         assert!(!failure.evidence.full_text_pass);
@@ -602,7 +637,10 @@ fn source_failures_and_incomplete_code_reads_remain_fatal_without_salvage() {
 fn revalidation_does_not_rescan_or_cache_heap_addresses() {
     let source = ready(RecipeId::Retail);
     let mut budget = defaults();
-    let mut proof = resolve(&source, &mut budget).unwrap();
+    let mut candidates =
+        resolve_candidates_with_image(&source, &mut budget, source.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let mut proof = candidates.remove(0);
     let before = source.reads.borrow().len();
     // The root slot may hold a different state by a later observation. This
     // binding holds only its RVA; the future Lua reader must validate that state
@@ -628,7 +666,10 @@ fn revalidation_does_not_rescan_or_cache_heap_addresses() {
 fn failed_revalidation_is_poisoned_and_fresh_resolution_keeps_original_budget() {
     let source = ready(RecipeId::Retail);
     let mut budget = defaults();
-    let mut proof = resolve(&source, &mut budget).unwrap();
+    let mut candidates =
+        resolve_candidates_with_image(&source, &mut budget, source.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let mut proof = candidates.remove(0);
     source.write(TEXT + 0x100, &[0x49]);
     assert_eq!(
         revalidate(&mut proof, &source, &mut budget)
@@ -647,7 +688,10 @@ fn failed_revalidation_is_poisoned_and_fresh_resolution_keeps_original_budget() 
     );
     assert_eq!(source.reads.borrow().len(), reads);
     assert_eq!(budget.usage(), used);
-    let fresh = resolve(&source, &mut budget).unwrap();
+    let mut candidates =
+        resolve_candidates_with_image(&source, &mut budget, source.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let fresh = candidates.remove(0);
     assert!(fresh.evidence.full_text_pass);
     assert!(budget.usage().read_calls > used.read_calls);
     assert_eq!(fresh.request, proof.request);
@@ -657,7 +701,10 @@ fn a_different_module_instance_or_new_budget_cannot_reuse_a_binding() {
     for changed_budget in [false, true] {
         let source = ready(RecipeId::Retail);
         let mut budget = defaults();
-        let mut proof = resolve(&source, &mut budget).unwrap();
+        let mut candidates =
+            resolve_candidates_with_image(&source, &mut budget, source.image()).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let mut proof = candidates.remove(0);
         let reads = source.reads.borrow().len();
         if changed_budget {
             let mut replacement = defaults();
@@ -714,9 +761,14 @@ fn global_read_allocation_and_cpu_budgets_preserve_partial_evidence() {
     ] {
         let source = ready(RecipeId::Retail);
         let mut budget = budget(limits);
-        let failure = resolve(&source, &mut budget).err().unwrap();
+        let failure = resolve_candidates_with_image(&source, &mut budget, source.image())
+            .err()
+            .unwrap();
         assert_eq!(failure.cause, cause);
-        assert!(!failure.evidence.full_text_pass);
+        assert_eq!(
+            failure.evidence.full_text_pass,
+            cause == "memory.runtime_budget:reads"
+        );
         assert!(budget.usage().read_calls <= limits.read_calls);
         assert!(budget.usage().requested_bytes <= limits.requested_bytes);
         assert!(budget.usage().allocation_bytes <= limits.allocation_bytes);
@@ -759,7 +811,10 @@ fn cancelled_expired_and_during_read_control_never_produces_a_binding() {
     )
     .unwrap();
     assert_eq!(
-        resolve(&source, &mut budget).err().unwrap().cause,
+        resolve_candidates_with_image(&source, &mut budget, source.image())
+            .err()
+            .unwrap()
+            .cause,
         "memory.runtime_cancelled"
     );
     assert_eq!(
@@ -788,7 +843,9 @@ fn a_real_source_fault_cannot_be_reclassified_by_simultaneous_cancellation() {
         || FixtureFlagControl(cancel),
     )
     .unwrap();
-    let failure = resolve(&source, &mut budget).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut budget, source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "fixture.os_denied:5");
     assert!(!failure.evidence.stable_guards);
 }
@@ -803,7 +860,9 @@ fn deadline_overrun_on_successful_read_is_preserved_without_retry() {
         || FixtureClearControl,
     )
     .unwrap();
-    let failure = resolve(&source, &mut budget).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut budget, source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "memory.runtime_deadline");
     assert_eq!(
         source
@@ -823,6 +882,11 @@ struct SparseFixture {
     inner: Fixture,
     spans: Vec<(u64, u64)>,
     short: RefCell<Vec<(u64, usize, usize)>>,
+}
+impl SparseFixture {
+    fn image(&self) -> Image {
+        self.inner.image()
+    }
 }
 impl Source for SparseFixture {
     type Identity = u64;
@@ -878,7 +942,10 @@ fn go320_sparse_short_prefix_is_kept_and_only_unread_suffix_retried() {
         spans: vec![(TEXT, TEXT + 16384)],
         short: RefCell::new(vec![(TEXT, 16384, 200), (TEXT + 4096, 4096, 0)]),
     };
-    let proof = resolve(&source, &mut defaults()).unwrap();
+    let mut candidates =
+        resolve_candidates_with_image(&source, &mut defaults(), source.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let proof = candidates.remove(0);
     assert_eq!(proof.recipe, RecipeId::ForeverContext);
     assert_eq!(proof.evidence.scanned_bytes, 12288);
     assert_eq!(proof.evidence.read_failures, 2);
@@ -908,7 +975,9 @@ fn go320_sparse_scan_never_stitches_an_anchor_across_unknown_bytes() {
         spans: vec![(TEXT, TEXT + 4096), (TEXT + 4097, TEXT + 8192)],
         short: RefCell::new(vec![]),
     };
-    let failure = resolve(&source, &mut defaults()).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "root.anchor_missing");
     assert_eq!(failure.evidence.pattern_hits, 0);
     assert_eq!(failure.evidence.scanned_bytes, 8191);
@@ -937,7 +1006,10 @@ fn go320_sparse_adjacent_spans_keep_tail_and_zero_large_read_recovers_pages() {
             spans,
             short: RefCell::new(short),
         };
-        let proof = resolve(&source, &mut defaults()).unwrap();
+        let mut candidates =
+            resolve_candidates_with_image(&source, &mut defaults(), source.image()).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let proof = candidates.remove(0);
         assert_eq!(proof.evidence.scanned_bytes, 8192);
         assert!(proof.evidence.full_text_pass);
         assert_eq!(proof.evidence.pattern_hits, 1);
@@ -949,7 +1021,10 @@ fn go320_multiple_call_sites_and_templates_deduplicate_one_rip_root() {
     let source = ready(RecipeId::Retail);
     source.anchor(RecipeId::Forever, TEXT + 0x300, 0x1010);
     source.anchor(RecipeId::ForeverContext, TEXT + 0x500, 0x1010);
-    let proof = resolve(&source, &mut defaults()).unwrap();
+    let mut candidates =
+        resolve_candidates_with_image(&source, &mut defaults(), source.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let proof = candidates.remove(0);
     assert_eq!(
         (proof.evidence.pattern_hits, proof.evidence.root_candidates),
         (3, 1)
@@ -966,7 +1041,9 @@ fn go320_sparse_read_limit_and_candidate_limit_are_hard_and_retain_coverage() {
             0x1000 + index * 8,
         );
     }
-    let failure = resolve(&source, &mut defaults()).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "root.root_candidate_budget");
     assert_eq!(
         (
@@ -982,7 +1059,9 @@ fn go320_sparse_read_limit_and_candidate_limit_are_hard_and_retain_coverage() {
 fn go320_transient_root_slot_change_does_not_poison_recipe_or_rescan() {
     let source = ready(RecipeId::Retail);
     let mut b = defaults();
-    let mut proof = resolve(&source, &mut b).unwrap();
+    let mut candidates = resolve_candidates_with_image(&source, &mut b, source.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let mut proof = candidates.remove(0);
     // The first binding read the root twice; the next recheck observes a swap.
     source.trigger(
         0x1010,
@@ -1022,7 +1101,9 @@ fn go320_pattern_match_budget_is_separate_from_deduplicated_roots() {
     for index in 0..4097 {
         source.anchor(RecipeId::Retail, TEXT + index * 64, 0x1010);
     }
-    let failure = resolve(&source, &mut defaults()).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "root.pattern_match_budget");
     assert_eq!(failure.evidence.pattern_hits, 4097);
     assert_eq!(failure.evidence.root_candidates, 1);
@@ -1034,7 +1115,9 @@ fn go320_one_failed_page_is_not_retried_indefinitely() {
         spans: vec![(TEXT, TEXT + 4096)],
         short: RefCell::new(vec![(TEXT, 4096, 0)]),
     };
-    let failure = resolve(&source, &mut defaults()).err().unwrap();
+    let failure = resolve_candidates_with_image(&source, &mut defaults(), source.image())
+        .err()
+        .unwrap();
     assert_eq!(failure.cause, "root.anchor_missing");
     assert_eq!(failure.evidence.read_failures, 1);
     assert_eq!(failure.evidence.scanned_bytes, 0);
@@ -1106,7 +1189,10 @@ fn go320_root_recipe_failure_retains_original_read_facts_without_diagnostic_io()
         failed_reads: Cell::new(0),
     };
     let mut budget = defaults();
-    let mut proof = resolve(&source, &mut budget).unwrap();
+    let mut candidates =
+        resolve_candidates_with_image(&source, &mut budget, fixture.image()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let mut proof = candidates.remove(0);
     source.fail.set(true);
     let failure = revalidate(&mut proof, &source, &mut budget).unwrap_err();
     assert_eq!(failure.cause, "fixture.native_read_failed");

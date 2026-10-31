@@ -817,7 +817,20 @@ fn inspect_inner(
         _ => None,
     };
     let active = if let Some(parent) = catalog_root {
-        catalog_builds(&text(parent, ".build.info", 1 << 20, control)?, control)?
+        text(parent, ".build.info", 1 << 20, control)
+            .and_then(|raw| catalog_builds(&raw, control))
+            .map_err(|mut error| {
+                if error.code == "records.invalid_metadata" {
+                    if error.details.is_null() {
+                        error.details = serde_json::json!({});
+                    }
+                    if let Some(details) = error.details.as_object_mut() {
+                        details.entry("sourcePath").or_insert_with(|| serde_json::json!(parent.path().join(".build.info")));
+                        details.entry("formatHint").or_insert_with(|| serde_json::json!("Pipe-delimited launcher build catalog with a header and row boundary"));
+                    }
+                }
+                error
+            })?
     } else {
         Vec::new()
     };
@@ -1232,10 +1245,16 @@ mod tests {
             "records.metadata_limit"
         );
         fs::write(fixture.0.join(".build.info"), "x|".repeat(129)).unwrap();
-        assert_eq!(
-            inspect_with(&path, &mut Meter::default()).unwrap_err().code,
-            "records.invalid_metadata"
-        );
+        let error = inspect_with(&path, &mut Meter::default()).unwrap_err();
+        assert_eq!(error.code, "records.invalid_metadata");
+        assert_eq!(error.exit_code, 4);
+        assert_eq!(error.details["sourcePath"], serde_json::json!(fixture.0.join(".build.info")));
+        assert!(error.details["formatHint"].as_str().unwrap().contains("Pipe-delimited"));
+        fs::write(fixture.0.join(".build.info"), b"bad\0catalog\n").unwrap();
+        let error = inspect_with(&path, &mut Meter::default()).unwrap_err();
+        assert_eq!(error.code, "records.invalid_metadata");
+        assert_eq!(error.message, "catalog contains NUL");
+        assert_eq!(error.details["sourcePath"], serde_json::json!(fixture.0.join(".build.info")));
     }
     #[test]
     fn controlled_multichunk_read_has_no_request_larger_than_64k() {

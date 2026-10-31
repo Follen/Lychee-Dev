@@ -408,7 +408,7 @@ fn formal_repair_lock_names_contend_with_existing_delivery_guards() {
         matches!(ExclusiveLock::resource_controlled(&scope,&format!("installation-maintenance:{canonical}"),&OperationControl::default()),Err(e) if e.code=="workspace.busy")
     );
     maintenance.close().unwrap();
-    let installation = deploy::installation_lock(&target).unwrap();
+    let installation = deploy::installation_lock_controlled(&target, &Default::default()).unwrap();
     assert!(
         matches!(ExclusiveLock::resource_controlled(&scope,&format!("installation:{canonical}"),&OperationControl::default()),Err(e) if e.code=="workspace.busy")
     );

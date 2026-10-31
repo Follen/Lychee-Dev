@@ -178,7 +178,7 @@ fn incremental_z_three_large_blocks_keep_bounded_buffers_and_original_admission(
 }
 
 #[test]
-fn incremental_z_matches_eager_single_faults_and_keeps_public_decoder_eager() {
+fn incremental_z_matches_eager_single_faults_and_keeps_range_bytes_exact() {
     let bytes = body(3 * 65536 + 9);
     let encoded = compressed(&bytes);
     let mut corrupt = encoded.clone();
@@ -199,12 +199,12 @@ fn incremental_z_matches_eager_single_faults_and_keeps_public_decoder_eager() {
             (eager.code, eager.exit_code, eager.message)
         );
     }
-    // The public decoder remains the eager oracle, including its owned output.
+    // The current range reader authenticates the requested chunk and preserves
+    // the independently generated original bytes.
     let raw = frame(&[(encoded, bytes.len())]);
-    assert_eq!(
-        super::super::decode(&raw, Limits::default(), &BTreeMap::new()).unwrap(),
-        bytes
-    );
+    let keys = BTreeMap::new();
+    let ranges = super::super::Ranges::open(&raw, Limits::default(), &keys).unwrap();
+    assert_eq!(&*ranges.read_span(0, bytes.len()).unwrap(), bytes);
 }
 
 #[test]

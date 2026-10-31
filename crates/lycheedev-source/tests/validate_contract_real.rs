@@ -120,7 +120,7 @@ fn single_and_matrix_native_validation_keep_coverage_and_warm_index_gaps() {
     let release: Value =
         serde_json::from_str(include_str!("../../../release/tools/luac.json")).unwrap();
     let manifest: Manifest = serde_json::from_value(release["runtime"].clone()).unwrap();
-    let runtime = Runtime::verified(&stage, manifest).unwrap();
+    let runtime = Runtime::verified_with_ordered_control(&stage, manifest, &Default::default()).unwrap();
     let home = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
         "../../.tmp/rust-validate-contract-real/home-{}-{}",
         std::process::id(),
@@ -383,7 +383,7 @@ fn single_and_matrix_native_validation_keep_coverage_and_warm_index_gaps() {
         cold_gap.data["targets"][0]["unresolved"],
         warm_gap.data["targets"][0]["unresolved"]
     );
-    let cached = index::build(&home, &gap_source).unwrap();
+    let cached = index::build_with_control(&home, &gap_source, &Default::default()).unwrap();
     assert_eq!(cached.summary.io["cachedIndex"], true);
     assert_eq!(cached.summary.diagnostics, 26);
     assert!(

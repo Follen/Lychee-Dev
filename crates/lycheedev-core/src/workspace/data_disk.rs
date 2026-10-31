@@ -37,7 +37,7 @@ pub use reading::{
     ReaderCheck,
 };
 pub use shared_blobs::durable::SourceIdentity;
-pub(crate) use shared_blobs::durable::{StageSlot, recover_shards};
+pub(crate) use shared_blobs::durable::recover_shards;
 pub(crate) use shared_blobs::retention::protects_evidence_body;
 pub(crate) use shared_blobs::stream::StreamQuota;
 pub use shared_blobs::stream::{

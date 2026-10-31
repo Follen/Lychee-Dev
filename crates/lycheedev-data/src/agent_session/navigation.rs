@@ -235,70 +235,6 @@ fn selector(field: &DecorSelector) -> &'static str {
         DecorSelector::ModelFileDataId => "ModelFileDataID",
     }
 }
-fn binding(request: &DomainRequest) -> (&SourceMode, &[String]) {
-    match request {
-        DomainRequest::ItemGet {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::ItemModels {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::ItemTextures {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::ItemGeosets {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::SpellInfo {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::SpellAuras {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::SpellSummons {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::EncounterGet {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::DecorList {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::DecorGet {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::CreatureDisplay {
-            mode,
-            hotfix_captures,
-            ..
-        }
-        | DomainRequest::CreatureModel {
-            mode,
-            hotfix_captures,
-            ..
-        } => (mode, hotfix_captures),
-    }
-}
 pub(super) async fn execute(
     engine: &mut Engine,
     mut request: DomainRequest,
@@ -324,7 +260,7 @@ pub(super) async fn execute(
         }
         _ => {}
     }
-    let (mode, captures) = binding(&request);
+    let (mode, captures) = request.binding();
     super::domain::validate_captures(mode, captures)?;
     let owner = engine.begin_domain_request(&request, control.clone())?;
     let budget = owner.budget();

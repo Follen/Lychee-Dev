@@ -1,7 +1,7 @@
 //! Fixed general generic relation, including direct-vs-general recursion.
 use super::{
     OwnedQuery, QueryResult,
-    relation::{Relation, RelationMode, next_relation_level, relation_from_bool},
+    relation::{Relation, RelationMode, next_relation_level},
 };
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{LuaGenericType, LuaType, LuaTypeDeclId};

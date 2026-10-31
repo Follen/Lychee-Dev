@@ -6,10 +6,11 @@ use crate::{
     storage::{self, ExclusiveLock},
 };
 use std::path::PathBuf;
+#[cfg(test)]
+use std::sync::Arc;
 use std::{
     fs,
     path::Path,
-    sync::Arc,
     time::{Duration, Instant},
 };
 

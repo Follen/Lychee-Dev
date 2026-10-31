@@ -1,5 +1,4 @@
-//! WDC3 cross-section string pool with an independently encrypted eight-byte gap.
-//! The frozen Go323 cipher vector stays at outer chunk index 1 (nonce XOR index).
+//! WDC3 cross-section string pool with a fixed eight-byte unavailable gap.
 use super::fixture::{self, Cell, Table};
 fn put(raw: &mut [u8], at: usize, value: u32) {
     raw[at..at + 4].copy_from_slice(&value.to_le_bytes());
@@ -44,26 +43,4 @@ pub fn table(id: u32, gap: usize, text: &[u8]) -> Table {
 }
 pub fn pool(raw: &[u8]) -> usize {
     u32::from_le_bytes(raw[120..124].try_into().unwrap()) as usize + 8
-}
-pub fn frame_at(raw: &[u8], gap: usize) -> (String, Vec<u8>) {
-    let start = pool(raw) + gap;
-    assert_eq!(&raw[start..start + 8], &[2, 0, 0, 0, 99, 0, 0, 0]);
-    let first = [b"N".as_slice(), &raw[..start]].concat();
-    let last = [b"N".as_slice(), &raw[start + 8..]].concat();
-    let cipher = fixture::encrypted_frame(&raw[start..start + 8]).1;
-    let encrypted = &cipher[cipher.len() - 25..];
-    fixture::framed_chunks(&[
-        (&first, start),
-        (encrypted, 8),
-        (&last, raw.len() - start - 8),
-    ])
-}
-pub fn frame_far(raw: &[u8]) -> (String, Vec<u8>) {
-    frame_at(raw, 512)
-}
-pub fn frame_near(raw: &[u8]) -> (String, Vec<u8>) {
-    frame_at(raw, 16)
-}
-pub fn frame_before(raw: &[u8]) -> (String, Vec<u8>) {
-    frame_at(raw, 4)
 }

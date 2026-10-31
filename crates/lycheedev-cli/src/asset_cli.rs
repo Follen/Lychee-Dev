@@ -202,6 +202,50 @@ pub(crate) fn request(inv: &Invocation) -> Result<Option<(DataContext, AssetRequ
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    #[test]
+    fn public_required_asset_flags_enter_real_typed_admission() {
+        let home = std::env::temp_dir().join(format!("cli-admission-unused-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let cases: &[(&[&str], &[&str])] = &[
+            (&["asset", "inspect", "--file-id", "7"], &["--file-id"]),
+            (&["asset", "search", "--listfile", "community-csv", "--query", "needle"], &["--listfile"]),
+            (&["asset", "export", "--file-id", "7", "--cdn", "--output", "raw.bin"], &["--file-id", "--output"]),
+            (&["asset", "demux", "--path", "movie.avi", "--output", "frames"], &["--output"]),
+        ];
+        for (words, required) in cases {
+            let words: Vec<String> = words.iter().map(|word| (*word).into()).collect();
+            let mut inv = crate::parse(&words).unwrap();
+            inv.home = home.clone();
+            let (_, admitted) = request(&inv).unwrap().unwrap();
+            match admitted {
+                AssetRequest::Inspect { file_id } => assert_eq!(file_id, 7),
+                AssetRequest::Search(search) => {
+                    assert_eq!(search.listfile, "community-csv");
+                    assert!(matches!(search.mode, SearchMode::Query(ref text) if text == "needle"));
+                }
+                AssetRequest::Export(export) => {
+                    assert_eq!(export.file_id, 7);
+                    assert_eq!(export.output, inv.cwd.join("raw.bin"));
+                    assert_eq!(export.encoding, Encoding::Raw);
+                }
+                AssetRequest::Demux(demux) => {
+                    assert!(matches!(demux.input, DemuxInput::Path(ref path) if path == &inv.cwd.join("movie.avi")));
+                    assert_eq!(demux.output, inv.cwd.join("frames"));
+                }
+            }
+            for missing in *required {
+                let mut incomplete = words.clone();
+                let index = incomplete.iter().position(|word| word.as_str() == *missing).unwrap();
+                incomplete.drain(index..index + 2);
+                let mut inv = crate::parse(&incomplete).unwrap();
+                inv.home = home.clone();
+                let error = request(&inv).err().unwrap();
+                assert_eq!((error.code.as_str(), error.exit_code), ("command.invalid_arguments", 2));
+                assert!(error.message.contains(*missing), "{error}");
+            }
+        }
+        assert!(!home.exists());
+    }
     fn invocation(command: &str) -> Invocation {
         Invocation {
             command: command.into(),

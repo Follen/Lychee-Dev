@@ -3,8 +3,8 @@ import {fileIdentity,verifyTool} from './agent-tool-identity.mjs';
 // Entire collector is a descendant of the official outer non-breakaway Job.
 import assert from 'node:assert/strict';
 import {existsSync,lstatSync,readdirSync,writeFileSync} from 'node:fs';
-import {join,resolve} from 'node:path';
-import {createRequire} from 'node:module';
+import {join} from 'node:path';
+
 import {performance} from 'node:perf_hooks';
 import {beginScratch} from '../../tools/rust-disk.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
@@ -13,7 +13,7 @@ import {hashFile,verifyArtifact,sourceDigest} from '../../tools/rust-build.mjs';
 import {verifyGoReferenceArtifact,inventory} from './inputs.mjs';
 import {REPETITIONS,orderFor} from './contract.mjs';
 import {parse} from './agent-json.mjs';
-import {bounded,digest,blob,loadOwnedAgentFixture,seedDataHome,decodedIdentity,validateDataOutput,decodeDataImage,CSV_ROWS} from './agent-fixture-inputs.mjs';
+import {bounded, digest, loadOwnedAgentFixture, seedDataHome, decodedIdentity, validateDataOutput, decodeDataImage, CSV_ROWS} from './agent-fixture-inputs.mjs';
 import {loadAgentImporter} from './agent-importer.mjs';
 import {seedAgentHome} from './agent-seed.mjs';
 import {auditQuery,generationProof,cacheIdentity,metadata} from './agent-audit.mjs';

@@ -3,7 +3,7 @@
 // publication, or process-runner replacement. Diagnostic only: a passing run is
 // not a performance acceptance result.
 import assert from 'node:assert/strict';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, writeFileSync} from 'node:fs';
 import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {performance} from 'node:perf_hooks';

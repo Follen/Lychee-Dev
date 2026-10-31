@@ -1763,7 +1763,7 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
     lycheedev_core::workspace::initialize(&home).unwrap();
     std::fs::create_dir_all(home.join("mirrors")).unwrap();
     let dir = git::mirror(&home, "wow-ui-source");
-    git::bytes(
+    git::bytes_with_control(
         None,
         &[
             "init",
@@ -1771,7 +1771,7 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
             "--object-format=sha1",
             &dir.to_string_lossy(),
         ],
-        4096,
+        4096, &Default::default(),
     )
     .unwrap();
     let input_file = home.join("fixture-input");
@@ -1799,15 +1799,15 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
     for (path, raw) in &inputs {
         std::fs::write(&input_file, raw).unwrap();
         let object = String::from_utf8(
-            git::bytes(
+            git::bytes_with_control(
                 Some(&dir),
                 &["hash-object", "-w", "--", &input_file.to_string_lossy()],
-                128,
+                128, &Default::default(),
             )
             .unwrap(),
         )
         .unwrap();
-        git::bytes(
+        git::bytes_with_control(
             Some(&dir),
             &[
                 "update-index",
@@ -1815,13 +1815,13 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
                 "--cacheinfo",
                 &format!("100644,{},{}", object.trim(), path),
             ],
-            4096,
+            4096, &Default::default(),
         )
         .unwrap();
     }
-    let tree = String::from_utf8(git::bytes(Some(&dir), &["write-tree"], 128).unwrap()).unwrap();
+    let tree = String::from_utf8(git::bytes_with_control(Some(&dir), &["write-tree"], 128, &Default::default()).unwrap()).unwrap();
     let commit = String::from_utf8(
-        git::bytes(
+        git::bytes_with_control(
             Some(&dir),
             &[
                 "-c",
@@ -1833,7 +1833,7 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
                 "-m",
                 "isolated adaptive pipeline fixture",
             ],
-            128,
+            128, &Default::default(),
         )
         .unwrap(),
     )

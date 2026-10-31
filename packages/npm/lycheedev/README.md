@@ -29,8 +29,12 @@ runs the executable on the same arguments and forwards its stdout/stderr and exi
 code; it never downloads a fallback binary. There are no runtime npm dependencies
 and no install scripts.
 
+Replace the example path with the reviewed package you intend to install.
+For registry installation, select that release's explicit published version or
+tag; an unqualified package name can select a different release.
+
 ```powershell
-npm install --global lycheedev
+npm install --global 'C:\Downloads\lycheedev-X.Y.Z.tgz' # selected release tarball
 lycheedev version --format json
 lycheedev describe --format json
 

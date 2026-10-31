@@ -220,27 +220,6 @@ impl NativeBackend {
             control,
         )
     }
-    /// Cleanup/recovery can retain the authenticated recorded installation even
-    /// after unrelated addon drift. This path cannot publish or verify Invoke bytes: delivery requires a
-    /// verified manifest for those operations. Reload requires fresh two-key
-    /// INPUT and the original coordinator guard, independently of the pool.
-    pub fn open_recorded(
-        target: MailboxWindow,
-        authenticated_addon: PathBuf,
-        release: &str,
-        trace_directory: Option<PathBuf>,
-        guard: impl FnMut(&OperationControl) -> ChannelResult<()> + 'static,
-        control: &OperationControl,
-    ) -> ChannelResult<Self> {
-        Self::open_with_store(
-            target,
-            DiskPublications::recorded(authenticated_addon, release)?,
-            release,
-            trace_directory,
-            Box::new(guard),
-            control,
-        )
-    }
     fn open_with_store(
         target: MailboxWindow,
         publications: DiskPublications,

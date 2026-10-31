@@ -111,14 +111,6 @@ pub struct RuntimeBudget {
     scoped_controls: Vec<Box<dyn RuntimeControl>>,
 }
 impl RuntimeBudget {
-    pub fn with_control<C: RuntimeControl + 'static>(
-        limits: RuntimeLimits,
-        deadline: Instant,
-        control: C,
-    ) -> Result<Self> {
-        control.check()?;
-        Self::with_control_factory(limits, deadline, 0, || control)
-    }
     /// Reserve owned control storage before invoking the factory. This lets a
     /// caller debit retained cancellation ancestry before cloning it.
     pub fn with_control_factory<C: RuntimeControl + 'static>(
