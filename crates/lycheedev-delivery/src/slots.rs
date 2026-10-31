@@ -283,9 +283,6 @@ pub(crate) fn static_files(index: u16, version: &str) -> [(String, Vec<u8>); 2] 
     let [toc, loader, _] = files(index, version);
     [toc, loader]
 }
-pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    read_bounded_controlled(path, limit, &OperationControl::default())
-}
 /// Bounded immutable read with the caller's original control and checked close.
 pub(crate) fn read_bounded_controlled(
     path: &Path,
@@ -294,7 +291,7 @@ pub(crate) fn read_bounded_controlled(
 ) -> Result<Vec<u8>> {
     use std::io::{Seek, SeekFrom};
     control.check()?;
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = fs::symlink_metadata(path).map_err(member_io)?;
     if !metadata.file_type().is_file() || metadata.len() > limit as u64 {
         return Err(invalid("slot member is not a bounded regular file"));
     }
@@ -334,16 +331,30 @@ fn absent(path: &Path) -> Result<bool> {
         Err(error) => Err(error.into()),
     }
 }
+// Missing managed members are an incomplete inventory. Access, sharing and
+// other I/O failures do not establish corruption or authorize slot repair.
+fn member_io(error: std::io::Error) -> ToolkitError {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        invalid("managed slot member is missing")
+    } else {
+        error.into()
+    }
+}
 fn plain_directory(parent: &Path, path: &Path) -> Result<()> {
     storage::guard_path(parent, path)?;
-    if !fs::symlink_metadata(path)?.file_type().is_dir() {
+    if !fs::symlink_metadata(path)
+        .map_err(member_io)?
+        .file_type()
+        .is_dir()
+    {
         return Err(invalid("redirected or non-directory slot"));
     }
     Ok(())
 }
 fn exact_members(path: &Path) -> Result<()> {
     // Stop at the fourth entry instead of allowing an unbounded foreign tree.
-    let entries = fs::read_dir(path)?
+    let entries = fs::read_dir(path)
+        .map_err(member_io)?
         .take(4)
         .collect::<std::io::Result<Vec<_>>>()?;
     if entries.len() != 3 {

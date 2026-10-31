@@ -1,10 +1,8 @@
 // Adapted from EmmyLua 08b0873962e83bb8307e9a81052e3f41578fbc78 (MIT).
 // Owned per-query CFG; public AST/facts only, no upstream private types.
-use std::collections::VecDeque;
-
 use std::collections::{HashMap, HashSet};
 
-use emmylua_parser::{LuaAstPtr, LuaCallExpr, LuaExpr, LuaSyntaxId};
+use emmylua_parser::{LuaAstPtr, LuaCallExpr, LuaSyntaxId};
 use rowan::{TextRange, TextSize};
 
 use super::{FlowAntecedent, FlowEffect, FlowId, FlowNode, FlowNodeKind};
@@ -12,7 +10,6 @@ use emmylua_code_analysis::SemanticId;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct FlowTree {
-    decl_bind_expr_ref: HashMap<SemanticId, LuaAstPtr<LuaExpr>>,
     decl_multi_return_ref: HashMap<SemanticId, Vec<DeclMultiReturnRefAt>>,
     flow_nodes: Vec<FlowNode>,
     node_effects: HashMap<FlowId, Vec<FlowEffect>>,
@@ -30,8 +27,6 @@ pub struct FlowTree {
     decl_assignments: HashMap<SemanticId, Vec<(TextSize, FlowId)>>,
     /// Sorted `(assignment statement start, flow id)` entries per assigned member.
     member_assignments: HashMap<SemanticId, Vec<(TextSize, FlowId)>>,
-    /// Sorted `(position, flow id)` for `DeclPosition` nodes.
-    decl_positions: Vec<(TextSize, FlowId)>,
     /// Sorted `(condition position, flow id)` for true/false condition nodes.
     condition_nodes: Vec<(TextSize, FlowId)>,
     /// Sorted `(cast position, flow id)` for `---@cast` / `--[[@as]]` nodes.
@@ -48,7 +43,6 @@ pub struct FlowTree {
 
 impl FlowTree {
     pub fn new(
-        decl_bind_expr_ref: HashMap<SemanticId, LuaAstPtr<LuaExpr>>,
         decl_multi_return_ref: HashMap<SemanticId, Vec<DeclMultiReturnRefAt>>,
         flow_nodes: Vec<FlowNode>,
         node_effects: HashMap<FlowId, Vec<FlowEffect>>,
@@ -59,7 +53,6 @@ impl FlowTree {
     ) -> Self {
         let mut decl_assignments: HashMap<SemanticId, Vec<(TextSize, FlowId)>> = HashMap::new();
         let mut member_assignments: HashMap<SemanticId, Vec<(TextSize, FlowId)>> = HashMap::new();
-        let mut decl_positions: Vec<(TextSize, FlowId)> = Vec::new();
         let mut condition_nodes: Vec<(TextSize, FlowId)> = Vec::new();
         let mut cast_nodes: Vec<(TextSize, FlowId)> = Vec::new();
         let mut branch_nodes: Vec<(TextSize, FlowId)> = Vec::new();
@@ -110,7 +103,6 @@ impl FlowTree {
                         }
                     }
                 }
-                FlowNodeKind::DeclPosition(pos) => decl_positions.push((*pos, flow_id)),
                 FlowNodeKind::TrueCondition(cond) | FlowNodeKind::FalseCondition(cond) => {
                     condition_nodes.push((cond.get_syntax_id().get_range().start(), flow_id));
                 }
@@ -135,7 +127,6 @@ impl FlowTree {
             }
             entries.sort_by_key(|(pos, _)| *pos);
         }
-        decl_positions.sort_by_key(|(pos, _)| *pos);
         condition_nodes.sort_by_key(|(pos, _)| *pos);
         cast_nodes.sort_by_key(|(pos, _)| *pos);
         branch_nodes.sort_by_key(|(pos, _)| *pos);
@@ -156,7 +147,6 @@ impl FlowTree {
             binding_starts.entry(range.start()).or_insert(*flow_id);
         }
         Self {
-            decl_bind_expr_ref,
             decl_multi_return_ref,
             flow_nodes,
             node_effects,
@@ -167,7 +157,6 @@ impl FlowTree {
             binding_starts,
             decl_assignments,
             member_assignments,
-            decl_positions,
             condition_nodes,
             cast_nodes,
             branch_nodes,
@@ -207,11 +196,6 @@ impl FlowTree {
             .unwrap_or(&[])
     }
 
-    /// Total number of CFG nodes.
-    pub fn node_count(&self) -> u32 {
-        self.flow_nodes.len() as u32
-    }
-
     pub fn has_tag_cast(&self) -> bool {
         self.has_tag_cast
     }
@@ -243,17 +227,6 @@ impl FlowTree {
         idx.checked_sub(1).map(|idx| entries[idx])
     }
 
-    /// Exact flow id for a `DeclPosition` at `position`, if any.
-    pub fn decl_position_flow(&self, position: TextSize) -> Option<FlowId> {
-        let idx = self
-            .decl_positions
-            .partition_point(|(pos, _)| *pos < position);
-        self.decl_positions
-            .get(idx)
-            .filter(|(pos, _)| *pos == position)
-            .map(|(_, flow_id)| *flow_id)
-    }
-
     /// Whether any flow event that can change the queried value lies in the
     /// position range: conditions, casts, or a branch merge.
     ///
@@ -274,16 +247,6 @@ impl FlowTree {
             || has_node_between(&self.branch_nodes, start, end, include_start)
     }
 
-    /// Whether any assignment to `decl` occurs in the flow tree.
-    pub fn has_decl_assignment(&self, decl: &SemanticId) -> bool {
-        self.decl_assignments.contains_key(decl)
-    }
-
-    /// Whether any assignment to `member` occurs in the flow tree.
-    pub fn has_member_assignment(&self, member: &SemanticId) -> bool {
-        self.member_assignments.contains_key(member)
-    }
-
     /// Whether loops / labels / break / continue may create non-monotonic flow edges.
     pub fn has_complex_control(&self) -> bool {
         self.has_complex_control
@@ -293,28 +256,6 @@ impl FlowTree {
         self.multiple_antecedents
             .get(id as usize)
             .map(|v| v.as_slice())
-    }
-
-    /// Returns the first backward-reachable flow node shared by all starting flows.
-    pub fn get_nearest_common_antecedent(&self, flow_ids: &[FlowId]) -> Option<FlowId> {
-        let (first_flow_id, rest_flow_ids) = flow_ids.split_first()?;
-        let first_antecedents = self.collect_antecedents(*first_flow_id);
-        let rest_antecedents = rest_flow_ids
-            .iter()
-            .map(|flow_id| {
-                self.collect_antecedents(*flow_id)
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        first_antecedents
-            .into_iter()
-            .find(|flow_id| rest_antecedents.iter().all(|set| set.contains(flow_id)))
-    }
-
-    pub fn get_decl_ref_expr(&self, decl_id: &SemanticId) -> Option<LuaAstPtr<LuaExpr>> {
-        self.decl_bind_expr_ref.get(decl_id).cloned()
     }
 
     pub fn has_shared_multi_return_refs(
@@ -339,38 +280,6 @@ impl FlowTree {
                     .filter_map(|entry| entry.reference.as_ref())
                     .any(|right_ref| right_ref.call_expr.get_syntax_id() == left_call_id)
             })
-    }
-
-    /// Chooses the search roots used to resolve correlated multi-return refs.
-    ///
-    /// If either declaration already has a multi-return ref reachable on the current
-    /// straight-line history, the caller can analyze the current flow directly and we
-    /// return `current_flow_id` as the only search root.
-    ///
-    /// Otherwise the current flow sits after a branch merge, so we walk backward to the
-    /// nearest multi-antecedent join and return each incoming branch flow separately.
-    /// This lets downstream correlation logic analyze branch-local histories without
-    /// mixing refs from different branches together.
-    pub fn get_decl_multi_return_search_roots(
-        &self,
-        discriminant_decl_id: &SemanticId,
-        target_decl_id: &SemanticId,
-        position: TextSize,
-        current_flow_id: FlowId,
-    ) -> Vec<FlowId> {
-        if self.has_decl_multi_return_ref_on_linear_history(
-            discriminant_decl_id,
-            position,
-            current_flow_id,
-        ) || self.has_decl_multi_return_ref_on_linear_history(
-            target_decl_id,
-            position,
-            current_flow_id,
-        ) {
-            vec![current_flow_id]
-        } else {
-            self.get_nearest_branch_antecedents(current_flow_id)
-        }
     }
 
     pub fn get_decl_multi_return_ref_summary_at(
@@ -466,98 +375,6 @@ impl FlowTree {
             .find(|entry| entry.position <= position && entry.flow_id == flow_id)
     }
 
-    /// Returns whether `decl_id` has a recorded multi-return ref on the linear backward history.
-    ///
-    /// "Linear history" means repeatedly following only `FlowAntecedent::Single` links from
-    /// `start_flow_id`. The search stops as soon as it reaches a merge (`Multiple`) or the start
-    /// of flow. In other words, this checks only the current straight-line history and does
-    /// not inspect alternate branch predecessors.
-    fn has_decl_multi_return_ref_on_linear_history(
-        &self,
-        decl_id: &SemanticId,
-        position: TextSize,
-        start_flow_id: FlowId,
-    ) -> bool {
-        let mut current_flow_id = start_flow_id;
-        let mut visited = HashSet::new();
-        loop {
-            if !visited.insert(current_flow_id) {
-                return false;
-            }
-
-            if self
-                .get_decl_multi_return_ref_on_flow(decl_id, position, current_flow_id)
-                .is_some()
-            {
-                return true;
-            }
-
-            let Some(flow_node) = self.get_flow_node(current_flow_id) else {
-                return false;
-            };
-            match flow_node.antecedent.as_ref() {
-                Some(FlowAntecedent::Single(next_flow_id)) => {
-                    current_flow_id = *next_flow_id;
-                }
-                Some(FlowAntecedent::Multiple(_)) | None => return false,
-            }
-        }
-    }
-
-    fn get_nearest_branch_antecedents(&self, start_flow_id: FlowId) -> Vec<FlowId> {
-        let mut current_flow_id = start_flow_id;
-        let mut visited = HashSet::new();
-        loop {
-            if !visited.insert(current_flow_id) {
-                return vec![start_flow_id];
-            }
-
-            let Some(flow_node) = self.get_flow_node(current_flow_id) else {
-                return vec![start_flow_id];
-            };
-            match flow_node.antecedent.as_ref() {
-                Some(FlowAntecedent::Multiple(multi_id)) => {
-                    return self
-                        .get_multi_antecedents(*multi_id)
-                        .map(|flows| flows.to_vec())
-                        .unwrap_or_else(|| vec![start_flow_id]);
-                }
-                Some(FlowAntecedent::Single(next_flow_id)) => {
-                    current_flow_id = *next_flow_id;
-                }
-                None => return vec![start_flow_id],
-            }
-        }
-    }
-
-    fn collect_antecedents(&self, flow_id: FlowId) -> Vec<FlowId> {
-        let mut antecedents = Vec::new();
-        let mut pending = VecDeque::from([flow_id]);
-        let mut visited = HashSet::new();
-        while let Some(flow_id) = pending.pop_front() {
-            if !visited.insert(flow_id) {
-                continue;
-            }
-
-            antecedents.push(flow_id);
-            let Some(flow_node) = self.get_flow_node(flow_id) else {
-                continue;
-            };
-            match flow_node.antecedent.as_ref() {
-                Some(FlowAntecedent::Single(antecedent_flow_id)) => {
-                    pending.push_back(*antecedent_flow_id);
-                }
-                Some(FlowAntecedent::Multiple(multi_id)) => {
-                    if let Some(branch_flow_ids) = self.get_multi_antecedents(*multi_id) {
-                        pending.extend(branch_flow_ids.iter().copied());
-                    }
-                }
-                None => {}
-            }
-        }
-
-        antecedents
-    }
 }
 
 /// Best-effort AST position for a flow node kind; `None` for label/terminal nodes.

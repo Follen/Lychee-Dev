@@ -1298,10 +1298,12 @@ mod tests {
                 .0,
             input
         );
-        let before_status = crate::query_store::status(&home, &pin).unwrap();
+        let status_control = OperationControl::default();
+        let before_status =
+            crate::query_store::status_with_control(&home, &pin, &status_control).unwrap();
         assert_eq!(before_status["ready"], false);
         let first_index = crate::index::build(&home, &pin).unwrap();
-        let status = crate::query_store::status(&home, &pin).unwrap();
+        let status = crate::query_store::status_with_control(&home, &pin, &status_control).unwrap();
         assert_eq!(status["ready"], true);
         assert_eq!(status["snapshotFiles"], 1);
         assert_eq!(status["astFiles"], 1);

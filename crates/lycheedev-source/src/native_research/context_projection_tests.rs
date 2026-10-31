@@ -1,5 +1,5 @@
-// The original no-retention path is the byte-for-byte oracle. These tests do
-// not normalize rows, order, digest, analysis, XML maps or semantic receipts.
+// Compare production reconstruction with same-scope retained projections.
+// Rows, order, digest, analysis, XML maps and semantic receipts stay exact.
 fn context_projection_fixture() -> ResearchSession {
     context_projection_load_fixture(true)
 }
@@ -34,17 +34,17 @@ fn context_projection_load_fixture(complete_load:bool) -> ResearchSession {
 
 fn assert_context_projection_equal(session:&ResearchSession,query:&QueryRequest,graph:Option<&Graph>) {
     let plan=session.prepared.plan_research_operations(query,&session.xml,None).unwrap();
-    let incoming=session.prepared.research_relations(&query.symbol,"incoming",graph,&session.xml).unwrap();
+    let incoming=session.prepared.research_relations_with_context_observed(&query.symbol,"incoming",graph,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let before=session.prepared.research_steps();
-    let expected=session.prepared.research_relations(&query.symbol,"both",graph,&session.xml).unwrap();
+    let expected=session.prepared.research_relations_with_context_observed(&query.symbol,"both",graph,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let cost=session.prepared.research_steps()-before;
     assert_ne!(serde_json::to_vec(&incoming).unwrap(),serde_json::to_vec(&expected).unwrap(),"outgoing/overlapping rows must not be replaced by incoming rows");
-    let completion=session.prepared.execute_research_operations(&plan,query,graph,&session.xml,None).unwrap();
+    let completion=session.prepared.execute_research_operations_observed(&plan,query,graph,&session.xml,None,&mut |_|{}).unwrap();
     let mut execution=plan::ResearchExecution::new(&plan);
     let projection=execution.scope(json!({"kind":"context-projection-equivalence"}),completion).unwrap();
     assert!(projection.is_some(),"the fixture must exercise retained file rows");
     let before=session.prepared.research_steps();let reused=context_projection_reused_files();
-    let actual=session.prepared.project_research_relations(&plan,query,graph,&session.xml,projection).unwrap();
+    let actual=session.prepared.project_research_relations_observed(&plan,query,graph,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     assert!(context_projection_reused_files()>reused,"the second pass must actually move an eligible file");
     assert_eq!(session.prepared.research_steps()-before,cost,"same facade steps and bounded return reserve");
     assert_eq!(serde_json::to_vec(&actual).unwrap(),serde_json::to_vec(&expected).unwrap());
@@ -168,13 +168,13 @@ fn context_projection_excludes_inherited_owner_files_from_reuse() {
             }
         }
         let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,None).unwrap();
+        let completion=session.prepared.execute_research_operations_observed(&plan,&query,Some(&graph),&session.xml,None,&mut |_|{}).unwrap();
         let (_,_,projection)=completion.consume(&plan).unwrap();
         assert!(projection.is_none(),"inherited outgoing files are never retained as invariant incoming rows");
         let before=session.prepared.research_steps();
-        let expected=session.prepared.research_relations(&query.symbol,"both",Some(&graph),&session.xml).unwrap();
+        let expected=session.prepared.research_relations_with_context_observed(&query.symbol,"both",Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
         let steps=session.prepared.research_steps()-before;let before=session.prepared.research_steps();
-        let actual=session.prepared.project_research_relations(&plan,&query,Some(&graph),&session.xml,projection).unwrap();
+        let actual=session.prepared.project_research_relations_observed(&plan,&query,Some(&graph),&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
         assert_eq!(session.prepared.research_steps()-before,steps);
         assert_eq!(serde_json::to_vec(&actual).unwrap(),serde_json::to_vec(&expected).unwrap());
     }
@@ -187,16 +187,16 @@ fn context_projection_rejects_foreign_request_graph_xml_and_later_cancellation()
     let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
     let control=session.prepared.operation_control();
     let graphs=session.xml.programs.iter().map(|program|session.prepared.build_xml_plan("context-foreign",program.clone(),None,control).unwrap()).collect::<Vec<_>>();
-    let projection=||session.prepared.execute_research_operations(&plan,&query,Some(&graphs[0]),&session.xml,None).unwrap().consume(&plan).unwrap().2;
+    let projection=||session.prepared.execute_research_operations_observed(&plan,&query,Some(&graphs[0]),&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap().2;
     let identical=query.clone();
-    assert!(session.prepared.project_research_relations(&plan,&identical,Some(&graphs[0]),&session.xml,projection()).is_err());
-    assert!(session.prepared.project_research_relations(&plan,&query,Some(&graphs[1]),&session.xml,projection()).is_err());
-    assert!(session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection()).is_err());
-    assert!(session.prepared.project_research_relations(&plan,&query,Some(&graphs[0]),&other.xml,projection()).is_err());
-    assert!(other.prepared.project_research_relations(&plan,&query,Some(&graphs[0]),&session.xml,projection()).is_err());
+    assert!(session.prepared.project_research_relations_observed(&plan,&identical,Some(&graphs[0]),&session.xml,projection(),&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).is_err());
+    assert!(session.prepared.project_research_relations_observed(&plan,&query,Some(&graphs[1]),&session.xml,projection(),&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).is_err());
+    assert!(session.prepared.project_research_relations_observed(&plan,&query,None,&session.xml,projection(),&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).is_err());
+    assert!(session.prepared.project_research_relations_observed(&plan,&query,Some(&graphs[0]),&other.xml,projection(),&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).is_err());
+    assert!(other.prepared.project_research_relations_observed(&plan,&query,Some(&graphs[0]),&session.xml,projection(),&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).is_err());
     let retained=projection();assert!(retained.is_some());
     control.tracked_cancel_handle().unwrap().cancel();
-    assert_eq!(session.prepared.project_research_relations(&plan,&query,Some(&graphs[0]),&session.xml,retained).unwrap_err().code,"command.cancelled");
+    assert_eq!(session.prepared.project_research_relations_observed(&plan,&query,Some(&graphs[0]),&session.xml,retained,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err().code,"command.cancelled");
 }
 
 #[test]
@@ -205,21 +205,21 @@ fn context_projection_replays_budget_and_original_deadline_after_operations() {
     let session=planner_fixture(files.clone(),BTreeMap::new(),None);
     let query=planned_query("Target","target.lua",1,1,"function","both");
     let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-    let (_,_,projection)=session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap();assert!(projection.is_some());
+    let (_,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,None,&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();assert!(projection.is_some());
     let remaining=session.prepared.inputs().limits().construction_steps-session.prepared.research_steps();
     session.prepared.carry_research_steps(remaining,session.prepared.operation_control()).unwrap();
     let before=session.prepared.research_steps();
-    let cached=session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection).unwrap_err();
-    let fresh=session.prepared.research_relations(&query.symbol,"both",None,&session.xml).unwrap_err();
+    let cached=session.prepared.project_research_relations_observed(&plan,&query,None,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err();
+    let fresh=session.prepared.research_relations_with_context_observed(&query.symbol,"both",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err();
     assert_eq!(cached.code,"source.native_query_budget");assert_eq!(cached.code,fresh.code);assert_eq!(session.prepared.research_steps(),before);
 
     let mut session=planner_fixture(files,BTreeMap::new(),None);
     let control=OperationControl::uncancelable(std::time::Instant::now()+std::time::Duration::from_secs(2));
     session.prepared.begin_research_request(&control).unwrap();
     let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-    let (_,_,projection)=session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap();assert!(projection.is_some());
+    let (_,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,None,&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();assert!(projection.is_some());
     std::thread::sleep(control.deadline().saturating_duration_since(std::time::Instant::now())+std::time::Duration::from_millis(1));
-    assert_eq!(session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection).unwrap_err().code,"command.deadline");
+    assert_eq!(session.prepared.project_research_relations_observed(&plan,&query,None,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err().code,"command.deadline");
 }
 
 #[test]
@@ -228,12 +228,12 @@ fn context_projection_large_rows_fall_back_without_truncation() {
     let session=planner_fixture(files,BTreeMap::new(),None);
     let query=planned_query("Target","target.lua",1,1,"function","both");
     let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-    let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap();
+    let (answers,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,None,&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();
     assert!(projection.is_none(),"serialized file rows exceed the existing 1 MiB retention policy");
     let before=session.prepared.research_steps();
-    let expected=session.prepared.research_relations(&query.symbol,"both",None,&session.xml).unwrap();let cost=session.prepared.research_steps()-before;
+    let expected=session.prepared.research_relations_with_context_observed(&query.symbol,"both",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();let cost=session.prepared.research_steps()-before;
     let before=session.prepared.research_steps();let reused=context_projection_reused_files();
-    let actual=session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection).unwrap();
+    let actual=session.prepared.project_research_relations_observed(&plan,&query,None,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     assert_eq!(context_projection_reused_files(),reused);assert_eq!(session.prepared.research_steps()-before,cost);
     assert_eq!(serde_json::to_vec(&actual).unwrap(),serde_json::to_vec(&expected).unwrap());
     assert!(serde_json::to_vec(&actual["relations"]).unwrap().len()>1<<20);
@@ -248,7 +248,7 @@ fn projection_at_reserve_offset(session:&mut ResearchSession,query:&QueryRequest
     let control=session.prepared.operation_control().clone();
     session.prepared.begin_research_request(&control).unwrap();
     let plan=session.prepared.plan_research_operations(query,&session.xml,None).unwrap();
-    let (_,_,projection)=session.prepared.execute_research_operations(&plan,query,None,&session.xml,None).unwrap().consume(&plan).unwrap();
+    let (_,_,projection)=session.prepared.execute_research_operations_observed(&plan,query,None,&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();
     assert!(projection.is_some(),"both sides must compute an eligible same-scope projection first");
     let projection=if reuse{projection}else{drop(projection);None};
     // This is the production SourceQueries return reserve, deliberately fixed
@@ -256,7 +256,7 @@ fn projection_at_reserve_offset(session:&mut ResearchSession,query:&QueryRequest
     let start=(session.prepared.inputs().limits().construction_steps-1024).checked_add_signed(offset).unwrap();
     session.prepared.carry_research_steps(start-session.prepared.research_steps(),&control).unwrap();
     let passes=research_projection_passes();let files=context_projection_reused_files();
-    let result=session.prepared.project_research_relations(&plan,query,None,&session.xml,projection)
+    let result=session.prepared.project_research_relations_observed(&plan,query,None,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap())
         .map_err(|error|json!({"code":error.code,"message":error.message,"details":error.details}));
     (result,session.prepared.research_steps(),research_projection_passes()-passes,context_projection_reused_files()-files)
 }
@@ -314,7 +314,7 @@ fn context_projection_preserves_nonempty_xml_mixin_copy_tail() {
     let graph=session.prepared.build_xml_plan("context-mixin",session.xml.programs[0].clone(),None,&control).unwrap();
     assert!(!graph.xml.as_ref().unwrap().copies.is_empty(),"fixture must perform real abstract XML mixin copies");
     let query=planned_query("Caller","logic.lua",1,3,"function","both");
-    let original=session.prepared.research_relations(&query.symbol,"both",Some(&graph),&session.xml).unwrap();
+    let original=session.prepared.research_relations_with_context_observed(&query.symbol,"both",Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let rows=original["relations"].as_array().unwrap();
     let first_copy=rows.iter().position(|row|row["kind"]=="xml_mixin_copy").expect("selected Caller value must have an XML mixin-copy relation");
     assert!(rows[first_copy..].iter().all(|row|row["kind"]=="xml_mixin_copy"),"copies remain the final ordered tail");

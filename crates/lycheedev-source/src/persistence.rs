@@ -100,18 +100,6 @@ pub(crate) fn finish_control<T>(result: Result<T>, stopped: Result<()>) -> Resul
     finish_owned(result, stopped)
 }
 
-/// Keep all authenticated source identity handles through their last consumer.
-pub(crate) fn finish_files<T>(
-    files: Vec<std::fs::File>,
-    mut result: Result<T>,
-    control: &OperationControl,
-) -> Result<T> {
-    for file in files {
-        result = lycheedev_core::storage::finish_file(file, result, control);
-    }
-    result
-}
-
 /// Argument/cwd validation can fail after the durable intent was committed but
 /// before a process was launched. Keep that fact without deleting or replaying.
 pub(crate) fn retained_intent(mut error: lycheedev_core::ToolkitError, key: &str, generation: i64) -> lycheedev_core::ToolkitError {

@@ -603,24 +603,34 @@ fn csv_columns_quoting_manifest_and_implicit_overwrite() {
     let pages = two();
     let mut r = run_wago(&f, q(), &pages).unwrap();
     r.records[0].table_name = " Vehicle,\"Seat\"\nX\rY".into();
-    let (raw, m) = output::encode(&r, &budget(&f.ctx,&f.request)).unwrap();
-    let csv = String::from_utf8(raw.clone()).unwrap();
-    assert!(csv.starts_with(
-        "id,push_id,record_id,table_name,status,build,region_id,locale,payload_length\r\n"
-    ));
-    assert!(csv.contains("\" Vehicle,\"\"Seat\"\"\r\nXY\""));
-    assert_eq!(m["content"]["sha256"], storage::sha256(&raw));
     let path = f.root.join("hotfix.csv");
     fs::write(&path, b"prior").unwrap();
     output::csv(&f.ctx, &path, &r, &budget(&f.ctx,&f.request)).unwrap();
-    assert_eq!(fs::read(&path).unwrap(), raw);
-    assert_eq!(
-        serde_json::from_slice::<Value>(
-            &fs::read(path.with_extension("csv.manifest.json")).unwrap()
-        )
-        .unwrap(),
-        m
-    );
+    let raw = fs::read(&path).unwrap();
+    let m: Value = serde_json::from_slice(&fs::read(path.with_extension("csv.manifest.json")).unwrap()).unwrap();
+    assert_eq!(raw, concat!(
+        "id,push_id,record_id,table_name,status,build,region_id,locale,payload_length\r\n",
+        "1,10,41,\" Vehicle,\"\"Seat\"\"\r\nXY\",1,68974,71,enUS,5\r\n",
+        "2,10,42,SpellEffect,1,68974,71,enUS,5\r\n",
+        "3,9,43,SpellEffect,3,68974,71,enUS,5\r\n",
+        "4,9,44,SpellEffect,3,68974,71,enUS,5\r\n",
+    ).as_bytes());
+    assert_eq!(m["schema"], "lycheedev.csv-export.v1");
+    assert_eq!(m["rowCount"], 4);
+    assert_eq!(m["complete"], true);
+    assert_eq!(m["truncated"], false);
+    assert_eq!(m["columns"], json!([
+        "id", "push_id", "record_id", "table_name", "status", "build", "region_id", "locale", "payload_length"
+    ]));
+    assert_eq!(m["source"]["provider"], "wago");
+    assert_eq!(m["source"]["product"], "retail");
+    assert_eq!(m["source"]["fullBuild"], "12.0.7.68974");
+    assert_eq!(m["source"]["region"], "us");
+    assert_eq!(m["source"]["locale"], "enUS");
+    assert_eq!(m["source"]["ref"], r.change.sha256);
+    assert_eq!(m["source"]["fetchedAt"], r.change.fetched_at);
+    assert_eq!(m["content"]["sha256"], storage::sha256(&raw));
+    assert_eq!(m["content"]["bytes"], raw.len());
 }
 #[test]
 fn csv_refuses_workspace_and_sidecar_conflict_before_data() {
@@ -737,17 +747,25 @@ fn optional_definition_keeps_short_rows_and_status_decode_states() {
         },
         Record::default(),
     ];
-    decode::apply(&mut records, &definition, &b).unwrap();
+    decode::apply_with_check(&mut records, &definition, &b, || Ok(())).unwrap();
     assert_eq!(records[0].fields.as_ref().unwrap()["Value"], -2);
     assert_eq!(records[0].decode_state, "decoded");
     assert_eq!(records[1].decode_state, "not_valid");
     assert_eq!(records[2].decode_state, "no_payload");
-    assert!(
-        decode::positional("[]", &definition, &b)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(decode::positional("[1,2]", &definition, &b).is_err());
+    let mut empty = [Record {
+        status: 1,
+        payload: Some(serde_json::value::RawValue::from_string("[]".into()).unwrap()),
+        ..Default::default()
+    }];
+    decode::apply_with_check(&mut empty, &definition, &b, || Ok(())).unwrap();
+    assert_eq!(empty[0].decode_state, "decoded");
+    assert_eq!(empty[0].fields.as_ref().unwrap(), &BTreeMap::new());
+    let mut overwide = [Record {
+        status: 1,
+        payload: Some(serde_json::value::RawValue::from_string("[1,2]".into()).unwrap()),
+        ..Default::default()
+    }];
+    assert!(decode::apply_with_check(&mut overwide, &definition, &b, || Ok(())).is_err());
 }
 
 #[test]
@@ -886,7 +904,7 @@ fn raidbots_source_bytes_do_not_consume_metadata_allowance() {
         f.ctx.control.clone(),
     );
     assert_eq!(
-        super::super::local::read_source_file(&path, 512 << 20, &b).unwrap(),
+        super::super::local::read_source_file_controlled(&path, 512 << 20, &b, &f.ctx.control, |_| Ok(())).unwrap(),
         fs::read(path).unwrap()
     );
     assert_eq!(b.snapshot().unwrap().metadata_bytes, 0);

@@ -27,6 +27,7 @@ struct ErrorFields {
     message: String,
     exit_code: i32,
     details: Range<usize>,
+    observation: Option<ToolkitError>,
 }
 pub(super) struct RawResponse {
     bytes: Vec<u8>,
@@ -53,7 +54,7 @@ impl RawResponse {
             validate(error.details,2)?;
             let start=error.details.get().as_ptr() as usize-bytes.as_ptr() as usize;
             Some(ErrorFields{code:error.code,message:error.message,exit_code:error.exit_code,
-                details:start..start+error.details.get().len()})
+                details:start..start+error.details.get().len(),observation:None})
         } else {None};
         drop(head.terminal);
         let bytes=if replacements.is_empty(){bytes}else{
@@ -80,6 +81,10 @@ impl RawResponse {
         Ok(Self{bytes,error})
     }
     pub(super) fn failed(&self)->bool {self.error.is_some()}
+    pub(super) fn with_observation(mut self,observation:ToolkitError)->Self {
+        self.error.as_mut().expect("child error routing").observation=Some(observation);
+        self
+    }
     fn error_reply(&self,retirement:Option<&ToolkitError>,terminal:Option<&analysis_process::AnalysisTerminal>,writer:&mut dyn Write)->Result<()> {
         let error=self.error.as_ref().expect("child error routing");
         let raw_details:&RawValue=serde_json::from_slice(&self.bytes[error.details.clone()])?;
@@ -88,7 +93,41 @@ impl RawResponse {
         #[derive(Serialize)]
         struct ErrorReply<'a> {value:Option<()>,error:RoutedError<'a>,#[serde(skip_serializing_if="Option::is_none")]terminal:Option<&'a analysis_process::AnalysisTerminal>}
         #[derive(Serialize)]
-        struct RoutedError<'a> {code:&'a str,message:&'a str,exit_code:i32,details:RetirementDetails<'a>}
+        struct RoutedError<'a> {code:&'a str,message:ObservedMessage<'a>,exit_code:i32,details:ObservedDetails<'a>}
+        #[derive(Serialize)]
+        struct OriginalError<'a> {code:&'a str,message:&'a str,exit_code:i32,details:RetirementDetails<'a>}
+        struct ObservedMessage<'a>{original:&'a str,observation:Option<&'a ToolkitError>}
+        impl std::fmt::Display for ObservedMessage<'_> {
+            fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {
+                f.write_str(self.original)?;
+                if let Some(observation)=self.observation {
+                    f.write_str("\n")?;
+                    f.write_str(&observation.message)?;
+                }
+                Ok(())
+            }
+        }
+        impl Serialize for ObservedMessage<'_> {
+            fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error>{
+                if self.observation.is_none(){self.original.serialize(serializer)}
+                else{serializer.collect_str(self)}
+            }
+        }
+        struct ObservedDetails<'a>{primary:OriginalError<'a>,observation:Option<&'a ToolkitError>}
+        impl Serialize for ObservedDetails<'_> {
+            fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error>{
+                use serde::ser::SerializeMap;
+                let Some(observation)=self.observation else{return self.primary.details.serialize(serializer);};
+                // Core finish_owned's canonical cleanup object, borrowing the
+                // complete child details instead of allocating a Value tree.
+                let mut map=serializer.serialize_map(Some(4))?;
+                map.serialize_entry("cleanup",observation)?;
+                map.serialize_entry("control",&Option::<()>::None)?;
+                map.serialize_entry("primary",&self.primary)?;
+                map.serialize_entry("schema",storage::FILE_CLEANUP_SCHEMA)?;
+                map.end()
+            }
+        }
         struct RetirementDetails<'a>{original:&'a RawValue,retirement:Option<&'a ToolkitError>}
         impl Serialize for RetirementDetails<'_> {
             fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error>{
@@ -110,8 +149,10 @@ impl RawResponse {
                 map.end()
             }
         }
-        write_frame(writer,&ErrorReply{value:None,error:RoutedError{code:&error.code,message:&error.message,exit_code:error.exit_code,
-            details:RetirementDetails{original:details,retirement}},terminal},RESPONSE_BYTES)
+        write_frame(writer,&ErrorReply{value:None,error:RoutedError{code:&error.code,
+            message:ObservedMessage{original:&error.message,observation:error.observation.as_ref()},exit_code:error.exit_code,
+            details:ObservedDetails{primary:OriginalError{code:&error.code,message:&error.message,exit_code:error.exit_code,
+                details:RetirementDetails{original:details,retirement}},observation:error.observation.as_ref()}},terminal},RESPONSE_BYTES)
     }
 }
 pub(super) fn append_bounded(output:&mut Vec<u8>,bytes:&[u8])->Result<()> {

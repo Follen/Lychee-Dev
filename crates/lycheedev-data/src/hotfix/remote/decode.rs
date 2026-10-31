@@ -56,13 +56,6 @@ fn scalar(value: Value, field: &Field) -> Result<Value> {
         ))),
     }
 }
-pub(super) fn positional(
-    raw: &str,
-    definition: &Definition,
-    budget: &Budget,
-) -> Result<BTreeMap<String, Value>> {
-    positional_with_check(raw, definition, budget, &mut || Ok(()))
-}
 fn positional_with_check(
     raw: &str,
     definition: &Definition,
@@ -127,13 +120,6 @@ fn positional_with_check(
         result.insert(field.name.clone(), converted);
     }
     Ok(result)
-}
-pub(super) fn apply(
-    records: &mut [Record],
-    definition: &Definition,
-    budget: &Budget,
-) -> Result<()> {
-    apply_with_check(records, definition, budget, || Ok(()))
 }
 pub(super) fn apply_with_check(
     records: &mut [Record],

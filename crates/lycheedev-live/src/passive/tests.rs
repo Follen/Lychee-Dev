@@ -78,14 +78,16 @@ impl Source for Fake {
 fn passive_discovery_keeps_twins_distinct_without_native_capabilities() {
     let fixture = Fixture::new();
     let client = fixture.client("client");
-    let source = Fake::new(vec![window(&client, 11), window(&client, 12)]);
+    let mut first = window(&client, 11);
+    first.identity.hwnd = 18_446_744_073_709_551_000usize;
+    let source = Fake::new(vec![first, window(&client, 12)]);
     let ctx = fixture.context();
     let default = serde_json::to_value(discover(&ctx, &InstancesRequest::default(), &source).unwrap()).unwrap();
     assert_eq!(source.calls.get(), 1);
     assert_eq!(default.as_object().unwrap().len(), 2);
     let candidates = default["candidates"].as_array().unwrap();
     assert_eq!(candidates.len(), 2);
-    assert_eq!(candidates[0]["window"]["handle"], "111");
+    assert_eq!(candidates[0]["window"]["handle"], "18446744073709551000");
     assert_eq!(
         candidates[1]["window"]["processStartedAt"],
         (u64::MAX - 12).to_string()

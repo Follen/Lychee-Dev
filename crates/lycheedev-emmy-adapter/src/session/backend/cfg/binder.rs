@@ -2,7 +2,7 @@
 // Owned per-query CFG; public AST/facts only, no upstream private types.
 use std::collections::HashMap;
 
-use emmylua_parser::{LuaAstPtr, LuaExpr, LuaNameToken, LuaSyntaxId};
+use emmylua_parser::{LuaNameToken, LuaSyntaxId};
 use rowan::TextSize;
 
 use super::{
@@ -17,7 +17,6 @@ pub struct FlowBinder<'a, 'control> {
     pub facts: &'a FileFacts,
     pub control: &'control mut dyn FnMut() -> bool,
     pub file_id: FileId,
-    pub decl_bind_expr_ref: HashMap<SemanticId, LuaAstPtr<LuaExpr>>,
     pub decl_multi_return_ref: HashMap<SemanticId, Vec<DeclMultiReturnRefAt>>,
     pub start: FlowId,
     pub unreachable: FlowId,
@@ -46,7 +45,6 @@ impl<'a, 'control> FlowBinder<'a, 'control> {
             flow_nodes: Vec::new(),
             node_effects: HashMap::new(),
             multiple_antecedents: Vec::new(),
-            decl_bind_expr_ref: HashMap::new(),
             decl_multi_return_ref: HashMap::new(),
             labels: HashMap::new(),
             start: FlowId::default(),
@@ -213,7 +211,6 @@ impl<'a, 'control> FlowBinder<'a, 'control> {
             }
         }
         FlowTree::new(
-            self.decl_bind_expr_ref,
             self.decl_multi_return_ref,
             self.flow_nodes,
             self.node_effects,

@@ -22,12 +22,11 @@ use super::{
     exprs::is_binary_logical,
     finish_flow_label,
     stats::{
-        bind_multi_return_refs, check_local_immutable, check_value_expr_is_check_expr,
-        finish_entered_loop_post_flow, get_local_decl_ids, get_var_decl_ids, get_var_member_ids,
+        bind_multi_return_refs, finish_entered_loop_post_flow, get_local_decl_ids, get_var_decl_ids,
+        get_var_member_ids,
         static_literal_truthiness, static_number_value,
     },
 };
-use emmylua_code_analysis::SemanticId;
 
 /// Task: carries the input current and produces one FlowId delivered to the continuation on the stack
 enum Task {
@@ -465,21 +464,7 @@ impl<'a, 'b, 'control> BindEngine<'a, 'b, 'control> {
                 }
             }
             LuaAst::LuaLocalStat(local_stat) => {
-                let local_names = local_stat.get_local_name_list().collect::<Vec<_>>();
                 let values = local_stat.get_value_exprs().collect::<Vec<_>>();
-                let min_len = local_names.len().min(values.len());
-                for i in 0..min_len {
-                    let name = &local_names[i];
-                    let value = &values[i];
-                    let decl_id = SemanticId::decl(self.binder.file_id, name.get_range());
-                    if check_local_immutable(self.binder, &decl_id)
-                        && check_value_expr_is_check_expr(value.clone())
-                    {
-                        self.binder
-                            .decl_bind_expr_ref
-                            .insert(decl_id, value.to_ptr());
-                    }
-                }
                 self.stack.push(Continuation::LocalDone {
                     local_stat,
                     current,

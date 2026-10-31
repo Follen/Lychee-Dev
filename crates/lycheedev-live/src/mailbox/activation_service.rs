@@ -81,15 +81,25 @@ where
     /// Only the exact missing-log condition enters activation; corruption and
     /// unknown historic generations are not migrated or treated as fresh work.
     pub fn status_with_activation(&self, id: &str, control: &OperationControl) -> ServiceOutcome {
+        match self.status_projection_with_activation(id, control) {
+            Ok(result) => ServiceOutcome::Completed(result),
+            Err(error) => ServiceOutcome::failure(error),
+        }
+    }
+    // The read-only doctor consumes the same status projection without losing
+    // its typed read/control/close cause inside a ServiceOutcome presentation.
+    pub(super) fn status_projection_with_activation(
+        &self,
+        id: &str,
+        control: &OperationControl,
+    ) -> ChannelResult<ProjectResult> {
         match self.book.status(id, control) {
-            Ok(record) => ServiceOutcome::Completed(self.project(&record, "", "")),
+            Ok(record) => Ok(self.project(&record, "", "")),
             Err(e) if missing(&e) => match self.book.activation_status(id, control) {
-                Ok(record) => {
-                    ServiceOutcome::Completed(status_record(&record, self.clock.unix_millis()))
-                }
-                Err(e) => ServiceOutcome::failure(e),
+                Ok(record) => Ok(status_record(&record, self.clock.unix_millis())),
+                Err(e) => Err(e),
             },
-            Err(e) => ServiceOutcome::failure(e),
+            Err(e) => Err(e),
         }
     }
     pub fn resume_with_activation(

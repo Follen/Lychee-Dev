@@ -379,6 +379,17 @@ fn input_schema(definition: &Definition) -> Value {
         "metaFlags":[{"name":"--help","short":"-h","type":"boolean","required":false}],
         "validation":"CLI token shape and option contracts; constraints and handler-specific semantic requirements remain authoritative"})
 }
+fn file_input(path: &str) -> Option<Value> {
+    match path {
+        "source batch" => Some(json!({"flag":"--file",
+            "description":"UTF-8 JSON file containing the typed batch requests below. Every item shares the selected fixed source and environment, while retaining its own cursor and coverage.",
+            "schema":lycheedev_source::batch::schema()})),
+        "source validate" => Some(json!({"flag":"--matrix",
+            "description":"JSON matrix configuration only. Matrix targets each select their own source/product/ref; --matrix forbids --snapshot, --path, --toc and --environment. For ordinary single-addon validation, --path is the addon directory and --toc is its relative TOC manifest, not a JSON configuration file.",
+            "schema":lycheedev_source::matrix::schema()})),
+        _ => None,
+    }
+}
 fn exact_schema(path: &str) -> Result<Value> {
     let definition = contract::all().iter().find(|d|d.path == path).ok_or_else(|| {
         let mut error = ToolkitError::arguments("schema requires an exact command path");
@@ -395,12 +406,14 @@ fn exact_schema(path: &str) -> Result<Value> {
     if matches!(path, "data agent serve" | "data agent schema") {
         result["protocol"] = lycheedev_data::agent_session::schema();
     }
+    if let Some(input) = file_input(path) {
+        result["fileInput"] = input;
+    }
     Ok(result)
 }
 fn help(inv: &Invocation) -> Result<Value> {
     if let Some(definition) = contract::all().iter().find(|d| d.path == inv.command) {
-        return Ok(
-            json!({"schema":"lycheedev.cli-help.v1","kind":"command","command":definition.path,
+        let mut result = json!({"schema":"lycheedev.cli-help.v1","kind":"command","command":definition.path,
             "commands":[definition],"flags":definition.flags.iter().map(|f|f.0.clone()).chain(std::iter::once("--help".into())).collect::<Vec<_>>(),
             "input":input_schema(definition),
             "effects":crate::discovery::effects(definition),
@@ -408,8 +421,11 @@ fn help(inv: &Invocation) -> Result<Value> {
             "result":crate::discovery::result_contract(),
             "examples":definition.examples,
             "errors":{"exitCodes":crate::discovery::exit_codes(),"discovery":DISCOVERY},
-            "discovery":DISCOVERY,"schemaCommand":format!("lycheedev schema {}",definition.path)}),
-        );
+            "discovery":DISCOVERY,"schemaCommand":format!("lycheedev schema {}",definition.path)});
+        if let Some(input) = file_input(&definition.path) {
+            result["fileInput"] = input;
+        }
+        return Ok(result);
     }
     let children = children(&inv.command);
     let total = children.len();
@@ -474,6 +490,155 @@ mod tests {
     fn args(words: &[&str]) -> Vec<String> {
         words.iter().map(|word| (*word).to_owned()).collect()
     }
+
+    #[test]
+    fn source_batch_public_file_schema_examples_enter_strict_typed_admission() {
+        let public = discover(&parse(&args(&["schema", "source", "batch"])).unwrap())
+            .unwrap().unwrap().data;
+        assert_eq!(public["fileInput"]["flag"], "--file");
+        let help = discover(&parse(&args(&["source", "batch", "--help"])).unwrap())
+            .unwrap().unwrap().data;
+        assert_eq!(help["fileInput"], public["fileInput"]);
+        let schema = &public["fileInput"]["schema"];
+        for (kind, field, default, minimum, maximum) in [
+            ("query", "limit", 10, 1, 200),
+            ("refs", "limit", 25, 1, 200),
+            ("context", "limit", 25, 1, 200),
+            ("context", "maxBytes", 16384, 1, 1_048_576),
+            ("context", "maxLines", 80, 1, 2000),
+            ("context", "depth", 0, 0, 4),
+        ] {
+            let property = &schema["$defs"][kind]["properties"][field];
+            assert_eq!(property["default"], default, "{kind}.{field} default");
+            assert_eq!(property["minimum"], minimum, "{kind}.{field} minimum");
+            assert_eq!(property["maximum"], maximum, "{kind}.{field} maximum");
+        }
+        for pointer in [
+            "/properties/requests/items/$ref",
+            "/$defs/item/properties/query/$ref",
+            "/$defs/item/properties/refs/$ref",
+            "/$defs/item/properties/context/$ref",
+        ] {
+            let reference = schema.pointer(pointer).and_then(Value::as_str).unwrap();
+            assert!(reference.starts_with("#/"), "{reference}");
+            assert!(schema.pointer(&reference[1..]).is_some(), "unresolved {reference}");
+        }
+        let examples = schema["examples"].as_array()
+            .expect("source batch must publish complete JSON file examples");
+        assert!(!examples.is_empty());
+        for example in examples {
+            lycheedev_source::batch::parse(&serde_json::to_vec(example).unwrap()).unwrap();
+        }
+        let mut input = examples[0].clone();
+        let items = input["requests"].as_array_mut().unwrap();
+        assert_eq!(items.len(), 3, "the minimal example must cover query, refs and context");
+        for (kind, fields) in [
+            ("query", json!({"text":"SchemaQuery"})),
+            ("refs", json!({"symbol":"SchemaRefs"})),
+            ("context", json!({"symbolId":"SYM-schema-context"})),
+        ] {
+            let item = items.iter_mut().find(|item| item.get(kind).is_some()).unwrap();
+            item[kind] = fields;
+        }
+        let parsed = lycheedev_source::batch::parse(&serde_json::to_vec(&input).unwrap()).unwrap();
+        let query = parsed.requests.iter().find_map(|item| item.query.as_ref()).unwrap();
+        assert_eq!(query.text, "SchemaQuery");
+        assert_eq!(query.limit, 10);
+        let refs = parsed.requests.iter().find_map(|item| item.refs.as_ref()).unwrap();
+        assert_eq!(refs.symbol, "SchemaRefs");
+        assert_eq!(refs.limit, 25);
+        let context = parsed.requests.iter().find_map(|item| item.context.as_ref()).unwrap();
+        assert_eq!(context.symbol_id, "SYM-schema-context");
+        assert_eq!((context.limit, context.max_bytes, context.max_lines, context.depth), (25, 16384, 80, 0));
+        for (kind, field, values) in [
+            ("query", "limit", vec![0, -1, 201]),
+            ("refs", "limit", vec![0, -1, 201]),
+            ("context", "limit", vec![0, -1, 201]),
+            ("context", "maxBytes", vec![0, -1, 1_048_577]),
+            ("context", "maxLines", vec![0, -1, 2001]),
+            ("context", "depth", vec![-1, 5]),
+        ] {
+            for value in values {
+                let mut invalid = input.clone();
+                let item = invalid["requests"].as_array_mut().unwrap().iter_mut()
+                    .find(|item| item.get(kind).is_some()).unwrap();
+                item[kind][field] = json!(value);
+                assert!(lycheedev_source::batch::parse(&serde_json::to_vec(&invalid).unwrap()).is_err(), "{kind}.{field}={value}");
+            }
+        }
+        for kind in ["query", "refs", "context"] {
+            let mut invalid = input.clone();
+            let item = invalid["requests"].as_array_mut().unwrap().iter_mut()
+                .find(|item| item.get(kind).is_some()).unwrap();
+            item[kind]["unknown"] = json!(true);
+            assert!(lycheedev_source::batch::parse(&serde_json::to_vec(&invalid).unwrap()).is_err(), "{kind} unknown field");
+        }
+    }
+
+    #[test]
+    fn source_matrix_public_file_schema_examples_enter_real_config_admission() {
+        let public = discover(&parse(&args(&["schema", "source", "validate"])).unwrap())
+            .unwrap().unwrap().data;
+        assert_eq!(public["fileInput"]["flag"], "--matrix");
+        let help = discover(&parse(&args(&["source", "validate", "--help"])).unwrap())
+            .unwrap().unwrap().data;
+        assert_eq!(help["fileInput"], public["fileInput"]);
+        let schema = &public["fileInput"]["schema"];
+        assert_eq!(schema["properties"]["targets"]["minItems"], 1);
+        assert_eq!(schema["properties"]["targets"]["maxItems"], 32);
+        let examples = schema["examples"].as_array()
+            .expect("source validate must publish its matrix JSON shape, distinct from --path/--toc addon inputs");
+        assert!(!examples.is_empty());
+        struct Directory(std::path::PathBuf);
+        impl Drop for Directory {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let directory = Directory(std::env::temp_dir().join(format!(
+            "lycheedev-source-file-schema-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        std::fs::create_dir(&directory.0).unwrap();
+        let file = directory.0.join("matrix.json");
+        let control = lycheedev_core::control::OperationControl::default();
+        let read = |input: &Value| {
+            std::fs::write(&file, serde_json::to_vec(input).unwrap()).unwrap();
+            lycheedev_source::matrix::read_config(&file, &control)
+        };
+        for example in examples { read(example).unwrap(); }
+        let mut input = examples[0].clone();
+        input["path"] = json!("relative-addon");
+        input["targets"] = json!([{"id":"schema-client","toc":"Main.toc","product":"classic","ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]);
+        let (config, root) = read(&input).unwrap();
+        assert_eq!(root, directory.0.join("relative-addon"));
+        assert_eq!(config.targets[0].id, "schema-client");
+        assert_eq!(config.targets[0].toc, "Main.toc");
+        assert_eq!(config.targets[0].product, "classic");
+        assert_eq!(config.targets[0].reference, "a".repeat(40));
+        assert!(config.targets[0].source.is_empty(), "omitted source retains the owning resolver's wow-ui-source default");
+        let mut default_path = input.clone();
+        default_path.as_object_mut().unwrap().remove("path");
+        assert_eq!(read(&default_path).unwrap().1, directory.0);
+        for field in ["id", "toc", "product", "ref"] {
+            let mut missing = input.clone();
+            missing["targets"][0].as_object_mut().unwrap().remove(field);
+            assert_eq!(read(&missing).unwrap_err().code, "codebase.invalid_matrix_config", "{field}");
+        }
+        for count in [0, 32, 33] {
+            let mut bounded = input.clone();
+            bounded["targets"] = json!((0..count).map(|index| {
+                let mut target = input["targets"][0].clone();
+                target["id"] = json!(format!("client-{index}")); target
+            }).collect::<Vec<_>>());
+            assert_eq!(read(&bounded).is_ok(), count == 32, "target count {count}");
+        }
+        for nested in [false, true] {
+            let mut unknown = input.clone();
+            if nested { unknown["targets"][0]["unknown"] = json!(true); }
+            else { unknown["unknown"] = json!(true); }
+            assert_eq!(read(&unknown).unwrap_err().code, "codebase.invalid_matrix_config");
+        }
+    }
+
     #[test]
     fn clap_tree_and_every_exact_help_are_metadata_only() {
         parser().debug_assert();

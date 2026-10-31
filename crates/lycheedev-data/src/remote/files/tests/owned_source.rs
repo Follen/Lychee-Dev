@@ -29,10 +29,9 @@ fn owned_open_keeps_same_authenticated_files_and_block_when_moved() {
     let mut out = vec![0; size];
     assert_eq!(owned.read(&mut out).unwrap(), size);
     assert_eq!(out, raw);
-    owned.rewind().unwrap();
-    let mut prefix = [0; 4];
-    owned.read_exact(&mut prefix).unwrap();
-    assert_eq!(&prefix, b"BLTE");
+    let prefix = owned.read_encoded(0, 4).unwrap();
+    assert_eq!(prefix.as_ref(), b"BLTE");
+    drop(prefix);
     assert_eq!(f.backend.calls.lock().unwrap().len(), calls);
     assert!(weak.upgrade().unwrap().counters().unwrap().block_cache_hits >= hits + 3);
     let work = budget.snapshot().unwrap();
@@ -158,7 +157,7 @@ fn owned_sequential_read_preserves_prefix_and_old_block_after_next_block_error()
     std::fs::remove_dir_all(&f.home).unwrap();
 }
 #[test]
-fn owned_cached_reads_and_rewind_keep_original_and_independent_budget_stops() {
+fn owned_cached_reads_keep_original_and_independent_budget_stops() {
     for stop_budget in [false, true] {
         let f = Fixture::new("archives =\n");
         let independent = OperationControl::default();
@@ -183,7 +182,6 @@ fn owned_cached_reads_and_rewind_keep_original_and_independent_budget_stops() {
             owned.read_encoded(0, 8).err().unwrap().code,
             "command.cancelled"
         );
-        assert_eq!(owned.rewind().unwrap_err().code, "command.cancelled");
         assert_eq!(
             blte::stream_io_error(owned.read(&mut [0; 1]).unwrap_err()).code,
             "command.cancelled"

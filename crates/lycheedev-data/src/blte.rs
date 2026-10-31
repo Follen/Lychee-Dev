@@ -975,9 +975,6 @@ impl Decoder<'_> {
         salsa_checked(&raw[11 + iv..], key, nonce, self.budget, self.source_check)
     }
 }
-fn salsa(raw: &[u8], key: &[u8], nonce: [u8; 8], budget: Option<&Budget>) -> Result<Vec<u8>> {
-    salsa_checked(raw, key, nonce, budget, None)
-}
 fn salsa_checked(
     raw: &[u8],
     key: &[u8],
@@ -1093,7 +1090,7 @@ mod tests {
             e.push(4);
             e.extend([0; 4]);
             e.push(b'S');
-            e.extend(salsa(b"Nhello", &key, [0; 8], None).unwrap());
+            e.extend(salsa_checked(b"Nhello", &key, [0; 8], None, None).unwrap());
             let b = frame(&e, 5);
             assert_eq!(
                 decode(&b, Limits::default(), &BTreeMap::from([(id, key)])).unwrap(),

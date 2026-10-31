@@ -278,13 +278,15 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     listener.set_nonblocking(true)?;
     let owner = lycheedev_windows::process::Process::open(std::process::id()).map_err(fault)?;
+    let identity = owner.identity().clone();
+    owner.close().map_err(fault)?;
     let mut command = Command::new(std::env::current_exe()?);
     command
         .arg("--data-agent-worker")
         .arg(&token)
         .arg(listener.local_addr()?.port().to_string())
-        .arg(owner.identity().pid.to_string())
-        .arg(owner.identity().created.to_string())
+        .arg(identity.pid.to_string())
+        .arg(identity.created.to_string())
         .env(START_ENV, &token)
         .current_dir(&inv.cwd)
         .stdin(Stdio::piped())

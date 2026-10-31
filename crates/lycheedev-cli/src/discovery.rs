@@ -80,7 +80,7 @@ pub fn effects(definition: &Definition) -> Value {
 
 /// Identity inputs already expressed by the command's own flags. Business
 /// modules own the actual validation; this is discovery, not a second gate.
-const IDENTITY_FLAGS: [(&str, &str); 18] = [
+const IDENTITY_FLAGS: [(&str, &str); 16] = [
     (
         "--project",
         "Project directory and lock; the nearest parent project is used when omitted.",
@@ -93,7 +93,6 @@ const IDENTITY_FLAGS: [(&str, &str); 18] = [
         "--installation",
         "Selected client or game installation directory.",
     ),
-    ("--path", "Explicit addon/skill target directory."),
     ("--pid", "Bind the running process with this PID."),
     ("--session", "Named retained session to continue."),
     ("--character", "Actor display-name constraint."),
@@ -109,15 +108,19 @@ const IDENTITY_FLAGS: [(&str, &str); 18] = [
         "--release",
         "Verified distribution root or release archive for install/update.",
     ),
-    ("--output", "Recovery or upgrade archive destination."),
     ("--definitions", "Pinned definitions commit or full ref."),
 ];
 
 pub fn prerequisites(definition: &Definition) -> Value {
     let mut inputs = Vec::new();
     for flag in &definition.flags {
-        if let Some((_, requirement)) = IDENTITY_FLAGS.iter().find(|(name, _)| *name == flag.name())
-        {
+        let requirement = if matches!(flag.name(), "--path" | "--output") {
+            Some(format!("{}: {}", definition.path, flag.0))
+        } else {
+            IDENTITY_FLAGS.iter().find(|(name, _)| *name == flag.name())
+                .map(|(_, requirement)| (*requirement).to_owned())
+        };
+        if let Some(requirement) = requirement {
             inputs.push(json!({"flag":flag.name(),"requirement":requirement}));
         }
     }
@@ -133,7 +136,8 @@ pub fn prerequisites(definition: &Definition) -> Value {
 pub fn result_contract() -> Value {
     json!({
         "schema": "lycheedev.result.v1",
-        "envelope": {"ok":"boolean","command":"string","result":"value"},
+        "envelope": {"schema":"string","ok":"boolean","operationId":"string","context":"object",
+            "result":"value","captures":"array","warnings":"array","error":"object|null"},
         "jsonl": {"endFrame":"required","exit":"0 on success"},
         "statuses": ["complete","partial","pending","cancelled"],
         "coverage": ["complete","partial","truncated","unknown"],
@@ -179,6 +183,65 @@ pub fn product_matches(query: &str) -> Vec<Value> {
 mod tests {
     use super::*;
     use crate::contract;
+
+    #[test]
+    fn public_result_contract_names_the_actual_success_and_error_envelope() {
+        use std::collections::BTreeSet;
+        let args = |words: &[&str]| words.iter().map(|word| (*word).into()).collect::<Vec<String>>();
+        let invocation = crate::parse(&args(&["schema", "version"])).unwrap();
+        let public = crate::dispatch(&invocation).unwrap().data;
+        let expected: BTreeSet<_> = [
+            "schema", "ok", "operationId", "context", "result", "captures", "warnings", "error",
+        ].into_iter().collect();
+        let version = crate::parse(&args(&["version"])).unwrap();
+        for result in [
+            crate::dispatch(&version),
+            Err(lycheedev_core::ToolkitError::arguments("invalid selected argument")),
+        ] {
+            let mut bytes = Vec::new();
+            crate::render(&mut bytes, "json", &result).unwrap();
+            let actual: Value = serde_json::from_slice(&bytes).unwrap();
+            let keys: BTreeSet<_> = actual.as_object().unwrap().keys().map(String::as_str).collect();
+            assert_eq!(keys, expected);
+            assert_eq!(actual["schema"], "lycheedev.result.v1");
+            assert_eq!(actual["ok"], result.is_ok());
+            assert!(actual["operationId"].is_string());
+            assert!(actual["context"].is_object());
+            assert!(actual["captures"].is_array());
+            assert!(actual["warnings"].is_array());
+            assert_eq!(actual["error"].is_null(), result.is_ok());
+        }
+        let documented: BTreeSet<_> = public["result"]["envelope"]
+            .as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(documented, expected, "Agent discovery must describe the emitted envelope");
+    }
+
+    #[test]
+    fn public_prerequisites_keep_command_specific_path_and_output_meanings() {
+        for (command, flag, meaning) in [
+            ("asset export", "--output", "export"),
+            ("asset demux", "--output", "directory"),
+            ("evidence bundle", "--output", "bundle"),
+            ("source inspect", "--path", "source"),
+            ("source validate", "--path", "addon"),
+            ("project init", "--path", "project"),
+            ("update", "--path", "skill"),
+        ] {
+            let schema_args = ["schema".to_owned(), command.to_owned()];
+            let schema = crate::dispatch(&crate::parse(&schema_args).unwrap()).unwrap().data;
+            let mut help_args: Vec<_> = command.split_whitespace().map(str::to_owned).collect();
+            help_args.push("--help".into());
+            let help = crate::dispatch(&crate::parse(&help_args).unwrap()).unwrap().data;
+            assert_eq!(schema["prerequisites"], help["prerequisites"]);
+            let row = schema["prerequisites"]["identityInputs"].as_array().unwrap()
+                .iter().find(|row| row["flag"] == flag).unwrap();
+            let requirement = row["requirement"].as_str().unwrap().to_lowercase();
+            assert!(requirement.contains(meaning), "{command} {flag}: {requirement}");
+            if command.starts_with("asset ") {
+                assert!(!requirement.contains("upgrade"), "asset outputs are not upgrade archives");
+            }
+        }
+    }
 
     #[test]
     fn exit_codes_are_stable_and_actionable() {

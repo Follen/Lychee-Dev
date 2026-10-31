@@ -22,7 +22,6 @@ use lifecycle::{PathControl, finish_controls, open_workspace};
 mod publication_attempt;
 pub(crate) use publication_attempt::{
     BlobPublicationSettlement, publish_blob_attempt_predeclared_with_check,
-    publish_blob_attempt_with_check,
 };
 mod staged;
 pub use staged::publish_blob_stream_bounded_with_check;

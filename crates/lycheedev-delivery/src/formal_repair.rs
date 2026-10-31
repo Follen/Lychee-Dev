@@ -71,14 +71,17 @@ pub fn apply(
         .ok_or_else(|| invalid("addon parent is missing"))?;
     let original = release::inspect_with_control(release_root, version, control)?;
     let mut snapshot = snapshot::Snapshot::prepare(release_root, parent, &original, control)?;
+    let preparation_root = snapshot.root().to_path_buf();
     let mut phase = "prepared";
+    // Keep the verified intended receipt at its owning boundary: lock close
+    // and snapshot cleanup can fail after publication has fully completed.
+    let wanted = release::receipt(&original, "addon");
     let result = (|| {
         validator.validate(snapshot.root(), version, control)?;
         snapshot.verify(&original, control)?;
         if revalidate(selected, control)? != target {
             return Err(conflict("client identity changed during preparation"));
         }
-        let wanted = release::receipt(&original, "addon");
         // The formal protocol requires its actual release closure, not a
         // version-only manifest that cannot load the slot runtime.
         if !wanted
@@ -146,19 +149,27 @@ pub fn apply(
                 slots::inspect_controlled(parent, version, control)?;
                 control.check()?;
                 phase = "complete";
-                Ok(wanted)
+                Ok(wanted.clone())
             })();
             finish(work, [installation.close()], control)
         })();
         finish(work, [maintenance.close()], control)
     })();
-    match result {
+    let result = match result {
         Ok(receipt) => finish(Ok(receipt), [snapshot.cleanup(control)], control),
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(receipt) => Ok(receipt),
         Err(mut error) => {
             // Never recursively delete a changed/unverified staging tree on a
             // failed or cancelled operation. It is owned evidence, not a new
             // release selection or authority for implicit recovery.
-            error.details = json!({"schema":"lycheedev.formal-repair.v1", "phase":phase, "target":target, "archive":archive, "retainedPreparation":snapshot.root(), "cause":error.clone()});
+            error.details = json!({"schema":"lycheedev.formal-repair.v1", "phase":phase, "target":target, "archive":archive, "retainedPreparation":preparation_root, "cause":error.clone()});
+            if phase == "complete" {
+                error.details["operationCompleted"] = json!(true);
+                error.details["result"] = json!(wanted);
+            }
             Err(error)
         }
     }

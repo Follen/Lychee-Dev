@@ -109,6 +109,24 @@ impl Fixture {
         }
         a
     }
+    fn locked_project(&self) -> PathBuf {
+        let project = self.root.join("project");
+        fs::create_dir_all(project.join("nested")).unwrap();
+        fs::write(project.join("lycheedev.json"), br#"{"schema":"lycheedev.project.v1","product":"retail"}"#).unwrap();
+        let pin = selection::load_pinned(&self.home, &self.snapshot).unwrap();
+        fs::write(
+            project.join("lycheedev.lock.json"),
+            serde_json::to_vec(&json!({"schema":"lycheedev.project-lock.v1","selection":pin})).unwrap(),
+        ).unwrap();
+        project
+    }
+    fn argv_without_snapshot(&self, scan: bool) -> Vec<String> {
+        let mut args = self.argv("dbcache", scan);
+        let position = args.iter().position(|arg| arg == "--snapshot").unwrap();
+        args.remove(position);
+        args.remove(position);
+        args
+    }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -147,6 +165,83 @@ fn admitted_dbcache_local_and_scan_use_eight_digit_hex_without_decimal_regressio
         assert_eq!(value["recordId"], 2);
         if !scan {
             assert_eq!(output.data["page"]["entries"].as_array().unwrap().len(), 1);
+        }
+    }
+}
+
+fn assert_project_cache_result(fixture: &Fixture, inv: &Invocation, scan: bool) {
+    let outcome = crate::hotfix_cli::dispatch(inv).unwrap();
+    let body = if scan { &outcome.data["result"] } else { &outcome.data };
+    assert_eq!(body["source"]["provenance"]["snapshot"], fixture.snapshot);
+    if scan {
+        assert_eq!(body["query"]["Filter"]["tableHash"], 42);
+        assert_eq!(body["query"]["Filter"]["recordId"], 2);
+        assert_eq!(body["returned"], 1);
+    } else {
+        let entries = body["page"]["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(body["page"]["filter"]["tableHash"], 42);
+        assert_eq!(body["page"]["filter"]["recordId"], 2);
+    }
+}
+
+#[test]
+fn hotfix_project_explicit_lock_selects_local_page_and_scan_pin() {
+    let fixture = Fixture::new();
+    let project = fixture.locked_project();
+    for scan in [false, true] {
+        let mut args = fixture.argv_without_snapshot(scan);
+        args.extend(words(&["--project", project.to_str().unwrap()]));
+        let mut inv = parse(&args).unwrap();
+        inv.cwd = fixture.root.clone();
+        assert_project_cache_result(&fixture, &inv, scan);
+    }
+}
+
+#[test]
+fn hotfix_project_nearest_lock_selects_local_page_and_scan_pin() {
+    let fixture = Fixture::new();
+    let project = fixture.locked_project();
+    for scan in [false, true] {
+        let mut inv = parse(&fixture.argv_without_snapshot(scan)).unwrap();
+        inv.cwd = project.join("nested");
+        assert_project_cache_result(&fixture, &inv, scan);
+    }
+}
+
+#[test]
+fn hotfix_project_explicit_snapshot_bypasses_malformed_project() {
+    let fixture = Fixture::new();
+    let project = fixture.locked_project();
+    fs::write(project.join("lycheedev.json"), b"invalid JSON").unwrap();
+    for scan in [false, true] {
+        let mut args = fixture.argv("dbcache", scan);
+        args.extend(words(&["--project", project.to_str().unwrap()]));
+        let mut inv = parse(&args).unwrap();
+        inv.cwd = project.join("nested");
+        assert_project_cache_result(&fixture, &inv, scan);
+    }
+}
+
+#[test]
+fn hotfix_project_invalid_explicit_selection_never_falls_back_to_nearest() {
+    let fixture = Fixture::new();
+    let valid_project = fixture.locked_project();
+    let invalid = fixture.root.join("invalid-project");
+    fs::create_dir(&invalid).unwrap();
+    for (declaration, code) in [
+        (None, "selection.project_missing"),
+        (Some(b"invalid JSON".as_slice()), "selection.project_format"),
+    ] {
+        if let Some(bytes) = declaration {
+            fs::write(invalid.join("lycheedev.json"), bytes).unwrap();
+        }
+        for scan in [false, true] {
+            let mut args = fixture.argv_without_snapshot(scan);
+            args.extend(words(&["--project", invalid.to_str().unwrap()]));
+            let mut inv = parse(&args).unwrap();
+            inv.cwd = valid_project.join("nested");
+            assert_eq!(crate::hotfix_cli::dispatch(&inv).unwrap_err().code, code);
         }
     }
 }

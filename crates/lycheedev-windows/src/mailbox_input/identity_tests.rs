@@ -187,3 +187,66 @@ fn class_and_executable_mismatch_block_normal_and_emergency_posts_on_owned_hwnd(
         keyboard.close().unwrap();
     }
 }
+
+#[test]
+fn short_process_close_failure_blocks_owned_window_identity() {
+    use crate::process::checked_query_tests::CloseObservation;
+    let window = OwnedWindow::new();
+    let target = window.target();
+    let observer = CloseObservation::install(|result| {
+        result?;
+        Err("fixture.process_close".into())
+    });
+    let result = target.identity.verify();
+    drop(observer);
+    assert!(result.unwrap_err().contains("fixture.process_close"));
+    assert!(window.packets().is_empty());
+}
+#[test]
+fn short_process_close_failure_cannot_seal_a_mailbox_window() {
+    use crate::process::checked_query_tests::CloseObservation;
+    let window = OwnedWindow::new();
+    let target = window.target();
+    let observer = CloseObservation::install(|result| {
+        result?;
+        Err("fixture.process_close".into())
+    });
+    let result = MailboxWindow::bind(
+        target.identity.clone(),
+        &String::from_utf16(&target.executable).unwrap(),
+        &String::from_utf16(&target.class).unwrap(),
+    );
+    drop(observer);
+    assert!(result.unwrap_err().contains("fixture.process_close"));
+    assert!(window.packets().is_empty());
+}
+#[test]
+fn mailbox_query_close_failure_preserves_the_primary_identity_rejection() {
+    use crate::process::checked_query_tests::CloseObservation;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let window = OwnedWindow::new();
+    let mut target = window.target();
+    target.class.push(u16::from(b'X'));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    let observer = CloseObservation::install(move |result| {
+        result?;
+        // Two nested window-identity proofs finish before the outer image/class
+        // query owner. Fault that retained owner, after its real OS close.
+        if observed.fetch_add(1, Ordering::SeqCst) >= 2 {
+            Err("fixture.outer_process_close".into())
+        } else {
+            Ok(())
+        }
+    });
+    let result = target.verify();
+    drop(observer);
+    assert!(calls.load(Ordering::SeqCst) >= 3);
+    let error = result.unwrap_err();
+    assert!(error.contains("desktop.identity_changed"));
+    assert!(error.contains("fixture.outer_process_close"));
+    assert!(window.packets().is_empty());
+}

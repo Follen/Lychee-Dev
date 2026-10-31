@@ -8,7 +8,6 @@ import {fileURLToPath} from 'node:url';
 const SAFE_CRATES = ['cli', 'core', 'data', 'delivery', 'emmy-adapter', 'binding-contracts', 'live', 'source'];
 const WINDOWS_FIXTURES = new Set([
   'crates/lycheedev-cli/tests/support/data_agent_cpu.rs',
-  'crates/lycheedev-data/tests/assets_business.rs',
   'crates/lycheedev-source/tests/native_quota_peer.rs',
   'crates/lycheedev-live/tests/passive_windows.rs',
 ]);

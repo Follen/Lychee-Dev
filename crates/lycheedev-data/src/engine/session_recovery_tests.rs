@@ -114,14 +114,14 @@ async fn execute_admits_optimized_output_schema_without_rounding_wide_values() {
     })).unwrap();
     let result = engine.execute(request, OperationControl::default()).await.unwrap();
     assert_eq!(result.row_count(), 3);
-    result.visit_batches(&OperationControl::default(), |schema, batches| {
+    {
+        let schema = result.schema.as_ref().unwrap();
         assert_eq!(schema.field(0).name(), "exact");
         assert_eq!(schema.field(0).data_type(), &arrow_schema::DataType::Int64);
-        for batch in batches {
+        for batch in &result.batches {
             assert_eq!(&batch.schema(), schema);
         }
-        Ok(())
-    }).unwrap();
+    }
     let page = serde_json::to_value(result.page(0, 10).unwrap()).unwrap();
     assert_eq!(page["columns"], serde_json::json!(["exact"]));
     assert_eq!(page["rows"], serde_json::json!([

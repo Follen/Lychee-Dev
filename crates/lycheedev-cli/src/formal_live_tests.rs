@@ -610,6 +610,172 @@ fn doctor_retains_typed_connection_and_uses_protocol_context() {
     assert!(rendered(&response, "json").contains("\"same\":1,\"same\":2"));
 }
 #[test]
+fn doctor_typed_io_failure_survives_public_aggregation_and_raw_report_rendering() {
+    let f = Fixture::new();
+    let inv = invocation(&["doctor", "--session", "CON-original"], &f.0);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls);
+    let details =
+        json!({"resource":"owned-slot-inventory","nativeError":32,"preserved":{"bytes":17}});
+    services.report.failure(
+        "live.installation",
+        "error",
+        ToolkitError::new("external.io", "fixture sharing failure", 5)
+            .with_details(details.clone())
+            .into(),
+        "retry the original read",
+    );
+    services.report.connection = Some(project_result());
+    let response = crate::dispatch_formal_entry_with(&inv, |inv| {
+        aggregate_doctor_with(
+            inv,
+            || {
+                Ok(lycheedev_core::Outcome::new(
+                    json!({"healthy":true,"checks":[]}),
+                ))
+            },
+            || dispatch_with(inv, |_| Ok(services)),
+        )
+    })
+    .unwrap();
+    assert_eq!(response.exit_code(), 5);
+    let error = response.error.as_ref().unwrap();
+    assert_eq!(error.code, "external.io");
+    assert_eq!(error.details, details);
+    for format in ["json", "jsonl"] {
+        let output = rendered(&response, format);
+        assert!(output.contains("\"same\":1,\"same\":2"));
+        let frame: Value = serde_json::from_str(output.lines().last().unwrap()).unwrap();
+        let envelope = if format == "jsonl" {
+            &frame["envelope"]
+        } else {
+            &frame
+        };
+        assert_eq!(envelope["error"]["details"], details);
+        assert_eq!(
+            envelope["result"]["live"]["connection"]["reportState"],
+            "verified"
+        );
+    }
+}
+#[test]
+fn doctor_typed_stop_and_independent_close_causes_are_both_public() {
+    let f = Fixture::new();
+    let inv = invocation(&["doctor", "--session", "CON-original"], &f.0);
+    let mut services = fake(&f.0, Rc::new(RefCell::new(vec![])));
+    services.report.failure(
+        "live.input",
+        "blocked",
+        ChannelError::Joined {
+            causes: vec![
+                ChannelError::Contract(lycheedev_live::mailbox::ContractError(
+                    "live.channel_input_observation_stale",
+                )),
+                ChannelError::Cancelled,
+            ],
+        },
+        "resume original",
+    );
+    let close = ToolkitError::new("fixture.close", "reader checked close failed", 5)
+        .with_details(json!({"handle":"original-reader","consumed":true}));
+    services.report.failure(
+        "live.memory",
+        "error",
+        close.clone().into(),
+        "inspect retained reader error",
+    );
+    services.report.connection = Some(project_result());
+    let response = crate::dispatch_formal_entry_with(&inv, |inv| {
+        aggregate_doctor_with(
+            inv,
+            || {
+                Ok(lycheedev_core::Outcome::new(
+                    json!({"healthy":true,"checks":[]}),
+                ))
+            },
+            || dispatch_with(inv, |_| Ok(services)),
+        )
+    })
+    .unwrap();
+    let error = response.error.as_ref().unwrap();
+    assert_eq!(error.code, "live.channel_wait_cancelled");
+    assert_eq!(error.exit_code, 7);
+    assert_eq!(
+        error.details["causes"][0]["code"],
+        "live.channel_wait_cancelled"
+    );
+    assert_eq!(
+        error.details["causes"][1],
+        serde_json::to_value(close).unwrap()
+    );
+    assert!(rendered(&response, "json").contains("\"same\":1,\"same\":2"));
+}
+#[test]
+fn doctor_typed_read_failure_cannot_enter_repair() {
+    let f = Fixture::new();
+    let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    services.report.failure(
+        "live.installation",
+        "error",
+        ToolkitError::new("external.io", "cannot read original inventory", 5).into(),
+        "retry read",
+    );
+    let response = run(&inv, services);
+    assert_eq!(*calls.borrow(), [Call::Doctor("CON-original".into())]);
+    assert_eq!(response.error.unwrap().code, "external.io");
+}
+#[test]
+fn doctor_protocol_diagnostic_does_not_block_the_formal_repair_service() {
+    let f = Fixture::new();
+    let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    services.report.failure(
+        "live.bootstrap",
+        "blocked",
+        ChannelError::Contract(lycheedev_live::mailbox::ContractError(
+            "live.channel_bootstrap_invalid",
+        )),
+        "upgrade managed addon",
+    );
+    let _ = run(&inv, services);
+    assert_eq!(
+        *calls.borrow(),
+        [Call::Doctor("CON-original".into()), Call::Fix]
+    );
+}
+#[test]
+fn doctor_typed_reinspection_failure_survives_a_completed_repair() {
+    let f = Fixture::new();
+    let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    let mut inspected = DoctorResult::default();
+    let details = json!({"phase":"post-repair-read","consumed":true});
+    inspected.failure(
+        "live.memory",
+        "error",
+        ToolkitError::new("external.io", "reinspection failed", 5)
+            .with_details(details.clone())
+            .into(),
+        "retry original read",
+    );
+    inspected.connection = Some(project_result());
+    services.fixed_report = Some(inspected);
+    services.outcome = Some(ServiceOutcome::Completed(project_result()));
+    let response = run(&inv, services);
+    assert_eq!(
+        *calls.borrow(),
+        [Call::Doctor("CON-original".into()), Call::Fix]
+    );
+    let error = response.error.as_ref().unwrap();
+    assert_eq!(error.code, "external.io");
+    assert_eq!(error.details, details);
+    assert!(rendered(&response, "json").contains("\"same\":1,\"same\":2"));
+}
+#[test]
 fn doctor_fix_preserves_result_on_error_and_does_not_reinspect_after_failure() {
     let f = Fixture::new();
     let inv = invocation(&["doctor", "--session", "CON-original", "--fix"], &f.0);
@@ -1566,4 +1732,92 @@ fn service_outcome_does_not_publish_an_empty_connection() {
         assert!(!response.context.contains_key("session"));
         assert_eq!(response.exit_code(), if failed { 7 } else { 0 });
     }
+}
+
+fn snapshot_connect_fixture(f: &Fixture) -> Invocation {
+    use lycheedev_core::selection::{DataPin, SelectionSpec};
+    let mut inv = invocation(&["live", "connect", "--snapshot", "fixture-pin"], &f.0);
+    lycheedev_core::workspace::initialize_controlled(&inv.home, &inv.control).unwrap();
+    let pin = lycheedev_core::selection::pin_selection_controlled(
+        &inv.home,
+        SelectionSpec {
+            data: Some(DataPin {
+                product: "retail".into(),
+                region: "us".into(),
+                full_build: "12.1.5.70391".into(),
+                build_config: "1".repeat(32),
+                cdn_config: "2".repeat(32),
+                language: "enUS".into(),
+                definition_commit: "a".repeat(40),
+            }),
+            ..Default::default()
+        },
+        &inv.control,
+    )
+    .unwrap();
+    inv.flags.insert("--snapshot".into(), pin.id);
+    inv
+}
+#[test]
+fn snapshot_connect_preflight_keeps_original_stop_without_invoking_service() {
+    let f = Fixture::new();
+    let mut inv = snapshot_connect_fixture(&f);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    let control = OperationControl::default();
+    inv.control.tracked_cancel_handle().unwrap().cancel();
+    let error = prepare_and_run(&inv, &mut services, &control).unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(error.exit_code, 7);
+    assert!(calls.borrow().is_empty());
+    inv.control = OperationControl::uncancelable(Instant::now());
+    let error = prepare_and_run(&inv, &mut services, &control).unwrap_err();
+    assert_eq!(error.code, "command.deadline");
+    assert_eq!(error.exit_code, 5);
+    assert!(calls.borrow().is_empty());
+}
+#[test]
+fn snapshot_connect_preflight_uses_fixed_build_and_retains_selection_arguments() {
+    let f = Fixture::new();
+    let mut inv = snapshot_connect_fixture(&f);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    prepare_and_run(&inv, &mut services, &inv.control).unwrap();
+    assert_eq!(
+        *calls.borrow(),
+        [Call::Connect(
+            String::new(),
+            0,
+            String::new(),
+            String::new(),
+            "12.1.5.70391".into(),
+            "retail".into()
+        )]
+    );
+    calls.borrow_mut().clear();
+    inv.flags.insert("--snapshot".into(), "PIN-missing".into());
+    let error = prepare_and_run(&inv, &mut services, &inv.control).unwrap_err();
+    assert_eq!(error.code, "command.invalid_arguments");
+    assert_eq!(error.exit_code, 2);
+    assert!(calls.borrow().is_empty());
+}
+#[cfg(windows)]
+#[test]
+fn snapshot_connect_preflight_does_not_reclassify_real_metadata_io_as_arguments() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let f = Fixture::new();
+    let inv = snapshot_connect_fixture(&f);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(inv.home.join("state/toolkit.sqlite"))
+        .unwrap();
+    let result = prepare_and_run(&inv, &mut services, &inv.control);
+    lycheedev_core::storage::finish_file(held, Ok(()), &inv.control).unwrap();
+    let error = result.unwrap_err();
+    assert_eq!(error.code, "vault.metadata");
+    assert_eq!(error.exit_code, 5);
+    assert!(calls.borrow().is_empty());
 }

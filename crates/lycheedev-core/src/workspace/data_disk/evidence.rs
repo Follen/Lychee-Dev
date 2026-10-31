@@ -253,25 +253,6 @@ impl<'a> EvidenceQuota<'a> {
         self.owner.control.check()?;
         Ok(pages)
     }
-    pub(crate) fn attempting_commit(&self, key: &str, generation: i64) -> usize {
-        let mut receipts = self.owner.publication_receipts.borrow_mut();
-        let index = receipts.len();
-        receipts.push(serde_json::json!({
-            "kind":"data-evidence-metadata", "state":"unknown",
-            "path":self.path(), "key":key, "generation":generation,
-        }));
-        index
-    }
-    pub(crate) fn commit_state(&self, index: usize, state: &'static str) {
-        self.owner.publication_receipts.borrow_mut()[index]["state"] = state.into();
-    }
-    pub(crate) fn prepare_receipt(&self) -> Result<()> {
-        self.owner
-            .publication_receipts
-            .borrow_mut()
-            .try_reserve(1)
-            .map_err(|_| ToolkitError::invalid("cannot reserve metadata commit receipt"))
-    }
     pub(crate) fn finish<T>(self, result: Result<T>) -> Result<T> {
         // Attempt inventory on errors too; a stopped inventory preserves its
         // exact stop and all files remain counted by the next admission.

@@ -1,6 +1,97 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertPackageReports, assertRustCoverage } from './ci-release.mjs';
+import {createHash} from 'node:crypto';
+import fs from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+import {join, resolve, sep} from 'node:path';
+import { assertPackageReports, assertRustCoverage, assertValidationReports, sealRelease } from './ci-release.mjs';
+import { CLIENTS, discoverSuites } from '../tests/addon/run-all.mjs';
+
+function sealedFixture(t) {
+  const base = resolve(import.meta.dirname, '../.tmp/rust-audit-next');
+  mkdirSync(base, {recursive: true});
+  const directory = mkdtempSync(join(base, 'seal-'));
+  t.after(() => {
+    assert(directory.startsWith(base + sep));
+    rmSync(directory, {recursive: true, force: true});
+  });
+  const candidate = join(directory, 'candidate'), output = join(directory, 'sealed');
+  mkdirSync(join(candidate, 'reports'), {recursive: true});
+  const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+  const record = (name, bytes) => ({name, bytes: bytes.length, sha256: digest(bytes)});
+  const tgz = Buffer.from('the original validated package'), addon = Buffer.from('the validated addon');
+  const report = Buffer.from('{"state":"passed"}\n');
+  const manifest = {schema: 'lycheedev.ci-release-candidate.v1', version: '3.5.0', tag: 'v3.5.0',
+    commit: 'a'.repeat(40), distTag: 'beta', sourceTree: 'b'.repeat(64), publication: 'not_performed',
+    artifacts: {npmTgz: record('lycheedev-3.5.0.tgz', tgz), addonZip: record('lycheedev-3.5.0-addon.zip', addon)},
+    validation: {reports: [record('package-business', report)]}, rust: {rustc: 'fixed'}};
+  writeFileSync(join(candidate, manifest.artifacts.npmTgz.name), tgz);
+  writeFileSync(join(candidate, manifest.artifacts.addonZip.name), addon);
+  writeFileSync(join(candidate, 'reports/package-business'), report);
+  writeFileSync(join(candidate, 'release-manifest.json'), JSON.stringify(manifest));
+  const identity = join(directory, 'identity.json');
+  writeFileSync(identity, JSON.stringify({schema: 'lycheedev.ci-release-identity.v1', version: manifest.version,
+    tag: manifest.tag, commit: manifest.commit, distTag: manifest.distTag, tagVerified: true}));
+  const names = ['release-manifest.json', ...Object.values(manifest.artifacts).map(row => row.name), 'reports/package-business'];
+  const sums = (selected = names) => writeFileSync(join(candidate, 'SHA256SUMS'),
+    selected.map(name => `${digest(readFileSync(join(candidate, name)))}  ${name}\n`).join(''));
+  sums();
+  return {candidate, output, identity, manifest, names, sums};
+}
+
+test('tag sealing preserves all manifest-declared package and validation bytes', t => {
+  const fx = sealedFixture(t);
+  sealRelease(fx);
+  for (const name of fx.names) assert.deepEqual(readFileSync(join(fx.output, name)), readFileSync(join(fx.candidate, name)));
+});
+
+for (const name of ['lycheedev-3.5.0.tgz', 'reports/package-business']) {
+  test(`tag sealing rejects substituted ${name} even with regenerated SHA256SUMS`, t => {
+    const fx = sealedFixture(t);
+    writeFileSync(join(fx.candidate, name), 'substituted bytes');
+    fx.sums();
+    assert.throws(() => sealRelease(fx), /ci-release\.sealed_file_(identity|changed)/);
+    assert.equal(existsSync(fx.output), false);
+  });
+}
+
+test('tag sealing requires every declared validation report in SHA256SUMS', t => {
+  const fx = sealedFixture(t);
+  fx.sums(fx.names.filter(name => !name.startsWith('reports/')));
+  assert.throws(() => sealRelease(fx), /ci-release\.sealed_file_unlisted/);
+  assert.equal(existsSync(fx.output), false);
+});
+
+test('tag sealing cannot change the channel frozen by the tag identity', t => {
+  const fx = sealedFixture(t);
+  fx.manifest.distTag = 'latest';
+  writeFileSync(join(fx.candidate, 'release-manifest.json'), JSON.stringify(fx.manifest));
+  fx.sums();
+  assert.throws(() => sealRelease(fx), /ci-release\.candidate_identity_mismatch/);
+  assert.equal(existsSync(fx.output), false);
+});
+
+test('tag sealing verifies copied bytes before writing the sealed manifest', t => {
+  const fx = sealedFixture(t), original = fs.copyFileSync;
+  const mocked = t.mock.method(fs, 'copyFileSync', (source, target, ...args) => {
+    original(source, target, ...args);
+    if (source.endsWith('.tgz')) writeFileSync(target, 'changed during copy');
+  });
+  syncBuiltinESMExports();
+  t.after(() => { mocked.mock.restore(); syncBuiltinESMExports(); });
+  assert.throws(() => sealRelease(fx), /ci-release\.sealed_file_copy_changed/);
+  assert.equal(existsSync(join(fx.output, 'release-sealed.json')), false);
+});
+
+test('tag sealing rejects repeated sum entries and paths outside the candidate', t => {
+  for (const extra of ['lycheedev-3.5.0.tgz', '../identity.json']) {
+    const fx = sealedFixture(t);
+    fx.sums([...fx.names, extra]);
+    assert.throws(() => sealRelease(fx), /ci-release\.sealed_(duplicate|unexpected)_file/);
+    assert.equal(existsSync(fx.output), false);
+  }
+});
 
 test('candidate requires complete Rust coverage for the same built program record', () => {
   const identity = {commit: 'a'.repeat(40), sourceTree: 'b'.repeat(64), recordSHA256: 'c'.repeat(64), programs: 93};
@@ -55,4 +146,47 @@ test('partial, missing and unreaped package business checks cannot seal a candid
     value => { value.audit.violations.push('unlisted payload'); },
     value => { value.production.state = 'assembled'; },
   ]) { const value = fixture(); change(value); assert.throws(() => assertPackageReports(value)); }
+});
+
+function validationFixture() {
+  const packages = fixture(), suites = discoverSuites(), lua51SHA256 = 'e'.repeat(64);
+  const testIdentity = {commit: 'a'.repeat(40), sourceTree: 'b'.repeat(64), recordSHA256: 'c'.repeat(64), programs: 93};
+  const rust = {schema: 'lycheedev.ci-test-run.v1', commit: testIdentity.commit, sourceTree: testIdentity.sourceTree,
+    testRecordSHA256: testIdentity.recordSHA256, state: 'passed', handlesReaped: true, programs: 93, passed: 93, failed: 0,
+    coverage: {complete: true, expectedPrograms: 93, observedPrograms: 93, shards: 2}};
+  const cases = CLIENTS.flatMap(client => suites.map(file => ({file, client, state: 'passed'})));
+  const reports = new Map([
+    ['rust', rust], ['package-audit', packages.audit], ['package-business', packages.business],
+    ['addon-lua', {schema: 'lycheedev.addon-lua-regression.v1', suites: suites.length, clients: [...CLIENTS],
+      counts: {passed: cases.length, failed: 0}, cases, interpreter: {executableSHA256: lua51SHA256}}],
+    ['addon-zip', {ok: true, violations: [], files: ['Lychee Dev/Lychee Dev.toc']}],
+    ['skill', {checkKind: 'static-reference-consistency', files: 21, contracts: 68, references: 30, violations: []}],
+  ]);
+  return {reports, identity: {testIdentity, packageIdentity: packages, lua51SHA256}};
+}
+
+test('candidate rejects failed addon and Skill validations even when all named reports are present', () => {
+  const positive = validationFixture();
+  assert.doesNotThrow(() => assertValidationReports(positive.reports, positive.identity));
+  for (const [section, change] of [
+    ['addon-lua', value => { value.counts.failed = 1; value.cases[0].state = 'failed'; }],
+    ['addon-zip', value => { value.ok = false; value.violations.push('missing bindings'); }],
+    ['skill', value => { value.violations.push('unknown command'); }],
+  ]) {
+    const {reports, identity} = validationFixture(); change(reports.get(section));
+    assert.throws(() => assertValidationReports(reports, identity), /ci-release\.(addon|skill)/, section);
+  }
+});
+
+test('candidate requires the complete current addon matrix and the sealed Lua interpreter', () => {
+  for (const change of [
+    value => { value.cases.pop(); value.counts.passed--; },
+    value => { value.cases[1] = {...value.cases[0]}; },
+    value => { value.clients.pop(); },
+    value => { value.suites--; },
+    value => { value.interpreter.executableSHA256 = 'f'.repeat(64); },
+  ]) {
+    const {reports, identity} = validationFixture(); change(reports.get('addon-lua'));
+    assert.throws(() => assertValidationReports(reports, identity), /ci-release\.addon/);
+  }
 });

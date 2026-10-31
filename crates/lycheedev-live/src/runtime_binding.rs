@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 use crate::{
     lua_layout::Layout,
-    mailbox::lookup::{Memory, Reader, Record, Selector},
+    mailbox::lookup::{Memory, Reader, Record},
     runtime_root::{RecipeId, RootBinding, RootEvidence},
 };
 use lycheedev_core::client::{self, ClientInstallation};
@@ -11,7 +11,6 @@ use lycheedev_windows::process::{
     RuntimeBudget, RuntimeControl, RuntimeCost, RuntimeLimits, RuntimeModule,
     RuntimeModuleIdentity, RuntimeReadKind, RuntimeUsage,
 };
-use serde::Serialize;
 use std::cell::RefCell;
 
 type Result<T> = std::result::Result<T, String>;
@@ -204,9 +203,6 @@ impl RuntimeLayoutAdmission {
             scope: None,
         })
     }
-    pub fn profile_id(&self) -> &'static str {
-        self.profile.profile
-    }
     pub fn evidence_sha256(&self) -> &'static str {
         self.profile.evidence_sha256
     }
@@ -256,98 +252,6 @@ impl std::fmt::Display for RuntimeBindingFailure {
     }
 }
 impl std::error::Error for RuntimeBindingFailure {}
-
-/// Plain observation data, deliberately excluding the opaque module's issuance
-/// serial/request and all root, Lua state and heap addresses.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeWindowDescription {
-    pub handle: String,
-    pub process_id: u32,
-    pub process_started_at: String,
-}
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeModuleDescription {
-    pub base: String,
-    pub size: u64,
-    pub architecture: u16,
-}
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeCoverage {
-    pub recipe: Option<RecipeId>,
-    pub pattern_hits: u64,
-    pub rejected_matches: u64,
-    pub root_candidates: u64,
-    pub text_bytes: u64,
-    pub gaps: crate::runtime_root::RootGaps,
-    pub read_failures: u64,
-    pub header_bytes: u64,
-    pub scanned_bytes: u64,
-    pub module_read_calls: u64,
-    pub module_read_bytes: u64,
-    pub full_text_pass: bool,
-    pub stable_guards: bool,
-    pub atomic: bool,
-}
-impl From<&RootEvidence> for RuntimeCoverage {
-    fn from(value: &RootEvidence) -> Self {
-        Self {
-            recipe: value.recipe,
-            pattern_hits: value.pattern_hits,
-            rejected_matches: value.rejected_matches,
-            root_candidates: value.root_candidates,
-            text_bytes: value.text_bytes,
-            gaps: value.gaps.clone(),
-            read_failures: value.read_failures,
-            header_bytes: value.header_bytes,
-            scanned_bytes: value.scanned_bytes,
-            module_read_calls: value.module_read_calls,
-            module_read_bytes: value.module_read_bytes,
-            full_text_pass: value.full_text_pass,
-            stable_guards: value.stable_guards,
-            atomic: value.atomic,
-        }
-    }
-}
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeBindingDescription {
-    pub window: RuntimeWindowDescription,
-    pub module: RuntimeModuleDescription,
-    pub client: ClientInstallation,
-    pub expected_release: String,
-    pub layout_profile: &'static str,
-    pub initial_coverage: RuntimeCoverage,
-    pub latest_coverage: RuntimeCoverage,
-}
-
-fn description_cost(client: &ClientInstallation, release: &str) -> RuntimeCost {
-    let client_bytes: usize = [
-        &client.directory,
-        &client.product,
-        &client.product_code,
-        &client.catalog_product,
-        &client.display_name,
-        &client.channel,
-        &client.metadata_branch,
-        &client.full_build,
-        &client.toc,
-        &client.identity_source,
-    ]
-    .iter()
-    .map(|value| value.len())
-    .sum();
-    RuntimeCost {
-        allocation_bytes: (std::mem::size_of::<RuntimeBindingDescription>()
-            + client_bytes
-            + release.len()
-            + 3 * 32) as u64,
-        work_units: (client_bytes + release.len() + 256) as u64,
-        ..RuntimeCost::default()
-    }
-}
 
 // Private seam exercises orchestration without allowing external Memory
 // implementations to mint an OS-bound reader or an ABI admission.
@@ -536,10 +440,7 @@ impl Source for CandidateSource<'_> {
         runtime_read_diagnostic(self.module, self.root, address, bytes, module, budget)
     }
 }
-enum LookupSelector<'a> {
-    Named(&'a Selector),
-    Formal(&'a crate::mailbox::Selector),
-}
+
 fn transient_publication(cause: &str) -> bool {
     matches!(
         cause,
@@ -556,37 +457,6 @@ struct Bound<S> {
     poisoned: Option<String>,
 }
 impl<S: Source> Bound<S> {
-    fn describe(
-        &mut self,
-        budget: &mut RuntimeBudget,
-        project: impl FnOnce(
-            &S,
-            &RuntimeLayoutAdmission,
-            &str,
-            &mut RuntimeBudget,
-        ) -> Result<RuntimeBindingDescription>,
-    ) -> std::result::Result<RuntimeBindingDescription, RuntimeBindingFailure> {
-        if let Some(cause) = &self.poisoned {
-            return Err(self.failure(cause.clone(), "poisoned", budget));
-        }
-        let result = (|| {
-            if budget.request_id() != self.request {
-                return Err("reader.runtime_budget_identity".into());
-            }
-            budget.check()?;
-            self.source.verify_scope(&self.admission, budget)?;
-            let description = project(&self.source, &self.admission, &self.release, budget)?;
-            budget.check()?;
-            Ok(description)
-        })();
-        if budget.request_id() == self.request {
-            self.last_usage = budget.usage();
-        }
-        result.map_err(|cause: String| {
-            self.poisoned = Some(cause.clone());
-            self.failure(cause, "description", budget)
-        })
-    }
     fn failure(
         &self,
         cause: String,
@@ -647,27 +517,13 @@ impl<S: Source> Bound<S> {
             poisoned: None,
         })
     }
-    fn lookup(
-        &mut self,
-        selector: &Selector,
-        budget: &mut RuntimeBudget,
-    ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
-        self.lookup_selected(LookupSelector::Named(selector), None, budget)
-    }
     fn lookup_formal(
         &mut self,
         selector: &crate::mailbox::Selector,
         accept: Option<&mut dyn FnMut(&Record) -> bool>,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
-        self.lookup_selected(LookupSelector::Formal(selector), accept, budget)
-    }
-    fn lookup_selected(
-        &mut self,
-        selector: LookupSelector<'_>,
-        mut accept: Option<&mut dyn FnMut(&Record) -> bool>,
-        budget: &mut RuntimeBudget,
-    ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
+        let mut accept = accept;
         if let Some(cause) = &self.poisoned {
             return Err(self.failure(cause.clone(), "poisoned", budget));
         }
@@ -698,14 +554,7 @@ impl<S: Source> Bound<S> {
                     layout: self.admission.layout(),
                     release: self.release.clone(),
                 };
-                let read = match selector {
-                    LookupSelector::Named(selector) => reader
-                        .lookup_runtime(selector, &self.admission)
-                        .map_err(crate::mailbox::lookup::LookupFailure::from),
-                    LookupSelector::Formal(selector) => {
-                        reader.lookup_runtime_formal(selector, &self.admission, None)
-                    }
-                };
+                let read = reader.lookup_runtime_formal(selector, &self.admission, None);
                 read.map_err(|failure| {
                     first_read_failure = failure.first_read_failure;
                     failure.cause
@@ -814,65 +663,13 @@ impl RuntimeBoundMemory {
     pub fn close(self, budget: &RuntimeBudget) -> Result<()> {
         self.bound.source.close(budget)
     }
-    /// Recheck this held scope and copy descriptive facts under its original
-    /// ledger. This DTO cannot reconstruct a module, root or input capability.
-    pub fn description(
-        &mut self,
-        budget: &mut RuntimeBudget,
-    ) -> std::result::Result<RuntimeBindingDescription, RuntimeBindingFailure> {
-        self.bound
-            .describe(budget, |source, admission, release, budget| {
-                let scope = admission
-                    .scope
-                    .as_ref()
-                    .ok_or("reader.runtime_scope_missing")?;
-                budget.charge(description_cost(&scope.client, release))?;
-                let module = source.module.identity();
-                Ok(RuntimeBindingDescription {
-                    window: RuntimeWindowDescription {
-                        handle: module.window().hwnd.to_string(),
-                        process_id: module.process().pid,
-                        process_started_at: module.process().created.to_string(),
-                    },
-                    module: RuntimeModuleDescription {
-                        base: module.base().to_string(),
-                        size: module.size(),
-                        architecture: module.architecture(),
-                    },
-                    client: scope.client.clone(),
-                    expected_release: release.into(),
-                    layout_profile: admission.profile_id(),
-                    initial_coverage: source.root.evidence().into(),
-                    latest_coverage: source.evidence().into(),
-                })
-            })
-    }
-    /// Open the held runtime module, resolve its instruction recipe and bind the
-    /// Lua reader under one cumulative request budget. No disk-backed root rule
-    /// or caller-supplied module/root identity enters this path.
-    pub fn open(
-        window: lycheedev_windows::WindowIdentity,
-        release: &str,
-        budget: &mut RuntimeBudget,
-    ) -> std::result::Result<Self, RuntimeBindingFailure> {
-        Self::open_selected(window, release, budget, false)
-    }
-
     /// Formal reader constructor: the controlled, fully hashed EXE/PE layout
     /// is mandatory and stays retained by the selected root capability.
+
     pub fn open_formal(
         window: lycheedev_windows::WindowIdentity,
         release: &str,
         budget: &mut RuntimeBudget,
-    ) -> std::result::Result<Self, RuntimeBindingFailure> {
-        Self::open_selected(window, release, budget, true)
-    }
-
-    fn open_selected(
-        window: lycheedev_windows::WindowIdentity,
-        release: &str,
-        budget: &mut RuntimeBudget,
-        trusted: bool,
     ) -> std::result::Result<Self, RuntimeBindingFailure> {
         let module =
             RuntimeModule::open(window, budget).map_err(|cause| RuntimeBindingFailure {
@@ -883,7 +680,7 @@ impl RuntimeBoundMemory {
                 first_read_failure: None,
             })?;
         let prepared = (|| {
-            let resolved = if trusted {
+            let resolved = {
                 let layout =
                     module
                         .verify_image_layout(budget)
@@ -897,8 +694,6 @@ impl RuntimeBoundMemory {
                 crate::runtime_root::RuntimeRootRecipe::candidates_with_layout(
                     &module, layout, budget,
                 )
-            } else {
-                crate::runtime_root::RuntimeRootRecipe::candidates(&module, budget)
             };
             let mut roots = resolved.map_err(|failure| RuntimeBindingFailure {
                 cause: failure.cause,
@@ -1034,13 +829,6 @@ impl RuntimeBoundMemory {
         )
         .map(|bound| Self { bound })
     }
-    pub fn lookup(
-        &mut self,
-        selector: &Selector,
-        budget: &mut RuntimeBudget,
-    ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
-        self.bound.lookup(selector, budget)
-    }
     pub fn lookup_formal(
         &mut self,
         selector: &crate::mailbox::Selector,
@@ -1056,9 +844,6 @@ impl RuntimeBoundMemory {
     /// does not claim that the full text domain was scanned again.
     pub fn latest_root_evidence(&self) -> &RootEvidence {
         self.bound.source.evidence()
-    }
-    pub fn profile_id(&self) -> &'static str {
-        self.bound.admission.profile_id()
     }
 }
 

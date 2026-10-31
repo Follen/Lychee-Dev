@@ -295,11 +295,6 @@ impl SnapshotInputsJson {
         Ok((Self { evidence, json: std::sync::OnceLock::new(), bytes }, sha256))
     }
     #[cfg(test)]
-    fn from_serialized(evidence: Arc<GraphSnapshotEvidence>, json: String) -> Self {
-        let bytes = json.len();
-        Self { evidence, json: std::sync::OnceLock::from(json), bytes }
-    }
-    #[cfg(test)]
     fn is_materialized(&self) -> bool { self.json.get().is_some() }
     pub fn len(&self) -> usize { self.bytes }
     pub fn is_empty(&self) -> bool { self.bytes == 0 }

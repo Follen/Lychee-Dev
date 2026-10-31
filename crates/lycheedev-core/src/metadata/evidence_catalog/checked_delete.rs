@@ -7,10 +7,7 @@ pub(crate) fn run<T>(
     keys: &[String],
     expected: &[(String, i64)],
     control: &OperationControl,
-    validate: impl FnOnce(
-        &[Document],
-        &TransactionReader<'_>,
-    ) -> Result<(T, Option<(String, serde_json::Value)>)>,
+    validate: impl FnOnce(&[Document]) -> Result<(T, Option<(String, serde_json::Value)>)>,
 ) -> Result<T> {
     with_catalog(
         home,
@@ -105,12 +102,7 @@ pub(crate) fn run<T>(
                         ));
                     }
                 }
-                let reader = TransactionReader {
-                    connection: &transaction,
-                    control,
-                    catalog: Some(catalog),
-                };
-                let (value, recovery) = validate(&documents, &reader)?;
+                let (value, recovery) = validate(&documents)?;
                 control.check()?;
                 let recovery = recovery
                     .map(|(key, record)| -> Result<_> {

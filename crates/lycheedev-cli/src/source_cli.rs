@@ -263,7 +263,7 @@ pub(crate) fn research(inv: &Invocation) -> Result<Option<Research>> {
     };
     let environment = if needs_environment {
         inv.flag("--environment")
-            .map(|id| selection::load_pinned(&inv.home, id))
+            .map(|id| selection::load_pinned_controlled(&inv.home, id, &inv.control))
             .transpose()?
     } else {
         None
@@ -430,7 +430,11 @@ fn validation(inv: &Invocation) -> Result<SourceRequest> {
     let semantic = inv.flag_bool("--semantic");
     let environment = if selection.source().repository != "wow-ui-source" && semantic {
         Some(
-            selection::load_pinned(&inv.home, inv.required("--environment")?)?
+            selection::load_pinned_controlled(
+                &inv.home,
+                inv.required("--environment")?,
+                &inv.control,
+            )?
                 .spec
                 .source
                 .ok_or_else(|| {
@@ -459,7 +463,10 @@ fn ordinary(inv: &Invocation) -> Result<Ordinary> {
     let request = match inv.command.as_str() {
         "source list" => match inv.flag("--snapshot") {
             Some(_) => SourceRequest::Status(SelectedSource::new(crate::core_cli::resolve_pinned(inv)?)?),
-            None => SourceRequest::Catalog,
+            None => match crate::core_cli::resolve_optional_project(inv)? {
+                Some((_, pin)) => SourceRequest::Status(SelectedSource::new(pin)?),
+                None => SourceRequest::Catalog,
+            },
         },
         "source sync" => SourceRequest::Sync(SyncRequest {
             repository: inv.required("--source")?.into(),
@@ -484,8 +491,8 @@ fn ordinary(inv: &Invocation) -> Result<Ordinary> {
         "source diff" => {
             let from = inv.required("--from")?;
             let to = inv.required("--to")?;
-            let left = selection::load_pinned(&inv.home, from)?;
-            let right = selection::load_pinned(&inv.home, to)?;
+            let left = selection::load_pinned_controlled(&inv.home, from, &inv.control)?;
+            let right = selection::load_pinned_controlled(&inv.home, to, &inv.control)?;
             let selected = |pin| {
                 SelectedSource::new(pin).map_err(|_| {
                     ToolkitError::new(

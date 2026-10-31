@@ -6,19 +6,8 @@ import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {gzipSync} from 'node:zlib';
 import * as packageTools from './rust-package-smoke.mjs';
-import {parsePackageOptions, prepareDependencyClosure, assertArtifactSource, assertSourceSyntaxValidation, assertInstalledNativeVersion, packageSmokeEnvironment} from './rust-package-smoke.mjs';
+import {parsePackageOptions, prepareDependencyClosure, assertArtifactSource, assertSourceSyntaxValidation, assertInstalledNativeIdentity, packageSmokeEnvironment} from './rust-package-smoke.mjs';
 import {sourceDigest} from './rust-build.mjs';
-import {assertNpmSmokeVersion} from './ci-release.mjs';
-
-test('release candidate consumes the v1 npm report CLI version envelope without accepting a flat version', () => {
-  const report = {schema: 'lycheedev.rust-npm-smoke.v1', version: {
-    schema: 'lycheedev.result.v1', ok: true, result: {version: '3.5.0'},
-  }};
-  assertNpmSmokeVersion(report, '3.5.0');
-  assert.throws(() => assertNpmSmokeVersion(report, '3.5.1'), /ci-release.npm_version_mismatch/);
-  assert.throws(() => assertNpmSmokeVersion({...report, version: '3.5.0'}, '3.5.0'), /ci-release.npm_version_mismatch/);
-  assert.throws(() => assertNpmSmokeVersion({...report, version: undefined}, '3.5.0'), /ci-release.npm_version_mismatch/);
-});
 
 test('npm smoke isolates user, Agent and npm state without inherited toolkit overrides', () => {
   const scratch = join(tmpdir(), 'isolated-npm-smoke'), inherited = '/real-user-state';
@@ -90,18 +79,24 @@ test('a different luac pin invalidates an otherwise unchanged sealed CLI', t => 
   assert.throws(() => assertArtifactSource(artifact, sourceDigest(root), 'debug'), /artifact_source_mismatch/);
 });
 
-test('installed native version must match the authenticated package version', () => {
-  const expectedVersion = '3.5.0';
-  const valid = {ok: true, result: {platform: 'windows/amd64', rust: true, version: expectedVersion}};
-  assertInstalledNativeVersion(valid, expectedVersion);
+test('installed native identity must match the authenticated package version and build', () => {
+  const expected = {packageVersion: '3.5.0', commit: 'a'.repeat(40), workspaceDirty: false};
+  const valid = {ok: true, result: {platform: 'windows/amd64', rust: true, version: expected.packageVersion,
+    commit: expected.commit, workspaceDirty: false}};
+  assertInstalledNativeIdentity(valid, expected);
   for (const version of ['3.1.4', '3.5.1', '', undefined, 3.5]) {
-    assert.throws(() => assertInstalledNativeVersion({...valid, result: {...valid.result, version}}, expectedVersion), /candidate\.version_mismatch/);
+    assert.throws(() => assertInstalledNativeIdentity({...valid, result: {...valid.result, version}}, expected), /candidate\.version_mismatch/);
   }
-  assert.throws(() => assertInstalledNativeVersion({...valid, ok: false}, expectedVersion), /candidate\.version_mismatch/);
-  for (const expected of ['', undefined]) assert.throws(() => assertInstalledNativeVersion(valid, expected), /candidate\.version_mismatch/);
-  assert.throws(() => assertInstalledNativeVersion({...valid, result: {...valid.result, platform: 'linux/amd64'}}, expectedVersion), /candidate\.not_rust/);
-  assert.throws(() => assertInstalledNativeVersion({...valid, result: {...valid.result, rust: false}}, expectedVersion), /candidate\.not_rust/);
-  assertInstalledNativeVersion(valid, expectedVersion);
+  assert.throws(() => assertInstalledNativeIdentity({...valid, ok: false}, expected), /candidate\.version_mismatch/);
+  for (const packageVersion of ['', undefined]) assert.throws(() => assertInstalledNativeIdentity(valid, {...expected, packageVersion}), /candidate\.version_mismatch/);
+  assert.throws(() => assertInstalledNativeIdentity({...valid, result: {...valid.result, platform: 'linux/amd64'}}, expected), /candidate\.not_rust/);
+  assert.throws(() => assertInstalledNativeIdentity({...valid, result: {...valid.result, rust: false}}, expected), /candidate\.not_rust/);
+  for (const response of ['3.5.0', undefined]) assert.throws(() => assertInstalledNativeIdentity(response, expected), /candidate\.not_rust/);
+  for (const result of [{...valid.result, commit: 'b'.repeat(40)}, {...valid.result, commit: undefined},
+    {...valid.result, workspaceDirty: true}, {...valid.result, workspaceDirty: undefined}]) {
+    assert.throws(() => assertInstalledNativeIdentity({...valid, result}, expected), /candidate\.binary_build_identity/);
+  }
+  assertInstalledNativeIdentity({...valid, result: {...valid.result, workspaceDirty: true}}, {...expected, workspaceDirty: true});
 });
 
 function closureFixture(t) {
@@ -186,7 +181,7 @@ function packedFixture(t) {
     'payload/skill/scripts/lycheedev.mjs': Buffer.from('// launcher fixture')};
   const tgz = join(root, 'producer/candidate.tgz'); writeFileSync(tgz, tarball(files));
   const report = {schema: 'lycheedev.rust-npm-package.v1', state: 'packed', profile: 'release', developmentOnly: true, packageVersion,
-    commit, sourceTreeSHA256: sourceDigest(root), binarySHA256: sha(cli), releaseManifestSHA256: sha(release), resourceInventorySHA256: sha(Buffer.from(JSON.stringify(resources))),
+    commit, workspaceDirty: false, sourceTreeSHA256: sourceDigest(root), binarySHA256: sha(cli), releaseManifestSHA256: sha(release), resourceInventorySHA256: sha(Buffer.from(JSON.stringify(resources))),
     compilerSHA256: sha(compiler), tgz: 'candidate.tgz', tgzPathBase: 'report', tgzSHA256: sha(readFileSync(tgz)), npmSmoke: 'not_run', validation: {state: 'not_run'}};
   const reportPath = join(root, 'producer/report.json'); writeFileSync(reportPath, JSON.stringify(report));
   const calls = [];
@@ -197,7 +192,7 @@ function packedFixture(t) {
     else if (args.includes('install')) {
       const installed = join(args[args.indexOf('--prefix') + 1], 'node_modules/lycheedev');
       for (const [path, bytes] of Object.entries(files)) { const destination = join(installed, path); mkdirSync(join(destination, '..'), {recursive: true}); writeFileSync(destination, bytes); }
-    } else if (args.includes('version')) stdout = JSON.stringify({ok: true, result: {version: packageVersion, rust: true, platform: 'windows/amd64'}});
+    } else if (args.includes('version')) stdout = JSON.stringify({ok: true, result: {version: packageVersion, rust: true, platform: 'windows/amd64', commit, workspaceDirty: false}});
     else if (!args.includes('-v') && !args.includes('-p')) assert.fail(`unexpected command: ${command} ${args.join(' ')}`);
     return {status: 0, handlesReaped: true, stdout: Buffer.from(stdout), stderr: Buffer.alloc(0), logs: []};
   };
@@ -230,6 +225,28 @@ test('package validation consumes the original TGZ without assembly, pack or Car
   assert(calls.some(call => call.args[0]?.includes('payload') && call.args.includes('version')), 'executes installed Skill launcher');
   assert.equal(existsSync(join(root, 'validated/package')), false, 'no package assembly tree');
 });
+
+for (const [label, change] of [
+  ['a different compiled commit', value => { value.commit = 'b'.repeat(40); }],
+  ['a different compiled dirty state', value => { value.workspaceDirty = true; }],
+]) {
+  test(`package validation rejects ${label} despite an identical package version`, async t => {
+    const fixture = packedFixture(t);
+    const execute = (command, args, options) => {
+      const result = fixture.execute(command, args, options);
+      if (args.includes('version')) {
+        const envelope = JSON.parse(result.stdout.toString()); change(envelope.result);
+        result.stdout = Buffer.from(JSON.stringify(envelope));
+      }
+      return result;
+    };
+    await assert.rejects(() => packageTools.packageValidate(['validated', '--package-report', fixture.reportPath], fixture.root, {execute}), /candidate\.binary_build_identity/);
+    const report = JSON.parse(readFileSync(join(fixture.root, 'validated/report.json')));
+    assert.equal(report.state, 'failed');
+    assert.equal(report.npmSmoke, 'not_run');
+    assert.equal(fixture.calls.some(call => call.command === 'cargo' || call.args.includes('pack')), false);
+  });
+}
 
 test('package validation rejects changed TGZ or stale producer identity before install', async t => {
   for (const defect of ['tgz', 'schema', 'state', 'sourceTreeSHA256', 'commit', 'tgzPathBase']) {

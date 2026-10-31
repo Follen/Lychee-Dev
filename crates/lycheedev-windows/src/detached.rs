@@ -19,12 +19,30 @@ use windows::{
     },
     core::{PCWSTR, PWSTR},
 };
-struct Handle(HANDLE);
+struct Handle(Option<HANDLE>, &'static str);
+impl Handle {
+    fn raw(&self) -> HANDLE {
+        self.0.expect("live detached handle")
+    }
+    fn close(&mut self) -> Result<()> {
+        self.0
+            .take()
+            .map_or(Ok(()), |handle| close_handle(handle, self.1))
+    }
+}
+fn close_handle(handle: HANDLE, kind: &'static str) -> Result<()> {
+    // SAFETY: the original process/thread owner takes its handle before this
+    // sole close attempt. An uncertain result is never retried by Drop.
+    let result = unsafe { CloseHandle(handle) }.map_err(|e| format!("process.{kind}_close: {e}"));
+    #[cfg(test)]
+    let result = checked_close_tests::observe_close(kind, result);
+    #[cfg(not(test))]
+    let _ = kind;
+    result
+}
 impl Drop for Handle {
     fn drop(&mut self) {
-        unsafe {
-            let _ = CloseHandle(self.0);
-        }
+        let _ = self.close();
     }
 }
 fn wide(value: &OsStr) -> Result<Vec<u16>> {
@@ -152,9 +170,10 @@ pub fn spawn_hidden_no_inherit(
         )
         .map_err(|e| format!("process.create:{e}"))?;
     }
-    let process = Handle(info.hProcess);
-    let thread = Handle(info.hThread);
-    drop(thread);
+    #[cfg(test)]
+    checked_close_tests::record_spawn(info.dwProcessId);
+    let process = Handle(Some(info.hProcess), "detached_process");
+    let mut thread = Handle(Some(info.hThread), "detached_thread");
     let mut child = DetachedChild {
         process,
         identity: ProcessIdentity {
@@ -163,21 +182,37 @@ pub fn spawn_hidden_no_inherit(
         },
         owned: true,
     };
+    if let Err(primary) = thread.close() {
+        return crate::process::finish_query(
+            Err(primary),
+            child
+                .terminate_and_close(Instant::now() + Duration::from_secs(2))
+                .map(|_| ()),
+        );
+    }
     let (mut created, mut exit, mut kernel, mut user) = (
         FILETIME::default(),
         FILETIME::default(),
         FILETIME::default(),
         FILETIME::default(),
     );
-    unsafe {
+    let identified = unsafe {
         GetProcessTimes(
-            child.process.0,
+            child.process.raw(),
             &mut created,
             &mut exit,
             &mut kernel,
             &mut user,
         )
-        .map_err(|e| e.to_string())?;
+    }
+    .map_err(|e| e.to_string());
+    if let Err(primary) = identified {
+        return crate::process::finish_query(
+            Err(primary),
+            child
+                .terminate_and_close(Instant::now() + Duration::from_secs(2))
+                .map(|_| ()),
+        );
     }
     child.identity.created = (created.dwHighDateTime as u64) << 32 | created.dwLowDateTime as u64;
     Ok(child)
@@ -190,7 +225,7 @@ impl DetachedChild {
         &self.identity
     }
     pub fn try_wait(&self) -> Result<Option<u32>> {
-        let wait = unsafe { WaitForSingleObject(self.process.0, 0) };
+        let wait = unsafe { WaitForSingleObject(self.process.raw(), 0) };
         if wait == WAIT_TIMEOUT {
             return Ok(None);
         }
@@ -199,16 +234,16 @@ impl DetachedChild {
         }
         let mut exit = 0;
         unsafe {
-            GetExitCodeProcess(self.process.0, &mut exit).map_err(|e| e.to_string())?;
+            GetExitCodeProcess(self.process.raw(), &mut exit).map_err(|e| e.to_string())?;
         }
         Ok(Some(exit))
     }
-    pub fn terminate_and_wait(&mut self, deadline: Instant) -> Result<u32> {
+    fn terminate_and_wait(&mut self, deadline: Instant) -> Result<u32> {
         if let Some(code) = self.try_wait()? {
             self.owned = false;
             return Ok(code);
         }
-        let terminate = unsafe { TerminateProcess(self.process.0, 7) };
+        let terminate = unsafe { TerminateProcess(self.process.raw(), 7) };
         if let Err(error) = terminate
             && self.try_wait()?.is_none()
         {
@@ -224,20 +259,45 @@ impl DetachedChild {
                 return Err("process.reap_deadline".into());
             }
             let wait = unsafe {
-                WaitForSingleObject(self.process.0, remaining.as_millis().clamp(1, 30000) as u32)
+                WaitForSingleObject(
+                    self.process.raw(),
+                    remaining.as_millis().clamp(1, 30000) as u32,
+                )
             };
             if wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT {
                 return Err("process.wait_failed".into());
             }
         }
     }
+    /// Consume startup custody using the caller's original retirement deadline.
+    /// Close is attempted once even when retirement remains unconfirmed; both
+    /// errors survive and the fallback cannot start a new retirement window.
+    pub fn terminate_and_close(mut self, deadline: Instant) -> Result<u32> {
+        let retired = self.terminate_and_wait(deadline);
+        self.owned = false;
+        crate::process::finish_query(retired, self.process.close())
+    }
     /// Call only after the authenticated owner has taken custody of the live daemon.
     pub fn handoff(mut self) -> Result<ProcessIdentity> {
-        if self.try_wait()?.is_some() {
-            return Err("process.detached_exited".into());
+        match self.try_wait() {
+            Ok(None) => {
+                // The daemon already owns its lifetime. A handle-close failure
+                // is an error, never permission to terminate that owner.
+                self.owned = false;
+                let identity = self.identity.clone();
+                crate::process::finish_query(Ok(identity), self.process.close())
+            }
+            observed => {
+                let primary = observed
+                    .err()
+                    .unwrap_or_else(|| "process.detached_exited".into());
+                crate::process::finish_query(
+                    Err(primary),
+                    self.terminate_and_close(Instant::now() + Duration::from_secs(2))
+                        .map(|_| ()),
+                )
+            }
         }
-        self.owned = false;
-        Ok(self.identity.clone())
     }
 }
 impl Drop for DetachedChild {
@@ -247,3 +307,7 @@ impl Drop for DetachedChild {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "detached_close_tests.rs"]
+mod checked_close_tests;

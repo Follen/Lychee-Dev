@@ -1,10 +1,7 @@
-use crate::{Process, Result, WindowIdentity};
+use crate::{Result, WindowIdentity};
 use serde::{Deserialize, Serialize};
 use windows::{
-    Win32::{
-        Foundation::{HWND, LPARAM},
-        UI::WindowsAndMessaging::*,
-    },
+    Win32::UI::WindowsAndMessaging::*,
     core::BOOL,
 };
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -15,63 +12,27 @@ pub struct Window {
     pub title: String,
     pub visible: bool,
 }
-unsafe extern "system" fn collect(hwnd: HWND, parameter: LPARAM) -> BOOL {
-    unsafe {
-        let out = &mut *(parameter.0 as *mut Vec<Window>);
-        if out.len() >= 4096 {
-            return BOOL(0);
-        }
-        let mut pid = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if pid == 0 {
-            return BOOL(1);
-        }
-        let Ok(process) = Process::open(pid) else {
-            return BOOL(1);
-        };
-        let Ok(path) = process.image_path() else {
-            return BOOL(1);
-        };
-        let mut class = [0u16; 256];
-        let mut title = [0u16; 1024];
-        let count = GetClassNameW(hwnd, &mut class);
-        if count <= 0 {
-            return BOOL(1);
-        }
-        let len = GetWindowTextW(hwnd, &mut title).max(0) as usize;
-        let identity = WindowIdentity {
-            process: process.identity().clone(),
-            hwnd: hwnd.0 as usize,
-        };
-        if identity.verify().is_ok() {
-            out.push(Window {
-                identity,
-                executable: path.to_string_lossy().into_owned(),
-                class: String::from_utf16_lossy(&class[..count as usize]),
-                title: String::from_utf16_lossy(&title[..len]),
-                visible: IsWindowVisible(hwnd).as_bool(),
-            });
-        }
-        BOOL(1)
-    }
-}
-pub fn windows() -> Result<Vec<Window>> {
-    let mut out = Vec::new();
-    unsafe {
-        EnumWindows(Some(collect), LPARAM(&mut out as *mut _ as isize))
-            .map_err(|e| e.to_string())?;
-    }
-    if out.len() >= 4096 {
-        return Err("window.inventory_truncated".into());
-    }
-    Ok(out)
-}
-
 /// Visible-window metadata only. The held process handle has limited-query
 /// access; this path cannot read process memory or open an executable file.
 pub fn passive_windows(mut check: impl FnMut() -> Result<()>) -> Result<Vec<Window>> {
+    use std::os::windows::io::{IntoRawHandle, RawHandle};
     use windows::Win32::{Foundation::*, System::Threading::*};
     struct QueryHandle(HANDLE);
+    impl IntoRawHandle for QueryHandle {
+        fn into_raw_handle(self) -> RawHandle {
+            let raw = self.0.0;
+            std::mem::forget(self);
+            raw
+        }
+    }
+    impl QueryHandle {
+        fn close(self) -> Result<()> {
+            let result = crate::guarded_spawn::close_owned_handle(self);
+            #[cfg(test)]
+            let result = crate::process::checked_query_tests::observe_close(result);
+            result.map_err(|error| format!("window.query_close: {error}"))
+        }
+    }
     impl Drop for QueryHandle {
         fn drop(&mut self) {
             unsafe {
@@ -109,54 +70,71 @@ pub fn passive_windows(mut check: impl FnMut() -> Result<()>) -> Result<Vec<Wind
                 return BOOL(1);
             };
             let handle = QueryHandle(handle);
-            let (mut created, mut exited, mut kernel, mut user) = (
-                FILETIME::default(),
-                FILETIME::default(),
-                FILETIME::default(),
-                FILETIME::default(),
-            );
-            if GetProcessTimes(handle.0, &mut created, &mut exited, &mut kernel, &mut user).is_err()
-            {
-                return BOOL(1);
-            }
-            let mut path = [0u16; 32768];
-            let mut length = path.len() as u32;
-            if QueryFullProcessImageNameW(
-                handle.0,
-                PROCESS_NAME_WIN32,
-                windows::core::PWSTR(path.as_mut_ptr()),
-                &mut length,
-            )
-            .is_err()
-            {
-                return BOOL(1);
-            }
-            let mut class = [0u16; 256];
-            let mut title = [0u16; 1024];
-            let count = GetClassNameW(hwnd, &mut class);
-            if count <= 0 {
-                return BOOL(1);
-            }
-            let title_length = GetWindowTextW(hwnd, &mut title).max(0) as usize;
-            let mut final_pid = 0;
-            GetWindowThreadProcessId(hwnd, Some(&mut final_pid));
-            if final_pid != pid || !IsWindow(Some(hwnd)).as_bool() {
-                return BOOL(1);
-            }
-            state.windows.push(Window {
-                identity: WindowIdentity {
-                    process: crate::ProcessIdentity {
-                        pid,
-                        created: (u64::from(created.dwHighDateTime) << 32)
-                            | u64::from(created.dwLowDateTime),
+            let observed = (|| -> Result<Option<Window>> {
+                (state.check)()?;
+                let (mut created, mut exited, mut kernel, mut user) = (
+                    FILETIME::default(),
+                    FILETIME::default(),
+                    FILETIME::default(),
+                    FILETIME::default(),
+                );
+                GetProcessTimes(handle.0, &mut created, &mut exited, &mut kernel, &mut user)
+                    .map_err(|error| format!("window.query_times: {error}"))?;
+                let mut path = [0u16; 32768];
+                let mut length = path.len() as u32;
+                QueryFullProcessImageNameW(
+                    handle.0,
+                    PROCESS_NAME_WIN32,
+                    windows::core::PWSTR(path.as_mut_ptr()),
+                    &mut length,
+                )
+                .map_err(|error| format!("window.query_image: {error}"))?;
+                let mut class = [0u16; 256];
+                let mut title = [0u16; 1024];
+                let count = GetClassNameW(hwnd, &mut class);
+                if count <= 0 {
+                    return Ok(None);
+                }
+                let title_length = GetWindowTextW(hwnd, &mut title).max(0) as usize;
+                let mut final_pid = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut final_pid));
+                if final_pid != pid || !IsWindow(Some(hwnd)).as_bool() {
+                    return Ok(None);
+                }
+                Ok(Some(Window {
+                    identity: WindowIdentity {
+                        process: crate::ProcessIdentity {
+                            pid,
+                            created: (u64::from(created.dwHighDateTime) << 32)
+                                | u64::from(created.dwLowDateTime),
+                        },
+                        hwnd: hwnd.0 as usize,
                     },
-                    hwnd: hwnd.0 as usize,
-                },
-                executable: String::from_utf16_lossy(&path[..length as usize]),
-                class: String::from_utf16_lossy(&class[..count as usize]),
-                title: String::from_utf16_lossy(&title[..title_length]),
-                visible: true,
-            });
+                    executable: String::from_utf16_lossy(&path[..length as usize]),
+                    class: String::from_utf16_lossy(&class[..count as usize]),
+                    title: String::from_utf16_lossy(&title[..title_length]),
+                    visible: true,
+                }))
+            })();
+            let control = (state.check)();
+            let close = handle.close();
+            let must_fail = control.is_err() || close.is_err();
+            let finished = crate::process::finish_query(
+                crate::process::finish_query(observed, control),
+                close,
+            );
+            match finished {
+                Ok(Some(window)) => state.windows.push(window),
+                Ok(None) => (),
+                Err(error) if must_fail => {
+                    state.error = Some(error);
+                    return BOOL(0);
+                }
+                // A window which disappeared or cannot be queried remains
+                // ineligible under the existing discovery policy. Its acquired
+                // handle still received checked close before this skip.
+                Err(_) => (),
+            }
             BOOL(1)
         }
     }

@@ -307,7 +307,7 @@ fn actual_admitted_cdn_encoding_root_selected_chain_keeps_one_scoped_batch() {
             batches += 1;
             for file in files {
                 assert_eq!(file.materialized.content.bytes.as_slice(), f.payload);
-                assert_eq!(file.entry.file_data_id, 7);
+                assert_eq!(file.reading["entry"]["fileDataID"], 7);
                 assert_eq!(file.reading["source"], "cdn");
                 assert_eq!(
                     file.reading["verification"]["contentWholeDecodedCKey"],
@@ -596,11 +596,11 @@ fn multi_locale_root_match_limit_is_per_id_not_per_batch() {
             calls += 1;
             assert_eq!(files.len(), 2);
             assert_eq!(
-                (files[0].entry.file_data_id, files[1].entry.file_data_id),
+                (files[0].reading["entry"]["fileDataID"].as_u64().unwrap(), files[1].reading["entry"]["fileDataID"].as_u64().unwrap()),
                 (7, 8)
             );
             for file in files {
-                assert_eq!(file.entry.locale_mask, 0x40);
+                assert_eq!(file.reading["entry"]["localeMask"], 0x40);
                 assert_eq!(file.materialized.content.bytes.as_slice(), f.payload);
             }
             Ok(Vec::new())

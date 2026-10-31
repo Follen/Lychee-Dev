@@ -20,7 +20,6 @@ pub(crate) struct DemandSource {
     pub(super) original: Option<Arc<table_source::Prepared>>,
     pub(super) schema: Arc<SchemaOwner>,
     pub(super) budget: Arc<Budget>,
-    pub(super) generation: Option<Arc<super::super::Generation>>,
     absence_plan: Option<Arc<effective::OverlayPlan>>,
 }
 impl DemandSource {
@@ -349,7 +348,6 @@ impl DemandSource {
             original: self.original.clone(),
             schema: self.schema.clone(),
             budget,
-            generation: None,
             absence_plan: self.absence_plan.clone(),
         })))
     }
@@ -458,7 +456,6 @@ pub(crate) fn prepare_demand(
             let mut snapshots = effective::Snapshots::new(invocation, data, &budget);
             let (plan, report) = snapshots.prepare(
                 &base.schema().columns,
-                base.schema().complete,
                 &original.definition,
                 &original.bundle,
                 captures,
@@ -546,7 +543,6 @@ pub(crate) fn prepare_demand(
                 original: Some(original.clone()),
                 schema,
                 budget: budget.clone(),
-                generation: None,
                 absence_plan,
             }),
         })
@@ -579,7 +575,6 @@ impl DemandSource {
             original: self.original.clone(),
             schema: self.schema.clone(),
             budget: self.budget.clone(),
-            generation: None,
             absence_plan: self.absence_plan.clone(),
         })))
     }

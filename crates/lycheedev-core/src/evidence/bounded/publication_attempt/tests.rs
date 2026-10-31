@@ -84,9 +84,11 @@ fn stages(home: &Path) -> usize {
 #[test]
 fn cancelled_before_stage_returns_original_failure_and_no_growth_witness() {
     let f = Fixture::new();
+    let reference = BlobRef { sha256: storage::sha256(b"body"), bytes: 4 };
+    let name = f.predeclared(&reference);
     let control = OperationControl::default();
     control.tracked_cancel_handle().unwrap().cancel();
-    let attempt = publish_blob_attempt_with_check(&f.0, b"body", 4, &control, || Ok(()));
+    let attempt = publish_blob_attempt_predeclared_with_check(&f.0, b"body", &reference, 4, &control, || Ok(()), &name);
     assert_eq!(attempt.result.unwrap_err().code, "command.cancelled");
     assert!(!attempt.settlement.stage_created);
     assert!(attempt.settlement.may_release_unpublished_intent());
@@ -95,15 +97,17 @@ fn cancelled_before_stage_returns_original_failure_and_no_growth_witness() {
 #[test]
 fn actual_created_stage_is_discarded_before_clean_not_published_receipt() {
     let f = Fixture::new();
+    let reference = BlobRef { sha256: storage::sha256(b"body"), bytes: 4 };
+    let name = f.predeclared(&reference);
     let observed = Cell::new(false);
     let attempt =
-        publish_blob_attempt_with_check(&f.0, b"body", 4, &OperationControl::default(), || {
+        publish_blob_attempt_predeclared_with_check(&f.0, b"body", &reference, 4, &OperationControl::default(), || {
             if stages(&f.0) != 0 {
                 observed.set(true);
                 return Err(failure());
             }
             Ok(())
-        });
+        }, &name);
     assert!(observed.get());
     assert_eq!(attempt.result.unwrap_err().code, "fixture.independent_stop");
     assert!(attempt.settlement.stage_created);
@@ -115,15 +119,17 @@ fn actual_created_stage_is_discarded_before_clean_not_published_receipt() {
 #[test]
 fn real_published_body_and_checked_close_survive_late_failure_receipt() {
     let f = Fixture::new();
+    let reference = BlobRef { sha256: storage::sha256(b"body"), bytes: 4 };
+    let name = f.predeclared(&reference);
     let path = blob_path(&f.0, &storage::sha256(b"body")).unwrap();
     let attempt =
-        publish_blob_attempt_with_check(&f.0, b"body", 4, &OperationControl::default(), || {
+        publish_blob_attempt_predeclared_with_check(&f.0, b"body", &reference, 4, &OperationControl::default(), || {
             if path.exists() {
                 Err(failure())
             } else {
                 Ok(())
             }
-        });
+        }, &name);
     assert_eq!(attempt.result.unwrap_err().code, "fixture.independent_stop");
     assert_eq!(attempt.settlement.publication, StagedPublication::Published);
     assert!(attempt.settlement.stage_cleanup_complete);
@@ -134,9 +140,11 @@ fn real_published_body_and_checked_close_survive_late_failure_receipt() {
 #[test]
 fn successful_existing_body_reuse_keeps_native_not_published_separate() {
     let f = Fixture::new();
+    let reference = BlobRef { sha256: storage::sha256(b"body"), bytes: 4 };
+    let name = f.predeclared(&reference);
     let control = OperationControl::default();
     publish_blob_bounded(&f.0, b"body", 4, &control).unwrap();
-    let attempt = publish_blob_attempt_with_check(&f.0, b"body", 4, &control, || Ok(()));
+    let attempt = publish_blob_attempt_predeclared_with_check(&f.0, b"body", &reference, 4, &control, || Ok(()), &name);
     assert_eq!(attempt.result.unwrap()["bytes"], 4);
     assert!(attempt.settlement.reused);
     assert!(!attempt.settlement.stage_created);

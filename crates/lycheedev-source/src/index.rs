@@ -381,7 +381,7 @@ fn fingerprint_fields_checked(
     use sha2::Digest;
     let mut hash = sha2::Sha256::new();
     check()?;
-    hash.update(b"rust-index-v20\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0TS0.26.3\0Lua0.5.0\0XML0.38\0xml-inline-v2-original-lines\0generator-v6\0");
+    hash.update(b"rust-index-v21\0assets-v3-validated-headers\0facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0TS0.26.3\0Lua0.5.0\0XML0.38\0xml-inline-v2-original-lines\0generator-v6\0");
     for (ordinal, field) in [repository, product, commit, parser]
         .into_iter()
         .enumerate()

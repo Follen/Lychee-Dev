@@ -183,6 +183,9 @@ impl DomainAccess for Access<'_> {
     fn budget_owner(&self) -> Arc<Budget> {
         self.budget.clone()
     }
+    fn complete(&self) -> bool {
+        self.partial.is_empty() && self.truncation.is_none()
+    }
     fn mark_partial(&mut self, r: &'static str) {
         if !self.partial.contains(&r) {
             self.partial.push(r);
@@ -444,6 +447,7 @@ pub(super) async fn execute(
             access.creature_model(*file_data_id).await?
         }
     };
+    let complete = access.complete();
     let Access {
         sources,
         relations,
@@ -451,7 +455,7 @@ pub(super) async fn execute(
         truncation,
         ..
     } = access;
-    let context = json!({"relations":relations,"complete":partial.is_empty()&&truncation.is_none(),"partial":!partial.is_empty(),"partialReasons":if partial.is_empty(){Value::Null}else{json!(partial)},"truncated":truncation.is_some(),"truncationReason":truncation.unwrap_or("none")});
+    let context = json!({"relations":relations,"complete":complete,"partial":!partial.is_empty(),"partialReasons":if partial.is_empty(){Value::Null}else{json!(partial)},"truncated":truncation.is_some(),"truncationReason":truncation.unwrap_or("none")});
     if let Value::Object(context) = context {
         report
             .as_object_mut()

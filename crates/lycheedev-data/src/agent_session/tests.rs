@@ -51,6 +51,165 @@ fn response(value: Response) -> Value {
     serde_json::to_value(value).unwrap()
 }
 
+fn semantics_fixture() -> (Fixture, String) {
+    use lycheedev_core::{evidence, storage};
+    let fx = fixture();
+    let resources: [(&str, &[u8]); 2] = [
+        ("mapping.dbdm", b"ENUM AgentSample::value AgentValues\n"),
+        ("enums/AgentValues.dbde", b"-1 Negative\n9007199254740993 Wide\n"),
+    ];
+    let cache = crate::cache_fixture::Cache::new(&fx.home);
+    let mut mapping_key = String::new();
+    for (path, bytes) in resources {
+        let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{}/meta/{path}", fixture::DEFS);
+        let key = format!("definition/{}", storage::sha256(url.as_bytes()));
+        let blob = evidence::publish_blob(&fx.home, bytes, 4 << 20).unwrap();
+        cache.put(&key, &json!({"url":url,"blob":blob}), None).unwrap();
+        if path == "mapping.dbdm" { mapping_key = key; }
+    }
+    (fx, mapping_key)
+}
+
+fn semantics_task(mode: SourceMode, captures: Vec<String>) -> Task {
+    Task::Semantics { table: TableRequest { name: "AgentSample".into(), mode, hotfix_captures: captures } }
+}
+
+fn assert_static_semantics(value: &Value) {
+    assert_eq!(value["table"], json!({"name":"AgentSample","mode":"static"}));
+    assert_eq!(value["columns"], json!(["Field","Kind","Definition","Value","Name","Comment","ConditionField","ConditionValue"]));
+    assert_eq!(value["rows"], json!([
+        ["value","ENUM","AgentValues",-1,"Negative","","",""],
+        ["value","ENUM","AgentValues",9007199254740993u64,"Wide","","",""]
+    ]));
+    assert_eq!(value["complete"], true);
+    assert_eq!(value["provenance"]["table"], "AgentSample");
+    assert_eq!(value["provenance"]["commit"], fixture::DEFS);
+    assert_eq!(value["provenance"]["build"], fixture::BUILD);
+}
+
+#[test]
+fn semantics_static_session_returns_exact_pinned_metadata_rows() {
+    let (fx, _) = semantics_fixture();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
+    let runtime = runtime();
+    let value = response(runtime.block_on(session.execute(semantics_task(SourceMode::Static, vec![]), control())).unwrap());
+    assert_static_semantics(&value);
+    session.close().unwrap();
+}
+
+fn assert_semantics_rejects_before_source(mode: SourceMode, captures: Vec<String>) {
+    let (fx, mapping_key) = semantics_fixture();
+    let mut session = Session::new(fx.context(), Default::default()).unwrap();
+    let runtime = runtime();
+    // Establish that this complete fixture can serve the legitimate request.
+    let value = response(runtime.block_on(session.execute(semantics_task(SourceMode::Static, vec![]), control())).unwrap());
+    assert_static_semantics(&value);
+    let rejected = |session: &mut Session| {
+        let error = runtime.block_on(session.execute(semantics_task(mode.clone(), captures.clone()), control()))
+            .err().expect("Semantics must reject a non-static or capture-bearing request");
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.code, "data.semantics.source_mode");
+    };
+    rejected(&mut session);
+    // The same admission error must precede an actual metadata source failure.
+    assert!(crate::cache_fixture::Cache::new(&fx.home).delete(&mapping_key).unwrap());
+    let missing = runtime.block_on(session.execute(semantics_task(SourceMode::Static, vec![]), control())).err().unwrap();
+    assert_eq!(missing.code, "records.definition_unavailable_offline");
+    rejected(&mut session);
+    session.close().unwrap();
+}
+
+#[test]
+fn semantics_effective_capture_request_is_rejected_before_metadata_source() {
+    assert_semantics_rejects_before_source(SourceMode::Effective, vec!["CAP-not-an-input".into()]);
+}
+#[test]
+fn semantics_effective_empty_history_is_rejected_before_metadata_source() {
+    assert_semantics_rejects_before_source(SourceMode::Effective, vec![]);
+}
+#[test]
+fn semantics_static_capture_request_is_rejected_before_metadata_source() {
+    assert_semantics_rejects_before_source(SourceMode::Static, vec!["CAP-not-an-input".into()]);
+}
+
+fn partial_aura_fixture() -> Fixture {
+    // Common-value Effect=6 needs no physical record bytes. The two physical
+    // rows remain exactly the authenticated ID/SpellID 1/42 and 2/99 bytes of
+    // the existing encrypted fixture, including its fixed Salsa20 vector.
+    let mut spec = fixture::table("SpellEffect", 922,
+        &[("ID","uint"),("SpellID","uint"),("Effect","signed")],
+        &[vec![Cell::U(1),Cell::U(42),Cell::I(6)]]);
+    let mut one = spec.raw[..196].to_vec();
+    one.extend_from_slice(&spec.raw[196..204]);
+    let put = |raw: &mut Vec<u8>, at: usize, value: u32| raw[at..at+4].copy_from_slice(&value.to_le_bytes());
+    put(&mut one,12,8); put(&mut one,16,0); put(&mut one,88,0);
+    // Third field: common codec, default aura effect 6, no common exceptions.
+    put(&mut one,180,2); put(&mut one,184,6);
+    let mut raw = one[..112].to_vec();
+    raw.extend([0;40]); raw.extend_from_slice(&one[112..]);
+    raw.extend(2u32.to_le_bytes()); raw.extend(99u32.to_le_bytes());
+    for (at,value) in [(4,2),(32,2),(68,2),(80,236),(120,244),(124,1)] {put(&mut raw,at,value);}
+    raw[112..120].copy_from_slice(&0x1234567890abcdefu64.to_le_bytes());
+    spec.raw=raw;
+    let (_,encoded)=fixture::encrypted_frame(&spec.raw);
+    Fixture::with_encoded_table(spec,encoded)
+}
+
+fn aura_report(fx: &Fixture, spell_id: u32, expected_source: Value, source_complete: bool) -> Value {
+    let mut session=Session::new(fx.context(),Default::default()).unwrap();
+    let runtime=runtime();
+    let query=QueryRequest::Plan {plan:QueryPlan::Scan {table:TableRequest {
+        name:"SpellEffect".into(),mode:SourceMode::Static,hotfix_captures:vec![]
+    }}};
+    let receipt=response(runtime.block_on(session.execute(Task::Query {query},control())).unwrap());
+    assert_eq!(receipt["complete"],source_complete);
+    let handle=receipt["result"]["handle"].as_str().unwrap().to_owned();
+    let page=response(runtime.block_on(session.execute(Task::Page {handle:handle.clone(),offset:0,limit:10},control())).unwrap());
+    assert_eq!(page["rows"],expected_source);
+    runtime.block_on(session.execute(Task::Release {handle},control())).unwrap();
+    let result=response(runtime.block_on(session.execute(Task::Navigate {request:crate::engine::DomainRequest::SpellAuras {
+        spell_id,mode:SourceMode::Static,hotfix_captures:vec![]
+    }},control())).unwrap());
+    let bytes=lycheedev_core::evidence::read_blob(&fx.home,&result["capture"]["blob"],16<<20).unwrap();
+    let captured:Value=serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(captured["result"]["report"],result["report"]);
+    assert_eq!(result["capture"]["complete"],source_complete);
+    session.close().unwrap();result["report"].clone()
+}
+
+#[test]
+fn spell_auras_partial_empty_source_does_not_assert_no_aura() {
+    let fx=partial_aura_fixture();
+    let report=aura_report(&fx,99,json!([[1,42,6]]),false);
+    assert_eq!(report["spellID"],99);
+    assert_eq!(report["hasAura"],json!([]));
+    assert_eq!(report["noAura"],json!([]),"unread SpellID 99 cannot establish a negative aura fact");
+    assert_eq!(report["complete"],false);
+    assert_eq!(report["partial"],true);
+}
+
+#[test]
+fn spell_auras_complete_no_aura_preserves_negative_fact() {
+    let fx=Fixture::new(&[fixture::table("SpellEffect",922,
+        &[("ID","uint"),("SpellID","uint"),("Effect","signed")],
+        &[vec![Cell::U(1),Cell::U(42),Cell::I(64)]])]);
+    let report=aura_report(&fx,42,json!([[1,42,64]]),true);
+    assert_eq!(report["hasAura"],json!([]));
+    assert_eq!(report["noAura"],json!([42]));
+    assert_eq!(report["complete"],true);
+    assert_eq!(report["partial"],false);
+}
+
+#[test]
+fn spell_auras_partial_observed_aura_preserves_positive_fact() {
+    let fx=partial_aura_fixture();
+    let report=aura_report(&fx,42,json!([[1,42,6]]),false);
+    assert_eq!(report["hasAura"],json!([42]));
+    assert_eq!(report["noAura"],json!([]));
+    assert_eq!(report["complete"],false);
+    assert_eq!(report["partial"],true);
+}
+
 #[test]
 fn wire_parses_typed_tasks_and_rejects_unknown_fields_without_sql() {
     let valid = json!({"protocol":PROTOCOL,"id":1,"task":"query","query":{"kind":"plan","plan":{"op":"lookup","table":{"name":"AgentSample","mode":"static"},"ids":[9,1]}}});

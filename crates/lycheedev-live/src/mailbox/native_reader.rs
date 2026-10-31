@@ -76,12 +76,11 @@ impl<R: SelectedReader> ReadState<R> {
             |budget| reader.lookup(selector, accept, budget),
         );
         let result = match read {
-            Ok(Ok(record)) => {
-                self.budget
-                    .charge(RuntimeCost::allocation(std::mem::size_of::<Record>()))
-                    .map_err(|cause| classify_reader_error(&cause))?;
-                Ok(record.into_iter().collect())
-            }
+            Ok(Ok(record)) => self
+                .budget
+                .charge(RuntimeCost::allocation(std::mem::size_of::<Record>()))
+                .map_err(|cause| classify_reader_error(&cause))
+                .map(|()| record.into_iter().collect()),
             Ok(Err(failure)) => {
                 let error = classify_reader_error(&failure.cause);
                 self.last_failure = Some(failure);

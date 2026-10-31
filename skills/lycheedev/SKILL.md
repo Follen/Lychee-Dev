@@ -63,8 +63,8 @@ Use the installed `lycheedev` on PATH, or
 `node <skill-directory>/scripts/lycheedev.mjs`.
 
 - `lycheedev cli search "<task>"` — at most five matching commands.
-- `lycheedev schema <command...>` — exact input contract; leaf `--help` is
-  equivalent.
+- `lycheedev schema <command...>` — exact input contract; leaf `--help` exposes
+  the same command-line inputs.
 - `lycheedev describe --format json` — full installed catalog.
 - `lycheedev data agent schema` — versioned Data Agent task and session
   contract.

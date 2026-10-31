@@ -97,8 +97,6 @@ fn typed_batches_preserve_exact_i64_float32_strings_and_sorted_logical_ids() {
     let mut importer = TableImporter::new(&view, budget, limits(3, 4096)).unwrap();
     let batch = importer.next_batch().unwrap().unwrap();
     assert_eq!(batch.record_ids().values().as_ref(), &[2, 9]);
-    assert_eq!(batch.locate(9), Some(1));
-    assert_eq!(batch.locate(3), None);
     let integers = batch
         .records()
         .column(1)

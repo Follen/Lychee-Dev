@@ -381,9 +381,6 @@ fn native_budget_failure(reason:&str)->bool {matches!(reason,
         |"object observation depth budget exceeded"
         |"object observation field budget exceeded"
         |"source.native_budget: shared operation step budget exceeded"
-        |"unknown call capture footprint budget exceeded"
-        |"unknown call function footprint budget exceeded"
-        |"unknown call object footprint budget exceeded"
 )}
 impl Builder {
     fn native_recover_budget(&mut self,reason:&str)->Result<bool> {

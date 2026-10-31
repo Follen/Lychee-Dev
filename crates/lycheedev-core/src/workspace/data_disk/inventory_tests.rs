@@ -162,7 +162,7 @@ fn run_inventory(owner: &DerivedReservation<'_>, reuse: bool) -> Result<DerivedU
     )
 }
 fn same_failure(owner: &DerivedReservation<'_>, code: &str) {
-    let before = inventory(&owner.home, &owner.paths, &owner.control).unwrap_err();
+    let before = run_inventory(owner, false).unwrap_err();
     let after = run_inventory(owner, true).unwrap_err();
     assert_eq!(before.code, code);
     assert_eq!(after.code, before.code);

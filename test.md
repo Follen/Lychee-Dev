@@ -36,6 +36,20 @@ Data新增业务见[navigation_business_tests.rs](crates/lycheedev-data/src/agen
 
 [status_control_tests.rs](crates/lycheedev-delivery/src/status_control_tests.rs)走正式status dispatch，observer只停止原control或在实际close后注入错误；真实Windows禁止data-read句柄区分读前大小检查与事后拒绝。取消/期限、IO/checked-close错误不得降格为modified/incomplete成功。
 
+补审回归沿当前正式入口：Data的[Session测试](crates/lycheedev-data/src/agent_session/tests.rs)核Semantics只许可static/空captures且先于元数据读取，以及真实partial Aura来源不能产生否定事实；保完整空来源与已观察正事实对照。CLI的[source选择](crates/lycheedev-cli/src/source_cli_tests.rs)、[Hotfix选择](crates/lycheedev-cli/src/hotfix_remote_tests.rs)、[发现合同](crates/lycheedev-cli/src/discovery.rs)和[Data admission](crates/lycheedev-cli/src/data_cli.rs)分别核固定项目/最近锁/显式snapshot优先、实际输出字段、命令路径语义和显式jsonl；不启动真实游戏。
+
+Source的[batch](crates/lycheedev-source/src/batch_tests.rs)拒绝重复/未知字段、损坏UTF-8、null操作和越界参数；[agent_cli](crates/lycheedev-cli/src/agent_cli.rs)把公开batch/matrix文件示例交真实parser，并核默认值、范围和引用。[asset头](crates/lycheedev-source/src/assets.rs)核PNG/BLP头的维度观察，不充当像素解码验证。native research的既有caller/context/observation测试直接走生产observed/Serialize路径；已移除无消费者的no-observer包装、重复自比和转换指针断言，保原独立预算、XML、foreign graph与取消预期。
+
+[Source会话](crates/lycheedev-source/src/native_session.rs)的初始Hello测试使用实际dispatch和自有pipe核原取消/期限与正常EOF；观察线程测试区分精确scope stop、独立I/O/checked-close、活跃与已完成请求，真实Windows marker读取另由broker测试覆盖。CLI环境/diff选择与Source sync继续同一原control；Core默认fixture入口共用现有受控PIN/CAP读写，不保留另一条未检查关闭的执行路径。[NativeReader](crates/lycheedev-live/src/mailbox/native_reader_tests.rs)用同一真实ledger和独立child停止核record分配失败同时保留额度与取消原因；不读取游戏。
+
+[回复组合](crates/lycheedev-source/src/native_session/raw_response_tests.rs)把真实typed child错误帧、原analysis退休错误和observer错误交同一生产收尾函数，再经正式帧writer/consumer核Core cleanup结构与全部原因；单错精确字节、原Vec地址/容量、任意精确数值及默认栈限制分别保留。真实线程panic用例核回包尝试仍fatal退出，取消/期限/写入失败不恢复warm owner；组合帧超限必须零字节发布。
+
+Windows新回归在真实一次关闭之后注入结果，保启动/工作原因与关闭原因：[Process查询](crates/lycheedev-windows/src/process/checked_query_tests.rs)、[broker](crates/lycheedev-windows/src/broker.rs)、[detached](crates/lycheedev-windows/src/detached_close_tests.rs)、[Job](crates/lycheedev-windows/src/job_close_tests.rs)。[keyboard event](crates/lycheedev-windows/src/mailbox_input/keyboard_activity.rs)的event_only分组只使用自有event/线程，不装全局hook或发送输入；默认helper空跑不能计为业务通过。[destination](crates/lycheedev-windows/tests/destination.rs)的文件、取消、替换、race和parent/reparse断言已迁当前prepare_controlled/publish_reader_controlled，旧发布执行器退役。
+
+Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取消准备、受控流式SRI、已更新后的journal保存失败及子命令原结构化错误。Live的[Driver回归](crates/lycheedev-live/src/mailbox/driver_tests.rs)使用现有合成backend/journal核input_observed保存失败与传输/取消双错、原意图和恢复不重放；doctor的typed公共原因与旧协议修复许可分别验证。这些离线用例不扩大为实机通过。
+
+新增[默认更新发现](crates/lycheedev-delivery/src/update/tests.rs)用真实metadata核原停止、target前缀/来源过滤、key顺序及原10001行总限额；[doctor归档](crates/lycheedev-live/src/mailbox/doctor_repair_tests.rs)核普通主addon升级在Delivery错误和等待手动reload时都保实际选定路径；[正式安装](crates/lycheedev-delivery/src/formal_repair/tests.rs)用合成client/release与真实deny-delete核main及500槽已经验证完成时，清理错误仍附原Receipt。以上列的是用途，实际红/绿状态以handover当前结果为准。
+
 ## 3. Rust 独立集成目标
 
 执行入口为构建阶段生成的对应测试程序；依赖真实 CLI、luac、固定源码或安装的目标必须明确提供这些输入。含 ignored 的文件不能整份记为通过；准备 helper、被父测试调用的 peer 和业务测试分开记录。
@@ -129,7 +143,7 @@ Data新增业务见[navigation_business_tests.rs](crates/lycheedev-data/src/agen
 | [rust-owned-process.test.mjs](tools/rust-owned-process.test.mjs)、[rust-owned-process-atomic-job.test.mjs](tools/rust-owned-process-atomic-job.test.mjs)、[rust-local-owned-process.test.mjs](tools/rust-local-owned-process.test.mjs)、[rust-owned-recovery.test.mjs](tools/rust-owned-recovery.test.mjs)、[rust-owned-memory.test.mjs](tools/rust-owned-memory.test.mjs) | Job/进程创建、启动记录、I/O、取消、资源回收与测量。Cargo helper许可使用固定清单内的精确Rustup启动器哈希，启动与恢复共同验证；未知哈希仍拒绝，Job与root wrapper绑定保持。 |
 | [rust-unsafe-boundaries.test.mjs](tools/rust-unsafe-boundaries.test.mjs)、[rust-license-inventory.test.mjs](tools/rust-license-inventory.test.mjs)、[rust-emmy-identity.test.mjs](tools/rust-emmy-identity.test.mjs)、[luac.test.mjs](tools/luac.test.mjs) | FFI 边界、许可证、固定 Emmy 上游身份与 luac 打包；CI 复用已有原生产物。 |
 | [lua-tool-supply.test.mjs](tools/lua-tool-supply.test.mjs)、[rust-formal-lua.test.mjs](tools/rust-formal-lua.test.mjs)、[rust-formal-lua-bridge.test.mjs](tools/rust-formal-lua-bridge.test.mjs) | 固定Lua供应包按清单、原生产记录/receipt、源码/许可证/EXE哈希导入，不依赖旧业务HEAD或绝对路径。原记录不改写；bridge仅为本轮执行生成路径映射并保留原摘要。篡改、目录覆盖及身份不符拒绝；当前addon与Mailbox测试继续使用同一解释器。 |
-| [ci-release.test.mjs](tools/ci-release.test.mjs)、[ci-package-business.test.mjs](tools/ci-package-business.test.mjs) | 生产/安装/内容审计/业务报告必须绑定同一TGZ与CLI；missing、not_run、partial、输入变化或进程未回收不能封存候选。业务入口复用tiny Source与预编译Data输入构造器，实际查询使用安装包内Release；Node边界测试不代替两条真实业务执行。 |
+| [ci-release.test.mjs](tools/ci-release.test.mjs)、[ci-package-business.test.mjs](tools/ci-package-business.test.mjs) | 生产/安装/内容审计/业务报告绑定同一TGZ与CLI；候选还要求完整当前addon×client矩阵、同一Lua解释器及成功的addon/Skill报告。声明的哈希/字节/清单与复制后字节均核对，渠道不能改变。包验收和候选共用安装CLI的版本/编译提交/dirty状态校验；同版本旧binary不能冒充本轮产物。missing、not_run、partial、输入变化或未回收不能封存。业务入口复用tiny Source与预编译Data输入，实际查询使用安装包内Release；Node边界测试不代替真实执行。 |
 | [rust-source-pack-evidence.test.mjs](tools/rust-source-pack-evidence.test.mjs) | Source 导出/结果比较辅助逻辑；辅助，不计业务通过。 |
 | `tools/ci-{changes,docs,test-programs,artifacts,release}.mjs` | CI 变更分类、文档检查、测试程序构建/执行、产物 manifest seal/verify、候选封存；纯工具逻辑，需一次真实 CI 才能证明产物复用生效（N12）。 |
 

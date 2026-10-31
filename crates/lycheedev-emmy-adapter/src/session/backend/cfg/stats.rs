@@ -1,32 +1,12 @@
 // Adapted from EmmyLua 08b0873962e83bb8307e9a81052e3f41578fbc78 (MIT).
 // Owned per-query CFG; public AST/facts only, no upstream private types.
 use emmylua_parser::{
-    BinaryOperator, LuaAstNode, LuaExpr, LuaIndexKey, LuaLiteralToken, LuaLocalName, LuaVarExpr,
-    NumberResult, UnaryOperator,
+    LuaAstNode, LuaExpr, LuaLiteralToken, LuaLocalName, LuaVarExpr, NumberResult, UnaryOperator,
 };
 use rowan::TextSize;
 
 use super::{DeclMultiReturnRef, DeclMultiReturnRefAt, FlowId, binder::FlowBinder};
 use emmylua_code_analysis::{LuaMemberKey, SemanticId};
-
-pub(super) fn check_local_immutable(_binder: &mut FlowBinder, _decl_id: &SemanticId) -> bool {
-    // M0: no reference index, so assume immutable.
-    true
-}
-
-pub(super) fn check_value_expr_is_check_expr(value_expr: LuaExpr) -> bool {
-    match value_expr {
-        LuaExpr::BinaryExpr(binary_expr) => {
-            let Some(op) = binary_expr.get_op_token() else {
-                return false;
-            };
-
-            matches!(op.get_op(), BinaryOperator::OpEq | BinaryOperator::OpNe)
-        }
-        LuaExpr::CallExpr(call) => call.is_type(),
-        _ => false, // Other expressions can be checked
-    }
-}
 
 pub(super) fn get_local_decl_ids(
     binder: &FlowBinder<'_, '_>,
@@ -76,22 +56,6 @@ pub(super) fn get_var_member_ids(
             Some((member.owner.clone(), member.key.clone(), member.id.clone()))
         })
         .collect()
-}
-
-/// Converts `LuaIndexKey` into a file-agnostic member key (matching the facts collection rules).
-#[allow(dead_code)]
-pub(super) fn member_key_from_index_key(key: LuaIndexKey) -> Option<LuaMemberKey> {
-    match key {
-        LuaIndexKey::Name(_) | LuaIndexKey::String(_) => {
-            Some(LuaMemberKey::Name(key.get_path_part().into()))
-        }
-        LuaIndexKey::Integer(num) => match num.get_number_value() {
-            NumberResult::Int(i) => Some(LuaMemberKey::Integer(i)),
-            _ => None,
-        },
-        LuaIndexKey::Idx(idx) => Some(LuaMemberKey::Integer(idx as i64)),
-        LuaIndexKey::Expr(_) => None,
-    }
 }
 
 pub(super) fn bind_multi_return_refs(

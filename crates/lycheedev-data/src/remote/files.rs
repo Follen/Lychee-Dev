@@ -600,11 +600,6 @@ pub(crate) struct OwnedEncoded<'a> {
     size: usize,
     position: usize,
 }
-impl OwnedEncoded<'_> {
-    pub(crate) fn rewind(&mut self) -> Result<()> {
-        rewind(&self.files, &mut self.position)
-    }
-}
 impl crate::blte::EncodedRead for OwnedEncoded<'_> {
     fn check_encoded(&self) -> Result<()> {
         self.files.store.check()

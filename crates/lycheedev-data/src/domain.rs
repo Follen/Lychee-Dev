@@ -108,11 +108,11 @@ impl SpellEffects {
         }
         Ok(true)
     }
-    fn result(&self) -> Value {
+    fn result(&self, complete: bool) -> Value {
         if self.summon {
             json!({"spellID":self.spell,"npcID":self.npc,"count":self.summons.len(),"summons":self.summons})
         } else {
-            json!({"spellID":self.spell,"hasAura":if self.has_aura{vec![self.spell]}else{vec![]},"noAura":if self.has_aura{vec![]}else{vec![self.spell]}})
+            json!({"spellID":self.spell,"hasAura":if self.has_aura{vec![self.spell]}else{vec![]},"noAura":if complete&&!self.has_aura{vec![self.spell]}else{vec![]}})
         }
     }
 }
@@ -146,5 +146,5 @@ pub(crate) async fn effects_domain(
             0,
         )?;
     }
-    Ok(effects.result())
+    Ok(effects.result(access.complete()))
 }

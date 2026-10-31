@@ -7,20 +7,15 @@ use lycheedev_core::{
     selection::{self, DataPin, SelectionSpec},
     storage, workspace,
 };
-use lycheedev_data::assets::{listfile, output, source};
+use lycheedev_data::assets::{listfile, source};
 use lycheedev_data::{assets::{self, request::{DemuxInput, DemuxRequest, ExportRequest, SearchMode, SearchRequest}}, request::{DataContext, SourceOptions}};
 
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    fs::{self, File, OpenOptions},
-    io,
-    os::windows::{
-        ffi::OsStrExt,
-        fs::{MetadataExt, OpenOptionsExt},
-        io::AsRawHandle,
-    },
-    path::{Path, PathBuf},
+    fs::{self, OpenOptions},
+    os::windows::fs::OpenOptionsExt,
+    path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -341,121 +336,6 @@ fn demux_all_name_conflicts_precede_any_external_frame_write_and_preserve_hardli
     assert_eq!(assets::demux::run(&ctx, &request).unwrap_err().exit_code, 7);
 }
 
-// A real Windows junction writer, without a fixture child or a new dependency.
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn DeviceIoControl(
-        handle: *mut std::ffi::c_void,
-        code: u32,
-        input: *const std::ffi::c_void,
-        input_bytes: u32,
-        output: *mut std::ffi::c_void,
-        output_bytes: u32,
-        returned: *mut u32,
-        overlapped: *mut std::ffi::c_void,
-    ) -> i32;
-}
-fn reparse_writer(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .write(true)
-        .share_mode(7)
-        .custom_flags(0x02200000)
-        .open(path)
-}
-fn junction(file: &File, target: &Path) -> io::Result<()> {
-    let absolute = std::path::absolute(target)?;
-    let print: Vec<u16> = absolute.as_os_str().encode_wide().collect();
-    let substitute: Vec<u16> = std::ffi::OsString::from(format!("\\??\\{}", absolute.display()))
-        .encode_wide()
-        .collect();
-    let size = 16 + (substitute.len() + print.len() + 2) * 2;
-    let mut bytes = vec![0u8; size];
-    bytes[..4].copy_from_slice(&0xa0000003u32.to_le_bytes());
-    bytes[4..6].copy_from_slice(&((size - 8) as u16).to_le_bytes());
-    bytes[10..12].copy_from_slice(&((substitute.len() * 2) as u16).to_le_bytes());
-    bytes[12..14].copy_from_slice(&((substitute.len() * 2 + 2) as u16).to_le_bytes());
-    bytes[14..16].copy_from_slice(&((print.len() * 2) as u16).to_le_bytes());
-    let mut at = 16;
-    for unit in substitute
-        .into_iter()
-        .chain(Some(0))
-        .chain(print)
-        .chain(Some(0))
-    {
-        bytes[at..at + 2].copy_from_slice(&unit.to_le_bytes());
-        at += 2;
-    }
-    let mut returned = 0;
-    if unsafe {
-        DeviceIoControl(
-            file.as_raw_handle(),
-            0x000900a4,
-            bytes.as_ptr().cast(),
-            size as u32,
-            std::ptr::null_mut(),
-            0,
-            &mut returned,
-            std::ptr::null_mut(),
-        )
-    } == 0
-    {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-#[test]
-fn product_output_directory_pins_parent_and_refuses_nonempty_ancestor_reparse() {
-    let fixture = Fixture::new();
-    let ancestor = fixture.root.join("ancestor");
-    let parent = ancestor.join("parent");
-    fs::create_dir_all(&parent).unwrap();
-    let outside = fixture.root.join("outside");
-    fs::create_dir(&outside).unwrap();
-    fs::create_dir(outside.join("parent")).unwrap();
-    fs::write(outside.join("parent").join("body"), b"outside original").unwrap();
-    let ctx = fixture.context();
-    let selected = output::OutputDirectory::open(&fixture.home, &parent, true).unwrap();
-    selected.preflight("body").unwrap();
-    assert!(reparse_writer(&parent).is_err());
-    assert!(fs::rename(&parent, ancestor.join("moved")).is_err());
-    // Prove the real junction payload/writer works on an empty ordinary directory.
-    // The held parent below is an existing child of ancestor, so that ancestor
-    // cannot be made empty by renaming/deleting the child while its handle lives.
-    let baseline = fixture.root.join("empty-junction-baseline");
-    fs::create_dir(&baseline).unwrap();
-    junction(&reparse_writer(&baseline).unwrap(), &outside).unwrap();
-    assert_ne!(
-        fs::symlink_metadata(&baseline).unwrap().file_attributes() & 0x400,
-        0
-    );
-    assert_eq!(
-        fs::read(baseline.join("parent").join("body")).unwrap(),
-        b"outside original"
-    );
-    let mutation = junction(&reparse_writer(&ancestor).unwrap(), &outside).unwrap_err();
-    assert_eq!(mutation.raw_os_error(), Some(145)); // ERROR_DIR_NOT_EMPTY, not an installed junction.
-    assert_eq!(
-        fs::symlink_metadata(&ancestor).unwrap().file_attributes() & 0x400,
-        0
-    );
-    selected.preflight("body").unwrap();
-    selected
-        .publish(&ctx, "body", b"selected parent bytes", 64)
-        .unwrap();
-    assert_eq!(
-        fs::read(parent.join("body")).unwrap(),
-        b"selected parent bytes"
-    );
-    assert_eq!(
-        fs::read(outside.join("parent").join("body")).unwrap(),
-        b"outside original"
-    );
-    assert_eq!(fs::read_dir(outside.join("parent")).unwrap().count(), 1);
-    drop(selected);
-    fs::remove_dir(&baseline).unwrap();
-}
 // Staged only; append to Assets integration target after Root releases edits.
 #[test]
 #[ignore = "explicit genuine synthetic CASC fixture required; no game installation"]

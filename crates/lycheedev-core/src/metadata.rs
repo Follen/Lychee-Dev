@@ -39,37 +39,6 @@ pub struct Document {
     pub generation: i64,
     pub value: serde_json::Value,
 }
-/// Read exact document bytes while the caller's write transaction is held.
-/// Kept separate from public Document so existing JSON-value consumers retain
-/// their API and do not pay for a second retained copy of every scanned row.
-pub(crate) struct TransactionReader<'a> {
-    connection: &'a Connection,
-    control: &'a crate::control::OperationControl,
-    catalog: Option<&'a evidence_catalog::Catalog>,
-}
-impl TransactionReader<'_> {
-    pub(crate) fn read_raw(&self, key: &str) -> Result<Vec<u8>> {
-        self.control.check()?;
-        if let Some(catalog) = self.catalog {
-            return evidence_catalog::required(catalog.document(key, self.control, &|| Ok(()))?)
-                .map(|row| row.bytes);
-        }
-        let raw: Option<Vec<u8>> = self
-            .connection
-            .query_row("SELECT value FROM documents WHERE key=?1", [key], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        self.control.check()?;
-        raw.ok_or_else(|| {
-            ToolkitError::new(
-                "vault.record_missing",
-                format!("document {key} does not exist"),
-                3,
-            )
-        })
-    }
-}
 impl Metadata {
     fn require_write_capability(&self) -> Result<()> {
         if !self.writable {
@@ -847,40 +816,12 @@ impl Metadata {
             validate,
         )
     }
-    pub(crate) fn delete_checked_controlled<T>(
-        &mut self,
-        keys: &[String],
-        expected: &[(String, i64)],
-        control: &crate::control::OperationControl,
-        validate: impl FnOnce(&[Document], &TransactionReader<'_>) -> Result<T>,
-    ) -> Result<T> {
-        self.delete_checked_record_controlled_with_raw(
-            keys,
-            expected,
-            control,
-            |documents, reader| Ok((validate(documents, reader)?, None)),
-        )
-    }
     pub(crate) fn delete_checked_record_controlled<T>(
         &mut self,
         keys: &[String],
         expected: &[(String, i64)],
         control: &crate::control::OperationControl,
         validate: impl FnOnce(&[Document]) -> Result<(T, Option<(String, serde_json::Value)>)>,
-    ) -> Result<T> {
-        self.delete_checked_record_controlled_with_raw(keys, expected, control, |documents, _| {
-            validate(documents)
-        })
-    }
-    pub(crate) fn delete_checked_record_controlled_with_raw<T>(
-        &mut self,
-        keys: &[String],
-        expected: &[(String, i64)],
-        control: &crate::control::OperationControl,
-        validate: impl FnOnce(
-            &[Document],
-            &TransactionReader<'_>,
-        ) -> Result<(T, Option<(String, serde_json::Value)>)>,
     ) -> Result<T> {
         self.require_write_capability()?;
         evidence_catalog::checked_delete(&self.home, keys, expected, control, validate)

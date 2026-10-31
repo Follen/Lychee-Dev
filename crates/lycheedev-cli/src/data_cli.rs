@@ -50,7 +50,7 @@ pub(crate) fn source_options(inv: &Invocation) -> Result<SourceOptions> {
 }
 
 pub(crate) fn admit_session(inv: &Invocation) -> Result<(DataContext, SessionConfig)> {
-    if inv.flag("--format").is_some_and(|value| value != "jsonl") {
+    if inv.flag("--format") != Some("jsonl") {
         return Err(ToolkitError::arguments("data agent serve requires JSONL"));
     }
     let config = SessionConfig {
@@ -118,6 +118,25 @@ mod tests {
 
     fn invocation(words: &[&str]) -> Invocation {
         crate::parse(&words.iter().map(|word| (*word).into()).collect::<Vec<_>>()).unwrap()
+    }
+
+    #[test]
+    fn session_requires_explicit_jsonl_through_public_parser_and_admission() {
+        let explicit = invocation(&["data", "agent", "serve", "--format", "jsonl"]);
+        let (context, config) = admit_session(&explicit).unwrap();
+        assert_eq!(config.max_handles, 32);
+        assert!(context.control.same_scope(&explicit.control));
+
+        for words in [
+            vec!["data", "agent", "serve"],
+            vec!["data", "agent", "serve", "--format", "json"],
+        ] {
+            let error = crate::parse(&words.iter().map(|word| (*word).into()).collect::<Vec<_>>())
+                .and_then(|inv| admit_session(&inv))
+                .err()
+                .expect("serve must require the advertised explicit JSONL transport");
+            assert_eq!((error.code.as_str(), error.exit_code), ("command.invalid_arguments", 2));
+        }
     }
 
     #[test]

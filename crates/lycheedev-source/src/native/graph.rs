@@ -193,7 +193,6 @@ enum AssignmentDestination {
     Cell(String),
     Field { object:usize, key:Option<String>, receiver_fact:usize },
     UncertainField { receiver_fact:usize },
-    Unavailable,
 }
 struct Builder { inputs:Arc<SourceInputs>, control:OperationControl, graph:GraphFacts, harvest:Harvest, cells:BTreeMap<String,usize>, objects:Vec<ObjectState>, bodies:Vec<(usize,LuaClosureExpr)>,
     heap_observation: usize, object_versions:Vec<usize>, object_view_ids: BTreeMap<ObjectViewKey,usize>, object_slots: usize,
@@ -250,55 +249,6 @@ impl Builder {
         let unchanged=state.unknown.as_deref()==Some(REASON)&&state.unknown_observation>0
             &&state.fields.values().all(|write|self.field_write_observations.get(write).copied().unwrap_or(0)<=state.unknown_observation);
         if !unchanged{self.unknown_object(object,REASON.into(),site);}
-    }
-    fn invalidate_native_call_effects(&mut self,call:usize,function:Option<usize>,ctx:&Context)->Result<()> {
-        // This load-time footprint follows actual object/function reachability.
-        // A caller cannot mutate a local object it cannot reach. Deferred body
-        // execution requires a separate execution observation, not mutation of
-        // the shared after-load heap while merely inspecting a function body.
-        if ctx.deferred{return Ok(())}
-        let mut objects=Vec::new();let mut functions=Vec::new();
-        for argument in &self.graph.calls[call].arguments{
-            let decision=&self.graph.uses[*argument].decision;
-            if let Some(object)=self.object(decision){objects.push(object)}
-            if let Some(function)=self.function(decision){functions.push(function)}
-        }
-        if let Some(function)=function{functions.push(function)}
-        for(cell,write)in &self.cells{if cell.starts_with("global:"){
-            let decision=&self.graph.writes[*write].decision;
-            if let Some(object)=self.object(decision){objects.push(object)}
-            if let Some(function)=self.function(decision){functions.push(function)}
-        }}
-        let mut seen_functions=Vec::new();let mut nodes=0;
-        while let Some(function)=functions.pop(){
-            if seen_functions.contains(&function){continue}
-            if seen_functions.len()>=64{return Err("unknown call function footprint budget exceeded".into())}
-            seen_functions.push(function);
-            let declaration=self.graph.functions[function].clone();
-            let Some(closure)=self.bodies.iter().find(|(id,_)|*id==function).map(|(_,closure)|closure.clone())else{continue};
-            for node in closure.syntax().descendants(){
-                self.budget()?;
-                nodes+=1;if nodes>6000{return Err("unknown call capture footprint budget exceeded".into())}
-                let Some(name)=LuaNameExpr::cast(node)else{continue};let site=self.inputs.site(&declaration.declaration.file,name.get_range());
-                let cell=self.harvest.local_read(&self.inputs,&site).map(|local|format!("local:{local}:load:{}",declaration.load_occurrence)).unwrap_or_else(||format!("global:{}",site.text(&self.inputs).expect("admitted parser Site")));
-                if let Some(write)=self.cells.get(&cell){
-                    let decision=&self.graph.writes[*write].decision;
-                    if let Some(object)=self.object(decision){objects.push(object)}
-                    if let Some(function)=self.function(decision){functions.push(function)}
-                }
-            }
-        }
-        let mut seen_objects=Vec::new();
-        while let Some(object)=objects.pop(){
-            if seen_objects.contains(&object){continue}
-            if seen_objects.len()>=OBJECT_LIMIT{return Err("unknown call object footprint budget exceeded".into())}
-            seen_objects.push(object);
-            // Shallow aliases expose nested objects as well as their parent.
-            let field_writes:Vec<_>=self.objects[object].fields.values().copied().collect();
-            for write in field_writes{self.budget()?;if let Some(child)=self.object(&self.graph.writes[write].decision){objects.push(child)}}
-            self.unknown_object(object,"ordinary_unknown_call_reachable_effect".into(),self.graph.calls[call].site.clone());
-        }
-        Ok(())
     }
     fn object_observation(&self,object:usize)->Result<usize> {
         let mut pending=vec![(object,0)];let mut seen=std::collections::BTreeSet::new();let mut observation=0;
@@ -368,7 +318,6 @@ impl Builder {
         if let Some(branch)=ctx.conditional_branch{self.graph.branches[branch].write_versions.push(id);}
         id
     }
-    fn key(&self,site:&Site,ctx:&Context)->String { self.native_key(site,ctx) }
     fn read(&self,key:&str,ctx:&Context)->(Decision,Vec<usize>) {
         if let Some(value)=ctx.parameters.get(key) {return(value.clone(),vec![])}
         if ctx.deferred && self.graph.phase=="unknown" && key.starts_with("global:") {return(Decision::Unavailable("unknown_execution_phase".into()),vec![])}
@@ -484,7 +433,6 @@ impl Builder {
                 else{self.unknown_object(object,"dynamic_field_write".into(),target.site);}
             }
             AssignmentDestination::UncertainField{receiver_fact}=>self.native_uncertain_field_write(target.site,ctx,receiver_fact,decision,input),
-            AssignmentDestination::Unavailable=>{if let Some(branch)=ctx.conditional_branch{self.graph.branches[branch].coverage_gaps.push(json!({"sourceSite":target.site,"reason":"conditional_assignment_target_identity_unavailable"}));}}
         }
     }
     fn block(&mut self,block:LuaBlock,ctx:&Context)->Result<()> { let paths=self.native_block(block,ctx,0)?; self.native_load_terminals(paths) }

@@ -154,6 +154,91 @@ fn declaration(product: &str) -> Vec<u8> {
     .unwrap()
 }
 
+fn assert_source_list_status(fixture: &Fixture, inv: &Invocation) {
+    let request = ordinary(inv).unwrap();
+    let SourceRequest::Status(selected) = &request.request else {
+        panic!("selected source list must inspect its fixed pin, not the repository catalog");
+    };
+    assert_eq!(selected.snapshot(), fixture.pin);
+    assert_eq!(selected.source().repository, "elvui");
+    assert_eq!(selected.source().product, "main");
+    let expected_commit = selected.source().exact_commit.clone();
+    let outcome = SourceCommand::Ordinary(request)
+        .dispatch(&context(inv), SourceTools::default())
+        .unwrap();
+    assert_eq!(outcome.data["activeSnapshot"], expected_commit);
+    assert_eq!(outcome.data["ready"], false);
+    assert_eq!(outcome.data["readySnapshots"], 0);
+    assert_eq!(outcome.data["complete"], false);
+    assert_eq!(fixture.captures(), 0);
+}
+
+#[test]
+fn source_list_explicit_project_selects_pinned_readiness() {
+    let fixture = Fixture::new();
+    fixture.write_project(&declaration("main"), true);
+    let project = fixture.root.join("project");
+    let mut inv = fixture.inv("source list", &[("--project", project.to_str().unwrap())]);
+    // Only the explicit project can select this pin from outside its ancestors.
+    inv.cwd = fixture.root.clone();
+    assert_source_list_status(&fixture, &inv);
+}
+
+#[test]
+fn source_list_nearest_project_selects_pinned_readiness() {
+    let fixture = Fixture::new();
+    fixture.write_project(&declaration("main"), true);
+    assert_source_list_status(&fixture, &fixture.inv("source list", &[]));
+}
+
+#[test]
+fn source_list_bad_explicit_project_does_not_fall_back_to_catalog() {
+    let fixture = Fixture::new();
+    fixture.write_project(b"broken", true);
+    let project = fixture.root.join("project");
+    let inv = fixture.inv("source list", &[("--project", project.to_str().unwrap())]);
+    let error = ordinary(&inv)
+        .err()
+        .expect("an explicit malformed project must fail");
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("selection.project_format", 4)
+    );
+    assert_eq!(fixture.captures(), 0);
+}
+
+#[test]
+fn source_list_without_project_retains_repository_catalog() {
+    let fixture = Fixture::new();
+    let mut inv = fixture.inv("source list", &[]);
+    inv.cwd = fixture.root.clone();
+    let request = ordinary(&inv).unwrap();
+    assert!(matches!(&request.request, SourceRequest::Catalog));
+    let outcome = SourceCommand::Ordinary(request)
+        .dispatch(&context(&inv), SourceTools::default())
+        .unwrap();
+    let rows = outcome.data.as_array().unwrap();
+    assert!(rows.iter().any(|row| row["key"] == "wow-ui-source"));
+    assert!(rows.iter().any(|row| row["key"] == "elvui"));
+    assert!(outcome.selection.as_object().unwrap().is_empty());
+    assert_eq!(fixture.captures(), 0);
+}
+
+#[test]
+fn source_list_explicit_snapshot_bypasses_malformed_project() {
+    let fixture = Fixture::new();
+    fixture.write_project(b"broken", true);
+    let project = fixture.root.join("project");
+    let inv = fixture.inv(
+        "source list",
+        &[
+            ("--snapshot", &fixture.pin),
+            ("--project", project.to_str().unwrap()),
+        ],
+    );
+    assert_source_list_status(&fixture, &inv);
+}
+
 #[test]
 fn source_research_keeps_project_selector_and_explicit_snapshot_error_priority() {
     let fixture = Fixture::new();
@@ -549,6 +634,32 @@ fn source_query_and_diff_limit_defaults_and_bounds_are_admitted_by_cli() {
         ],
     );
     assert_eq!(ordinary(&inv).err().unwrap().code, missing_pin.code);
+    assert_eq!(fixture.captures(), 0);
+}
+
+#[test]
+fn source_diff_pin_admission_retains_original_cancellation() {
+    let fixture = Fixture::new();
+    let inv = fixture.inv(
+        "source diff",
+        &[("--from", &fixture.pin), ("--to", &fixture.pin)],
+    );
+    let SourceRequest::Diff(request) = ordinary(&inv).unwrap().request else {
+        panic!("expected a fixed diff request");
+    };
+    assert_eq!(request.from.snapshot(), fixture.pin);
+    assert_eq!(request.to.snapshot(), fixture.pin);
+
+    inv.control.tracked_cancel_handle().unwrap().cancel();
+    // Enter the actual pin-admission branch rather than admit's outer stop
+    // check: a fresh default control here would still admit both valid pins.
+    let error = ordinary(&inv)
+        .err()
+        .expect("fixed diff reads must retain the caller's cancelled control");
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("command.cancelled", 7)
+    );
     assert_eq!(fixture.captures(), 0);
 }
 

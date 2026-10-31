@@ -20,7 +20,6 @@ pub(crate) enum Phase {
     Output,
     SourceClose,
     EncodedIdentityHash,
-    DecodedCacheOpen,
     DecodedCacheLookup,
     DecodedCacheVerify,
     DecodedStreamPublish,
@@ -40,11 +39,6 @@ pub(crate) enum Phase {
     PublisherRename,
     PublisherWinnerOpen,
     PublisherCheckedClose,
-    SqlRequest,
-    SqlExecute,
-    SqlSourcePrepare,
-    SqlSourceVerify,
-    SqlResult,
     SqlSerialize,
     SqlCapture,
     GenerationOpen,
@@ -76,9 +70,8 @@ const NAMES: [&str; 11] = [
 // scopes. In particular publish contains chunk reads/inflate/CKey work, and
 // prepare and payload can both call the decoded cache. Never add these to the
 // original phases, or interpret their remainder as physical disk time.
-const DETAIL_NAMES: [&str; 10] = [
+const DETAIL_NAMES: [&str; 9] = [
     "encoded_identity_hash",
-    "decoded_cache_open",
     "decoded_cache_lookup",
     "decoded_cache_verify_inclusive",
     "decoded_stream_publish_inclusive",
@@ -107,12 +100,7 @@ const PUBLISHER_NAMES: [&str; 11] = [
 ];
 // SQL scopes nest within execution/source preparation. Cursor advance includes
 // batch decode; each call, including EOF/error, is observed only when enabled.
-const SQL_NAMES: [&str; 18] = [
-    "request_compile_admit",
-    "execute_resolved_inclusive",
-    "source_prepare_inclusive",
-    "source_verify_inclusive",
-    "result_projection",
+const SQL_NAMES: [&str; 13] = [
     "capture_serialize",
     "capture_publish_metadata_inclusive",
     "generation_open_inclusive",
@@ -298,12 +286,27 @@ pub(crate) type TestOutput = Arc<Mutex<Vec<serde_json::Value>>>;
 mod tests {
     use super::*;
 
+    fn counter<'a>(value: &'a serde_json::Value, layer: &str, phase: &str) -> &'a serde_json::Value {
+        let mut matching = value[layer].as_array().unwrap().iter().filter(|item| item["phase"] == phase);
+        let counter = matching.next().expect("observed phase is missing");
+        assert!(matching.next().is_none(), "observed phase is duplicated");
+        counter
+    }
+
+    fn assert_idle_except(value: &serde_json::Value, layer: &str, active: &[&str]) {
+        for item in value[layer].as_array().unwrap() {
+            if !active.contains(&item["phase"].as_str().unwrap()) {
+                assert_eq!(item["calls"], 0, "unexpected phase: {item}");
+                assert_eq!(item["elapsedMicros"], 0, "unexpected phase: {item}");
+            }
+        }
+    }
+
     #[test]
     fn sql_counter_indices_are_separate_and_exact() {
         let (profile, output) = Profile::observed();
         for (index, phase) in [
-            Phase::SqlRequest, Phase::SqlExecute, Phase::SqlSourcePrepare,
-            Phase::SqlSourceVerify, Phase::SqlResult, Phase::SqlSerialize,
+            Phase::SqlSerialize,
             Phase::SqlCapture, Phase::GenerationOpen, Phase::GenerationQuota,
             Phase::GenerationManifest, Phase::GenerationObject, Phase::GenerationDirectory,
             Phase::GenerationBatch, Phase::GenerationRow, Phase::GenerationPrepare,
@@ -387,9 +390,11 @@ mod tests {
                 .iter()
                 .all(|p| p["calls"] == 0)
         );
-        assert_eq!(value["details"][7]["phase"], "zlib_inflate");
-        assert_eq!(value["details"][7]["calls"], 1);
-        assert_eq!(value["details"][7]["elapsedMicros"], 23);
+        let zlib = counter(&value, "details", "zlib_inflate");
+        assert_eq!(zlib["calls"], 1);
+        assert_eq!(zlib["elapsedMicros"], 23);
+        assert_idle_except(&value, "details", &["zlib_inflate"]);
+        for layer in ["publisher", "sql"] { assert_idle_except(&value, layer, &[]); }
         drop(span);
         drop(profile);
         assert_eq!(output.lock().unwrap().len(), 1);
@@ -408,12 +413,16 @@ mod tests {
         publisher.finish(|_| Duration::from_micros(19));
         let value = profile.value();
         assert_eq!(value["phases"].as_array().unwrap().len(), 11);
-        assert_eq!(value["details"].as_array().unwrap().len(), 10);
         assert_eq!(value["publisher"].as_array().unwrap().len(), 11);
-        assert_eq!(value["details"][7]["elapsedMicros"], 7);
-        assert_eq!(value["publisher"][0]["phase"], "source_to_spool_inclusive");
-        assert_eq!(value["publisher"][0]["calls"], 1);
-        assert_eq!(value["publisher"][0]["elapsedMicros"], 19);
+        let zlib = counter(&value, "details", "zlib_inflate");
+        assert_eq!(zlib["calls"], 1);
+        assert_eq!(zlib["elapsedMicros"], 7);
+        let spool = counter(&value, "publisher", "source_to_spool_inclusive");
+        assert_eq!(spool["calls"], 1);
+        assert_eq!(spool["elapsedMicros"], 19);
+        assert_idle_except(&value, "details", &["zlib_inflate"]);
+        assert_idle_except(&value, "publisher", &["source_to_spool_inclusive"]);
+        assert_idle_except(&value, "sql", &[]);
         assert!(value["phases"].as_array().unwrap().iter().all(|p| p["calls"] == 0));
         drop(decoder);
         drop(publisher);
@@ -454,22 +463,19 @@ mod tests {
         assert_eq!(value["schema"], "lycheedev.data-query-phases.v5");
         assert_eq!(value["timing"], TIMING);
         assert_eq!(value["phases"].as_array().unwrap().len(), 11);
-        assert_eq!(value["details"].as_array().unwrap().len(), 10);
         assert_eq!(value["publisher"].as_array().unwrap().len(), 11);
-        assert_eq!(value["publisher"][4]["phase"], "private_spool_read_ready");
-        assert_eq!(value["publisher"][4]["calls"], 2);
-        assert_eq!(value["publisher"][4]["elapsedMicros"], 8);
-        assert_eq!(value["publisher"][5]["phase"], "final_stage_seal");
-        assert_eq!(value["publisher"][5]["calls"], 1);
-        assert_eq!(value["publisher"][5]["elapsedMicros"], 29);
-        for key in ["phases", "details"] {
+        let ready = counter(&value, "publisher", "private_spool_read_ready");
+        assert_eq!(ready["calls"], 2);
+        assert_eq!(ready["elapsedMicros"], 8);
+        let seal = counter(&value, "publisher", "final_stage_seal");
+        assert_eq!(seal["calls"], 1);
+        assert_eq!(seal["elapsedMicros"], 29);
+        for key in ["phases", "details", "sql"] {
             assert!(value[key].as_array().unwrap().iter().all(|p| {
                 p["calls"] == 0 && p["elapsedMicros"] == 0
             }));
         }
-        assert!(value["publisher"].as_array().unwrap().iter().enumerate().all(
-            |(index, p)| matches!(index, 4 | 5) || (p["calls"] == 0 && p["elapsedMicros"] == 0)
-        ));
+        assert_idle_except(&value, "publisher", &["private_spool_read_ready", "final_stage_seal"]);
         drop(profile);
         let output = output.lock().unwrap();
         assert_eq!(output.len(), 1);

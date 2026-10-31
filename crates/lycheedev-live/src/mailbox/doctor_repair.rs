@@ -274,6 +274,11 @@ where
         delivery: &mut impl RepairDelivery,
         control: &OperationControl,
     ) -> (DoctorResult, ServiceOutcome) {
+        let failures = report.repair_blocking_errors();
+        if !failures.is_empty() {
+            let error = ChannelError::Joined { causes: failures };
+            return (report, ServiceOutcome::failure(error));
+        }
         let mut archive = String::new();
         let mut outcome = self.doctor_fix_inner(&report, options, delivery, &mut archive, control);
         let original_connection = report.connection.clone();
@@ -296,12 +301,17 @@ where
                 );
             }
             if !report.healthy {
-                outcome = outcome.join(Err(ChannelError::from(lycheedev_core::ToolkitError::new(
-                    "doctor.check_failed",
-                    "doctor.check_failed",
-                    3,
-                ))
-                .into()));
+                let failures = report.repair_blocking_errors();
+                let error = if failures.is_empty() {
+                    ChannelError::from(lycheedev_core::ToolkitError::new(
+                        "doctor.check_failed",
+                        "doctor.check_failed",
+                        3,
+                    ))
+                } else {
+                    ChannelError::Joined { causes: failures }
+                };
+                outcome = outcome.join(Err(error.into()));
             }
         } else {
             let next = result
@@ -435,6 +445,9 @@ where
             } else {
                 None
             };
+            if let Some(archive) = &archive {
+                *archive_result = archive.to_string_lossy().into_owned();
+            }
             if let Some(release) = release {
                 if let Err(error) =
                     delivery.apply(target, deployment, release, archive.as_deref(), control)

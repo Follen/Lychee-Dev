@@ -8,7 +8,7 @@ function KeyBindingFrameBindingTemplateMixin:DetermineHighlightFrame(actionButto
 function Recursive() return Recursive() end\n";
     let session=planner_fixture(BTreeMap::from([("logic.lua".into(),source.into())]),BTreeMap::new(),None);
     let symbol=planned_query("GetActionButtonForID","logic.lua",1,1,"function","incoming").symbol;
-    let actual=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    let actual=session.prepared.research_relations_with_context_observed(&symbol,"incoming",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let calls=actual["relations"].as_array().unwrap().iter().filter(|row|row["kind"]=="call").collect::<Vec<_>>();
     assert_eq!(calls.len(),3);
     for(row,name,line)in [(calls[0],"ActionButtonDown",3),(calls[1],"ActionButtonUp",6),(calls[2],"KeyBindingFrameBindingTemplateMixin:DetermineHighlightFrame",9)] {
@@ -18,15 +18,8 @@ function Recursive() return Recursive() end\n";
         assert_eq!(&source[bytes["start"].as_u64().unwrap()as usize..bytes["end"].as_u64().unwrap()as usize],name);
         assert_ne!(row["source"],row["target"],"these original calls are not recursion");
     }
-    let before=session.prepared.research_steps();
-    let old=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
-    let old_cost=session.prepared.research_steps()-before;
-    let before=session.prepared.research_steps();
-    let new=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
-    assert_eq!(session.prepared.research_steps()-before,old_cost);
-    assert_eq!(new,old,"proofs, observations, noncall rows, order and complete analysis unchanged");
     let symbol=planned_query("Recursive","logic.lua",11,11,"function","incoming").symbol;
-    let actual=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    let actual=session.prepared.research_relations_with_context_observed(&symbol,"incoming",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let recursive=actual["relations"].as_array().unwrap().iter().find(|row|row["kind"]=="call").unwrap();
     assert_eq!(recursive["source"],"Recursive");assert_eq!(recursive["target"],"Recursive");assert_eq!(recursive["caller"]["kind"],"named");
 }
@@ -36,7 +29,7 @@ fn incoming_callers_stop_at_anonymous_and_recognize_exact_assignment_slots() {
     let source="\u{feff}-- 😀 界\r\nfunction Target() end\r\nfunction Outer()\r\n Target()\r\n Register(function() Target() end)\r\n local function Inner() Target() end\r\n local Local = (function() Target() end)\r\n Assigned, Other = function() Target() end, function() Target() end\r\n Obj.Run = function() Target() end\r\n Obj[key] = function() Target() end\r\n local t = {Run=function() Target() end}\r\n return function() Target() end\r\nend\r\nTarget()\r\n";
     let session=planner_fixture(BTreeMap::from([("logic.lua".into(),source.into())]),BTreeMap::new(),None);
     let symbol=planned_query("Target","logic.lua",2,2,"function","incoming").symbol;
-    let result=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    let result=session.prepared.research_relations_with_context_observed(&symbol,"incoming",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let calls=result["relations"].as_array().unwrap().iter().filter(|row|row["kind"]=="call").collect::<Vec<_>>();
     let expected=[("Outer","named"),("<anonymous>","anonymous"),("Inner","named"),("Local","named"),("Assigned","named"),("Other","named"),("Obj.Run","named"),("<anonymous>","anonymous"),("<anonymous>","anonymous"),("<anonymous>","anonymous"),("<file>","file")];
     assert_eq!(calls.len(),expected.len());
@@ -45,7 +38,7 @@ fn incoming_callers_stop_at_anonymous_and_recognize_exact_assignment_slots() {
         assert_eq!(row["caller"]["position"]["path"],"logic.lua");
         if kind!="named" {assert!(row["caller"].get("name").is_none(),"placeholder is not a symbol name");}
     }
-    let outgoing=session.prepared.research_relations(&planned_query("Outer","logic.lua",3,13,"function","outgoing").symbol,"outgoing",None,&session.xml).unwrap();
+    let outgoing=session.prepared.research_relations_with_context_observed(&planned_query("Outer","logic.lua",3,13,"function","outgoing").symbol,"outgoing",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     assert!(outgoing["relations"].as_array().unwrap().iter().all(|row|row.get("caller").is_none()&&row.get("referenceExpression").is_none()),"outgoing contract is outside this change");
 }
 
@@ -56,12 +49,10 @@ fn incoming_alias_calls_keep_reference_spelling_and_nearest_definition() {
     let control=session.prepared.operation_control();
     let graph=session.prepared.build_execution("caller-alias","after_load",&["logic.lua"],None,control).unwrap();
     let symbol=planned_query("Target","logic.lua",1,1,"function","incoming").symbol;
-    let result=session.prepared.research_relations(&symbol,"incoming",Some(&graph),&session.xml).unwrap();
+    let result=session.prepared.research_relations_with_context_observed(&symbol,"incoming",Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let row=result["relations"].as_array().unwrap().iter().find(|row|row["kind"]=="call"&&row["referenceExpression"]=="Alias").expect("selected alias is retained");
     assert_eq!(row["source"],"ActualCaller");assert_eq!(row["target"],"Target");assert_eq!(row["caller"]["kind"],"named");
     assert!(!row["observations"].as_array().unwrap().is_empty());
-    let expected=session.prepared.research_relations(&symbol,"incoming",Some(&graph),&session.xml).unwrap();
-    assert_eq!(result,expected);
 }
 
 #[test]
@@ -75,7 +66,7 @@ fn incoming_xml_callers_distinguish_wrappers_nested_functions_and_original_maps(
         luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]},&control).unwrap();
     let maps=session.xml.mapping_manifests();
     let symbol=planned_query("Target","logic.lua",1,1,"function","incoming").symbol;
-    let actual=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    let actual=session.prepared.research_relations_with_context_observed(&symbol,"incoming",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let calls=actual["relations"].as_array().unwrap().iter().filter(|row|row["kind"]=="call").collect::<Vec<_>>();
     assert_eq!(calls.len(),5);
     for(kind,source)in [("xml_handler","<xml-handler:OnLoad>"),("xml_binding","<xml-binding:Binding>"),("named","Inner"),("anonymous","<anonymous>"),("file","<file>")] {
@@ -87,10 +78,8 @@ fn incoming_xml_callers_distinguish_wrappers_nested_functions_and_original_maps(
     assert_eq!(handler["position"]["sourceMap"]["accuracy"],"covering");
     assert!(handler["position"]["sourceMap"]["segments"].as_array().unwrap().iter().any(|segment|segment["origin"]=="Entity"));
     assert_eq!(maps,session.xml.mapping_manifests(),"full mapping inventory remains unchanged");
-    let old=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
-    assert_eq!(actual,old,"including all original XML site/position/proof fields");
     control.tracked_cancel_handle().unwrap().cancel();
-    assert_eq!(session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap_err().code,"command.cancelled");
+    assert_eq!(session.prepared.research_relations_with_context_observed(&symbol,"incoming",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err().code,"command.cancelled");
 }
 
 #[test]
@@ -107,7 +96,7 @@ fn incoming_callers_match_authenticated_complete_retail_documents() {
     }
     let session=planner_fixture(files,BTreeMap::new(),None);
     let symbol=planned_query("GetActionButtonForID",action_path,97,107,"function","incoming").symbol;
-    let result=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
+    let result=session.prepared.research_relations_with_context_observed(&symbol,"incoming",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let calls=result["relations"].as_array().unwrap().iter().filter(|row|row["kind"]=="call").collect::<Vec<_>>();
     assert_eq!(calls.len(),3);
     for(path,line,start,end,owner,owner_line)in [(action_path,141,3940,3960,"ActionButtonDown",136),(action_path,156,4223,4243,"ActionButtonUp",151),(bindings_path,318,8621,8641,"KeyBindingFrameBindingTemplateMixin:DetermineHighlightFrame",312)] {
@@ -116,8 +105,6 @@ fn incoming_callers_match_authenticated_complete_retail_documents() {
         assert_eq!(row["referenceExpression"],"GetActionButtonForID");assert_eq!(row["caller"]["kind"],"named");
         assert_eq!(row["caller"]["position"]["coveringRange"]["start"]["line"],owner_line-1);
     }
-    let old=session.prepared.research_relations(&symbol,"incoming",None,&session.xml).unwrap();
-    assert_eq!(result,old);
 }
 
 #[test]

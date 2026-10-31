@@ -59,7 +59,7 @@ fn independent_verified_cold_warm_sessions_keep_digest_identity_and_retained_cou
         .unwrap();
         let (bytes, ckey) = session
             .with_verified(7, &mut |file| {
-                assert_eq!(file.entry.file_data_id, 7);
+                assert_eq!(file.reading["entry"]["fileDataID"], 7);
                 assert_eq!(file.reading["contentVerified"], true);
                 assert_eq!(file.blob.reference().sha256, storage::sha256(&f.payload));
                 statistics.push(file.reading["decodedCache"].clone());

@@ -86,7 +86,6 @@ impl ResearchRequestPlan {
     pub(crate) fn batch_count(&self)->usize{self.semantic_plan.batch_count()}
     pub(crate) fn planning_steps(&self)->usize{self.planning_steps}
 }
-pub(crate) struct ExecutedResearch {pub(crate) value:ResearchReply,pub(crate) receipt:plan::ExecutionReceipt}
 pub(crate) struct ResearchReply {base:Value,xml:Arc<XmlResearch>}
 impl ResearchReply {
     pub(crate) fn fields_mut(&mut self)->&mut Value {&mut self.base}
@@ -170,7 +169,7 @@ impl ResearchSession {
     pub(crate) fn query_reply_observed(&mut self,query:QueryRequest,control:&OperationControl,mut observer:impl FnMut(&'static str))->Result<ResearchReply> {
         let planned=self.plan_query(query,control)?;
         observer("query_inputs_renewed");observer("query_operations_planned");
-        self.execute_planned_observed(planned,control,observer).map(|executed|executed.value)
+        self.execute_planned_observed(planned,control,observer)
     }
     pub(crate) fn plan_query(&mut self,query:QueryRequest,control:&OperationControl)->Result<ResearchRequestPlan> {
         self.prepared.begin_research_request(control)?;
@@ -188,7 +187,7 @@ impl ResearchSession {
         let planning_steps=self.prepared.research_steps();
         Ok(ResearchRequestPlan{query,semantic_plan,planning_steps})
     }
-    pub(crate) fn execute_planned_observed(&mut self,planned:ResearchRequestPlan,control:&OperationControl,mut observer:impl FnMut(&'static str))->Result<ExecutedResearch> {
+    pub(crate) fn execute_planned_observed(&mut self,planned:ResearchRequestPlan,control:&OperationControl,mut observer:impl FnMut(&'static str))->Result<ResearchReply> {
         let ResearchRequestPlan{query,semantic_plan,planning_steps}=planned;
         control.check()?;self.prepared.validate_research_plan(&semantic_plan,&query)?;
         let mut execution=plan::ResearchExecution::new(&semantic_plan);
@@ -301,7 +300,7 @@ impl ResearchSession {
         output.base["semanticPlan"]["resourceAccounting"]=json!({"planningSteps":planning_steps,"totalSharedSteps":self.prepared.research_steps(),"budgetReset":"once_before_planning","executedSemanticBatches":receipt.completed_batches});
         output.base["semanticExecution"]=execution_evidence;
         observer("query_reply_assembled");
-        Ok(ExecutedResearch{value:output,receipt})
+        Ok(output)
     }
 }
 
@@ -568,7 +567,7 @@ mod projection_tests {
                 let query=planned_query("Target","logic.lua",2,2,"function",direction);
                 let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
                 let before=research_projection_passes();
-                let completion=session.prepared.execute_research_operations(&plan,&query,selected,&session.xml,None).unwrap();
+                let completion=session.prepared.execute_research_operations_observed(&plan,&query,selected,&session.xml,None,&mut |_|{}).unwrap();
                 assert_eq!(research_projection_passes()-before,usize::from(direction!="outgoing"));
                 let mut execution=plan::ResearchExecution::new(&plan);
                 let projection=execution.scope(json!({"kind":"reuse-test"}),completion).unwrap();
@@ -576,10 +575,10 @@ mod projection_tests {
                 let (answers,receipt)=execution.finish();
                 if selected.is_none(){assert_eq!(receipt.completed_batches,0);}
                 let before=session.prepared.research_steps();
-                let expected=session.prepared.research_relations(&query.symbol,direction,selected,&session.xml).unwrap();
+                let expected=session.prepared.research_relations_with_context_observed(&query.symbol,direction,selected,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
                 let cost=session.prepared.research_steps()-before;
                 let before=session.prepared.research_steps();let passes=research_projection_passes();
-                let actual=session.prepared.project_research_relations(&plan,&query,selected,&session.xml,projection).unwrap();
+                let actual=session.prepared.project_research_relations_observed(&plan,&query,selected,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
                 assert_eq!(session.prepared.research_steps()-before,cost,"logical charges must match");
                 assert_eq!(research_projection_passes()-passes,usize::from(direction!="incoming"),"incoming must not reconstruct any source projection");
                 assert_eq!(serde_json::to_vec(&actual).unwrap(),serde_json::to_vec(&expected).unwrap());
@@ -600,13 +599,13 @@ mod projection_tests {
         let control=session.prepared.operation_control().clone();
         let program=crate::xml_load::Program::from_sources("Main.toc",[("Main.toc",b"logic.lua\n".as_slice()),("logic.lua",session.prepared.inputs().original("logic.lua").unwrap().as_bytes())],&control).unwrap();
         let graph=session.prepared.build_xml_plan("same-scope",std::sync::Arc::new(program),None,&control).unwrap();
-        let projection=||session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap().2;
+        let projection=||session.prepared.execute_research_operations_observed(&plan,&query,None,&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap().2;
         let identical_query=query.clone();
-        assert!(session.prepared.project_research_relations(&plan,&identical_query,None,&session.xml,projection()).is_err());
-        assert!(session.prepared.project_research_relations(&plan,&query,Some(&graph),&session.xml,projection()).is_err());
+        assert!(session.prepared.project_research_relations_observed(&plan,&identical_query,None,&session.xml,projection(),&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).is_err());
+        assert!(session.prepared.project_research_relations_observed(&plan,&query,Some(&graph),&session.xml,projection(),&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).is_err());
         let retained=projection();assert!(retained.is_some());
         control.tracked_cancel_handle().unwrap().cancel();
-        assert_eq!(session.prepared.project_research_relations(&plan,&query,None,&session.xml,retained).unwrap_err().code,"command.cancelled");
+        assert_eq!(session.prepared.project_research_relations_observed(&plan,&query,None,&session.xml,retained,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err().code,"command.cancelled");
     }
 
     #[test]
@@ -614,14 +613,14 @@ mod projection_tests {
         let session=planner_fixture(BTreeMap::from([("logic.lua".into(),"function Target() end\nTarget()\n".into())]),BTreeMap::new(),None);
         let query=planned_query("Target","logic.lua",1,1,"function","incoming");
         let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-        let (_,_,projection)=session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap();
+        let (_,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,None,&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();
         assert!(projection.is_some());
         let control=session.prepared.operation_control();
         let remaining=session.prepared.inputs().limits().construction_steps-session.prepared.research_steps();
         session.prepared.carry_research_steps(remaining,control).unwrap();
         let before=session.prepared.research_steps();
-        let cached=session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection).unwrap_err();
-        let fresh=session.prepared.research_relations(&query.symbol,"incoming",None,&session.xml).unwrap_err();
+        let cached=session.prepared.project_research_relations_observed(&plan,&query,None,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err();
+        let fresh=session.prepared.research_relations_with_context_observed(&query.symbol,"incoming",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err();
         assert_eq!(cached.code,"source.native_query_budget");assert_eq!(cached.code,fresh.code);
         assert_eq!(session.prepared.research_steps(),before,"failed steps do not reset or add credit");
     }
@@ -632,10 +631,10 @@ mod projection_tests {
         let session=planner_fixture(BTreeMap::from([("logic.lua".into(),text)]),BTreeMap::new(),None);
         let query=planned_query("Target","logic.lua",1,1,"function","incoming");
         let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-        let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap();
+        let (answers,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,None,&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();
         assert!(projection.is_none(),"large result uses the original reconstruction path");
         let before=research_projection_passes();
-        let result=session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection).unwrap();
+        let result=session.prepared.project_research_relations_observed(&plan,&query,None,&session.xml,projection,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
         assert_eq!(research_projection_passes()-before,1);
         assert!(serde_json::to_vec(&result).unwrap().len()>1<<20);
         assert!(result["relations"].as_array().unwrap().len()>=2000);
@@ -691,7 +690,7 @@ mod projection_tests {
         let program=crate::xml_load::Program::from_sources("Main.toc",[("Main.toc",b"addon.lua\n".as_slice()),("addon.lua",session.prepared.inputs().original("addon.lua").unwrap().as_bytes())],&control).unwrap();
         let graph=session.prepared.build_xml_plan("api-metadata-credit",std::sync::Arc::new(program),None,&control).unwrap();
         let plan=session.prepared.plan_research_operations(&query,&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
-        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
+        let completion=session.prepared.execute_research_operations_observed(&plan,&query,Some(&graph),&session.xml,session.snapshot.api_definitions.as_ref(),&mut |_|{}).unwrap();
         let mut execution=plan::ResearchExecution::new(&plan);execution.scope(json!({"kind":"actual_graph"}),completion).unwrap();
         let (evidence,receipt)=execution.finish();assert_eq!(receipt.completed_batches,1);assert_eq!(receipt.unexecuted_operations,0);
         assert_eq!(evidence["answers"][0]["operations"][1]["state"],"known");assert_eq!(evidence["answers"][0]["operations"][1]["executed"],true);
@@ -876,10 +875,10 @@ mod projection_tests {
         let planned=session.plan_query(planned_query("Caller","logic.lua",1,3,"function","both"),&control).unwrap();
         assert_eq!(planned.batch_count(),1);
         let executed=session.execute_planned_observed(planned,&control,|_|{}).unwrap();
-        assert_eq!(executed.receipt.completed_batches,0);
-        assert_eq!(executed.receipt.unexecuted_operations,3);
-        assert!(executed.receipt.uncertain_answers>0);
-        let value=executed.value.into_value();
+        let value=serde_json::to_value(executed).unwrap();
+        assert_eq!(value["semanticExecution"]["receipt"]["completed_batches"],0);
+        assert_eq!(value["semanticExecution"]["receipt"]["unexecuted_operations"],3);
+        assert!(value["semanticExecution"]["receipt"]["uncertain_answers"].as_u64().unwrap()>0);
         let answers=value["semanticExecution"]["answers"][0]["operations"].as_array().unwrap();
         assert_eq!(answers.len(),3);
         assert!(answers[0]["result"]["relationsSHA256"].as_str().is_some_and(|hash|hash.len()==64));
@@ -951,14 +950,14 @@ mod projection_tests {
         let _graph=session.prepared.build_xml_plan("planned-budget",session.xml.programs[0].clone(),None,&control).unwrap();
         assert!(session.prepared.research_steps()>planned_steps,"graph construction must retain planning charges");
         session.prepared.validate_research_plan(&plan,&query).unwrap();
-        let answers=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
+        let answers=session.prepared.execute_research_operations_observed(&plan,&query,Some(&_graph),&session.xml,session.snapshot.api_definitions.as_ref(),&mut |_|{}).unwrap();
         let (answers,performed,projection)=answers.consume(&plan).unwrap();
         assert!(projection.is_none());drop(projection);
         assert!(performed.iter().all(|done|*done));
         assert_eq!(answers.len(),130);
         assert_eq!(answers[127]["batch"],0);assert_eq!(answers[128]["batch"],1);assert_eq!(answers[129]["batch"],1);
         assert_eq!(answers[129]["kind"],"definition");assert!(answers[129]["result"]["site"].is_object());
-        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
+        let completion=session.prepared.execute_research_operations_observed(&plan,&query,Some(&_graph),&session.xml,session.snapshot.api_definitions.as_ref(),&mut |_|{}).unwrap();
         let mut execution=plan::ResearchExecution::new(&plan);execution.scope(json!({"snapshot":_graph.snapshot_key}),completion).unwrap();
         let (_,receipt)=execution.finish();assert_eq!(receipt.completed_batches,2);
         session.prepared.begin_research_request(&control).unwrap();
@@ -966,7 +965,7 @@ mod projection_tests {
     }
 
     #[test]
-    fn impossible_file_filter_preserves_native_rows_charges_and_scope(){
+    fn relation_projection_keeps_alias_unloaded_and_xml_rows_in_selected_scope(){
         let control=OperationControl::default();
         let files=BTreeMap::from([
             ("target.lua".into(),"\u{feff}-- 😀 界\r\nfunction Target(x) return x end\r\nAlias=Target\r\n".into()),
@@ -986,13 +985,7 @@ mod projection_tests {
         for graph in [None,Some(&graphs[0]),Some(&graphs[1])] {
             for direction in ["incoming","outgoing","both"] {
                 let symbol=planned_query("Target","target.lua",2,2,"function",direction).symbol;
-                let before=session.prepared.research_steps();
-                let expected=session.prepared.research_relations(&symbol,direction,graph,&session.xml).unwrap();
-                let expected_cost=session.prepared.research_steps()-before;
-                let before=session.prepared.research_steps();
-                let actual=session.prepared.research_relations(&symbol,direction,graph,&session.xml).unwrap();
-                assert_eq!(session.prepared.research_steps()-before,expected_cost);
-                assert_eq!(serde_json::to_vec(&actual.clone()).unwrap(),serde_json::to_vec(&expected).unwrap(),"{direction}");
+                let actual=session.prepared.research_relations_with_context_observed(&symbol,direction,graph,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
                 if direction=="incoming"&&graph.is_some_and(|graph|std::ptr::eq(graph,&graphs[0])) {
                     assert!(actual["relations"].as_array().unwrap().iter().any(|row|row["path"]=="alias.lua"),"selected alias without target spelling survives");
                     assert!(actual["relations"].as_array().unwrap().iter().any(|row|row["path"]=="unknown.lua"),"unloaded candidate survives");
@@ -1002,7 +995,7 @@ mod projection_tests {
         }
         control.tracked_cancel_handle().unwrap().cancel();
         let symbol=planned_query("Missing","none.lua",1,1,"function","both").symbol;
-        assert_eq!(session.prepared.research_relations(&symbol,"both",None,&session.xml).unwrap_err().code,"command.cancelled");
+        assert_eq!(session.prepared.research_relations_with_context_observed(&symbol,"both",None,&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap_err().code,"command.cancelled");
     }
 
     #[test]
@@ -1031,7 +1024,7 @@ mod projection_tests {
             let symbol=index::Symbol{id:String::new(),kind:"function".into(),name:name.into(),target:String::new(),category:String::new(),confidence:String::new(),path:path.into(),line,end_line,signature:String::new(),scope:String::new(),ordinal:0};
             for direction in ["incoming","outgoing","both"]{
 
-                let new=session.prepared.research_relations(&symbol,direction,Some(&graph),&session.xml).unwrap();
+                let new=session.prepared.research_relations_with_context_observed(&symbol,direction,Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
 
                 if name=="Target"&&direction=="incoming"{assert!(new["relations"].as_array().unwrap().iter().any(|row|row["path"]=="outside.lua"),"unloaded source references remain visible");}
                 if name=="Actual"&&direction=="outgoing"{assert!(new["relations"].as_array().unwrap().iter().any(|row|row["path"]=="Templates.xml"),"inherited handler keeps original XML source and selected owner");}

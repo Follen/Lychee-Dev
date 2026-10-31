@@ -122,13 +122,6 @@ impl ImportedBatch {
     pub(crate) fn ordinal(&self) -> usize {
         self.ordinal
     }
-    pub(crate) fn locate(&self, record_id: u32) -> Option<usize> {
-        self.record_ids
-            .values()
-            .as_ref()
-            .binary_search(&record_id)
-            .ok()
-    }
 }
 
 #[derive(Clone, Copy)]

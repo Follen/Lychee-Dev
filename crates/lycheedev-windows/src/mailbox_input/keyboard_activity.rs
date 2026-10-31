@@ -54,21 +54,67 @@ unsafe extern "system" fn keyboard_hook(code: i32, message: WPARAM, data: LPARAM
 fn os_error(operation: &str, error: windows::core::Error) -> String {
     format!("{operation}: hresult=0x{:08x}", error.code().0 as u32)
 }
-fn stop_event() -> Result<OwnedHandle, String> {
+struct StopEvent {
+    handle: Option<OwnedHandle>,
+    #[cfg(test)]
+    observer: Option<tests::CloseObserver>,
+    role: &'static str,
+}
+impl AsRawHandle for StopEvent {
+    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        self.handle
+            .as_ref()
+            .expect("live stop event")
+            .as_raw_handle()
+    }
+}
+impl StopEvent {
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self {
+            handle: Some(self.handle.as_ref().expect("live stop event").try_clone()?),
+            #[cfg(test)]
+            observer: self.observer.clone(),
+            role: "worker",
+        })
+    }
+    fn close(&mut self) -> Result<(), String> {
+        let Some(handle) = self.handle.take() else {
+            return Ok(());
+        };
+        let result = crate::guarded_spawn::close_owned_handle(handle);
+        #[cfg(test)]
+        let result = match &self.observer {
+            Some(observer) => observer(self.role, result),
+            None => result,
+        };
+        result.map_err(|error| format!("desktop.keyboard_{}_event_close: {error}", self.role))
+    }
+}
+impl Drop for StopEvent {
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
+}
+fn stop_event() -> Result<StopEvent, String> {
     // SAFETY: Unnamed manual-reset event with default security; no pointers or
     // inherited access are supplied. Success returns one owned kernel handle.
     let handle = unsafe { CreateEventW(None, true, false, None) }
         .map_err(|e| os_error("desktop.keyboard_stop_event", e))?;
     // SAFETY: Transfer the unique successful CreateEvent handle exactly once.
     // OwnedHandle closes it; worker ownership uses its safe try_clone API.
-    Ok(unsafe { OwnedHandle::from_raw_handle(handle.0) })
+    Ok(StopEvent {
+        handle: Some(unsafe { OwnedHandle::from_raw_handle(handle.0) }),
+        #[cfg(test)]
+        observer: tests::current_observer(),
+        role: "parent",
+    })
 }
 
 /// Kept across all known-zero retries in one native backend invocation. The
 /// stop event and worker's separate owned clone make timeout/drop memory-safe;
 /// an unconfirmed join is an error, never reported as successful cleanup.
 pub struct KeyboardActivity {
-    stop: OwnedHandle,
+    stop: StopEvent,
     state: Arc<KeyboardState>,
     worker: Option<JoinHandle<Result<(), String>>>,
     close_attempted: bool,
@@ -77,21 +123,74 @@ impl KeyboardActivity {
     /// Installation is bounded by the original caller deadline and a two-second
     /// startup cap. No 500ms wait occurs here or while any publication lock is held.
     pub fn new(deadline: Instant) -> Result<Self, String> {
+        Self::new_with_worker(deadline, run)
+    }
+    fn new_with_worker(
+        deadline: Instant,
+        run_worker: impl FnOnce(
+            &StopEvent,
+            Arc<KeyboardState>,
+            mpsc::SyncSender<Result<(), String>>,
+        ) -> Result<(), String>
+        + Send
+        + 'static,
+    ) -> Result<Self, String> {
         let now = Instant::now();
         if now >= deadline {
             return Err("desktop.keyboard_start_deadline".into());
         }
-        let stop = stop_event()?;
-        let worker_stop = stop
-            .try_clone()
-            .map_err(|e| format!("desktop.keyboard_stop_clone: {e}"))?;
+        let mut stop = stop_event()?;
+        let worker_stop = match stop.try_clone() {
+            Ok(worker_stop) => worker_stop,
+            Err(error) => {
+                return crate::process::finish_query(
+                    Err(format!("desktop.keyboard_stop_clone: {error}")),
+                    stop.close(),
+                );
+            }
+        };
         let state = Arc::new(KeyboardState::new(now));
         let worker_state = state.clone();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        // Builder drops its closure when thread creation fails. Retain the
+        // original clone until the worker actually takes custody, so that this
+        // normal failure path can check both event closes instead of using Drop.
+        let custody = Arc::new(std::sync::Mutex::new(Some(worker_stop)));
+        let transferred = custody.clone();
         let worker = std::thread::Builder::new()
             .name("lycheedev-keyboard-activity".into())
-            .spawn(move || run(worker_stop, worker_state, ready_tx))
-            .map_err(|e| format!("desktop.keyboard_thread: {e}"))?;
+            .spawn(move || {
+                let mut worker_stop = transferred
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .expect("worker stop custody");
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_worker(&worker_stop, worker_state, ready_tx)
+                }))
+                .unwrap_or_else(|_| Err("desktop.keyboard_thread_panicked".into()));
+                // The worker no longer borrows its event. Consume it before
+                // the parent observes thread exit, including after a panic.
+                crate::process::finish_query(result, worker_stop.close())
+            });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(error) => {
+                let worker_close = custody
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .expect("unstarted worker event")
+                    .close();
+                return crate::process::finish_query(
+                    crate::process::finish_query(
+                        Err(format!("desktop.keyboard_thread: {error}")),
+                        worker_close,
+                    ),
+                    stop.close(),
+                );
+            }
+        };
         let mut activity = Self {
             stop,
             state,
@@ -135,35 +234,49 @@ impl KeyboardActivity {
         self.close_attempted = true;
         self.state.stop();
         let Some(worker) = self.worker.as_ref() else {
-            return Ok(());
+            return self.stop.close();
         };
         // SAFETY: This parent-owned event handle remains live throughout the
         // synchronous call; the worker has a distinct owned handle to the same
         // event. Signaling neither closes a handle nor accesses worker memory.
-        unsafe { SetEvent(HANDLE(self.stop.as_raw_handle())) }
-            .map_err(|e| os_error("desktop.keyboard_stop", e))?;
+        let signaled = unsafe { SetEvent(HANDLE(self.stop.as_raw_handle())) }
+            .map_err(|e| os_error("desktop.keyboard_stop", e));
         // SAFETY: JoinHandle owns the thread handle. It is only borrowed for a
         // bounded wait and is not closed or consumed until that wait returns.
         let status = unsafe { WaitForSingleObject(HANDLE(worker.as_raw_handle()), CLOSE_MILLIS) };
         if status == WAIT_TIMEOUT {
-            return Err("desktop.keyboard_close_deadline".into());
+            return crate::process::finish_query(
+                signaled,
+                Err("desktop.keyboard_close_deadline".into()),
+            );
         }
         if status == WAIT_FAILED {
-            return Err(os_error(
-                "desktop.keyboard_join_wait",
-                windows::core::Error::from_thread(),
-            ));
+            return crate::process::finish_query(
+                signaled,
+                Err(os_error(
+                    "desktop.keyboard_join_wait",
+                    windows::core::Error::from_thread(),
+                )),
+            );
         }
         if status != WAIT_OBJECT_0 {
-            return Err(format!("desktop.keyboard_join_status: {}", status.0));
+            return crate::process::finish_query(
+                signaled,
+                Err(format!("desktop.keyboard_join_status: {}", status.0)),
+            );
         }
         // The signaled native thread is already terminated; join cannot wait for
         // its message loop. Taking this sole handle makes close idempotent.
-        self.worker
+        let joined = self
+            .worker
             .take()
             .expect("worker was borrowed above")
             .join()
-            .map_err(|_| "desktop.keyboard_thread_panicked".to_string())?
+            .unwrap_or_else(|_| Err("desktop.keyboard_thread_panicked".into()));
+        crate::process::finish_query(
+            crate::process::finish_query(signaled, joined),
+            self.stop.close(),
+        )
     }
 }
 impl Drop for KeyboardActivity {
@@ -178,7 +291,7 @@ impl Drop for KeyboardActivity {
 }
 
 fn run(
-    stop: OwnedHandle,
+    stop: &StopEvent,
     state: Arc<KeyboardState>,
     ready: mpsc::SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
@@ -219,7 +332,7 @@ fn run(
     };
     state.note(Instant::now());
     let _ = ready.send(Ok(()));
-    let result = pump(&stop);
+    let result = pump(stop);
     // SAFETY: This exact successful hook is unhooked once on its installer
     // thread, after the message loop has stopped. Callback code is process-lived
     // and TLS owns its state through the complete unhook attempt.
@@ -231,7 +344,7 @@ fn run(
         _ => Ok(()),
     }
 }
-fn pump(stop: &OwnedHandle) -> Result<(), String> {
+fn pump(stop: &StopEvent) -> Result<(), String> {
     loop {
         // SAFETY: The local HANDLE array borrows the worker-owned event only
         // for this wait. Message input and stop are event-driven; the event stays
@@ -290,6 +403,108 @@ fn pump(stop: &OwnedHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, sync::Mutex};
+    pub(super) type CloseObserver =
+        Arc<dyn Fn(&'static str, Result<(), String>) -> Result<(), String> + Send + Sync>;
+    thread_local! { static CLOSE_OBSERVER: RefCell<Option<CloseObserver>> = RefCell::new(None); }
+    pub(super) fn current_observer() -> Option<CloseObserver> {
+        CLOSE_OBSERVER.with_borrow(Clone::clone)
+    }
+    struct Observation;
+    impl Observation {
+        fn install(observer: CloseObserver) -> Self {
+            CLOSE_OBSERVER.with_borrow_mut(|current| {
+                assert!(current.is_none());
+                *current = Some(observer);
+            });
+            Self
+        }
+    }
+    impl Drop for Observation {
+        fn drop(&mut self) {
+            CLOSE_OBSERVER.with_borrow_mut(|current| *current = None);
+        }
+    }
+    fn event_only_worker(
+        stop: &StopEvent,
+        _: Arc<KeyboardState>,
+        ready: mpsc::SyncSender<Result<(), String>>,
+    ) -> Result<(), String> {
+        ready.send(Ok(())).unwrap();
+        let status = unsafe { WaitForSingleObject(HANDLE(stop.as_raw_handle()), INFINITE) };
+        if status == WAIT_OBJECT_0 {
+            Ok(())
+        } else {
+            Err(format!("fixture.event_wait: {}", status.0))
+        }
+    }
+    fn closes(fail: &'static str) -> (Observation, Arc<Mutex<Vec<&'static str>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let observed = calls.clone();
+        let observation = Observation::install(Arc::new(move |role, result| {
+            result?;
+            observed.lock().unwrap().push(role);
+            if role == fail || fail == "both" {
+                Err(format!("fixture.keyboard_{role}_close"))
+            } else {
+                Ok(())
+            }
+        }));
+        (observation, calls)
+    }
+    #[test]
+    fn event_only_worker_closes_both_owned_events_after_join() {
+        let (_observation, calls) = closes("");
+        let mut activity =
+            KeyboardActivity::new_with_worker(Instant::now() + START_LIMIT, event_only_worker)
+                .unwrap();
+        activity.close().unwrap();
+        assert!(activity.worker.is_none());
+        drop(activity);
+        let mut actual = calls.lock().unwrap().clone();
+        actual.sort();
+        assert_eq!(actual, ["parent", "worker"]);
+    }
+    #[test]
+    fn event_only_close_preserves_worker_and_parent_event_errors() {
+        for fail in ["parent", "worker"] {
+            let (observation, calls) = closes(fail);
+            let mut activity =
+                KeyboardActivity::new_with_worker(Instant::now() + START_LIMIT, event_only_worker)
+                    .unwrap();
+            let result = activity.close();
+            assert!(activity.worker.is_none());
+            drop(activity);
+            drop(observation);
+            assert_eq!(
+                calls.lock().unwrap().len(),
+                2,
+                "both actual handles consumed"
+            );
+            assert!(
+                result
+                    .err()
+                    .as_deref()
+                    .is_some_and(|error| error.contains(&format!("fixture.keyboard_{fail}_close"))),
+                "{fail} close error was lost"
+            );
+        }
+    }
+    #[test]
+    fn event_only_start_failure_preserves_primary_and_event_close_errors() {
+        let (_observation, calls) = closes("both");
+        let result =
+            KeyboardActivity::new_with_worker(Instant::now() + START_LIMIT, |_stop, _, ready| {
+                ready.send(Err("fixture.keyboard_start".into())).unwrap();
+                Err("fixture.keyboard_start".into())
+            });
+        let error = result.err().expect("startup failure");
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        assert!(error.contains("fixture.keyboard_start"));
+        assert!(error.contains("fixture.keyboard_worker_close"), "{error}");
+        assert!(error.contains("fixture.keyboard_parent_close"), "{error}");
+    }
+
     #[test]
     fn passive_monitor_installs_and_closes_without_input() {
         let mut monitor = KeyboardActivity::new(Instant::now() + START_LIMIT).unwrap();

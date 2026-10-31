@@ -450,18 +450,19 @@ mod tests {
         }
     }
     #[test]
+    #[ignore = "child fixture only; invoked explicitly by process owner regressions"]
     fn helper() {
         match std::env::var("LYCHEEDEV_CORE_PROCESS_FIXTURE").as_deref() {
             Ok("block") => std::thread::sleep(Duration::from_secs(20)),
             Ok("output") => std::io::stdout().write_all(&vec![b'x'; 65536]).unwrap(),
             Ok("silent-descendant-root") => silent_descendant_root(),
             Ok("silent-descendant") => silent_descendant(),
-            _ => {}
+            _ => panic!("Core process child fixture requires an explicit supported mode"),
         }
     }
     fn command(mode: &str) -> Command {
         let mut cmd = Command::new(std::env::current_exe().unwrap());
-        cmd.args(["--exact", "process::tests::helper", "--nocapture"])
+        cmd.args(["--ignored", "--exact", "process::tests::helper", "--nocapture"])
             .env("LYCHEEDEV_CORE_PROCESS_FIXTURE", mode);
         cmd
     }

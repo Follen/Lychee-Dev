@@ -174,7 +174,7 @@ fn supplemental_pin_after_publication_keeps_exact_generation_and_parent() {
     let error = pin_selection_observed_with_check(
         &f.0,
         spec('a'),
-        Some(&invocation),
+        &invocation,
         || budget.check(),
         |_| {
             published.set(published.get() + 1);

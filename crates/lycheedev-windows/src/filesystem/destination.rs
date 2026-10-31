@@ -826,43 +826,6 @@ pub struct Destination {
     overwrite: bool,
 }
 impl Destination {
-    pub fn open(output: &Path, overwrite: bool) -> io::Result<Self> {
-        if output.as_os_str().is_empty()
-            || matches!(output.as_os_str().encode_wide().last(), Some(47 | 92))
-        {
-            return Err(invalid("output must name a file"));
-        }
-        // GetFullPathName (used by absolute) normalizes trailing dots/spaces.
-        // Validate original components before that normalization can hide them.
-        if output
-            .components()
-            .any(|component| matches!(component, Component::Normal(name) if !valid_name(name)))
-        {
-            return Err(invalid(
-                "output contains a device, stream or ambiguous name",
-            ));
-        }
-        let path = std::path::absolute(output)?;
-        let parent = path
-            .parent()
-            .ok_or_else(|| invalid("output requires an existing parent"))?;
-        let name = path
-            .file_name()
-            .ok_or_else(|| invalid("output must name a file"))?;
-        if !valid_name(name) {
-            return Err(invalid(
-                "output contains a device, stream or ambiguous name",
-            ));
-        }
-        let directory = Directory::open(parent)?;
-        let destination = Self {
-            path,
-            _directory: directory,
-            overwrite,
-        };
-        destination.check()?;
-        Ok(destination)
-    }
     /// Acquire the parent under the original control. The caller now owns
     /// checked close even if the subsequent entry preflight fails. Publication
     /// always performs its own entry check; this is not permission to overwrite.
@@ -929,8 +892,8 @@ impl Destination {
         }
         control.check()
     }
-    /// Controlled assets use the already reviewed original-handle staged state
-    /// machine. Legacy publishers keep their existing API and behavior.
+    /// Publish exactly the declared source through an original-handle stage.
+    /// Preserve publication and cleanup facts independently of the result.
     pub fn publish_reader_controlled<C: FileControl>(
         &self,
         reader: &mut impl Read,
@@ -1029,96 +992,6 @@ impl Destination {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    fn check(&self) -> io::Result<()> {
-        // Refuse a currently observed reparse target. If the directory entry
-        // changes after this check, the handle-based rename replaces that entry
-        // (or fails); it never opens or writes through the replacement target.
-        self._directory.verify()?;
-        match relative_file(
-            self._directory.parent_handle(),
-            self.path.file_name().expect("validated simple name"),
-            RelativeOpen::Inspect,
-        ) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-            Ok(file) => {
-                let metadata = file.metadata()?;
-                if !self.overwrite
-                    || !metadata.is_file()
-                    || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
-                {
-                    Err(io::Error::new(
-                        io::ErrorKind::AlreadyExists,
-                        "output already exists or is not a regular file",
-                    ))
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-    /// The caller's control is checked before reading, at each 64 KiB block and
-    /// before publication. The source must have exactly the declared length.
-    pub fn publish_reader(
-        &self,
-        reader: &mut impl Read,
-        length: u64,
-        maximum: u64,
-        mut check: impl FnMut() -> io::Result<()>,
-    ) -> io::Result<()> {
-        check()?;
-        if length > maximum {
-            return Err(invalid("output exceeds publication budget"));
-        }
-        self.check()?;
-        let mut stage = Stage::create(&self._directory)?;
-        let result = (|| {
-            let mut buffer = [0u8; 65536];
-            let mut remaining = length;
-            while remaining != 0 {
-                check()?;
-                let admitted = buffer.len().min(remaining as usize);
-                let n = reader.read(&mut buffer[..admitted])?;
-                if n == 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "output source ended before its declared length",
-                    ));
-                }
-                check()?;
-                stage.file_mut().write_all(&buffer[..n])?;
-                remaining -= n as u64;
-            }
-            check()?;
-            if reader.read(&mut buffer[..1])? != 0 {
-                return Err(invalid("output source exceeds its declared length"));
-            }
-            stage.file_mut().sync_all()?;
-            check()?;
-            self.check()?;
-            stage.rename(&self.path, self.overwrite)?;
-            Ok(())
-        })();
-        if result.is_err() {
-            // Delete exactly the opened stage through its handle, never by a
-            // potentially substituted pathname. Drop retries if this fails.
-            stage.discard()?;
-        }
-        result
-    }
-    pub fn publish(
-        &self,
-        bytes: &[u8],
-        maximum: u64,
-        check: impl FnMut() -> io::Result<()>,
-    ) -> io::Result<()> {
-        self.publish_reader(
-            &mut io::Cursor::new(bytes),
-            bytes.len() as u64,
-            maximum,
-            check,
-        )
-    }
 }
 
 struct Stage {
@@ -1135,10 +1008,6 @@ enum RenameAttempt {
 }
 
 impl Stage {
-    fn create(parent: &Directory) -> io::Result<Self> {
-        parent.verify()?;
-        Self::create_verified(parent, &mut Uncontrolled)
-    }
     // The caller verified ancestry under its original control. Return the
     // acquired owner before any post-open check can lose cleanup authority.
     fn create_verified<C: FileControl>(
@@ -1740,11 +1609,11 @@ mod tests {
         fs::create_dir(&outside).unwrap();
         fs::write(outside.join("sentinel"), b"original outside bytes").unwrap();
         let output = parent.join("body");
-        let destination = Destination::open(&output, true).unwrap();
-        let mut stage = Stage::create(&destination._directory).unwrap();
+        let destination = Destination::prepare_controlled(&output, true, &mut Uncontrolled).unwrap();
+        let mut stage = Stage::create_verified(&destination._directory, &mut Uncontrolled).unwrap();
         stage.file_mut().write_all(b"complete staged body").unwrap();
         stage.file_mut().sync_all().unwrap();
-        destination.check().unwrap();
+        destination.check_controlled(&mut Uncontrolled).unwrap();
         // Exact production boundary: a reparse target is inserted after check
         // but before NtSetInformationFile.
         fs::create_dir(&output).unwrap();
@@ -1758,7 +1627,7 @@ mod tests {
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
         stage.discard().unwrap();
         drop(stage);
-        drop(destination);
+        destination.close().unwrap();
         fs::remove_file(&output).unwrap();
         assert_eq!(fs::read_dir(&parent).unwrap().count(), 0);
         fs::remove_dir_all(root).unwrap();

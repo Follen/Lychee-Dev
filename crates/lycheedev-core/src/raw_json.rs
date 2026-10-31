@@ -79,13 +79,7 @@ fn whitespace(byte: u8) -> bool {
 /// Iterative grammar scanner; scratch is bounded by Go's depth limit. String
 /// bytes and escaped surrogate code units are intentionally never decoded.
 pub(crate) fn validate_at(bytes: &[u8], base: usize) -> Result<(), InvalidJson> {
-    scan(bytes, base, false).map(|_| ())
-}
-/// The first complete JSON value, with Go byte/string/depth rules. Selection
-/// files decode that value before classifying any following data. This shares
-/// the validator and does not change full-document RawMessage admission.
-pub(crate) fn first_value_end(bytes: &[u8]) -> Result<usize, InvalidJson> {
-    scan(bytes, 0, true)
+    scan(bytes, base).map(|_| ())
 }
 enum ScanFailure {
     Syntax(InvalidJson),
@@ -104,7 +98,7 @@ pub fn validate_with_check(
 ) -> crate::Result<Result<(), InvalidJson>> {
     check()?;
     let mut next = 65536usize;
-    let result = scan_with(bytes, 0, false, &mut |at| {
+    let result = scan_with(bytes, 0, &mut |at| {
         if at >= next {
             check().map_err(ScanFailure::Control)?;
             next = at.saturating_add(65536);
@@ -120,8 +114,8 @@ pub fn validate_with_check(
         Err(ScanFailure::Control(e)) => Err(e),
     }
 }
-fn scan(bytes: &[u8], base: usize, first_only: bool) -> Result<usize, InvalidJson> {
-    match scan_with(bytes, base, first_only, &mut |_| Ok(())) {
+fn scan(bytes: &[u8], base: usize) -> Result<usize, InvalidJson> {
+    match scan_with(bytes, base, &mut |_| Ok(())) {
         Ok(end) => Ok(end),
         Err(ScanFailure::Syntax(e)) => Err(e),
         Err(ScanFailure::Control(_)) => unreachable!("no-op scanner callback cannot stop"),
@@ -130,7 +124,6 @@ fn scan(bytes: &[u8], base: usize, first_only: bool) -> Result<usize, InvalidJso
 fn scan_with(
     bytes: &[u8],
     base: usize,
-    first_only: bool,
     poll: &mut impl FnMut(usize) -> Result<(), ScanFailure>,
 ) -> Result<usize, ScanFailure> {
     let mut at = 0;
@@ -146,7 +139,7 @@ fn scan_with(
         let byte = bytes.get(at).copied();
         match frame {
             None if root => {
-                return if first_only || at == bytes.len() {
+                return if at == bytes.len() {
                     Ok(at)
                 } else {
                     Err(InvalidJson { offset: at }.into())

@@ -267,9 +267,6 @@ impl OwnedBindingSession {
         shapes.insert(object.view.clone(), frozen.clone());
         Ok(Ok(frozen))
     }
-    pub(crate) fn owns_shape(&self, shape: &FrozenShape) -> bool {
-        self.token == shape.token && shape.object.view.context == self.identity()
-    }
 }
 
 enum ActiveKey {

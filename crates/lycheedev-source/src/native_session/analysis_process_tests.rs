@@ -2,6 +2,20 @@ use super::*;
 use std::sync::atomic::AtomicUsize;
 
 #[test]
+fn cached_miss_recovery_preserves_actual_analysis_retirement_failure() {
+    let missing = ToolkitError::new(
+        "source.native_snapshot_missing", "Native Source snapshot is not cached", 3,
+    );
+    let retired = with_retirement(missing, Err(fault("fixture analysis retirement pending")));
+    assert_eq!(retired.code, "source.native_snapshot_missing");
+    assert_eq!(retired.details["analysisRetirementError"]["message"], "fixture analysis retirement pending");
+    let expected = serde_json::to_value(&retired).unwrap();
+    let preserved = super::super::cached_exchange_result(Err(retired))
+        .expect_err("failed analysis retirement must not authorize submitting full work");
+    assert_eq!(serde_json::to_value(preserved).unwrap(), expected);
+}
+
+#[test]
 fn private_frames_reject_unknown_fields_and_missing_wire() {
     for value in [
         json!({"processing_deadline_unix_ms":1}),

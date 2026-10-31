@@ -47,5 +47,5 @@ fn ordered_row_collector_matches_every_named_column() {
         .collect();
     assert!(named.is_empty());
     let ordered = table.leased_row_values(1, 1 << 20).unwrap();
-    assert_eq!(ordered.value(), &expected);
+    assert_eq!(&ordered.value, &expected);
 }

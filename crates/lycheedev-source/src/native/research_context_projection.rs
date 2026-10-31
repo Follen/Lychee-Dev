@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use lycheedev_core::Result;
 
-pub(super) struct FileProjectionRange {
+pub(crate) struct FileProjectionRange {
     pub(super) file: usize,
     pub(super) first: usize,
     pub(super) end: usize,

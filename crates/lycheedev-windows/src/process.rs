@@ -8,6 +8,7 @@ pub use runtime_module::{
     RuntimeReadKind, RuntimeUsage,
 };
 use serde::{Deserialize, Serialize};
+use std::os::windows::io::{IntoRawHandle, RawHandle};
 use windows::Win32::{
     Foundation::*,
     System::{Diagnostics::ToolHelp::*, Memory::*, ProcessStatus::*, Threading::*},
@@ -34,13 +35,46 @@ pub struct WindowIdentity {
     pub hwnd: usize,
 }
 struct Handle(HANDLE);
-impl Drop for Handle {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = CloseHandle(self.0);
+impl IntoRawHandle for Handle {
+    fn into_raw_handle(self) -> RawHandle {
+        let raw = self.0.0;
+        std::mem::forget(self);
+        raw
+    }
+}
+impl Handle {
+    fn close(self) -> Result<()> {
+        let result = crate::guarded_spawn::close_owned_handle(self);
+        #[cfg(test)]
+        let result = checked_query_tests::observe_close(result);
+        result.map_err(|error| format!("process.handle_close: {error}"))
+    }
+    fn finish<T>(self, result: Result<T>) -> Result<T> {
+        finish_query(result, self.close())
+    }
+}
+pub(crate) fn finish_query<T>(result: Result<T>, close: Result<()>) -> Result<T> {
+    match (result, close) {
+        (result, Ok(())) => result,
+        (Ok(_), Err(error)) => Err(error),
+        (Err(mut primary), Err(cleanup)) => {
+            primary.push('\n');
+            primary.push_str(&cleanup);
+            Err(primary)
         }
     }
 }
+impl Drop for Handle {
+    fn drop(&mut self) {
+        let result = unsafe { CloseHandle(self.0) }.map_err(|error| error.to_string());
+        #[cfg(test)]
+        let result = checked_query_tests::observe_close(result);
+        let _ = result;
+    }
+}
+#[cfg(test)]
+#[path = "process/checked_query_tests.rs"]
+pub(crate) mod checked_query_tests;
 pub struct Process {
     handle: Handle,
     identity: ProcessIdentity,
@@ -55,6 +89,14 @@ fn finish_process_wait(
     Ok(exit)
 }
 impl Process {
+    /// Consume the original process owner once. An uncertain close is never retried.
+    pub fn close(self) -> Result<()> {
+        self.handle.close()
+    }
+    /// Preserve a query failure together with the original owner's close failure.
+    pub fn finish<T>(self, result: Result<T>) -> Result<T> {
+        self.handle.finish(result)
+    }
     pub fn memory(&self) -> Result<ProcessMemory> {
         self.verify()?;
         let mut memory = PROCESS_MEMORY_COUNTERS_EX {
@@ -78,24 +120,27 @@ impl Process {
         unsafe {
             let snapshot =
                 Handle(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).map_err(|e| e.to_string())?);
-            let mut entry = PROCESSENTRY32W {
-                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-                ..Default::default()
-            };
-            Process32FirstW(snapshot.0, &mut entry).map_err(|e| e.to_string())?;
-            for _ in 0..65536 {
-                if entry.th32ProcessID == self.identity.pid {
-                    self.verify()?;
-                    if entry.th32ParentProcessID == 0 {
+            let result = (|| {
+                let mut entry = PROCESSENTRY32W {
+                    dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                    ..Default::default()
+                };
+                Process32FirstW(snapshot.0, &mut entry).map_err(|e| e.to_string())?;
+                for _ in 0..65536 {
+                    if entry.th32ProcessID == self.identity.pid {
+                        self.verify()?;
+                        if entry.th32ParentProcessID == 0 {
+                            return Err("process.parent_missing".into());
+                        }
+                        return Ok(entry.th32ParentProcessID);
+                    }
+                    if Process32NextW(snapshot.0, &mut entry).is_err() {
                         return Err("process.parent_missing".into());
                     }
-                    return Ok(entry.th32ParentProcessID);
                 }
-                if Process32NextW(snapshot.0, &mut entry).is_err() {
-                    return Err("process.parent_missing".into());
-                }
-            }
-            Err("process.inventory_budget".into())
+                Err("process.inventory_budget".into())
+            })();
+            snapshot.finish(result)
         }
     }
     pub fn identity(&self) -> &ProcessIdentity {
@@ -155,8 +200,10 @@ impl Process {
                 )
                 .map_err(|e| e.to_string())?,
             );
-            let identity = identity(handle.0, pid)?;
-            Ok(Self { handle, identity })
+            match identity(handle.0, pid) {
+                Ok(identity) => Ok(Self { handle, identity }),
+                Err(error) => handle.finish(Err(error)),
+            }
         }
     }
     pub fn verify(&self) -> Result<()> {
@@ -286,20 +333,23 @@ unsafe fn identity(h: HANDLE, pid: u32) -> Result<ProcessIdentity> {
 impl WindowIdentity {
     pub fn verify(&self) -> Result<()> {
         let p = Process::open(self.process.pid)?;
-        if p.identity != self.process {
-            return Err("window.process_reused".into());
-        }
-        unsafe {
-            let mut pid = 0;
-            let h = HWND(self.hwnd as *mut _);
-            if !IsWindow(Some(h)).as_bool() {
-                return Err("window.closed".into());
+        let result = (|| {
+            if p.identity != self.process {
+                return Err("window.process_reused".into());
             }
-            GetWindowThreadProcessId(h, Some(&mut pid));
-            if pid != self.process.pid {
-                return Err("window.reused".into());
+            unsafe {
+                let mut pid = 0;
+                let h = HWND(self.hwnd as *mut _);
+                if !IsWindow(Some(h)).as_bool() {
+                    return Err("window.closed".into());
+                }
+                GetWindowThreadProcessId(h, Some(&mut pid));
+                if pid != self.process.pid {
+                    return Err("window.reused".into());
+                }
+                Ok(())
             }
-            Ok(())
-        }
+        })();
+        p.finish(result)
     }
 }

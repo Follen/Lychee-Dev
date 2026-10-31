@@ -804,38 +804,56 @@ pub(super) fn worker(args: &[String]) -> Result<()> {
         return Err(fault("Native analysis home must be absolute"));
     }
     let own = Process::open(std::process::id()).map_err(platform)?;
-    let parent = Process::open(owner.pid).map_err(platform)?;
-    if own.parent_pid().map_err(platform)? != owner.pid
-        || parent.identity() != &owner
-        || parent.image_path().map_err(platform)?.canonicalize()?
-            != std::env::current_exe()?.canonicalize()?
-    {
-        return Err(fault("Native analysis actual owner differs"));
-    }
-    parent.verify().map_err(platform)?;
-    let mut input = std::io::stdin().lock();
-    let mut output = std::io::stdout().lock();
-    write_frame(
-        &mut output,
-        &WorkerHello {
-            wire: PRIVATE_WIRE.into(),
-            token: token.clone(),
-            identity: own.identity().clone(),
-            owner: owner.clone(),
-        },
-        4096,
-    )?;
-    let mut cached: Option<Cached> = None;
-    loop {
-        let call: WorkerCall = read_frame(&mut input, 4096)?;
-        if call.wire != PRIVATE_WIRE {
-            return Err(fault("Native analysis request wire differs"));
-        }
-        let raw = read_raw_frame(&mut input, REQUEST_BYTES)?;
-        let request: Request = match serde_json::from_slice(&raw) {
-            Ok(request) => request,
-            Err(_) => {
-                drop(raw);
+    let result = (|| -> Result<()> {
+        let parent = Process::open(owner.pid).map_err(platform)?;
+        let authenticated = (|| {
+            if own.parent_pid().map_err(platform)? != owner.pid
+                || parent.identity() != &owner
+                || parent.image_path().map_err(platform)?.canonicalize()?
+                    != std::env::current_exe()?.canonicalize()?
+            {
+                return Err(fault("Native analysis actual owner differs"));
+            }
+            parent.verify().map_err(platform)
+        })();
+        lycheedev_core::metadata::owned_write::finish_owned(authenticated, parent.close().map_err(platform))?;
+        let mut input = std::io::stdin().lock();
+        let mut output = std::io::stdout().lock();
+        write_frame(
+            &mut output,
+            &WorkerHello {
+                wire: PRIVATE_WIRE.into(),
+                token: token.clone(),
+                identity: own.identity().clone(),
+                owner: owner.clone(),
+            },
+            4096,
+        )?;
+        let mut cached: Option<Cached> = None;
+        loop {
+            let call: WorkerCall = read_frame(&mut input, 4096)?;
+            if call.wire != PRIVATE_WIRE {
+                return Err(fault("Native analysis request wire differs"));
+            }
+            let raw = read_raw_frame(&mut input, REQUEST_BYTES)?;
+            let request: Request = match serde_json::from_slice(&raw) {
+                Ok(request) => request,
+                Err(_) => {
+                    drop(raw);
+                    write_frame(
+                        &mut output,
+                        &WorkerMeta {
+                            wire: PRIVATE_WIRE.into(),
+                            accepted: false,
+                            cached: cache_state(&cached),
+                        },
+                        4096,
+                    )?;
+                    continue;
+                }
+            };
+            drop(raw);
+            if request.wire != WIRE || !matches!(request.action, Action::Query) {
                 write_frame(
                     &mut output,
                     &WorkerMeta {
@@ -847,84 +865,72 @@ pub(super) fn worker(args: &[String]) -> Result<()> {
                 )?;
                 continue;
             }
-        };
-        drop(raw);
-        if request.wire != WIRE || !matches!(request.action, Action::Query) {
+            let observed = Instant::now();
+            let now = utc_ms()?;
+            let cutoff = call
+                .processing_deadline_unix_ms
+                .min(request.deadline_unix_ms);
+            let deadline = observed
+                .checked_add(Duration::from_millis(cutoff.saturating_sub(now)))
+                .ok_or_else(|| fault("Native analysis deadline range"))?;
+            let control = OperationControl::uncancelable(deadline);
+            let begun = Instant::now();
+            let diagnostic = home.join("tmp/source-native-last-request.json");
+            let request_deadline_unix_ms = request.deadline_unix_ms;
+            let journal = std::cell::RefCell::new(PhaseJournal::open(&home,own.identity(),&control));
+            let record = |phase: &str, error: Option<&ToolkitError>| {
+                // All optional filesystem work stays in this killable child under
+                // the original processing cutoff. The IPC owner never writes here.
+                observe_if_active(&control, || {
+                    let coarse=!crate::native_research::allocation_phase(phase);
+                    let mut journal=journal.borrow_mut();
+                    let sampled=journal.admit(phase);
+                    if !coarse&&!sampled{return Ok(());}
+                    let elapsed=begun.elapsed().as_millis();let memory=own.memory().ok();
+                    if sampled{journal.append(phase,elapsed,memory.as_ref(),&owner,own.identity(),request_deadline_unix_ms,&control);}
+                    if coarse {
+                        let value=json!({"schema":"lycheedev.native-source-request-diagnostic.v1","workerPid":owner.pid,
+                            "workerCreated":owner.created,"analysisPid":own.identity().pid,"analysisCreated":own.identity().created,
+                            "requestDeadlineUnixMs":request_deadline_unix_ms,"phase":phase,"elapsedMs":elapsed,
+                            "processMemory":memory,"error":error,"phaseJournal":journal.metadata()});
+                        storage::atomic_write_controlled(&diagnostic,&serde_json::to_vec(&value)?,&control)?;
+                    }
+                    Ok(())
+                });
+            };
+            let result = execute_cached_query(
+                &mut cached,
+                request.work,
+                request.cached,
+                &control,
+                owner.pid,
+                record,
+            );
+            let response = match result {
+                Ok(value) => ResponseWrite {
+                    value: Some(value),
+                    error: None,
+                    terminal: None,
+                },
+                Err(error) => ResponseWrite {
+                    value: None,
+                    error: Some(error),
+                    terminal: None,
+                },
+            };
             write_frame(
                 &mut output,
                 &WorkerMeta {
                     wire: PRIVATE_WIRE.into(),
-                    accepted: false,
+                    accepted: true,
                     cached: cache_state(&cached),
                 },
                 4096,
             )?;
-            continue;
+            write_frame(&mut output, &response, RESPONSE_BYTES)?;
         }
-        let observed = Instant::now();
-        let now = utc_ms()?;
-        let cutoff = call
-            .processing_deadline_unix_ms
-            .min(request.deadline_unix_ms);
-        let deadline = observed
-            .checked_add(Duration::from_millis(cutoff.saturating_sub(now)))
-            .ok_or_else(|| fault("Native analysis deadline range"))?;
-        let control = OperationControl::uncancelable(deadline);
-        let begun = Instant::now();
-        let diagnostic = home.join("tmp/source-native-last-request.json");
-        let request_deadline_unix_ms = request.deadline_unix_ms;
-        let journal = std::cell::RefCell::new(PhaseJournal::open(&home,own.identity(),&control));
-        let record = |phase: &str, error: Option<&ToolkitError>| {
-            // All optional filesystem work stays in this killable child under
-            // the original processing cutoff. The IPC owner never writes here.
-            observe_if_active(&control, || {
-                let coarse=!crate::native_research::allocation_phase(phase);
-                let mut journal=journal.borrow_mut();
-                let sampled=journal.admit(phase);
-                if !coarse&&!sampled{return Ok(());}
-                let elapsed=begun.elapsed().as_millis();let memory=own.memory().ok();
-                if sampled{journal.append(phase,elapsed,memory.as_ref(),&owner,own.identity(),request_deadline_unix_ms,&control);}
-                if coarse {
-                    let value=json!({"schema":"lycheedev.native-source-request-diagnostic.v1","workerPid":owner.pid,
-                        "workerCreated":owner.created,"analysisPid":own.identity().pid,"analysisCreated":own.identity().created,
-                        "requestDeadlineUnixMs":request_deadline_unix_ms,"phase":phase,"elapsedMs":elapsed,
-                        "processMemory":memory,"error":error,"phaseJournal":journal.metadata()});
-                    storage::atomic_write_controlled(&diagnostic,&serde_json::to_vec(&value)?,&control)?;
-                }
-                Ok(())
-            });
-        };
-        let result = execute_cached_query(
-            &mut cached,
-            request.work,
-            request.cached,
-            &control,
-            owner.pid,
-            record,
-        );
-        let response = match result {
-            Ok(value) => ResponseWrite {
-                value: Some(value),
-                error: None,
-                terminal: None,
-            },
-            Err(error) => ResponseWrite {
-                value: None,
-                error: Some(error),
-                terminal: None,
-            },
-        };
-        write_frame(
-            &mut output,
-            &WorkerMeta {
-                wire: PRIVATE_WIRE.into(),
-                accepted: true,
-                cached: cache_state(&cached),
-            },
-            4096,
-        )?;
-        write_frame(&mut output, &response, RESPONSE_BYTES)?;
-    }
+    })();
+    lycheedev_core::metadata::owned_write::finish_owned(result, own.close().map_err(platform))
 }
 // Optional phase observation is never started after its original control has
 // stopped. A single filesystem syscall is still not interruptible; the owner

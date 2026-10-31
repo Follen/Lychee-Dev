@@ -57,9 +57,12 @@ export function assertArtifactSource(artifact, currentSourceDigest, profile) {
   if ((profile === 'release' && !['release', 'symbols'].includes(artifact.profile)) || (profile === 'debug' && !['dev', 'debug'].includes(artifact.profile)) || !['debug', 'release'].includes(profile)) throw new Error('candidate.artifact_profile_mismatch');
 }
 
-export function assertInstalledNativeVersion(response, expectedVersion) {
+export function assertInstalledNativeIdentity(response, expected) {
   if (response?.result?.platform !== 'windows/amd64' || !response.result.rust) throw new Error('candidate.not_rust');
-  if (response.ok !== true || typeof expectedVersion !== 'string' || expectedVersion.length === 0 || response.result.version !== expectedVersion) throw new Error('candidate.version_mismatch');
+  if (response.ok !== true || typeof expected.packageVersion !== 'string' || expected.packageVersion.length === 0
+    || response.result.version !== expected.packageVersion) throw new Error('candidate.version_mismatch');
+  if (!/^[a-f0-9]{40}$/.test(expected.commit ?? '') || response.result.commit !== expected.commit
+    || typeof expected.workspaceDirty !== 'boolean' || response.result.workspaceDirty !== expected.workspaceDirty) throw new Error('candidate.binary_build_identity');
 }
 
 export function assertSourceSyntaxValidation(response, compilerSHA256) {
@@ -254,7 +257,7 @@ function installPackedPackage({root, out, tgz, production, homeArg, pinArg, run,
   const installed = join(installation, 'node_modules/lycheedev'), pkg = verifyInstalledPackage(installed, production);
   const version = JSON.parse(run(process.execPath, [join(installed, 'payload/skill/scripts/lycheedev.mjs'), 'version', '--format', 'json'], out,
     {PATH: `${installation}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, LYCHEEDEV_BIN: ''}));
-  assertInstalledNativeVersion(version, production.packageVersion);
+  assertInstalledNativeIdentity(version, production);
   const payload = join(installed, 'payload/tool/luac'); run(join(payload, 'luac.exe'), ['-v'], out);
   writeFileSync(join(out, 'valid.lua'), 'local value = 1\nreturn value\n'); run(join(payload, 'luac.exe'), ['-p', join(out, 'valid.lua')], out);
   let validation = {state: 'not_run'};

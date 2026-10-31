@@ -107,14 +107,17 @@ impl<L: ProcessLifetimeObserver> DoctorEnvironment for NativeEnvironment<L> {
                         detail: String::new(),
                     })
                 }
-                Err(e) if matches!(e.code.as_str(), "command.cancelled" | "command.deadline") => {
-                    return Err(e.into());
+                Err(e)
+                    if e.code == "delivery.invalid_installation"
+                        && e.details["schema"] != lycheedev_core::storage::FILE_CLEANUP_SCHEMA =>
+                {
+                    Some(SlotAssessment {
+                        state: "incomplete".into(),
+                        detail: e.to_string(),
+                        ..Default::default()
+                    })
                 }
-                Err(e) => Some(SlotAssessment {
-                    state: "incomplete".into(),
-                    detail: e.to_string(),
-                    ..Default::default()
-                }),
+                Err(e) => return Err(e.into()),
             }
         };
         check_control(control)?;
@@ -216,3 +219,7 @@ impl<L: ProcessLifetimeObserver> crate::mailbox::connection::doctor_repair::Repa
         })
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "doctor_native_deployment_tests.rs"]
+mod deployment_tests;

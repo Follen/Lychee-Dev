@@ -194,9 +194,6 @@ pub(crate) struct LeasedRow<'table, T> {
     allocation: RowAllocation<'table>,
 }
 impl<'table, T> LeasedRow<'table, T> {
-    pub(crate) fn value(&self) -> &T {
-        &self.value
-    }
     pub(crate) fn try_map<U>(
         self,
         map: impl FnOnce(T) -> Result<U>,

@@ -26,11 +26,7 @@ pub(super) enum TypeCheckFailReason {
     TypeRecursion,
     TypeNotMatchWithReason(String),
 }
-impl TypeCheckFailReason {
-    pub(super) fn is_type_not_match(&self) -> bool {
-        matches!(self, Self::TypeNotMatch | Self::TypeNotMatchWithReason(_))
-    }
-}
+
 impl Relation {
     fn into_detail(self) -> Result<(), TypeCheckFailReason> {
         match self {

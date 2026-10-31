@@ -34,10 +34,6 @@ use target::Target;
 
 /// Normal requests keep the existing reqwest route. Use the raw connector if
 /// WHATWG changes any wire or endpoint identity, or cannot represent the URL.
-pub(super) fn target(locator: &str) -> Result<Option<Target>> {
-    let (target, raw) = classify(locator)?;
-    Ok(raw.then_some(target))
-}
 fn classify(locator: &str) -> Result<(Target, bool)> {
     let target = Target::parse(locator)?;
     let normalized = reqwest::Url::parse(locator).ok().map(|mut parsed| {

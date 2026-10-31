@@ -58,10 +58,6 @@ impl storage::FileControl for Files<'_> {
 fn read_file(path: &Path, maximum: usize, budget: &Budget) -> Result<Vec<u8>> {
     read_file_inner(path, maximum, budget, true)
 }
-/// Raidbots is a separately bounded input blob, not JSON metadata.
-pub(super) fn read_source_file(path: &Path, maximum: usize, budget: &Budget) -> Result<Vec<u8>> {
-    read_file_inner(path, maximum, budget, false)
-}
 fn read_file_inner(
     path: &Path,
     maximum: usize,
@@ -70,6 +66,7 @@ fn read_file_inner(
 ) -> Result<Vec<u8>> {
     read_file_scoped(path, maximum, budget, metadata, None, |_| Ok(()))
 }
+/// Raidbots is a separately bounded input blob, not JSON metadata.
 pub(super) fn read_source_file_controlled(
     path: &Path,
     maximum: usize,

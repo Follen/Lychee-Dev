@@ -219,8 +219,7 @@ fn identity(pin: &PinnedSet) -> Result<String> {
     ))
 }
 pub fn load_pinned(home: &Path, id: &str) -> Result<PinnedSet> {
-    let pin = Metadata::open(home, false)?.read(&format!("pin/{id}"))?;
-    validate_loaded_pin(pin, id)
+    load_pinned_controlled(home, id, &crate::control::OperationControl::default())
 }
 /// Preserve parent pin identity validation while bounding open and row reads
 /// by the invoking operation. Always check the acquired connection's close.
@@ -238,13 +237,13 @@ pub fn load_pinned_controlled_with_check(
     control: &crate::control::OperationControl,
     mut check: impl FnMut() -> Result<()>,
 ) -> Result<PinnedSet> {
-    selection_check(Some(control), &mut check)?;
+    selection_check(control, &mut check)?;
     let metadata = Metadata::open_controlled_with_check(home, false, control, &mut check)?;
     let result = metadata
         .read_controlled_with_check(&format!("pin/{id}"), control, &mut check)
         .and_then(|pin| validate_loaded_pin(pin, id));
     let result = crate::metadata::owned_write::finish_owned(result, metadata.close());
-    selection_finish(result, selection_check(Some(control), &mut check))
+    selection_finish(result, selection_check(control, &mut check))
 }
 fn validate_loaded_pin(pin: PinnedSet, id: &str) -> Result<PinnedSet> {
     validate(&pin.spec)?;
@@ -258,7 +257,7 @@ fn validate_loaded_pin(pin: PinnedSet, id: &str) -> Result<PinnedSet> {
     Ok(pin)
 }
 pub fn pin_selection(home: &Path, spec: SelectionSpec) -> Result<PinnedSet> {
-    pin_selection_inner(home, spec, None)
+    pin_selection_controlled(home, spec, &crate::control::OperationControl::default())
 }
 /// Publish a derived selection with the invoking operation's cancellation and deadline.
 pub fn pin_selection_controlled(
@@ -276,15 +275,13 @@ pub fn pin_selection_controlled_with_check(
     control: &crate::control::OperationControl,
     check: impl FnMut() -> Result<()>,
 ) -> Result<PinnedSet> {
-    pin_selection_observed_with_check(home, spec, Some(control), check, |_| {})
+    pin_selection_observed_with_check(home, spec, control, check, |_| {})
 }
 fn selection_check(
-    control: Option<&crate::control::OperationControl>,
+    control: &crate::control::OperationControl,
     check: &mut impl FnMut() -> Result<()>,
 ) -> Result<()> {
-    if let Some(control) = control {
-        control.check()?;
-    }
+    control.check()?;
     check()
 }
 // Check after cleanup on success and failure. Keep the first typed cause and
@@ -300,25 +297,10 @@ pub(crate) fn selection_finish<T>(result: Result<T>, stopped: Result<()>) -> Res
     }
     crate::metadata::owned_write::finish_owned(result, stopped)
 }
-fn pin_selection_inner(
-    home: &Path,
-    spec: SelectionSpec,
-    control: Option<&crate::control::OperationControl>,
-) -> Result<PinnedSet> {
-    pin_selection_observed(home, spec, control, |_| {})
-}
-fn pin_selection_observed(
-    home: &Path,
-    spec: SelectionSpec,
-    control: Option<&crate::control::OperationControl>,
-    published: impl FnMut(&PinnedSet),
-) -> Result<PinnedSet> {
-    pin_selection_observed_with_check(home, spec, control, || Ok(()), published)
-}
 fn pin_selection_observed_with_check(
     home: &Path,
     mut spec: SelectionSpec,
-    control: Option<&crate::control::OperationControl>,
+    control: &crate::control::OperationControl,
     mut check: impl FnMut() -> Result<()>,
     mut published: impl FnMut(&PinnedSet),
 ) -> Result<PinnedSet> {
@@ -329,12 +311,7 @@ fn pin_selection_observed_with_check(
         change.fetched_at = crate::storage::timestamp_offset(time);
     }
     if !spec.parent.is_empty() {
-        let parent = match control {
-            Some(control) => {
-                load_pinned_controlled_with_check(home, &spec.parent, control, &mut check)?
-            }
-            None => load_pinned(home, &spec.parent)?,
-        };
+        let parent = load_pinned_controlled_with_check(home, &spec.parent, control, &mut check)?;
         inherit_parent(&mut spec, parent)?;
     }
     validate(&spec)?;
@@ -346,18 +323,13 @@ fn pin_selection_observed_with_check(
     pin.id = identity(&pin)?;
     selection_check(control, &mut check)?;
     let key = format!("pin/{}", pin.id);
-    if let Some(control) = control {
-        let mut metadata = Metadata::open_controlled_with_check(home, true, control, &mut check)?;
-        let result = metadata.put_controlled_with_check(&key, &pin, None, control, &mut check);
-        if result.is_ok() {
-            published(&pin);
-        }
-        let result = crate::metadata::owned_write::finish_owned(result, metadata.close());
-        selection_finish(result, selection_check(Some(control), &mut check))?;
-    } else {
-        Metadata::open(home, true)?.put(&key, &pin, None)?;
+    let mut metadata = Metadata::open_controlled_with_check(home, true, control, &mut check)?;
+    let result = metadata.put_controlled_with_check(&key, &pin, None, control, &mut check);
+    if result.is_ok() {
         published(&pin);
     }
+    let result = crate::metadata::owned_write::finish_owned(result, metadata.close());
+    selection_finish(result, selection_check(control, &mut check))?;
     Ok(pin)
 }
 fn inherit_parent(spec: &mut SelectionSpec, parent: PinnedSet) -> Result<()> {

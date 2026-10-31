@@ -32,7 +32,6 @@ pub(super) struct Options {
     pub content_bytes: usize,
 }
 pub(super) struct File {
-    pub entry: metadata_format::RootRecord,
     pub reading: serde_json::Value,
     materialized: Materialized,
 }
@@ -53,12 +52,10 @@ enum SelectedBody {
     Verified(content::Verified),
 }
 struct SelectedFile {
-    entry: metadata_format::RootRecord,
     reading: serde_json::Value,
     body: SelectedBody,
 }
 pub(super) struct VerifiedFile {
-    pub entry: metadata_format::RootRecord,
     pub reading: serde_json::Value,
     pub blob: evidence::VerifiedBlob,
     _descriptor: crate::resource::OwnedRetainedReservation,
@@ -274,13 +271,11 @@ impl<'a, 'scope> Session<'a, 'scope> {
             let mut files = Vec::with_capacity(selected.len());
             for selected in selected {
                 let SelectedFile {
-                    entry,
                     reading,
                     body,
                 } = selected;
                 match body {
                     SelectedBody::Materialized(materialized) => files.push(File {
-                        entry,
                         reading,
                         materialized,
                     }),
@@ -308,7 +303,6 @@ impl<'a, 'scope> Session<'a, 'scope> {
             }
             let selected = selected.pop().ok_or_else(internal)?;
             let SelectedFile {
-                entry,
                 reading,
                 body,
             } = selected;
@@ -316,7 +310,6 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 return Err(internal());
             };
             let mut file = VerifiedFile {
-                entry,
                 reading,
                 blob: value.blob,
                 _descriptor: value.descriptor,
@@ -609,7 +602,6 @@ impl<'a, 'scope> Session<'a, 'scope> {
                     Ok(reading) => reading,
                     Err(error) => {
                         output.push(SelectedFile {
-                            entry,
                             reading: serde_json::Value::Null,
                             body: content,
                         });
@@ -620,7 +612,6 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 // when the caller's following callback subsequently fails.
                 prepared.root_reported = true;
                 output.push(SelectedFile {
-                    entry,
                     reading,
                     body: content,
                 });

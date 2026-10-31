@@ -407,8 +407,27 @@ fn prepare_and_run(
         }
         "live connect" => {
             if let Some(snapshot) = inv.flag("--snapshot") {
-                let pin = lycheedev_core::selection::load_pinned(&inv.home, snapshot)
-                    .map_err(|e| ToolkitError::arguments(e.message))?;
+                let pin = lycheedev_core::selection::load_pinned_controlled(
+                    &inv.home,
+                    snapshot,
+                    &inv.control,
+                )
+                .map_err(|error| {
+                    // Only the selected input's ordinary admission errors
+                    // become arguments. Keep resource/control failures and
+                    // every structured cleanup cause from the pin owner.
+                    if error.details.is_null()
+                        && (error.code.starts_with("selection.")
+                            || matches!(
+                                error.code.as_str(),
+                                "input.invalid" | "vault.record_missing"
+                            ))
+                    {
+                        ToolkitError::arguments(error.message)
+                    } else {
+                        error
+                    }
+                })?;
                 let data = pin.data.as_ref().ok_or_else(|| {
                     ToolkitError::arguments("live snapshot requires a pinned data build")
                 })?;
@@ -745,21 +764,32 @@ fn run_doctor(
         )),
     );
     response.context.insert("protocol".into(), json!(TRANSPORT));
-    if inv.flag_bool("--fix") {
+    response.error = doctor_error(&report);
+    if inv.flag_bool("--fix") && response.error.is_none() {
         let (repaired, outcome) = services.fix(report, inv, control);
         report = repaired;
+        // Successful repair may itself be followed by a failed diagnostic.
+        // Its typed causes are the authoritative projection for that report.
+        response.error = doctor_error(&report);
         match outcome {
             ServiceOutcome::Completed(_) => {}
             ServiceOutcome::Failed(error) => {
-                response.error = Some(public_error(&error));
+                if response.error.is_none() {
+                    response.error = Some(public_error(&error));
+                }
             }
             ServiceOutcome::ReportedWithFailure { error, .. } => {
-                response.error = Some(public_error(&error));
+                if response.error.is_none() {
+                    response.error = Some(public_error(&error));
+                }
             }
         }
     }
     if let Some(connection) = &report.connection {
         response.operation_id.clone_from(&connection.session);
+    }
+    if response.error.is_none() {
+        response.error = doctor_error(&report);
     }
     if response.error.is_none() && !report.healthy {
         response.error = Some(unhealthy());
@@ -767,6 +797,47 @@ fn run_doctor(
     response.result = Some(LiveResult::Doctor(report));
     merge_context(&mut response);
     response
+}
+
+fn doctor_error(report: &DoctorResult) -> Option<ToolkitError> {
+    let failures = report.repair_blocking_errors();
+    if failures.is_empty() {
+        return None;
+    }
+    let joined = ChannelError::Joined {
+        causes: failures.clone(),
+    };
+    let mut primary = public_error(&joined.into());
+    fn project(error: &ChannelError, causes: &mut Vec<ToolkitError>) {
+        match error {
+            ChannelError::Joined { causes: children } => {
+                for child in children {
+                    project(child, causes);
+                }
+            }
+            ChannelError::Toolkit {
+                code,
+                message,
+                exit_code,
+                details,
+                ..
+            } => {
+                causes.push(
+                    ToolkitError::new(code, message, *exit_code).with_details(details.clone()),
+                );
+            }
+            other => causes.push(public_error(&other.clone().into())),
+        }
+    }
+    let mut causes = Vec::new();
+    for error in &failures {
+        project(error, &mut causes);
+    }
+    if causes.len() > 1 {
+        let original = primary.clone();
+        primary.details = json!({"primary":original,"causes":causes});
+    }
+    Some(primary)
 }
 
 fn project_doctor_checks(report: &DoctorResult) -> Vec<Value> {

@@ -89,12 +89,13 @@ fn sync(ctx: &SourceContext, request: &request::SyncRequest) -> Result<Outcome> 
         &request.reference,
         &ctx.control,
     )?;
-    let pin = selection::pin_selection(
+    let pin = selection::pin_selection_controlled(
         &ctx.home,
         selection::SelectionSpec {
             source: Some(source),
             ..Default::default()
         },
+        &ctx.control,
     )?;
     let mut out = Outcome::new(serde_json::to_value(&pin)?);
     out.selection = serde_json::to_value(pin)?;

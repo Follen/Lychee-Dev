@@ -254,7 +254,6 @@ impl<'a> Snapshots<'a> {
     pub(crate) fn prepare(
         &mut self,
         columns: &[String],
-        complete: bool,
         definition: &schema::Definition,
         bundle: &definitions::Bundle,
         ids: &[String],

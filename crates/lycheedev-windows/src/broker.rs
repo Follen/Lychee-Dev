@@ -7,6 +7,7 @@ pub type BrokerCheck = Arc<dyn Fn() -> Result<()> + Send + Sync>;
 use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
+    os::windows::io::{IntoRawHandle, RawHandle},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -22,19 +23,53 @@ use windows::{
 };
 struct Handle(HANDLE);
 unsafe impl Send for Handle {}
-impl Drop for Handle {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = CloseHandle(self.0);
-        }
+impl IntoRawHandle for Handle {
+    fn into_raw_handle(self) -> RawHandle {
+        let handle = self.0.0;
+        std::mem::forget(self);
+        handle
     }
 }
+impl Handle {
+    fn close(self) -> Result<()> {
+        let result = crate::guarded_spawn::close_owned_handle(self);
+        #[cfg(test)]
+        let result = crate::process::checked_query_tests::observe_close(result);
+        result.map_err(|error| format!("broker.handle_close:{error}"))
+    }
+    fn finish<T>(self, result: Result<T>) -> Result<T> {
+        crate::process::finish_query(result, self.close())
+    }
+}
+impl Drop for Handle {
+    fn drop(&mut self) {
+        let result = unsafe { CloseHandle(self.0) }.map_err(|error| error.to_string());
+        #[cfg(test)]
+        let result = crate::process::checked_query_tests::observe_close(result);
+        let _ = result;
+    }
+}
+fn free_local(allocation: HLOCAL) -> Result<()> {
+    let result = if unsafe { LocalFree(Some(allocation)) }.0.is_null() {
+        Ok(())
+    } else {
+        Err(format!("broker.local_free:{}", unsafe { GetLastError().0 }))
+    };
+    #[cfg(test)]
+    let result = crate::process::checked_query_tests::observe_close(result);
+    result
+}
 struct Descriptor(PSECURITY_DESCRIPTOR);
+impl Descriptor {
+    fn close(self) -> Result<()> {
+        let allocation = HLOCAL(self.0.0);
+        std::mem::forget(self);
+        free_local(allocation)
+    }
+}
 impl Drop for Descriptor {
     fn drop(&mut self) {
-        unsafe {
-            let _ = LocalFree(Some(HLOCAL(self.0.0)));
-        }
+        let _ = free_local(HLOCAL(self.0.0));
     }
 }
 fn wide(s: &str) -> Vec<u16> {
@@ -101,6 +136,10 @@ pub struct NativeSourcePeer {
     process: Handle,
 }
 impl NativeSourcePeer {
+    /// Close the original retirement handle after its last wait or retirement.
+    pub fn close(self) -> Result<()> {
+        self.process.close()
+    }
     pub fn open(pid: u32, created: u64, executable: &Path) -> Result<Self> {
         unsafe {
             let process = Handle(
@@ -111,39 +150,45 @@ impl NativeSourcePeer {
                 )
                 .map_err(|e| e.to_string())?,
             );
-            let (mut birth, mut exit, mut kernel, mut user) = (
-                FILETIME::default(),
-                FILETIME::default(),
-                FILETIME::default(),
-                FILETIME::default(),
-            );
-            GetProcessTimes(process.0, &mut birth, &mut exit, &mut kernel, &mut user)
+            let result = (|| {
+                let (mut birth, mut exit, mut kernel, mut user) = (
+                    FILETIME::default(),
+                    FILETIME::default(),
+                    FILETIME::default(),
+                    FILETIME::default(),
+                );
+                GetProcessTimes(process.0, &mut birth, &mut exit, &mut kernel, &mut user)
+                    .map_err(|e| e.to_string())?;
+                if ((birth.dwHighDateTime as u64) << 32 | birth.dwLowDateTime as u64) != created {
+                    return Err("source.owner_identity_changed".into());
+                }
+                if WaitForSingleObject(process.0, 0) == WAIT_OBJECT_0 {
+                    return Ok(());
+                }
+                let mut path = vec![0u16; 32768];
+                let mut count = path.len() as u32;
+                QueryFullProcessImageNameW(
+                    process.0,
+                    PROCESS_NAME_WIN32,
+                    PWSTR(path.as_mut_ptr()),
+                    &mut count,
+                )
                 .map_err(|e| e.to_string())?;
-            if ((birth.dwHighDateTime as u64) << 32 | birth.dwLowDateTime as u64) != created {
-                return Err("source.owner_identity_changed".into());
+                let image = PathBuf::from(String::from_utf16_lossy(&path[..count as usize]));
+                let image = std::fs::canonicalize(image).map_err(|e| e.to_string())?;
+                let expected = std::fs::canonicalize(executable).map_err(|e| e.to_string())?;
+                if !image
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&expected.to_string_lossy())
+                {
+                    return Err("source.owner_executable_changed".into());
+                }
+                Ok(())
+            })();
+            match result {
+                Ok(()) => Ok(Self { process }),
+                Err(error) => process.finish(Err(error)),
             }
-            if WaitForSingleObject(process.0, 0) == WAIT_OBJECT_0 {
-                return Ok(Self { process });
-            }
-            let mut path = vec![0u16; 32768];
-            let mut count = path.len() as u32;
-            QueryFullProcessImageNameW(
-                process.0,
-                PROCESS_NAME_WIN32,
-                PWSTR(path.as_mut_ptr()),
-                &mut count,
-            )
-            .map_err(|e| e.to_string())?;
-            let image = PathBuf::from(String::from_utf16_lossy(&path[..count as usize]));
-            let image = std::fs::canonicalize(image).map_err(|e| e.to_string())?;
-            let expected = std::fs::canonicalize(executable).map_err(|e| e.to_string())?;
-            if !image
-                .to_string_lossy()
-                .eq_ignore_ascii_case(&expected.to_string_lossy())
-            {
-                return Err("source.owner_executable_changed".into());
-            }
-            Ok(Self { process })
         }
     }
     pub fn retire(&self, deadline: Instant) -> Result<()> {
@@ -180,39 +225,44 @@ fn logon_sid() -> Result<String> {
         OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
             .map_err(|e| e.to_string())?;
         let token = Handle(token);
-        let mut bytes = 0;
-        let _ = GetTokenInformation(token.0, TokenGroups, None, 0, &mut bytes);
-        if bytes == 0 || bytes > 128 * 1024 {
-            return Err("broker.token_budget".into());
-        }
-        let mut storage = vec![0u64; (bytes as usize).div_ceil(8)];
-        GetTokenInformation(
-            token.0,
-            TokenGroups,
-            Some(storage.as_mut_ptr() as *mut _),
-            bytes,
-            &mut bytes,
-        )
-        .map_err(|e| e.to_string())?;
-        let groups = &*(storage.as_ptr() as *const TOKEN_GROUPS);
-        let count = groups.GroupCount as usize;
-        let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
-        if count > 4096
-            || offset + count * std::mem::size_of::<SID_AND_ATTRIBUTES>() > bytes as usize
-        {
-            return Err("broker.token_groups_bounds".into());
-        }
-        let entries = std::slice::from_raw_parts(groups.Groups.as_ptr(), count);
-        for group in entries {
-            if group.Attributes & LOGON_ID_GROUP == LOGON_ID_GROUP {
-                let mut text = PWSTR::null();
-                ConvertSidToStringSidW(group.Sid, &mut text).map_err(|e| e.to_string())?;
-                let result = text.to_string().map_err(|e| e.to_string());
-                let _ = LocalFree(Some(HLOCAL(text.0 as *mut _)));
-                return result;
+        let result = (|| {
+            let mut bytes = 0;
+            let _ = GetTokenInformation(token.0, TokenGroups, None, 0, &mut bytes);
+            if bytes == 0 || bytes > 128 * 1024 {
+                return Err("broker.token_budget".into());
             }
-        }
-        Err("broker.logon_sid_unavailable".into())
+            let mut storage = vec![0u64; (bytes as usize).div_ceil(8)];
+            GetTokenInformation(
+                token.0,
+                TokenGroups,
+                Some(storage.as_mut_ptr() as *mut _),
+                bytes,
+                &mut bytes,
+            )
+            .map_err(|e| e.to_string())?;
+            let groups = &*(storage.as_ptr() as *const TOKEN_GROUPS);
+            let count = groups.GroupCount as usize;
+            let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
+            if count > 4096
+                || offset + count * std::mem::size_of::<SID_AND_ATTRIBUTES>() > bytes as usize
+            {
+                return Err("broker.token_groups_bounds".into());
+            }
+            let entries = std::slice::from_raw_parts(groups.Groups.as_ptr(), count);
+            for group in entries {
+                if group.Attributes & LOGON_ID_GROUP == LOGON_ID_GROUP {
+                    let mut text = PWSTR::null();
+                    ConvertSidToStringSidW(group.Sid, &mut text).map_err(|e| e.to_string())?;
+                    let result = text.to_string().map_err(|e| e.to_string());
+                    return crate::process::finish_query(
+                        result,
+                        free_local(HLOCAL(text.0 as *mut _)),
+                    );
+                }
+            }
+            Err("broker.logon_sid_unavailable".into())
+        })();
+        token.finish(result)
     }
 }
 pub struct BrokerListener {
@@ -220,6 +270,9 @@ pub struct BrokerListener {
     pending: Handle,
 }
 impl BrokerListener {
+    pub fn close(self) -> Result<()> {
+        self.pending.close()
+    }
     pub fn bind(scope: &BrokerScope) -> Result<Self> {
         Ok(Self {
             scope: scope.clone(),
@@ -235,21 +288,27 @@ impl BrokerListener {
         let event = event()?;
         let mut overlapped = Box::new(OVERLAPPED::default());
         overlapped.hEvent = event.0;
-        unsafe {
-            match ConnectNamedPipe(self.pending.0, Some(&mut *overlapped)) {
-                Ok(()) => {}
-                Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => {}
-                Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {
-                    complete(
-                        self.pending.0,
-                        &overlapped,
-                        deadline,
-                        control_check.as_ref(),
-                    )?;
+        let result = (|| {
+            unsafe {
+                match ConnectNamedPipe(self.pending.0, Some(&mut *overlapped)) {
+                    Ok(()) => {}
+                    Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => {}
+                    Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {
+                        complete(
+                            self.pending.0,
+                            &overlapped,
+                            deadline,
+                            control_check.as_ref(),
+                        )?;
+                    }
+                    Err(error) => return Err(error.to_string()),
                 }
-                Err(error) => return Err(error.to_string()),
             }
-        }
+            check(deadline, control_check.as_ref())
+        })();
+        // Connect completion has drained its OVERLAPPED before consuming the
+        // event. A failed close cannot publish a connected stream.
+        event.finish(result)?;
         // Keep one server instance present while handing the connected one out.
         // This prevents another process becoming the first server in a gap.
         let replacement = create(&self.scope, false)?;
@@ -297,10 +356,16 @@ fn create(scope: &BrokerScope, first: bool) -> Result<Handle> {
             0,
             Some(&attributes),
         );
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(format!("broker.pipe_create:{}", GetLastError().0));
+        let created = if handle == INVALID_HANDLE_VALUE {
+            Err(format!("broker.pipe_create:{}", GetLastError().0))
+        } else {
+            Ok(Handle(handle))
+        };
+        match (created, descriptor.close()) {
+            (Ok(handle), Ok(())) => Ok(handle),
+            (Ok(handle), Err(error)) => handle.finish(Err(error)),
+            (Err(error), closed) => crate::process::finish_query(Err(error), closed),
         }
-        Ok(Handle(handle))
     }
 }
 fn event() -> Result<Handle> {
@@ -374,6 +439,11 @@ pub struct BrokerStream {
     control_check: BrokerCheck,
 }
 impl BrokerStream {
+    /// Each operation has drained its OVERLAPPED before this owner is consumed.
+    /// Closing a duplicate must not disconnect the other stream owners.
+    pub fn close(self) -> Result<()> {
+        self.handle.close()
+    }
     pub fn try_clone(&self) -> Result<Self> {
         let mut duplicate = HANDLE::default();
         unsafe {
@@ -414,8 +484,12 @@ impl BrokerStream {
             )
             .map_err(connection_error)?
         };
+        let handle = Handle(handle);
+        if let Err(error) = check(deadline, control_check.as_ref()) {
+            return handle.finish(Err(error));
+        }
         Ok(Self {
-            handle: Handle(handle),
+            handle,
             server: false,
             deadline,
             control_check,
@@ -467,11 +541,8 @@ impl BrokerStream {
                 )
             }
         };
-        match result {
-            Ok(()) => {
-                check(self.deadline, self.control_check.as_ref())?;
-                Ok(bytes as usize)
-            }
+        let result = match result {
+            Ok(()) => check(self.deadline, self.control_check.as_ref()).map(|()| bytes as usize),
             Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
                 match complete(
                     self.handle.0,
@@ -491,7 +562,8 @@ impl BrokerStream {
                 Ok(0)
             }
             Err(e) => Err(e.to_string()),
-        }
+        };
+        event.finish(result)
     }
 }
 impl Read for BrokerStream {
@@ -517,6 +589,175 @@ impl Write for BrokerStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::checked_query_tests::CloseObservation;
+    fn fail_close() -> CloseObservation {
+        CloseObservation::install(|result| {
+            result?;
+            Err("fixture.broker_close".into())
+        })
+    }
+    #[test]
+    fn checked_authentication_cannot_succeed_after_resource_close_failure() {
+        let path = std::env::temp_dir().join(format!(
+            "lycheedev-broker-auth-{}",
+            crate::random::token().unwrap()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        BrokerScope::for_native_source(&path).unwrap();
+        let observer = fail_close();
+        let result = BrokerScope::for_native_source(&path);
+        drop(observer);
+        std::fs::remove_dir(&path).unwrap();
+        assert!(
+            result
+                .err()
+                .expect("authentication close must fail")
+                .contains("fixture.broker_close")
+        );
+    }
+    #[test]
+    fn checked_peer_rejection_retains_primary_and_process_close_failure() {
+        let own = crate::Process::open(std::process::id()).unwrap();
+        let created = own.identity().created;
+        own.close().unwrap();
+        let observer = fail_close();
+        let result = NativeSourcePeer::open(
+            std::process::id(),
+            created + 1,
+            &std::env::current_exe().unwrap(),
+        );
+        drop(observer);
+        let error = result.err().expect("wrong creation identity must fail");
+        assert!(error.contains("source.owner_identity_changed"));
+        assert!(error.contains("fixture.broker_close"));
+    }
+    #[test]
+    fn checked_connect_keeps_post_open_stop_and_its_close_failure() {
+        let scope = scope();
+        let listener = BrokerListener::bind(&scope).unwrap();
+        let observer = fail_close();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = BrokerStream::connect_with_control(
+            &scope,
+            Instant::now() + Duration::from_secs(3),
+            Arc::new(move || {
+                if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    Ok(())
+                } else {
+                    Err("fixture.post_open_stop".into())
+                }
+            }),
+        );
+        drop(observer);
+        listener.close().unwrap();
+        let error = match result {
+            Ok(stream) => {
+                stream.close().unwrap();
+                panic!("a stopped connect cannot return a stream")
+            }
+            Err(error) => error,
+        };
+        assert!(error.contains("fixture.post_open_stop"));
+        assert!(error.contains("fixture.broker_close"));
+    }
+    #[test]
+    fn checked_listener_creation_rejects_descriptor_cleanup_failure() {
+        let scope = scope();
+        BrokerListener::bind(&scope).unwrap().close().unwrap();
+        let observer = fail_close();
+        let result = BrokerListener::bind(&scope);
+        drop(observer);
+        let error = match result {
+            Ok(listener) => {
+                listener.close().unwrap();
+                None
+            }
+            Err(error) => Some(error),
+        };
+        BrokerListener::bind(&scope).unwrap().close().unwrap();
+        assert!(
+            error
+                .expect("descriptor close failure must reject a listener")
+                .contains("fixture.broker_close")
+        );
+    }
+    #[test]
+    fn checked_transfer_retains_real_write_but_rejects_event_close_failure() {
+        let scope = scope();
+        let mut listener = BrokerListener::bind(&scope).unwrap();
+        let (accepted, accepted_rx) = std::sync::mpsc::channel();
+        let (observed, received) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let mut stream = listener
+                .accept_with_control(Instant::now() + Duration::from_secs(3), ready())
+                .unwrap();
+            accepted.send(()).unwrap();
+            let mut bytes = [0; 4];
+            stream.read_exact(&mut bytes).unwrap();
+            assert_eq!(&bytes, b"ping");
+            stream.close().unwrap();
+            listener.close().unwrap();
+            observed.send(()).unwrap();
+        });
+        let mut client = BrokerStream::connect_with_control(
+            &scope,
+            Instant::now() + Duration::from_secs(3),
+            ready(),
+        )
+        .unwrap();
+        accepted_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let observer = fail_close();
+        let result = client.write_all(b"ping");
+        drop(observer);
+        received.recv_timeout(Duration::from_secs(3)).unwrap();
+        client.close().unwrap();
+        server.join().unwrap();
+        assert!(
+            result
+                .err()
+                .expect("event close failure must reject an otherwise completed write")
+                .to_string()
+                .contains("fixture.broker_close")
+        );
+    }
+    #[test]
+    fn checked_read_reports_event_close_failure_after_receiving_the_real_marker() {
+        let scope = scope();
+        let mut listener = BrokerListener::bind(&scope).unwrap();
+        let (accepted_tx, accepted_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let mut stream = listener
+                .accept_with_control(Instant::now() + Duration::from_secs(3), ready())
+                .unwrap();
+            stream.write_all(&[1]).unwrap();
+            accepted_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            stream.close().unwrap();
+            listener.close().unwrap();
+        });
+        let mut client = BrokerStream::connect_with_control(
+            &scope,
+            Instant::now() + Duration::from_secs(3),
+            ready(),
+        )
+        .unwrap();
+        accepted_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let observer = fail_close();
+        let mut marker = [0];
+        let result = client.read(&mut marker);
+        drop(observer);
+        release_tx.send(()).unwrap();
+        client.close().unwrap();
+        server.join().unwrap();
+        assert_eq!(marker, [1], "the cancellation marker was actually received");
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("fixture.broker_close")
+        );
+    }
     fn ready() -> BrokerCheck {
         Arc::new(|| Ok(()))
     }
@@ -549,7 +790,9 @@ mod tests {
             crate::random::token().unwrap()
         ));
         std::fs::create_dir_all(&path).unwrap();
-        BrokerScope::for_native_source(&path).unwrap()
+        let scope = BrokerScope::for_native_source(&path).unwrap();
+        std::fs::remove_dir(&path).unwrap();
+        scope
     }
     #[test]
     fn actual_local_pipe_peer_and_first_instance_guard() {

@@ -48,9 +48,13 @@ line. Diff truncation and line movement do not prove removed or broken APIs.
 {"requests":[{"id":"definition","query":{"text":"C_Spell.GetSpellInfo","topic":"api","limit":10}}]}
 ```
 
-Each item has an ID and exactly one query, refs or context object. Fields use
-camelCase (`symbolId`, `maxBytes`, `maxLines`); each item owns its cursor and
-coverage. All share source/environment. An item failure is not a completed batch.
+Each item contains exactly one query, refs or context object; an optional ID
+labels the item. Fields use camelCase (`symbolId`, `maxBytes`, `maxLines`); each
+item owns its cursor and coverage. All share source/environment. An item failure
+is not a completed batch.
+Use `lycheedev schema source batch` and its `fileInput` for the complete typed
+file schema, defaults and bounds. Unknown or repeated fields and malformed
+Unicode are rejected.
 
 ## Optional native session reuse
 

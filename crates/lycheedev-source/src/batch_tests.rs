@@ -37,7 +37,41 @@ fn unprepared_selection() -> ResearchSelection {
     }
 }
 #[test]
-fn reference_batch_json_admission_and_known_field_merging() {
+fn typed_batch_json_rejects_duplicate_case_folded_and_lossy_input() {
+    for raw in [
+        br#"{"requests":[{"query":{"text":"Foo"}}],"requests":[{"query":{"limit":1}}]}"#.as_slice(),
+        br#"{"requests":[{"query":{"text":"Foo"},"query":{"topic":"lua"}}]}"#.as_slice(),
+        br#"{"requests":[{"query":{"text":"Foo","text":"Bar"}}]}"#.as_slice(),
+        br#"{"REQUESTS":[{"Query":{"TEXT":"Foo"}}]}"#.as_slice(),
+        "{\"requeſts\":[{\"query\":{\"text\":\"Foo\"}}]}".as_bytes(),
+        br#"{"requests":[{"id":null,"query":{"text":"Foo"}}]}"#.as_slice(),
+        br#"{"requests":[{"query":null,"refs":{"symbol":"Foo"}}]}"#.as_slice(),
+        br#"{"requests":[{"query":{"text":"\ud800x\udc00"}}]}"#.as_slice(),
+        b"{\"requests\":[{\"query\":{\"text\":\"\xff\xe2\x82\"}}]}".as_slice(),
+    ] {
+        let error = parse(raw).unwrap_err();
+        assert_eq!(error.code, "codebase.invalid_batch", "{raw:?}: {error}");
+        assert_eq!(error.exit_code, 2);
+    }
+    let request = parse("{\"requests\":[{\"query\":{\"text\":\"火球 🔥\"}},{\"refs\":{\"symbolId\":\"symbol-1\"}},{\"context\":{\"symbol\":\"Foo\",\"maxBytes\":512,\"maxLines\":4}}]}".as_bytes()).unwrap();
+    assert_eq!(request.requests[0].query.as_ref().unwrap().text, "火球 🔥");
+    assert_eq!(
+        request.requests[1].refs.as_ref().unwrap().symbol_id,
+        "symbol-1"
+    );
+    assert_eq!(request.requests[2].context.as_ref().unwrap().max_lines, 4);
+}
+
+#[test]
+fn batch_query_rejects_negative_limit_before_source_preparation() {
+    let error = parse(br#"{"requests":[{"query":{"text":"Foo","limit":-5}}]}"#).unwrap_err();
+    assert_eq!(error.code, "codebase.invalid_query");
+    assert_eq!(error.exit_code, 2);
+    assert!(error.message.contains("request 1"));
+}
+
+#[test]
+fn batch_json_admission_rejects_invalid_shapes_and_bounds() {
     for raw in [
         r#"{"requests":[]}"#,
         r#"{"requests":[{}]}"#,
@@ -68,33 +102,6 @@ fn reference_batch_json_admission_and_known_field_merging() {
             count <= 32
         );
     }
-    let merged = parse(br#"{"REQUESTS":[{"ID":"kept","id":null,"Query":{"TEXT":"Foo","limit":1},"query":{"topic":"LUA","text":null},"refs":null}]}"#).unwrap();
-    assert_eq!(merged.requests[0].id, "kept");
-    let query = merged.requests[0].query.as_ref().unwrap();
-    assert_eq!(query.text, "Foo");
-    assert_eq!(query.limit, 1);
-    assert_eq!(query.topic, "LUA");
-    assert!(!merged.needs_research());
-}
-#[test]
-fn wire_json_reuses_request_elements_and_replaces_invalid_unicode() {
-    let merged = parse(br#"{"requests":[{"id":"first","query":{"text":"Foo"}}],"requests":[{"query":{"limit":1}}]}"#).unwrap();
-    assert_eq!(merged.requests[0].id, "first");
-    assert_eq!(merged.requests[0].query.as_ref().unwrap().text, "Foo");
-    assert_eq!(merged.requests[0].query.as_ref().unwrap().limit, 1);
-    assert_eq!(parse(br#"{"requests":[{"query":{"text":"Foo"}}],"requests":[],"requests":[{"query":{"limit":1}}]}"#).unwrap_err().code, "codebase.invalid_query");
-    let replaced = parse(br#"{"requests":[{"query":{"text":"\ud800x\udc00"}}]}"#).unwrap();
-    assert_eq!(
-        replaced.requests[0].query.as_ref().unwrap().text,
-        "\u{fffd}x\u{fffd}"
-    );
-    let replaced = parse(b"{\"requests\":[{\"query\":{\"text\":\"\xff\xe2\x82\"}}]}").unwrap();
-    assert_eq!(
-        replaced.requests[0].query.as_ref().unwrap().text,
-        "\u{fffd}\u{fffd}\u{fffd}"
-    );
-    let folded = parse("{\"requeſts\":[{\"query\":{\"text\":\"Foo\"}}]}".as_bytes()).unwrap();
-    assert_eq!(folded.requests.len(), 1);
 }
 
 #[test]
@@ -136,8 +143,8 @@ fn every_item_is_validated_before_preparation_or_runtime_admission() {
     assert!(!home.exists());
 }
 #[test]
-fn frozen_json_defaults_and_invalid_queries_are_distinct_from_cli_defaults() {
-    let request = parse(br#"{"requests":[{"query":{"text":" Foo ","limit":-5}},{"refs":{"symbol":"Foo"}},{"context":{"symbol":"Foo"}}]}"#).unwrap();
+fn batch_defaults_and_invalid_queries_are_admitted_before_preparation() {
+    let request = parse(br#"{"requests":[{"query":{"text":" Foo "}},{"refs":{"symbol":"Foo"}},{"context":{"symbol":"Foo"}}]}"#).unwrap();
     let calls = prepare_calls(&request, false).unwrap();
     let Operation::Query(query) = &calls[0] else {
         panic!("query operation")

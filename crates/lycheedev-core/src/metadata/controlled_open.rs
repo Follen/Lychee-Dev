@@ -407,28 +407,4 @@ impl Metadata {
         }
         Ok(())
     }
-    pub(crate) fn check_capture_owner_controlled(
-        &self,
-        home: &Path,
-        control: &OperationControl,
-        mut check: impl FnMut() -> Result<()>,
-    ) -> Result<()> {
-        metadata_check(control, &mut check)?;
-        self.check_capture_binding(home)?;
-        crate::workspace::open_controlled_with_check(home, control, &mut check)?;
-        let schema = owned_write::owned_lease_observed_with_check(
-            home,
-            "metadata-schema",
-            control,
-            &mut check,
-            &mut || {},
-        )?;
-        // Do not memoize user_version or dependency authentication. No writer
-        // transaction is kept alive between source, codec, artifact and manifest.
-        let checked =
-            initialize_connection(&self.connection, true, control, &mut check, &mut || {});
-        let checked = finish_owned(checked, schema.close());
-        let checked = crate::selection::selection_finish(checked, control.check());
-        crate::selection::selection_finish(checked, check())
-    }
 }

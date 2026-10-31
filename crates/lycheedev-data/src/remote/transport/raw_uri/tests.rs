@@ -85,21 +85,18 @@ fn raw_targets_preserve_encoded_dot_and_query_without_fragments() {
         "/a?q='raw'",
     ] {
         let full = format!("https://EXAMPLE.test{path}");
-        let uri = target(&full).unwrap().unwrap();
+        let (uri, raw) = classify(&full).unwrap();
+        assert!(raw);
         assert_eq!(
             uri.wire.path_and_query().unwrap().as_str(),
             path.split('#').next().unwrap()
         );
     }
     assert!(
-        target("https://example.test/a%2Fb?x=%2f")
-            .unwrap()
-            .is_none()
+        !classify("https://example.test/a%2Fb?x=%2f").unwrap().1
     );
     assert!(
-        target("https://example.test?x=1#fragment")
-            .unwrap()
-            .is_none()
+        !classify("https://example.test?x=1#fragment").unwrap().1
     );
 }
 #[test]
@@ -498,7 +495,8 @@ fn authority_identities_keep_numeric_names_ports_case_and_ipv6_zone() {
         "127.0.0.1.",
     ] {
         let locator = format!("http://{host}:80/a");
-        let target = target(&locator).unwrap().unwrap();
+        let (target, raw) = classify(&locator).unwrap();
+        assert!(raw);
         assert_eq!(target.wire.to_string(), locator);
         assert_eq!(target.dial_host, host);
         assert_eq!(target.tls_host, host);

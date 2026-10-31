@@ -281,8 +281,6 @@ fn provider_is_shared_but_equal_labels_never_mean_equal_sessions() {
     assert!(!a.same_session(&b));
     assert!(a.same_session(&a));
     let frozen = a.freeze_shape(&object(0), ok).unwrap().unwrap();
-    assert!(a.owns_shape(&frozen));
-    assert!(!b.owns_shape(&frozen));
     assert!(
         a.coverage_checked(ok).unwrap().is_empty(),
         "shape ownership is not a checker completion"

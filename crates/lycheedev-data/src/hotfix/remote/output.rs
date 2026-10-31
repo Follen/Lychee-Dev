@@ -49,9 +49,6 @@ fn row(
     raw.extend_from_slice(b"\r\n");
     Ok(())
 }
-pub(super) fn encode(result: &RemoteResult, budget: &Budget) -> Result<(Vec<u8>, Value)> {
-    encode_with_check(result, budget, || Ok(()))
-}
 fn encode_with_check(
     result: &RemoteResult,
     budget: &Budget,

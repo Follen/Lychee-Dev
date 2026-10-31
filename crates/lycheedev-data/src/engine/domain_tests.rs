@@ -693,7 +693,7 @@ fn creature_file_selector_binds_requested_file_separately_from_computed_relation
         result
             .validate_request(&request, &result._owner.lifetime.budget)
             .unwrap();
-        assert_eq!(result.report()["fileDataID"], computed);
+        assert_eq!(serde_json::to_value(&result).unwrap()["report"]["fileDataID"], computed);
     }
     for mutation in 0..4 {
         let mut report = report.clone();

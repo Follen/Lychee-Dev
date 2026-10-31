@@ -8,12 +8,14 @@
 //
 // Publication is deliberately not implemented here: the current task has no
 // publication authorization, and the old Go release pipeline is retired.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { verifyArtifacts } from './ci-artifacts.mjs';
+import { CLIENTS, discoverSuites } from '../tests/addon/run-all.mjs';
+import { assertInstalledNativeIdentity } from './rust-package-smoke.mjs';
 
 const repository = resolve(import.meta.dirname ?? fileURLToPath(new URL('.', import.meta.url)), '..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -96,12 +98,9 @@ function reportEntries(options) {
     if (!match) throw new Error(`ci-release.invalid_report: ${entry}`);
     const path = resolve(repository, match[2]);
     if (!existsSync(path)) throw new Error(`ci-release.validation_report_missing: ${match[2]}`);
-    return { name: match[1], path };
+    const bytes = readFileSync(path);
+    return { name: match[1], path, sha256: hash(bytes), value: JSON.parse(bytes.toString('utf8')) };
   });
-}
-
-export function assertNpmSmokeVersion(report, expectedVersion) {
-  if (report.version?.result?.version !== expectedVersion) throw new Error('ci-release.npm_version_mismatch');
 }
 
 export function assertRustCoverage(report, {commit, sourceTree, recordSHA256, programs}) {
@@ -125,6 +124,30 @@ export function assertPackageReports({ production, installation, audit, business
     || business.inputsStable !== true || business.handlesReaped !== true) throw new Error('ci-release.package_business_incomplete');
 }
 
+export function assertValidationReports(reports, { testIdentity, packageIdentity, lua51SHA256 }) {
+  for (const name of ['rust', 'addon-lua', 'addon-zip', 'skill', 'package-audit', 'package-business']) {
+    if (!reports.has(name)) throw new Error(`ci-release.validation_report_required: ${name}`);
+  }
+  assertRustCoverage(reports.get('rust'), testIdentity);
+  assertPackageReports({ ...packageIdentity, audit: reports.get('package-audit'), business: reports.get('package-business') });
+  const addon = reports.get('addon-lua'), suites = discoverSuites();
+  const expected = new Set(CLIENTS.flatMap(client => suites.map(file => `${client}/${file}`)));
+  if (addon?.schema !== 'lycheedev.addon-lua-regression.v1' || addon.suites !== suites.length
+    || JSON.stringify(addon.clients) !== JSON.stringify(CLIENTS) || addon.counts?.failed !== 0
+    || addon.counts?.passed !== expected.size || !Array.isArray(addon.cases) || addon.cases.length !== expected.size
+    || addon.interpreter?.executableSHA256 !== lua51SHA256) throw new Error('ci-release.addon_lua_incomplete');
+  for (const row of addon.cases) {
+    if (row?.state !== 'passed' || !expected.delete(`${row.client}/${row.file}`)) throw new Error('ci-release.addon_lua_incomplete');
+  }
+  const zip = reports.get('addon-zip');
+  if (zip?.ok !== true || !Array.isArray(zip.violations) || zip.violations.length
+    || !Array.isArray(zip.files) || !zip.files.length) throw new Error('ci-release.addon_zip_failed');
+  const skill = reports.get('skill');
+  if (skill?.checkKind !== 'static-reference-consistency' || !Array.isArray(skill.violations) || skill.violations.length
+    || !Number.isSafeInteger(skill.files) || skill.files <= 0 || !Number.isSafeInteger(skill.contracts) || skill.contracts <= 0
+    || !Number.isSafeInteger(skill.references) || skill.references <= 0) throw new Error('ci-release.skill_validation_failed');
+}
+
 export function releaseCandidate(options = {}) {
   if (!options.identity) throw new Error('ci-release.identity_required');
   if (!options.buildManifest) throw new Error('ci-release.build_manifest_required');
@@ -139,27 +162,29 @@ export function releaseCandidate(options = {}) {
   const tests = verifyArtifacts({ manifestPath: options.testManifest, require: ['test-programs'] });
   const buildManifest = readJson(resolve(repository, options.buildManifest));
   const testManifest = readJson(resolve(repository, options.testManifest));
-  const npm = readJson(resolve(repository, options.npmReport));
+  const npmBytes = readFileSync(resolve(repository, options.npmReport)), npm = JSON.parse(npmBytes.toString('utf8'));
+  const npmSHA256 = hash(npmBytes);
   if (npm.schema !== 'lycheedev.rust-npm-smoke.v1') throw new Error(`ci-release.unknown_npm_report: ${npm.schema}`);
   if (npm.assemblyOnly !== false || npm.npmSmoke !== 'passed') throw new Error('ci-release.npm_smoke_not_run');
   if (!['partial_passed', 'passed'].includes(npm.state)) throw new Error(`ci-release.npm_state: ${npm.state}`);
   if (npm.profile !== 'release') throw new Error(`ci-release.npm_profile: ${npm.profile}`);
-  assertNpmSmokeVersion(npm, identity.version);
+  assertInstalledNativeIdentity(npm.version, {packageVersion: identity.version, commit: identity.commit, workspaceDirty: false});
   if (npm.commit !== identity.commit) throw new Error('ci-release.npm_commit_mismatch');
   if (npm.sourceTreeSHA256 !== buildManifest.sourceTree) throw new Error('ci-release.npm_source_mismatch');
   if (npm.binarySHA256 !== buildManifest.components['cli-release'].binarySHA256) throw new Error('ci-release.npm_binary_mismatch');
   const assembly = readJson(join(repository, buildManifest.components['npm-package'].dir, 'report.json'));
   if (assembly.binarySHA256 !== npm.binarySHA256) throw new Error('ci-release.build_assembly_binary_mismatch');
-  const validationReports = reportEntries(options), reportMap = new Map(validationReports.map(row => [row.name, readJson(row.path)]));
-  if (reportMap.size !== validationReports.length) throw new Error('ci-release.duplicate_validation_report');
-  for (const name of ['rust', 'addon-lua', 'addon-zip', 'skill', 'package-audit', 'package-business']) {
-    if (!reportMap.has(name)) throw new Error(`ci-release.validation_report_required: ${name}`);
+  const validationReports = reportEntries(options), reportMap = new Map(validationReports.map(row => [row.name, row.value]));
+  if (reportMap.size !== validationReports.length || reportMap.has('npm-production.json') || reportMap.has('npm-installation.json')) {
+    throw new Error('ci-release.duplicate_validation_report');
   }
   const testPrograms = testManifest.components['test-programs'];
-  assertRustCoverage(reportMap.get('rust'), {commit: identity.commit, sourceTree: testManifest.sourceTree,
-    recordSHA256: testPrograms.recordSHA256, programs: testPrograms.programs});
-  assertPackageReports({ production: assembly, installation: npm, audit: reportMap.get('package-audit'), business: reportMap.get('package-business'),
-    productionSHA256: buildManifest.components['npm-package'].reportSHA256, installationSHA256: hash(readFileSync(resolve(repository, options.npmReport))) });
+  assertValidationReports(reportMap, {
+    testIdentity: {commit: identity.commit, sourceTree: testManifest.sourceTree, recordSHA256: testPrograms.recordSHA256, programs: testPrograms.programs},
+    packageIdentity: {production: assembly, installation: npm, productionSHA256: buildManifest.components['npm-package'].reportSHA256,
+      installationSHA256: npmSHA256},
+    lua51SHA256: buildManifest.components.lua51.executableSHA256,
+  });
   // The candidate copies the producer's archive. Installation and audit must
   // refer to its hash; neither consumer is allowed to supply a replacement.
   const tgz = resolve(repository, buildManifest.components['npm-package'].tgz);
@@ -176,13 +201,11 @@ export function releaseCandidate(options = {}) {
   const addonRecord = copyArtifact(addonZip, join(out, `lycheedev-${identity.version}-addon.zip`), buildManifest.components['addon-zip'].zipSHA256, 'addon_zip');
   const reports = [];
   for (const report of [...validationReports,
-    {name: 'npm-production.json', path: join(repository, buildManifest.components['npm-package'].dir, 'report.json')},
-    {name: 'npm-installation.json', path: resolve(repository, options.npmReport)}]) {
+    {name: 'npm-production.json', path: join(repository, buildManifest.components['npm-package'].dir, 'report.json'), sha256: buildManifest.components['npm-package'].reportSHA256},
+    {name: 'npm-installation.json', path: resolve(repository, options.npmReport), sha256: npmSHA256}]) {
     const destination = join(out, 'reports', report.name);
     mkdirSync(dirname(destination), { recursive: true });
-    copyFileSync(report.path, destination);
-    const bytes = readFileSync(destination);
-    reports.push({ name: report.name, bytes: bytes.length, sha256: hash(bytes) });
+    reports.push(copyArtifact(report.path, destination, report.sha256, 'validation_report'));
   }
   const manifest = {
     schema: CANDIDATE_SCHEMA, version: identity.version, tag: identity.tag, commit: identity.commit, distTag: identity.distTag,
@@ -225,19 +248,36 @@ export function sealRelease({ candidate, identity, output } = {}) {
   if (!existsSync(manifestPath)) throw new Error('ci-release.candidate_manifest_missing');
   const manifest = readJson(manifestPath);
   if (manifest.schema !== CANDIDATE_SCHEMA) throw new Error(`ci-release.unknown_candidate: ${manifest.schema}`);
-  if (manifest.version !== tag.version || manifest.commit !== tag.commit || manifest.tag !== tag.tag) throw new Error('ci-release.candidate_identity_mismatch');
+  if (manifest.version !== tag.version || manifest.commit !== tag.commit || manifest.tag !== tag.tag
+    || manifest.distTag !== tag.distTag) throw new Error('ci-release.candidate_identity_mismatch');
   if (manifest.publication !== 'not_performed') throw new Error('ci-release.candidate_publication_unexpected');
-  const sums = new Map(readFileSync(sumsPath(source), 'utf8').split('\n').filter(Boolean).map(line => {
-    const [digest, name] = line.split(/\s{2}/);
-    return [name, digest];
-  }));
-  for (const [name, digest] of sums) {
+  const expected = new Map([['release-manifest.json', null]]);
+  const add = (name, record) => {
+    if (!/^(?:reports\/)?[A-Za-z0-9._-]+$/.test(name)
+      || name.split('/').some(part => part === '.' || part === '..')) throw new Error(`ci-release.sealed_unexpected_file: ${name}`);
+    if (expected.has(name)) throw new Error(`ci-release.sealed_duplicate_file: ${name}`);
+    expected.set(name, record);
+  };
+  for (const record of Object.values(manifest.artifacts)) add(record.name, record);
+  for (const record of manifest.validation.reports) add(`reports/${record.name}`, record);
+  const sums = new Map();
+  for (const line of readFileSync(sumsPath(source), 'utf8').split(/\r?\n/).filter(Boolean)) {
+    const match = /^([a-f0-9]{64})  (.+)$/.exec(line);
+    if (!match) throw new Error('ci-release.sealed_invalid_sum');
+    const [, digest, name] = match;
+    if (!expected.has(name)) throw new Error(`ci-release.sealed_unexpected_file: ${name}`);
+    if (sums.has(name)) throw new Error(`ci-release.sealed_duplicate_file: ${name}`);
+    sums.set(name, digest);
+  }
+  for (const [name, record] of expected) {
+    if (!sums.has(name)) throw new Error(`ci-release.sealed_file_unlisted: ${name}`);
     const path = join(source, name);
     if (!existsSync(path)) throw new Error(`ci-release.sealed_file_missing: ${name}`);
-    if (hash(readFileSync(path)) !== digest) throw new Error(`ci-release.sealed_file_changed: ${name}`);
-  }
-  for (const name of ['release-manifest.json', ...Object.values(manifest.artifacts).map(record => record.name)]) {
-    if (!sums.has(name)) throw new Error(`ci-release.sealed_file_unlisted: ${name}`);
+    const info = lstatSync(path);
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error(`ci-release.sealed_file_identity: ${name}`);
+    const bytes = readFileSync(path), digest = hash(bytes);
+    if (digest !== sums.get(name)) throw new Error(`ci-release.sealed_file_changed: ${name}`);
+    if (record && (record.bytes !== bytes.length || record.sha256 !== digest)) throw new Error(`ci-release.sealed_file_identity: ${name}`);
   }
   const out = resolve(repository, output);
   if (existsSync(out)) throw new Error(`ci-release.output_exists: ${output}`);
@@ -245,7 +285,7 @@ export function sealRelease({ candidate, identity, output } = {}) {
   for (const name of sums.keys()) {
     const target = join(out, name);
     mkdirSync(dirname(target), { recursive: true });
-    copyFileSync(join(source, name), target);
+    copyArtifact(join(source, name), target, sums.get(name), 'sealed_file');
   }
   const sealed = {
     schema: SEALED_SCHEMA, version: manifest.version, tag: manifest.tag, commit: manifest.commit, distTag: manifest.distTag,

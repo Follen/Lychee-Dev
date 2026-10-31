@@ -62,15 +62,6 @@ impl OwnedProvenance {
     pub(crate) fn value(&self) -> &Value { &self.value }
 }
 impl ResultOwner {
-    pub(crate) fn visit_batches<T>(&self, control: &lycheedev_core::control::OperationControl,
-        visitor: impl FnOnce(&arrow_schema::SchemaRef, &[RecordBatch]) -> Result<T>) -> Result<T> {
-        control.check()?;
-        let schema = self.schema.clone().or_else(||self.batches.first().map(RecordBatch::schema))
-            .ok_or_else(|| fault("records.internal", 8, "Typed result schema is missing"))?;
-        let result = visitor(&schema, &self.batches)?;
-        control.check()?;
-        Ok(result)
-    }
     pub fn row_count(&self) -> usize {
         self.rows
     }

@@ -38,17 +38,6 @@ test('missing live group in an installed declaration remains visible', t => {
     assert(JSON.parse(result.stdout).violations.some(value => value.includes('live ')));
   }
 });
-test('generated reference check detects drift without repairing it', t => {
-  const root = fixture(t), output = join(root, 'commands.md');
-  let result = run('tools/skill-commands.mjs', ['--output', output]);
-  assert.equal(result.status, 0, result.stderr);
-  result = run('tools/skill-commands.mjs', ['--output', output, '--check']);
-  assert.equal(result.status, 0, result.stderr);
-  writeFileSync(output, 'stale');
-  assert.notEqual(run('tools/skill-commands.mjs', ['--output', output, '--check']).status, 0);
-  assert.equal(readFileSync(output, 'utf8'), 'stale');
-  assert.notEqual(run('tools/skill-commands.mjs', ['--target']).status, 0);
-});
 test('staging preserves the whole Skill and reports actual missing capabilities', t => {
   const root = fixture(t), destination = join(root, 'skill');
   stageSkill(destination, commands.filter(command => command.path !== 'doctor'));

@@ -382,9 +382,6 @@ pub fn load_with_control(
 }
 /// Readiness is read-only: absent or obsolete derived cache is reported without
 /// fetching, warming or mutating source state.
-pub fn status(home: &Path, pin: &SourcePin) -> Result<Value> {
-    status_with_control(home, pin, &Default::default())
-}
 pub fn status_with_control(
     home: &Path,
     pin: &SourcePin,

@@ -77,19 +77,40 @@ impl BrokerJob {
             info.BasicLimitInformation.LimitFlags =
                 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_JOB_MEMORY;
             info.JobMemoryLimit = max_commit_bytes;
-            SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const _,
-                std::mem::size_of_val(&info) as u32,
-            )
-            .map_err(|e| e.to_string())?;
-            AssignProcessToJobObject(handle, GetCurrentProcess()).map_err(|e| e.to_string())?;
-            guard.armed = true;
-            Ok(guard)
+            let started = (|| -> crate::Result<()> {
+                SetInformationJobObject(
+                    handle,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const _,
+                    std::mem::size_of_val(&info) as u32,
+                )
+                .map_err(|e| e.to_string())?;
+                #[cfg(test)]
+                checked_close_tests::before_assignment()?;
+                AssignProcessToJobObject(handle, GetCurrentProcess()).map_err(|e| e.to_string())
+            })();
+            match started {
+                Ok(()) => {
+                    guard.armed = true;
+                    Ok(guard)
+                }
+                Err(primary) => crate::process::finish_query(Err(primary), guard.close()),
+            }
         }
     }
-    pub fn disarm(&mut self) -> crate::Result<()> {
+    /// Consume the self-Job only after the caller has retired its descendants.
+    /// A failed disarm retains the armed owner until OS process exit; closing
+    /// that handle here could kill the current process while returning error.
+    pub fn close(mut self) -> crate::Result<()> {
+        if let Err(error) = self.disarm() {
+            std::mem::forget(self);
+            return Err(error);
+        }
+        let handle = self.handle;
+        std::mem::forget(self);
+        close_broker_job(handle)
+    }
+    fn disarm(&mut self) -> crate::Result<()> {
         if !self.armed {
             return Ok(());
         }
@@ -109,15 +130,21 @@ impl BrokerJob {
         Ok(())
     }
 }
+fn close_broker_job(handle: HANDLE) -> crate::Result<()> {
+    // SAFETY: the unique Job owner disarmed kill-on-close before transfer. The
+    // owner is consumed and no caller can retry this numeric handle on error.
+    let result = unsafe { CloseHandle(handle) }.map_err(|e| format!("job.handle_close: {e}"));
+    #[cfg(test)]
+    let result = checked_close_tests::observe_close(result);
+    result
+}
 impl Drop for BrokerJob {
     fn drop(&mut self) {
         // Never close an armed self-job after a failed disarm: that would kill the
         // current process while it is reporting the error. Explicit disarm exposes
         // the failure; retain the handle until process exit if it cannot be cleared.
         if self.disarm().is_ok() {
-            unsafe {
-                let _ = CloseHandle(self.handle);
-            }
+            let _ = close_broker_job(self.handle);
         }
     }
 }
@@ -233,3 +260,7 @@ impl Drop for JobGuard {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "job_close_tests.rs"]
+mod checked_close_tests;

@@ -270,31 +270,6 @@ pub(in crate::evidence) fn close_directory<T>(
     optional::finish_directory(result, directory)
 }
 
-pub(super) fn persist_capture(
-    home: &Path,
-    key: &str,
-    raw: &[u8],
-    control: Option<&OperationControl>,
-    supplemental: &mut impl FnMut() -> Result<()>,
-    state: &std::cell::Cell<crate::metadata::CaptureWriteState>,
-) -> Result<()> {
-    let default_control = OperationControl::default();
-    let effective = control.unwrap_or(&default_control);
-    let checks = std::cell::RefCell::new(supplemental);
-    crate::metadata::evidence_catalog::put_capture(
-        home,
-        crate::metadata::EvidenceDomain::General,
-        key,
-        raw,
-        &[],
-        effective,
-        &|| (*checks.borrow_mut())(),
-        |_| Ok(()),
-        |_, _| Ok(()),
-        |_| Ok(()),
-        state,
-    )
-}
 
 #[cfg(test)]
 mod tests;

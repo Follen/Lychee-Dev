@@ -17,7 +17,7 @@ mod archive_commands;
 mod bounded;
 pub(crate) use bounded::{
     StreamPublicationSettlement, publish_blob_attempt_predeclared_with_check,
-    publish_blob_attempt_with_check, publish_data_blob_stream_with_check,
+    publish_data_blob_stream_with_check,
 };
 mod budgeted;
 mod dependencies;
@@ -146,11 +146,9 @@ pub fn commit_capture(
     )
 }
 pub fn read_capture(home: &Path, id: &str) -> Result<Value> {
-    workspace::open(home)?;
-    let capture: CaptureRef = Metadata::open(home, false)?.read(&format!("capture/{id}"))?;
-    validate_capture(&capture, id)?;
-    Ok(serde_json::to_value(capture)?)
+    read_capture_controlled_with_check(home, id, &crate::control::OperationControl::default(), || Ok(()))
 }
+
 fn validate_capture(capture: &CaptureRef, id: &str) -> Result<()> {
     if capture.schema != "lycheedev.capture.v1"
         || capture.id != id

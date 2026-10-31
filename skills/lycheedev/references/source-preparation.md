@@ -4,9 +4,11 @@ Read when a source pin is missing or preparation fails.
 
 ## Select the repository revision
 
-`source list` discovers repository keys and supported tracks, not release tags.
-Use each repository's own track map; a game product is not every addon's track,
-and a source track does not establish installation compatibility.
+`source list` reports readiness for an explicit snapshot or the selected project
+lock, using the nearest parent project when `--project` is omitted. With no
+snapshot or project context it lists repository keys and supported tracks, not
+release tags. Use each repository's own track map; a game product is not every
+addon's track, and a source track does not establish installation compatibility.
 
 For `wow-ui-source`, the seven delivery products map to these Git branches:
 

@@ -236,8 +236,11 @@ fn finish_file_with<T>(
 }
 pub fn sha512_integrity(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha512};
+    sha512_integrity_digest(&Sha512::digest(bytes).into())
+}
+/// Format an already streamed SHA-512 digest using the public npm SRI encoding.
+pub fn sha512_integrity_digest(digest: &[u8; 64]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let digest = Sha512::digest(bytes);
     let mut output = String::from("sha512-");
     for chunk in digest.chunks(3) {
         let value = (chunk[0] as u32) << 16

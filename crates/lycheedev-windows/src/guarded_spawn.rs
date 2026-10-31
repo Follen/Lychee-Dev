@@ -25,6 +25,21 @@ use windows::Win32::{
     },
 };
 struct Handle(HANDLE);
+impl Handle {
+    fn close(self) -> Result<(), String> {
+        let raw = self.0;
+        std::mem::forget(self);
+        close_thread_handle(raw)
+    }
+}
+fn close_thread_handle(raw: HANDLE) -> Result<(), String> {
+    // SAFETY: Handle transfers its unique OpenThread owner exactly once; a
+    // failed close is never retried. Drop is only the unwind fallback.
+    let result = unsafe { CloseHandle(raw) }.map_err(|error| error.to_string());
+    #[cfg(test)]
+    let result = tests::observe_primary_thread_close(result);
+    result
+}
 
 /// Wait on the already-owned process handle for one finite caller-owned slice.
 /// The caller retains its deadline, cancellation and retirement policy.
@@ -51,9 +66,7 @@ pub fn wait_child_timeout(
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        unsafe {
-            let _ = CloseHandle(self.0);
-        }
+        let _ = close_thread_handle(self.0);
     }
 }
 #[derive(Debug, serde::Serialize)]
@@ -143,6 +156,18 @@ struct Custody {
     retirement_deadline: Option<Instant>,
 }
 impl Custody {
+    fn fail_with_closes(self, cause: String, closes: Vec<String>) -> StartupFailure {
+        let mut failure = self.fail(cause);
+        for close in closes {
+            let error = format!("startup.primary_thread_close: {close}");
+            failure.cleanup.error = Some(match failure.cleanup.error.take() {
+                Some(primary) => format!("{primary}; {error}"),
+                None => error,
+            });
+            failure.cleanup.handle_close_errors.push(close);
+        }
+        failure
+    }
     fn fail(mut self, cause: String) -> StartupFailure {
         let cleanup = self.reap();
         let pending = self.child.take().map(|child| PendingStartup {
@@ -419,6 +444,7 @@ fn original_primary_thread(
     created: u64,
     deadline: Instant,
     cancel: &mut impl FnMut() -> bool,
+    close_errors: &mut Vec<String>,
 ) -> Result<Handle, String> {
     check(deadline, cancel)?;
     let mut snapshot = ThreadSnapshot::capture(HANDLE(child.as_raw_handle()))?;
@@ -433,13 +459,22 @@ fn original_primary_thread(
         )
         .map_err(|error| error.to_string())?
     });
-    let owner = unsafe { GetProcessIdOfThread(thread.0) };
-    let actual_tid = unsafe { GetThreadId(thread.0) };
-    if owner != child.id() || actual_tid != tid || creation(child)? != created {
-        return Err("startup.thread_identity_changed".into());
-    }
-    if unsafe { WaitForSingleObject(HANDLE(child.as_raw_handle()), 0) } != WAIT_TIMEOUT {
-        return Err("startup.child_not_live".into());
+    let checked = (|| {
+        let owner = unsafe { GetProcessIdOfThread(thread.0) };
+        let actual_tid = unsafe { GetThreadId(thread.0) };
+        if owner != child.id() || actual_tid != tid || creation(child)? != created {
+            return Err("startup.thread_identity_changed".into());
+        }
+        if unsafe { WaitForSingleObject(HANDLE(child.as_raw_handle()), 0) } != WAIT_TIMEOUT {
+            return Err("startup.child_not_live".into());
+        }
+        Ok(())
+    })();
+    if let Err(error) = checked {
+        if let Err(close) = thread.close() {
+            close_errors.push(close);
+        }
+        return Err(error);
     }
     Ok(thread)
 }
@@ -591,6 +626,7 @@ fn spawn_optional_limit_with_probe_until(
         job: None,
         retirement_deadline,
     };
+    let mut thread_close_errors = Vec::new();
     let prepare = (|| -> Result<Handle, String> {
         check(deadline, &mut cancel)?;
         let child = custody.child.as_ref().unwrap();
@@ -615,21 +651,22 @@ fn spawn_optional_limit_with_probe_until(
             created,
             deadline,
             &mut cancel,
+            &mut thread_close_errors,
         )
     })();
     let thread = match prepare {
         Ok(thread) => thread,
-        Err(cause) => return Err(custody.fail(cause)),
+        Err(cause) => return Err(custody.fail_with_closes(cause, thread_close_errors)),
     };
     if let Err(cause) = probe(
         PrepareStage::BeforeResume,
         custody.child.as_ref().unwrap(),
         custody.job.as_ref(),
     ) {
-        return Err(custody.fail(cause));
+        return Err(custody.fail_with_closes(cause, thread.close().err().into_iter().collect()));
     }
     if let Err(cause) = check(deadline, &mut cancel) {
-        return Err(custody.fail(cause));
+        return Err(custody.fail_with_closes(cause, thread.close().err().into_iter().collect()));
     }
     let previous = unsafe { ResumeThread(thread.0) };
     if previous != 1 {
@@ -638,9 +675,16 @@ fn spawn_optional_limit_with_probe_until(
         } else {
             format!("startup.resume_count:{previous}")
         };
-        return Err(custody.fail(cause));
+        return Err(custody.fail_with_closes(cause, thread.close().err().into_iter().collect()));
     }
-    drop(thread);
+    if let Err(close) = thread.close() {
+        let mut failure = custody.fail_with_closes(
+            format!("startup.primary_thread_close: {close}"),
+            vec![close],
+        );
+        failure.stage = "thread_close";
+        return Err(failure);
+    }
     Ok((custody.child.take().unwrap(), custody.job.take().unwrap()))
 }
 

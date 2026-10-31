@@ -243,7 +243,10 @@ fn absolute(inv: &Invocation, path: &str) -> PathBuf {
     }
 }
 fn local_request(inv: &Invocation) -> Result<LocalRequest> {
-    let snapshot = inv.required("--snapshot")?.to_owned();
+    let snapshot = match inv.flag("--snapshot") {
+        Some(_) => inv.required("--snapshot")?.to_owned(),
+        None => crate::core_cli::resolve_pinned(inv)?.id,
+    };
     let file = inv.flag("--dbcache").filter(|v| !v.is_empty());
     let from = inv.flag("--from").filter(|v| !v.is_empty());
     if file.is_some() == from.is_some() {

@@ -62,14 +62,6 @@ struct Policy {
 }
 
 impl Policy {
-    fn new(proxy: String, no_proxy: &str) -> Self {
-        Self {
-            proxy,
-            http_proxy: String::new(),
-            cgi: false,
-            bypass: no_proxy.split(',').filter_map(Rule::parse).collect(),
-        }
-    }
 
     #[cfg(test)]
     fn select(&self, locator: &str) -> Result<Option<reqwest::Url>> {

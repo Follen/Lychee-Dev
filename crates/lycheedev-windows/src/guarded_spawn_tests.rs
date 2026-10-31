@@ -4,7 +4,7 @@ use super::*;
 use crate::Process;
 use sha2::{Digest, Sha256};
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     fs,
     io::{BufRead, BufReader, Read, Write},
     os::windows::fs::OpenOptionsExt,
@@ -19,6 +19,31 @@ use std::{
 };
 use windows::Win32::System::Pipes::PeekNamedPipe;
 const CHILD_MEMORY_LIMIT: usize = (2 << 30) - (256 << 20);
+type ThreadCloseObserver = Box<dyn FnMut(crate::Result<()>) -> crate::Result<()>>;
+thread_local! {
+    static THREAD_CLOSE_OBSERVER: RefCell<Option<ThreadCloseObserver>> = RefCell::new(None);
+}
+pub(super) fn observe_primary_thread_close(result: crate::Result<()>) -> crate::Result<()> {
+    THREAD_CLOSE_OBSERVER.with_borrow_mut(|observer| match observer {
+        Some(observer) => observer(result),
+        None => result,
+    })
+}
+struct ThreadCloseObservation;
+impl ThreadCloseObservation {
+    fn install(observer: impl FnMut(crate::Result<()>) -> crate::Result<()> + 'static) -> Self {
+        THREAD_CLOSE_OBSERVER.with_borrow_mut(|current| {
+            assert!(current.is_none());
+            *current = Some(Box::new(observer));
+        });
+        Self
+    }
+}
+impl Drop for ThreadCloseObservation {
+    fn drop(&mut self) {
+        THREAD_CLOSE_OBSERVER.with_borrow_mut(|observer| *observer = None);
+    }
+}
 fn process_image_hash(process: &Process) -> crate::Result<String> {
     process.verify()?;
     let bytes = fs::read(process.image_path()?).map_err(|error| error.to_string())?;
@@ -552,4 +577,89 @@ fn cancelled_or_injected_prepare_failure_never_resumes_and_reaps_original_child(
             failure.cleanup
         ));
     }
+}
+
+fn assert_primary_thread_close_failure(before_resume_failure: bool) {
+    let case = Case::new(if before_resume_failure {
+        "thread-close-primary"
+    } else {
+        "thread-close-resumed"
+    });
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_calls = calls.clone();
+    let observer = ThreadCloseObservation::install(move |result| {
+        // ConsumeClose already ran exactly once against the real primary
+        // thread handle. Inject its result, never an invalidated handle or
+        // a second OS close attempt.
+        result?;
+        observed_calls.fetch_add(1, Ordering::SeqCst);
+        Err("fixture.primary_thread_close".into())
+    });
+    let mut original = None;
+    let result = spawn_with_probe(
+        case.command(),
+        CHILD_MEMORY_LIMIT,
+        Instant::now() + Duration::from_secs(8),
+        || false,
+        |stage, child, job| {
+            if stage == PrepareStage::BeforeResume {
+                case.assert_not_started(child);
+                original = Some(held(child));
+                assert_eq!(
+                    job.unwrap().membership().unwrap().member_pids,
+                    vec![child.id()]
+                );
+                if before_resume_failure {
+                    return Err("fixture.before_resume".into());
+                }
+            }
+            Ok(())
+        },
+    );
+    drop(observer);
+    // The old success result must be retired before reporting its failing
+    // assertion, so red execution cannot strand the real helper/Job.
+    let failure = match result {
+        Ok((child, job)) => {
+            let mut owned = Running {
+                child: Some(child),
+                job: Some(job),
+                readers: vec![],
+            };
+            owned.terminate_and_join();
+            None
+        }
+        Err(failure) => Some(failure),
+    };
+    let original = original.expect("original held process identity");
+    original
+        .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "no consumed close retry");
+    let failure = failure.expect("a primary-thread close failure cannot return a successful spawn");
+    if before_resume_failure {
+        assert!(failure.cause.starts_with("fixture.before_resume"));
+    } else {
+        assert!(failure.cause.contains("fixture.primary_thread_close"));
+    }
+    assert!(failure.cleanup.child_waited);
+    assert_eq!(failure.cleanup.job_empty, Some(true));
+    assert!(
+        failure
+            .cleanup
+            .handle_close_errors
+            .iter()
+            .any(|error| error.contains("fixture.primary_thread_close"))
+    );
+    case.proof(&format!("beforeResumeFailure={before_resume_failure}\nprimary={}\nthreadCloseAttempts=1\nchild={} created={}\ncleanup={:?}\n", failure.cause, original.identity().pid, original.identity().created, failure.cleanup));
+}
+#[test]
+#[ignore = "requires sealed standalone helper and explicit evidence root"]
+fn primary_thread_close_failure_after_resume_cannot_return_success() {
+    assert_primary_thread_close_failure(false);
+}
+#[test]
+#[ignore = "requires sealed standalone helper and explicit evidence root"]
+fn primary_thread_close_failure_preserves_prepare_error_and_retirement() {
+    assert_primary_thread_close_failure(true);
 }

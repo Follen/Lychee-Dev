@@ -610,3 +610,77 @@ fn formal_repair_retained_preparation_capacity_preserves_owned_evidence() {
     assert_eq!(error.details["maximumRetainedRoots"], 4);
     assert!(!f.target().exists());
 }
+
+#[cfg(windows)]
+#[test]
+fn formal_repair_completed_receipt_survives_real_snapshot_deny_delete() {
+    use std::os::windows::fs::OpenOptionsExt;
+    struct Validator {
+        deny: bool,
+        held: Option<fs::File>,
+    }
+    impl AddonValidator for Validator {
+        fn validate(
+            &mut self,
+            root: &Path,
+            version: &str,
+            control: &OperationControl,
+        ) -> Result<()> {
+            FixtureValidator.validate(root, version, control)?;
+            if self.deny {
+                // Read remains legal throughout verification. Only cleanup's
+                // DELETE acquisition is denied on this unmoved snapshot file.
+                self.held = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(1)
+                        .open(root.join("payload/skill/SKILL.md"))?,
+                );
+            }
+            Ok(())
+        }
+    }
+    for deny in [false, true] {
+        let f = Fixture::new();
+        let control = OperationControl::default();
+        let mut validator = Validator { deny, held: None };
+        let result = apply(
+            &f.client,
+            &f.release,
+            None,
+            lycheedev_core::VERSION,
+            &mut validator,
+            &control,
+        );
+        if let Some(file) = validator.held.take() {
+            storage::finish_file(file, Ok(()), &control).unwrap();
+        }
+        let installed =
+            installation::inspect_main_controlled(&f.target(), "addon", &control).unwrap();
+        assert_eq!(installed["state"], "managed");
+        let pool =
+            slots::inspect_controlled(&f.parent(), lycheedev_core::VERSION, &control).unwrap();
+        assert_eq!(
+            pool["files"].as_array().unwrap().len(),
+            slots::COUNT as usize
+        );
+        if deny {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, "external.io");
+            assert_eq!(error.exit_code, 5);
+            assert_eq!(
+                error.details["operationCompleted"], true,
+                "main addon and all slots were verified before snapshot cleanup failed"
+            );
+            assert_eq!(
+                error.details["result"], installed["receipt"],
+                "the complete original Receipt remains available alongside cleanup failure"
+            );
+        } else {
+            assert_eq!(
+                serde_json::to_value(result.unwrap()).unwrap(),
+                installed["receipt"]
+            );
+        }
+    }
+}

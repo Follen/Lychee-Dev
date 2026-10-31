@@ -6,7 +6,7 @@ use crate::{
     validate,
 };
 use lycheedev_core::{
-    Outcome, Result, ToolkitError, control::OperationControl, evidence, selection::SourcePin,
+    Outcome, Result, ToolkitError, control::OperationControl, evidence, selection::SourcePin, storage,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -16,6 +16,8 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+const MAX_CONFIG_BYTES: usize = 1 << 20;
+const MAX_TARGETS: usize = 32;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Target {
@@ -34,6 +36,33 @@ pub struct Config {
     pub path: String,
     pub targets: Vec<Target>,
 }
+
+/// The JSON file accepted by `source validate --matrix`, before resolving each
+/// target's fixed source. Single-addon --path/--toc inputs are not JSON files.
+pub fn schema() -> Value {
+    json!({
+        "$schema":"https://json-schema.org/draft/2020-12/schema",
+        "title":"Source validation matrix file",
+        "type":"object","additionalProperties":false,"required":["targets"],
+        "properties":{
+            "path":{"type":"string","default":"","description":"Addon root. An omitted or empty path uses the config file's directory; a relative path is resolved from that directory, not the caller's working directory."},
+            "targets":{"type":"array","minItems":1,"maxItems":MAX_TARGETS,"items":{"$ref":"#/$defs/Target"}}
+        },
+        "$defs":{"Target":{
+            "type":"object","additionalProperties":false,"required":["id","toc","product","ref"],
+            "properties":{
+                "id":{"type":"string","minLength":1,"description":"Unique within this matrix; retained on the target's report and coverage."},
+                "toc":{"type":"string","minLength":1,"description":"Ordered TOC load manifest relative to the addon root."},
+                "source":{"type":"string","default":"","description":"Configured source repository key. Omitted or empty selects wow-ui-source; source list enumerates available repositories and product tracks."},
+                "product":{"type":"string","minLength":1,"description":"Exact product track in the selected source repository; targets are resolved independently."},
+                "ref":{"type":"string","minLength":1,"description":"Exact 40-character source commit or full refs/heads/... or refs/tags/... reference. Retain the resolved fixed commit; never infer a revision from the addon directory."}
+            }
+        }},
+        "x-limits":{"fileBytes":MAX_CONFIG_BYTES,"targetIds":"unique"},
+        "x-result":"Each target retains its fixed source, TOC load closure, diagnostics, unresolved facts and coverage; aggregate success does not upgrade partial target evidence.",
+        "examples":[{"path":"./addon","targets":[{"id":"retail","toc":"Main.toc","product":"retail","ref":"31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"}]}]
+    })
+}
 fn invalid(detail: &str) -> ToolkitError {
     ToolkitError::new(
         "codebase.invalid_matrix_config",
@@ -44,56 +73,68 @@ fn invalid(detail: &str) -> ToolkitError {
 pub fn read_config(path: &Path, control: &OperationControl) -> Result<(Config, PathBuf)> {
     control.check()?;
     let mut file = fs::File::open(path)?;
-    if !file.metadata()?.is_file() {
-        return Err(invalid("matrix config is not a regular file"));
-    }
-    let mut bytes = Vec::new();
-    (&mut file).take((1 << 20) + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > 1 << 20 {
-        return Err(invalid("matrix config exceeds 1 MiB"));
-    }
-    let config: Config = serde_json::from_slice(&bytes)
-        .map_err(|e| invalid(&format!("cannot parse matrix config: {e}")))?;
-    if config.targets.is_empty() {
-        return Err(invalid("matrix targets must not be empty"));
-    }
-    if config.targets.len() > 32 {
-        return Err(ToolkitError::new(
-            "codebase.matrix_budget",
-            "Matrix target count exceeds 32",
-            3,
-        ));
-    }
-    let mut ids = BTreeSet::new();
-    for target in &config.targets {
-        if target.id.is_empty()
-            || target.toc.is_empty()
-            || target.product.is_empty()
-            || target.reference.is_empty()
-        {
-            return Err(invalid("each target requires id, toc, product, and ref"));
+    let result = (|| {
+        control.check()?;
+        if !file.metadata()?.is_file() {
+            return Err(invalid("matrix config is not a regular file"));
         }
-        if !ids.insert(&target.id) {
+        let mut bytes = Vec::new();
+        let mut bounded = (&mut file).take(MAX_CONFIG_BYTES as u64 + 1);
+        let mut chunk = [0; 8192];
+        loop {
+            control.check()?;
+            let count = bounded.read(&mut chunk)?;
+            bytes.extend_from_slice(&chunk[..count]);
+            control.check()?;
+            if count == 0 { break; }
+        }
+        if bytes.len() > MAX_CONFIG_BYTES {
+            return Err(invalid("matrix config exceeds 1 MiB"));
+        }
+        let config: Config = serde_json::from_slice(&bytes)
+            .map_err(|e| invalid(&format!("cannot parse matrix config: {e}")))?;
+        control.check()?;
+        if config.targets.is_empty() {
+            return Err(invalid("matrix targets must not be empty"));
+        }
+        if config.targets.len() > MAX_TARGETS {
             return Err(ToolkitError::new(
-                "codebase.duplicate_target_id",
-                format!(
-                    "codebase.duplicate_target_id: duplicate matrix target id: {}",
-                    target.id
-                ),
-                4,
+                "codebase.matrix_budget",
+                "Matrix target count exceeds 32",
+                3,
             ));
         }
-    }
-    let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let root = if config.path.is_empty() {
-        base.to_path_buf()
-    } else if Path::new(&config.path).is_absolute() {
-        PathBuf::from(&config.path)
-    } else {
-        base.join(&config.path)
-    };
-    control.check()?;
-    Ok((config, std::path::absolute(root)?))
+        let mut ids = BTreeSet::new();
+        for target in &config.targets {
+            if target.id.is_empty()
+                || target.toc.is_empty()
+                || target.product.is_empty()
+                || target.reference.is_empty()
+            {
+                return Err(invalid("each target requires id, toc, product, and ref"));
+            }
+            if !ids.insert(&target.id) {
+                return Err(ToolkitError::new(
+                    "codebase.duplicate_target_id",
+                    format!(
+                        "codebase.duplicate_target_id: duplicate matrix target id: {}",
+                        target.id
+                    ),
+                    4,
+                ));
+            }
+        }
+        let base = path.parent().unwrap_or_else(|| Path::new("."));
+        let root = if config.path.is_empty() {
+            base.to_path_buf()
+        } else if Path::new(&config.path).is_absolute() {
+            PathBuf::from(&config.path)
+        } else {
+            base.join(&config.path)
+        };
+        Ok((config, std::path::absolute(root)?))
+    })();
+    storage::finish_file(file, result, control)
 }
 fn array<'a>(value: &'a Value, key: &str) -> &'a [Value] {
     value[key].as_array().map_or(&[], Vec::as_slice)

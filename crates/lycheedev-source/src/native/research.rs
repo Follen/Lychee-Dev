@@ -183,10 +183,6 @@ impl PreparedSnapshot {
         self.inputs.shared_steps.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    #[cfg(test)]
-    pub(crate) fn execute_research_operations<'a>(&'a self,plan:&crate::native_research::plan::ResearchPlan,query:&'a crate::native_research::QueryRequest,graph:Option<&'a Graph>,origins:&'a crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>)->lycheedev_core::Result<ResearchScopeCompletion<'a>> {
-        self.execute_research_operations_observed(plan,query,graph,origins,api,&mut |_|{})
-    }
     pub(crate) fn execute_research_operations_observed<'a>(&'a self,plan:&crate::native_research::plan::ResearchPlan,query:&'a crate::native_research::QueryRequest,graph:Option<&'a Graph>,origins:&'a crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<ResearchScopeCompletion<'a>> {
         use crate::native_research::plan::LogicalOperation;
         self.validate_research_plan(plan,query)?;
@@ -284,13 +280,6 @@ impl PreparedSnapshot {
             .is_some_and(|used|used<self.inputs.corpus.limits.construction_steps)
     }
 
-    /// Only the immediately completed operation can supply these rows. Exact
-    /// borrowed inputs bind source, request/options, graph and XML maps; the plan
-    /// still authenticates execution and the original control remains live.
-    #[cfg(test)]
-    pub(crate) fn project_research_relations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>)->lycheedev_core::Result<Value> {
-        self.project_research_relations_observed(plan,query,graph,origins,projection,&mut |_|{}).map(ResearchProjectionResult::into_value)
-    }
     pub(crate) fn project_research_relations_observed(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<ResearchProjectionResult> {
         self.validate_research_plan(plan,query)?;
         match projection {
@@ -313,13 +302,7 @@ impl PreparedSnapshot {
         }
     }
 
-    pub(crate) fn research_relations(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<Value> {
-        self.research_relations_with_context(symbol,direction,graph,origins,None,None)
-    }
-    fn research_relations_with_context(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,capture:Option<&mut Vec<FileProjectionRange>>,retained:Option<ContextFiles>)->lycheedev_core::Result<Value> {
-        self.research_relations_with_context_observed(symbol,direction,graph,origins,capture,retained,&mut |_|{}).map(ResearchProjectionResult::into_value)
-    }
-    fn research_relations_with_context_observed(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,mut capture:Option<&mut Vec<FileProjectionRange>>,mut retained:Option<ContextFiles>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<ResearchProjectionResult> {
+    pub(crate) fn research_relations_with_context_observed(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,mut capture:Option<&mut Vec<FileProjectionRange>>,mut retained:Option<ContextFiles>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<ResearchProjectionResult> {
         self.control.check()?;
         observer("query_relations_target_declarations");
         #[cfg(test)]

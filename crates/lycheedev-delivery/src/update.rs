@@ -1,9 +1,10 @@
 //! Managed resource update decisions and recovery live here, not in the npm launcher.
 use crate::{deploy, installation, release, slots};
 use lycheedev_core::{
-    Outcome, Result, ToolkitError, VERSION, request::RequestContext,
+    Outcome, Result, ToolkitError, VERSION,
     control::OperationControl,
     coordination::InstallationMaintenanceLease,
+    request::RequestContext,
     storage::{self, ExclusiveLock},
 };
 use serde::{Deserialize, Serialize};
@@ -195,8 +196,15 @@ pub struct Launcher {
 }
 #[derive(Clone, Debug)]
 pub enum Action {
-    Managed { release: PathBuf, plan: bool },
-    SelfUpdate { installed: PathBuf, launcher: Option<Launcher>, presentation: String },
+    Managed {
+        release: PathBuf,
+        plan: bool,
+    },
+    SelfUpdate {
+        installed: PathBuf,
+        launcher: Option<Launcher>,
+        presentation: String,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -209,7 +217,51 @@ pub fn read_target_file(path: &Path, control: &OperationControl) -> Result<Vec<U
     if fs::metadata(path)?.len() > 64 << 10 {
         return Err(ToolkitError::arguments("update target file exceeds 64 KiB"));
     }
-    Ok(serde_json::from_slice(&slots::read_bounded_controlled(path, 64 << 10, control)?)?)
+    Ok(serde_json::from_slice(&slots::read_bounded_controlled(
+        path,
+        64 << 10,
+        control,
+    )?)?)
+}
+// Default discovery keeps the historical raw-row limit and key ordering.
+// Opening, visiting and decoding use the same original operation control.
+fn configured_addon_targets(home: &Path, control: &OperationControl) -> Result<Vec<UpdateTarget>> {
+    let metadata = lycheedev_core::metadata::Metadata::open_controlled(home, false, control)?;
+    let result = (|| {
+        let mut targets = Vec::new();
+        let mut after = String::new();
+        let mut remaining = 10001usize;
+        while remaining != 0 {
+            let limit = remaining.min(1000);
+            let (count, last) = metadata.visit_raw_page_controlled_with_check(
+                "target/",
+                &after,
+                limit,
+                control,
+                || Ok(()),
+                |_, _, raw| {
+                    let config: Value = serde_json::from_slice(raw)?;
+                    if config["source"] == "installation"
+                        && let Some(path) = config["installation"].as_str()
+                    {
+                        targets.push(UpdateTarget {
+                            component: "addon".into(),
+                            path: path.into(),
+                        });
+                    }
+                    Ok(())
+                },
+            )?;
+            remaining -= count;
+            if count < limit {
+                break;
+            }
+            after = last;
+        }
+        control.check()?;
+        Ok(targets)
+    })();
+    lycheedev_core::metadata::owned_write::finish_owned(result, metadata.close())
 }
 pub fn dispatch(ctx: &RequestContext, request: &Request) -> Result<Outcome> {
     ctx.control.check()?;
@@ -220,33 +272,57 @@ pub fn dispatch(ctx: &RequestContext, request: &Request) -> Result<Outcome> {
             let mut targets = read_targets(&state, &ctx.control)?;
             for path in skill_candidates {
                 if path.exists() {
-                    targets.push(UpdateTarget { component: "skill".into(), path: path.clone() });
+                    targets.push(UpdateTarget {
+                        component: "skill".into(),
+                        path: path.clone(),
+                    });
                 }
             }
             if ctx.home.join("state/toolkit.sqlite").exists() {
-                let configs: Vec<Value> = lycheedev_core::metadata::Metadata::open(&ctx.home, false)?.list("target/", 10001)?;
-                for config in configs {
-                    if config["source"] == "installation" && let Some(path) = config["installation"].as_str() {
-                        targets.push(UpdateTarget { component: "addon".into(), path: path.into() });
-                    }
-                }
+                targets.extend(configured_addon_targets(&ctx.home, &ctx.control)?);
             }
             discover_targets(targets, &ctx.control)?
         }
     };
     match &request.action {
-        Action::Managed { release, plan } => managed_with_control(release, VERSION, &state, &targets, *plan, &ctx.control),
-        Action::SelfUpdate { installed, launcher, presentation } => {
+        Action::Managed { release, plan } => {
+            managed_with_control(release, VERSION, &state, &targets, *plan, &ctx.control)
+        }
+        Action::SelfUpdate {
+            installed,
+            launcher,
+            presentation,
+        } => {
             if let Some(launcher) = launcher {
-                let plan = managed_with_control(installed, VERSION, &state, &targets, true, &ctx.control)?;
+                let plan =
+                    managed_with_control(installed, VERSION, &state, &targets, true, &ctx.control)?;
                 // Freeze the exact admitted/current target identities before npm
                 // preparation, retaining original preflight and recovery order.
-                targets = plan.data["targets"].as_array().unwrap().iter().map(|target| {
-                    serde_json::from_value(json!({"component":target["component"],"path":target["path"]}))
-                }).collect::<std::result::Result<_, _>>()?;
-                crate::npm_update::prepare(ctx, presentation, installed, &launcher.node, &launcher.nonce, &launcher.npm_search_paths, targets)
+                targets = plan.data["targets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|target| {
+                        serde_json::from_value(
+                            json!({"component":target["component"],"path":target["path"]}),
+                        )
+                    })
+                    .collect::<std::result::Result<_, _>>()?;
+                crate::npm_update::prepare(
+                    ctx,
+                    presentation,
+                    installed,
+                    &launcher.node,
+                    &launcher.nonce,
+                    &launcher.npm_search_paths,
+                    targets,
+                )
             } else {
-                Err(ToolkitError::new("update.self_update_handoff_required", "native archives require --release; npm process self-update handoff is not yet connected", 3))
+                Err(ToolkitError::new(
+                    "update.self_update_handoff_required",
+                    "native archives require --release; npm process self-update handoff is not yet connected",
+                    3,
+                ))
             }
         }
     }

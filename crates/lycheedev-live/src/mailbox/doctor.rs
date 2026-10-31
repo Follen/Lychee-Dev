@@ -125,6 +125,26 @@ impl Default for DoctorResult {
     }
 }
 impl DoctorResult {
+    /// Protocol dispositions remain repairable health observations. Resource
+    /// reads, checked cleanup and caller stops cannot authorize repair. Keep
+    /// grouping/order for the existing public error precedence rules.
+    pub fn repair_blocking_errors(&self) -> Vec<ChannelError> {
+        fn select(error: &ChannelError) -> Option<ChannelError> {
+            match error {
+                ChannelError::Joined { causes } => {
+                    let causes: Vec<_> = causes.iter().filter_map(select).collect();
+                    (!causes.is_empty()).then_some(ChannelError::Joined { causes })
+                }
+                ChannelError::Contract(_)
+                | ChannelError::Pending { .. }
+                | ChannelError::Blocked(_)
+                | ChannelError::SlotAvailable { .. }
+                | ChannelError::Rejected { .. } => None,
+                _ => Some(error.clone()),
+            }
+        }
+        self.errors.iter().filter_map(select).collect()
+    }
     pub fn add(&mut self, id: &str, state: &str, detail: impl Into<String>, next: &str) {
         if matches!(state, "blocked" | "error") {
             self.healthy = false;
@@ -404,17 +424,20 @@ fn inspect_runtime_open(
                 }
             }
         }
-        other => {
+        Ok(_) => {
             report.add(
                 "live.bootstrap",
                 "warn",
                 "bootstrap diagnostic is not loaded",
                 "install the current addon and reload the selected client",
             );
-            if let Err(e) = other {
-                report.errors.push(e);
-            }
         }
+        Err(error) => report.failure(
+            "live.bootstrap",
+            "error",
+            error,
+            "retry the original diagnostic read before repair",
+        ),
     }
     let candidates = match discover(runtime, control, release, character, realm) {
         Ok(c) => c,

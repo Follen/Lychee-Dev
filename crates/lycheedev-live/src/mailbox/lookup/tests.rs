@@ -1,11 +1,26 @@
 use lycheedev_live::{
     lua_layout::Layout,
-    mailbox::lookup::{self, Memory, Reader, Record, Selector},
+    mailbox::lookup::{self, Memory, Reader, Record},
 };
+use lycheedev_live::mailbox::{self as v1, Kind};
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
 };
+
+fn selected(kind: Kind) -> v1::Selector {
+    v1::Selector { kind, nonce: v1::ZERO_TOKEN, runtime: v1::ZERO_TOKEN,
+        ticket: v1::ZERO_TOKEN, body: None }
+}
+fn receipt_selector(kind: Kind, nonce: &str) -> v1::Selector {
+    v1::Selector { nonce: v1::parse_token(nonce).unwrap(), ..selected(kind) }
+}
+fn body_selector(head: &Record) -> v1::Selector {
+    let receipt = v1::decode_publication_receipt(&head.contract().unwrap()).unwrap();
+    let mut selector = formal_selector(Kind::Body, head);
+    selector.body = Some(v1::BodyQualification { length: receipt.report_bytes, checksum: receipt.report_checksum });
+    selector
+}
 
 struct FixtureFlagControl(std::sync::Arc<std::sync::atomic::AtomicBool>);
 impl lycheedev_windows::process::RuntimeControl for FixtureFlagControl {
@@ -264,7 +279,7 @@ fn complete_named_lookup_no_heap_scan() {
     f.publication(&r, None);
     assert_eq!(
         f.reader()
-            .lookup_admitted(&Selector::Input)
+            .lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause)
             .unwrap()
             .unwrap()
             .payload,
@@ -276,14 +291,12 @@ fn complete_named_lookup_no_heap_scan() {
 #[test]
 fn previous_mailbox_root_exposes_only_identity_and_input_upgrade_evidence() {
     for (kind, selector, allowed) in [
-        (1, Selector::Identity, true),
-        (5, Selector::Input, true),
-        (6, Selector::Bootstrap, false),
+        (1, selected(Kind::Identity), true),
+        (5, selected(Kind::Input), true),
+        (6, selected(Kind::Bootstrap), false),
         (
             2,
-            Selector::Receipt {
-                nonce: "1".repeat(32),
-            },
+            receipt_selector(Kind::Receipt, &("1".repeat(32))),
             false,
         ),
     ] {
@@ -292,7 +305,7 @@ fn previous_mailbox_root_exposes_only_identity_and_input_upgrade_evidence() {
         f.publication(&r, None);
         let previous = f.string(lycheedev_live::mailbox::PREVIOUS_SCHEMA.as_bytes());
         f.replace_pointer(f.mailbox_nodes["schema"], previous);
-        let found = f.reader().lookup_admitted(&selector);
+        let found = f.reader().lookup_formal_admitted(&selector, None).map_err(|failure| failure.cause);
         if allowed {
             assert_eq!(found.unwrap().unwrap().payload, r.payload);
         } else {
@@ -307,7 +320,7 @@ fn path_mutation_discards_sample() {
     f.publication(&r, None);
     f.mutate.set(true);
     assert_eq!(
-        f.reader().lookup_admitted(&Selector::Input).unwrap_err(),
+        f.reader().lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause).unwrap_err(),
         "mailbox.path_changed"
     );
 }
@@ -324,7 +337,7 @@ fn secret_value_rejected_before_pointer_use() {
         .unwrap();
     b[(f.namespace_value - *base) as usize + 9] = 1;
     assert_eq!(
-        f.reader().lookup_admitted(&Selector::Input).unwrap_err(),
+        f.reader().lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause).unwrap_err(),
         "mailbox.secret_value"
     );
 }
@@ -336,14 +349,12 @@ fn exact_body_head_and_maximum_budget() {
     f.publication(&head, Some(&body));
     let observed = f
         .reader()
-        .lookup_admitted(&Selector::Receipt {
-            nonce: head.nonce.clone(),
-        })
+        .lookup_formal_admitted(&receipt_selector(Kind::Receipt, &(head.nonce.clone())), None).map_err(|failure| failure.cause)
         .unwrap()
         .unwrap();
     assert_eq!(
         f.reader()
-            .lookup_admitted(&Selector::Body { head: observed })
+            .lookup_formal_admitted(&body_selector(&(observed)), None).map_err(|failure| failure.cause)
             .unwrap()
             .unwrap()
             .payload
@@ -359,7 +370,7 @@ fn wrong_head_length_fails() {
     f.publication(&head, Some(&body));
     assert!(
         f.reader()
-            .lookup_admitted(&Selector::Body { head })
+            .lookup_formal_admitted(&body_selector(&head), None).map_err(|failure| failure.cause)
             .is_err()
     );
 }
@@ -372,7 +383,7 @@ fn corrupt_state_pointer_fails_without_overflow() {
         .get_mut()
         .insert(f.root, u64::MAX.to_le_bytes().to_vec());
     assert_eq!(
-        f.reader().lookup_admitted(&Selector::Input).unwrap_err(),
+        f.reader().lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause).unwrap_err(),
         "mailbox.state_address"
     );
 }
@@ -421,7 +432,7 @@ impl BudgetedFixture {
             ),
         }
     }
-    fn lookup_admitted(&self) -> lookup::Result<Option<Record>> {
+    fn read_input(&self) -> lookup::Result<Option<Record>> {
         let old = self.fixture.reader();
         Reader {
             memory: self,
@@ -430,7 +441,7 @@ impl BudgetedFixture {
 
             release: old.release,
         }
-        .lookup_admitted(&Selector::Input)
+        .lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause)
     }
 }
 #[test]
@@ -438,12 +449,12 @@ fn global_allocation_budget_includes_path_guards_and_is_not_reset_by_lookup() {
     let mut limits = lycheedev_windows::process::RuntimeCost::defaults();
     limits.allocation_bytes = 65536;
     let f = BudgetedFixture::new(limits);
-    assert!(f.lookup_admitted().unwrap().is_some());
+    assert!(f.read_input().unwrap().is_some());
     let first = f.budget.borrow().usage();
     assert!(first.allocation_bytes > 0 && first.work_units > 0);
     let mut exhausted = false;
     for _ in 0..32 {
-        if let Err(error) = f.lookup_admitted() {
+        if let Err(error) = f.read_input() {
             assert!(error.contains("budget"), "{error}");
             exhausted = true;
             break;
@@ -464,27 +475,18 @@ fn guard_allocation_failure_discards_observation_before_following_root() {
     // is deliberately not admitted.
     limits.allocation_bytes = std::mem::size_of::<FixtureFlagControl>() as u64 + 8 + 256;
     let f = BudgetedFixture::new(limits);
-    assert!(f.lookup_admitted().is_err());
+    assert!(f.read_input().is_err());
     assert_eq!(f.fixture.calls.get(), 1);
 }
 #[test]
-fn malformed_selector_and_oversized_head_do_not_read_the_lua_path() {
+fn unauthorized_formal_selectors_do_not_read_the_lua_path() {
     let f = Fixture::new();
-    for nonce in ["1".repeat(33), "F".repeat(32), "0".repeat(32)] {
-        assert_eq!(
-            f.reader()
-                .lookup_admitted(&Selector::Receipt { nonce })
-                .unwrap_err(),
-            "mailbox.receipt_nonce"
-        );
-    }
-    let head = record(2, vec![b' '; 16385]);
-    assert_eq!(
-        f.reader()
-            .lookup_admitted(&Selector::Body { head })
-            .unwrap_err(),
-        "mailbox.body_head"
-    );
+    assert_eq!(f.reader().lookup_formal_admitted(&selected(Kind::Receipt), None).unwrap_err().cause,
+        "mailbox.receipt_nonce");
+    let body = v1::Selector { kind: Kind::Body, nonce: [1;16], runtime: [2;16], ticket: [3;16],
+        body: Some(v1::BodyQualification { length: v1::MAX_PAYLOAD as u32 + 1, checksum: 1 }) };
+    assert_eq!(f.reader().lookup_formal_admitted(&body, None).unwrap_err().cause,
+        "mailbox.body_authorization");
     assert_eq!(f.calls.get(), 0);
 }
 #[test]
@@ -495,7 +497,7 @@ fn a_valid_wire_record_of_another_kind_cannot_supply_input_state() {
     // publication; the fixture publishes the same string for both fields.
     assert!(
         f.reader()
-            .lookup_admitted(&Selector::Input)
+            .lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause)
             .unwrap()
             .is_none()
     );
@@ -511,16 +513,14 @@ fn schema_only_lua_maps_preserve_exact_missing_keys() {
         let map = fixture.schema_only_map();
         fixture.replace_pointer(fixture.mailbox_nodes[field], map);
         let selector = if field == "receipts" {
-            Selector::Receipt {
-                nonce: head.nonce.clone(),
-            }
+            receipt_selector(Kind::Receipt, &(head.nonce.clone()))
         } else {
-            Selector::Body { head: head.clone() }
+            body_selector(&(head.clone()))
         };
         assert!(
             fixture
                 .reader()
-                .lookup_admitted(&selector)
+                .lookup_formal_admitted(&selector, None).map_err(|failure| failure.cause)
                 .unwrap()
                 .is_none()
         );
@@ -535,7 +535,7 @@ fn empty_body_is_a_record_but_missing_body_is_not() {
     fixture.publication(&head, Some(&body));
     let observed = fixture
         .reader()
-        .lookup_admitted(&Selector::Body { head: head.clone() })
+        .lookup_formal_admitted(&body_selector(&(head.clone())), None).map_err(|failure| failure.cause)
         .unwrap()
         .unwrap();
     assert!(observed.payload.is_empty());
@@ -545,7 +545,7 @@ fn empty_body_is_a_record_but_missing_body_is_not() {
     assert!(
         fixture
             .reader()
-            .lookup_admitted(&Selector::Body { head })
+            .lookup_formal_admitted(&body_selector(&head), None).map_err(|failure| failure.cause)
             .unwrap()
             .is_none()
     );
@@ -610,7 +610,7 @@ fn retired_record_short_read_rechecks_only_captured_path() {
     assert_eq!(
         fixture
             .reader()
-            .lookup_admitted(&Selector::Input)
+            .lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause)
             .unwrap_err(),
         "mailbox.path_changed"
     );
@@ -625,7 +625,7 @@ fn bootstrap_uses_separate_namespace_and_confirmation_uses_kind_four() {
     assert_eq!(
         fixture
             .reader()
-            .lookup_admitted(&Selector::Bootstrap)
+            .lookup_formal_admitted(&selected(Kind::Bootstrap), None).map_err(|failure| failure.cause)
             .unwrap()
             .unwrap()
             .kind,
@@ -634,7 +634,7 @@ fn bootstrap_uses_separate_namespace_and_confirmation_uses_kind_four() {
     assert!(
         fixture
             .reader()
-            .lookup_admitted(&Selector::Identity)
+            .lookup_formal_admitted(&selected(Kind::Identity), None).map_err(|failure| failure.cause)
             .is_err()
     );
     let r = record(4, b"confirmation".to_vec());
@@ -643,9 +643,7 @@ fn bootstrap_uses_separate_namespace_and_confirmation_uses_kind_four() {
     assert_eq!(
         fixture
             .reader()
-            .lookup_admitted(&Selector::Confirmation {
-                nonce: r.nonce.clone()
-            })
+            .lookup_formal_admitted(&receipt_selector(Kind::Confirmation, &(r.nonce.clone())), None).map_err(|failure| failure.cause)
             .unwrap()
             .unwrap()
             .kind,
@@ -654,7 +652,7 @@ fn bootstrap_uses_separate_namespace_and_confirmation_uses_kind_four() {
     assert!(
         fixture
             .reader()
-            .lookup_admitted(&Selector::Receipt { nonce: r.nonce })
+            .lookup_formal_admitted(&receipt_selector(Kind::Receipt, &(r.nonce)), None).map_err(|failure| failure.cause)
             .unwrap()
             .is_none()
     );
@@ -668,14 +666,12 @@ fn unsupported_publication_schema_is_rejected_for_all_record_kinds() {
         let schema = fixture.string(b"unsupported.mailbox.schema");
         fixture.replace_pointer(fixture.mailbox_nodes["schema"], schema);
         for selector in [
-            Selector::Identity,
-            Selector::Input,
-            Selector::Receipt {
-                nonce: r.nonce.clone(),
-            },
+            selected(Kind::Identity),
+            selected(Kind::Input),
+            receipt_selector(Kind::Receipt, &(r.nonce.clone())),
         ] {
             assert_eq!(
-                fixture.reader().lookup_admitted(&selector).unwrap_err(),
+                fixture.reader().lookup_formal_admitted(&selector, None).map_err(|failure| failure.cause).unwrap_err(),
                 "memory.mailbox_incompatible: mailbox_schema_mismatch"
             );
         }
@@ -736,7 +732,7 @@ fn original_failure_cannot_hide_guard_cancellation_deadline_or_identity_loss() {
 
                 release: original.release,
             };
-            let error = reader.lookup_admitted(&Selector::Input).unwrap_err();
+            let error = reader.lookup_formal_admitted(&selected(Kind::Input), None).map_err(|failure| failure.cause).unwrap_err();
             assert!(error.contains(cause), "{error}");
             assert!(
                 error.contains(if malformed {

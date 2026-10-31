@@ -133,12 +133,6 @@ for (const file of markdownFiles(skillRoot)) {
   for (const piece of commandPieces(markdown)) {
     for (const invocation of piece.split(/(?<=\S);\s*(?=lycheedev\s)/)) checkInvocation(file, invocation.replace(/[.;,]$/, ''));
   }
-  // Generated directory flag spans belong to the preceding command row.
-  // Checking isolated `--flag` spans would silently discard their contract.
-  for (const row of markdown.matchAll(/^- `([^`]+)` — (?:mutates|read-only)\.[^\n]*\r?\n  Flags: (.+)$/gm)) {
-    const flags = [...row[2].matchAll(/`([^`]+)`/g)].map(match => match[1]);
-    checkInvocation(file, `${row[1]} ${flags.join(' ')}`);
-  }
 }
 
 process.stdout.write(`${JSON.stringify({

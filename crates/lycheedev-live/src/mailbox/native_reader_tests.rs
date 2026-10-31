@@ -1,6 +1,6 @@
 use super::*;
-use crate::mailbox::{Kind, ZERO_TOKEN};
 use crate::mailbox::lookup::Record;
+use crate::mailbox::{Kind, ZERO_TOKEN};
 use lycheedev_core::control::TrackedCancellation;
 use std::time::{Duration, Instant};
 
@@ -8,6 +8,8 @@ struct FakeReader {
     calls: usize,
     fail: Option<String>,
     cancel: Option<TrackedCancellation>,
+    cancel_at_return: Option<TrackedCancellation>,
+    returned_record: bool,
 }
 impl SelectedReader for FakeReader {
     fn lookup(
@@ -46,6 +48,12 @@ impl SelectedReader for FakeReader {
                 None => true,
             };
             budget.check()?;
+            self.returned_record = true;
+            // Model a stop after the lookup's last check, while the caller
+            // still must admit the returned record under its original ledger.
+            if let Some(cancel) = &self.cancel_at_return {
+                cancel.cancel();
+            }
             Ok(accepted.then_some(record))
         })();
         result.map_err(|cause| RuntimeBindingFailure {
@@ -61,13 +69,18 @@ fn control() -> OperationControl {
     OperationControl::default()
 }
 fn state(control: &OperationControl) -> ReadState<FakeReader> {
+    state_with_limits(control, RuntimeLimits::defaults())
+}
+fn state_with_limits(control: &OperationControl, limits: RuntimeLimits) -> ReadState<FakeReader> {
     ReadState {
         reader: FakeReader {
             calls: 0,
             fail: None,
             cancel: None,
+            cancel_at_return: None,
+            returned_record: false,
         },
-        budget: runtime_budget(control, RuntimeLimits::defaults()).unwrap(),
+        budget: runtime_budget(control, limits).unwrap(),
         last_failure: None,
     }
 }
@@ -80,6 +93,27 @@ fn identity() -> Selector {
         body: None,
     }
 }
+#[test]
+fn cancelled_formal_open_stops_before_issuing_any_runtime_reader() {
+    let control = control();
+    control.tracked_cancel_handle().unwrap().cancel();
+    let window = WindowIdentity {
+        hwnd: 0,
+        process: lycheedev_windows::ProcessIdentity {
+            pid: 0,
+            created: u64::MAX,
+        },
+    };
+    let failure = NativeReader::open(window, lycheedev_core::VERSION, &control)
+        .err()
+        .unwrap();
+    assert_eq!(failure.cause, "memory.runtime_cancelled");
+    assert_eq!(failure.stage, "budget");
+    assert_eq!(failure.usage, RuntimeCost::default());
+    assert!(!failure.root.full_text_pass);
+    assert!(failure.first_read_failure.is_none());
+}
+
 #[test]
 fn mailbox_native_reader_retains_one_ledger_across_named_reads() {
     let c = control();
@@ -239,4 +273,43 @@ fn native_reader_finish_always_closes_and_preserves_operation_cleanup_and_contro
     assert!(error.any_cause(&|cause| matches!(cause, ChannelError::Cancelled)));
     assert_eq!(finish_with_close(Ok(17), || Ok(())).unwrap(), 17);
     assert!(finish_with_close(Ok(17), || Err(ChannelError::DeadlineExceeded)).is_err());
+}
+
+#[test]
+fn mailbox_native_reader_record_allocation_failure_keeps_independent_child_cancel() {
+    let parent = control();
+    let child = parent.ordered_child(parent.deadline()).unwrap();
+    // This legal read establishes the exact admission point after the current
+    // scope and actual fixture read. Removing one byte allows that whole read,
+    // but rejects the following Record allocation under the same ledger.
+    let mut baseline = state(&parent);
+    assert_eq!(baseline.find(&child, &identity(), None).unwrap().len(), 1);
+    assert!(baseline.reader.returned_record);
+    let mut limits = RuntimeLimits::defaults();
+    limits.allocation_bytes = baseline.budget.usage().allocation_bytes - 1;
+    let mut reader = state_with_limits(&parent, limits);
+    let ledger = reader.budget.request_id();
+    reader.reader.cancel_at_return = Some(child.tracked_cancel_handle().unwrap());
+    let error = reader.find(&child, &identity(), None).unwrap_err();
+    assert!(
+        reader.reader.returned_record,
+        "failure occurred after the real fixture lookup returned its record"
+    );
+    assert_eq!(reader.reader.calls, 1);
+    assert_eq!(reader.budget.usage().read_calls, 1);
+    assert_eq!(
+        reader.budget.request_id(),
+        ledger,
+        "allocation uses the original ledger"
+    );
+    assert!(
+        parent.check().is_ok(),
+        "the original open parent remains active"
+    );
+    assert_eq!(child.check().unwrap_err().code, "command.cancelled");
+    assert!(error.any_cause(&|cause| matches!(cause, ChannelError::External { causes } if causes.iter().any(|cause| cause == "memory.runtime_budget:allocations"))), "record allocation cause was lost: {error:?}");
+    assert!(
+        error.any_cause(&|cause| matches!(cause, ChannelError::Cancelled)),
+        "independent child cancellation was lost: {error:?}"
+    );
 }

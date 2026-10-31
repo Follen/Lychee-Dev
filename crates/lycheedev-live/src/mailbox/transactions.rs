@@ -421,7 +421,21 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
         // Cancellation stops new input, not the bounded persistence of facts.
         // This fresh 3s control is deliberately independent of caller cancellation.
         let flush = OperationControl::uncancelable(Instant::now() + Duration::from_secs(3));
-        self.save(&flush, "input_observed")?;
+        if let Err(flush_error) = self.save(&flush, "input_observed") {
+            let mut error = match failure {
+                Some(input_error) => join_errors(input_error, flush_error),
+                None => flush_error,
+            };
+            // The independent fact flush can cross the original invocation's
+            // stop. Preserve that cause without admitting another input or
+            // changing the durable intent when the flush was unsuccessful.
+            if let Err(stopped) = check_control(control)
+                && !error.any_cause(&|cause| cause == &stopped)
+            {
+                error = join_errors(error, stopped);
+            }
+            return Err(error);
+        }
         Ok((outcome, failure))
     }
 

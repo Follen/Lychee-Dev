@@ -1,6 +1,6 @@
 //! Authenticated DBD selection and WDC table preparation for the current engine.
-use crate::{definitions, fault, query_source, resource::Budget, schema, table};
 use crate::request::DataContext;
+use crate::{definitions, fault, query_source, resource::Budget, schema, table};
 use lycheedev_core::{Result, selection};
 use std::sync::Arc;
 pub(crate) struct Prepared {
@@ -14,31 +14,14 @@ pub(crate) struct Prepared {
     // including navigation batches that no longer carry a DataContext.
     pub limits: table::TableLimits,
 }
+/// The explicit outer scope owns admission through the caller's scan and capture.
 pub(crate) fn prepare_scoped(
     inv: &DataContext,
     name: &str,
     budget: &Arc<Budget>,
-    remote: Option<&mut dyn crate::remote::provider::FileScope>,
-    resolved: Option<selection::PinnedSet>,
-) -> Result<Prepared> {
-    Ok(
-        prepare_following_scoped(inv, &[name], budget, remote, resolved, &mut |_| {
-            Ok(Vec::new())
-        })?
-        .remove(0),
-    )
-}
-
-/// The explicit outer scope owns admission through the caller's scan and capture.
-/// Legacy callers retain their previous path; this helper never acquires a lease.
-pub(crate) fn prepare_following_scoped(
-    inv: &DataContext,
-    names: &[&str],
-    budget: &Arc<Budget>,
     mut remote: Option<&mut dyn crate::remote::provider::FileScope>,
     resolved: Option<selection::PinnedSet>,
-    following: &mut dyn FnMut(&[Prepared]) -> Result<Vec<&'static str>>,
-) -> Result<Vec<Prepared>> {
+) -> Result<Prepared> {
     budget.check()?;
     if let Some(scope) = remote.as_ref() {
         scope.check_consumer(inv, budget)?;
@@ -60,7 +43,7 @@ pub(crate) fn prepare_following_scoped(
     let mut bundles = definitions::prepare_many_controlled(
         &inv.home,
         &data.definition_commit,
-        names,
+        &[name],
         inv.source.offline,
         budget.deadline,
         Some(budget),
@@ -79,7 +62,6 @@ pub(crate) fn prepare_following_scoped(
                 "Table file batch cardinality differs",
             ));
         }
-        let batch_start = prepared.len();
         for ((bundle, raw), file) in std::mem::take(&mut bundles).into_iter().zip(files) {
             budget.check()?;
             // CLI admission fixes the physical file allowance. Derive table
@@ -113,38 +95,11 @@ pub(crate) fn prepare_following_scoped(
                 limits,
             });
         }
-        let names = following(&prepared[batch_start..])?;
-        if names.is_empty() {
-            return Ok(Vec::new());
-        }
-        budget.check()?;
-        bundles = definitions::prepare_many_controlled(
-            &inv.home,
-            &data.definition_commit,
-            &names,
-            inv.source.offline,
-            budget.deadline,
-            Some(budget),
-            Some(&inv.control),
-        )?;
-        if bundles
-            .iter()
-            .any(|(bundle, _)| bundle.manifest != prepared[0].bundle.manifest)
-        {
-            return Err(fault(
-                "records.definition_identity",
-                4,
-                "Definition manifest changed between table batches",
-            ));
-        }
-        Ok(bundles
-            .iter()
-            .map(|(bundle, _)| bundle.identity.db2_file_data_id)
-            .collect())
+        Ok(Vec::new())
     };
     match remote.as_mut() {
         Some(scope) => scope.read_table_batches(data, &ids, &mut accept)?,
         None => query_source::read_table_batches_budgeted(inv, data, &ids, budget, &mut accept)?,
     }
-    Ok(prepared)
+    Ok(prepared.remove(0))
 }

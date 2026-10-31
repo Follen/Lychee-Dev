@@ -115,9 +115,6 @@ impl Drop for DomainResult {
     }
 }
 impl DomainResult {
-    pub(crate) fn report(&self) -> &Value {
-        &self.report
-    }
     pub(crate) fn sources(&self) -> &[OwnedProvenance] {
         &self.sources
     }

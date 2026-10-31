@@ -209,8 +209,7 @@ fn read_verified_content_source(
             drop(identity_span);
             let result = (|| {
                 // Private-cache ownership is per operation. This scope now
-                // includes open/read/checked-close; the historical separate
-                // DecodedCacheOpen counter stays zero, not an empty fake span.
+                // includes open/read/checked-close.
                 let lookup_span = budget.phase(Phase::DecodedCacheLookup);
                 let existing = match DataCacheMetadata::read_controlled_with_check::<Entry>(
                     home,

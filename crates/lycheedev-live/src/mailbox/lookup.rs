@@ -454,22 +454,6 @@ impl<M: Memory> Access<'_, M> {
         Ok(v)
     }
 }
-#[derive(Debug, Clone)]
-pub enum Selector {
-    Identity,
-    Input,
-    /// Read-only startup diagnostics; never authorizes input.
-    Bootstrap,
-    Receipt {
-        nonce: String,
-    },
-    Confirmation {
-        nonce: String,
-    },
-    Body {
-        head: Record,
-    },
-}
 pub struct Reader<'a, M: Memory> {
     pub memory: &'a M,
     pub root: u64,
@@ -477,14 +461,6 @@ pub struct Reader<'a, M: Memory> {
     pub release: String,
 }
 impl<M: Memory> Reader<'_, M> {
-    pub(crate) fn lookup_runtime(
-        &self,
-        selector: &Selector,
-        admission: &crate::runtime_binding::RuntimeLayoutAdmission,
-    ) -> Result<Option<Record>> {
-        admission.admits_layout(&self.layout)?;
-        self.lookup_admitted(selector)
-    }
     pub(crate) fn lookup_runtime_formal(
         &self,
         selector: &v1::Selector,
@@ -495,70 +471,6 @@ impl<M: Memory> Reader<'_, M> {
             .admits_layout(&self.layout)
             .map_err(LookupFailure::from)?;
         self.lookup_formal_admitted(selector, accept)
-    }
-    fn lookup_admitted(&self, selector: &Selector) -> Result<Option<Record>> {
-        self.memory.verify()?;
-        let body = match selector {
-            Selector::Receipt { nonce } | Selector::Confirmation { nonce } => {
-                if !token(nonce) {
-                    return Err("mailbox.receipt_nonce".into());
-                }
-                None
-            }
-            Selector::Body { head } => {
-                if !token(&head.nonce)
-                    || !token(&head.runtime)
-                    || !token(&head.ticket)
-                    || head.kind != 2
-                    || head.payload.len() > 16384
-                {
-                    return Err("mailbox.body_head".into());
-                }
-                self.memory.charge(
-                    head.payload.len() as u64 * 128 + 4096,
-                    head.payload.len() as u64 * 4,
-                )?;
-                let contract = head.contract().map_err(|_| "mailbox.body_head")?;
-                let receipt =
-                    v1::decode_publication_receipt(&contract).map_err(|_| "mailbox.body_head")?;
-                if receipt.state != "reported" || receipt.report_bytes as usize > v1::MAX_PAYLOAD {
-                    return Err("mailbox.body_head".into());
-                }
-                Some(v1::BodyQualification {
-                    length: receipt.report_bytes,
-                    checksum: receipt.report_checksum,
-                })
-            }
-            _ => None,
-        };
-        let mut formal = v1::Selector {
-            kind: v1::Kind::Identity,
-            nonce: v1::ZERO_TOKEN,
-            runtime: v1::ZERO_TOKEN,
-            ticket: v1::ZERO_TOKEN,
-            body,
-        };
-        match selector {
-            Selector::Identity => {}
-            Selector::Input => formal.kind = v1::Kind::Input,
-            Selector::Bootstrap => formal.kind = v1::Kind::Bootstrap,
-            Selector::Receipt { nonce } | Selector::Confirmation { nonce } => {
-                formal.kind = if matches!(selector, Selector::Confirmation { .. }) {
-                    v1::Kind::Confirmation
-                } else {
-                    v1::Kind::Receipt
-                };
-                formal.nonce = v1::parse_token(nonce).map_err(|_| "mailbox.receipt_nonce")?;
-            }
-            Selector::Body { head } => {
-                formal.kind = v1::Kind::Body;
-                formal.nonce = v1::parse_token(&head.nonce).map_err(|_| "mailbox.body_head")?;
-                formal.runtime = v1::parse_token(&head.runtime).map_err(|_| "mailbox.body_head")?;
-                formal.ticket = v1::parse_token(&head.ticket).map_err(|_| "mailbox.body_head")?;
-            }
-        }
-        self.lookup_formal_admitted(&formal, None)
-            .map_err(|failure| failure.cause)
     }
     fn lookup_formal_admitted(
         &self,

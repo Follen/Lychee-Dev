@@ -227,7 +227,7 @@ fn next_key_snapshot_can_decode_same_framing_after_missing_key_without_reparse()
     let mut encoded = vec![b'E', 8];
     encoded.extend_from_slice(&id.to_le_bytes());
     encoded.extend_from_slice(&[4, 0, 0, 0, 0, b'S']);
-    encoded.extend_from_slice(&salsa(b"Nhello", &key, [0; 8], None).unwrap());
+    encoded.extend_from_slice(&salsa_checked(b"Nhello", &key, [0; 8], None, None).unwrap());
     let source = source(frame(&encoded, 5), &budget);
     let reads = source.reads.clone();
     let prepared = PreparedRanges::open(source, Limits::default(), budget.clone()).unwrap();

@@ -170,6 +170,61 @@ fn doctor_reads_bootstrap_identity_input_only_and_checked_closes() {
     );
 }
 #[test]
+fn doctor_bootstrap_read_failure_keeps_typed_cause_even_when_runtime_is_readable() {
+    struct FailedBootstrap(Reader);
+    impl RecordReader for FailedBootstrap {
+        fn find(
+            &mut self,
+            c: &OperationControl,
+            s: &Selector,
+            a: Option<&mut dyn FnMut(&Record) -> bool>,
+            eager: bool,
+        ) -> ChannelResult<Vec<Record>> {
+            if s.kind == Kind::Bootstrap {
+                Err(
+                    lycheedev_core::ToolkitError::new("external.io", "bootstrap read failed", 5)
+                        .with_details(serde_json::json!({"source":"owned diagnostic reader"}))
+                        .into(),
+                )
+            } else {
+                self.0.find(c, s, a, eager)
+            }
+        }
+    }
+    impl DoctorRuntime for FailedBootstrap {
+        fn uptime_millis(&self) -> i64 {
+            self.0.uptime_millis()
+        }
+        fn checked_close(&mut self) -> ChannelResult<()> {
+            self.0.checked_close()
+        }
+    }
+    let mut reader = FailedBootstrap(Reader::new());
+    let mut report = DoctorResult::default();
+    inspect_runtime(
+        &mut report,
+        &mut reader,
+        &target(),
+        "3.2.0",
+        "",
+        "",
+        &OperationControl::default(),
+        &mut Schedule::default(),
+    );
+    assert!(!report.healthy);
+    assert!(report.identity.is_some() && report.input.is_some());
+    assert!(
+        matches!(&report.errors[0],ChannelError::Toolkit {code,details,..} if code=="external.io" && details["source"]=="owned diagnostic reader")
+    );
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|check| check.id == "live.bootstrap" && check.state == "error")
+    );
+    assert_eq!(reader.0.closes, 1);
+}
+#[test]
 fn doctor_bootstrap_crosschecks_header_schema_release_and_never_authorizes_input() {
     for field in ["schema", "bootstrap", "release"] {
         let mut reader = Reader::new();

@@ -46,25 +46,6 @@ impl BlobPublicationSettlement {
     }
 }
 
-pub(crate) fn publish_blob_attempt_with_check(
-    home: &Path,
-    bytes: &[u8],
-    maximum: usize,
-    control: &OperationControl,
-    mut supplemental: impl FnMut() -> Result<()>,
-) -> BlobPublishAttempt {
-    let mut settlement = BlobPublicationSettlement::new();
-    let result = publish_internal_observed(
-        home,
-        bytes,
-        maximum,
-        Some(control),
-        &mut supplemental,
-        None,
-        &mut settlement,
-    );
-    BlobPublishAttempt { result, settlement }
-}
 
 #[cfg(test)]
 mod tests;

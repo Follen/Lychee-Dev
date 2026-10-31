@@ -1,5 +1,5 @@
 //! Stable external destinations. Existing parents are resolved once, preserving
-//! the frozen parent-alias contract; only the named output entry is replaceable.
+//! the selected parent identity; only the named output entry is replaceable.
 use crate::request::DataContext;
 use lycheedev_core::{
     Result, ToolkitError,
@@ -102,17 +102,6 @@ pub fn publication_error(error: io::Error, path: &Path) -> ToolkitError {
         ToolkitError::io(error)
     }
 }
-pub fn destination(home: &Path, output: &Path, overwrite: bool) -> Result<Destination> {
-    let destination = open_destination(output, overwrite)?;
-    outside(
-        home,
-        destination
-            .path()
-            .parent()
-            .expect("validated output parent"),
-    )?;
-    Ok(destination)
-}
 pub(crate) fn destination_scoped(
     ctx: &DataContext,
     output: &Path,
@@ -169,7 +158,7 @@ fn open_destination_scoped(
         Err(error) => finish_closes(Err(error), destination.close(), &ctx.control),
     }
 }
-/// Same data/manifest preflight order as the legacy pair, with one checked
+/// Preserve data/manifest preflight order, with one checked
 /// parent owner per destination and original invocation/budget at every step.
 pub(crate) fn destination_pair_scoped(
     ctx: &DataContext,
@@ -301,91 +290,12 @@ pub(crate) fn publication_context(
     error
 }
 
-fn open_destination(output: &Path, overwrite: bool) -> Result<Destination> {
-    if output.as_os_str().is_empty()
-        || matches!(output.as_os_str().encode_wide().last(), Some(47 | 92))
-    {
-        return Err(ToolkitError::new(
-            "records.export_path",
-            "records.export_path",
-            2,
-        ));
-    }
-    let name = output
-        .file_name()
-        .ok_or_else(|| path_error("output must name a file"))?;
-    let absolute = std::path::absolute(output).map_err(|error| path_error(error.to_string()))?;
-    let parent = absolute
-        .parent()
-        .ok_or_else(|| path_error("output must name a file"))?;
-    let parent =
-        ordinary(&fs::canonicalize(parent).map_err(|error| path_error(error.to_string()))?);
-    let path = parent.join(name);
-    // Conflict preflight deliberately precedes source access and the workspace
-    // exclusion check, matching the frozen external-file contract.
-    let destination = Destination::open(&path, overwrite).map_err(|error| {
-        if error.kind() == io::ErrorKind::AlreadyExists {
-            conflict(&path)
-        } else {
-            path_error(error.to_string())
-        }
-    })?;
-    Ok(destination)
-}
-pub fn publish(
-    ctx: &DataContext,
-    destination: &Destination,
-    raw: &[u8],
-    maximum: usize,
-) -> Result<()> {
-    destination
-        .publish(raw, maximum as u64, || {
-            ctx.control
-                .check()
-                .map_err(|error| io::Error::new(io::ErrorKind::Interrupted, error))
-        })
-        .map_err(|error| publication_error(error, destination.path()))
-}
-pub fn publish_reader(
-    ctx: &DataContext,
-    destination: &Destination,
-    reader: &mut impl io::Read,
-    length: u64,
-    maximum: usize,
-) -> Result<()> {
-    destination
-        .publish_reader(reader, length, maximum as u64, || {
-            ctx.control
-                .check()
-                .map_err(|error| io::Error::new(io::ErrorKind::Interrupted, error))
-        })
-        .map_err(|error| publication_error(error, destination.path()))
-}
 pub struct OutputDirectory {
     pub path: PathBuf,
     held: Directory,
     overwrite: bool,
 }
 impl OutputDirectory {
-    pub fn open(home: &Path, output: &Path, overwrite: bool) -> Result<Self> {
-        let absolute =
-            std::path::absolute(output).map_err(|error| path_error(error.to_string()))?;
-        if !fs::metadata(&absolute).is_ok_and(|metadata| metadata.is_dir()) {
-            return Err(path_error(format!(
-                "{} must be an existing directory",
-                output.display()
-            )));
-        }
-        let canonical =
-            ordinary(&fs::canonicalize(absolute).map_err(|error| path_error(error.to_string()))?);
-        outside(home, &canonical)?;
-        let held = Directory::open(&canonical).map_err(|error| path_error(error.to_string()))?;
-        Ok(Self {
-            path: canonical,
-            held,
-            overwrite,
-        })
-    }
     pub(crate) fn open_scoped(ctx: &DataContext, output: &Path, overwrite: bool) -> Result<Self> {
         ctx.control.check()?;
         let absolute = std::path::absolute(output).map_err(|e| path_error(e.to_string()))?;
@@ -469,27 +379,6 @@ impl OutputDirectory {
             &ctx.control,
             || budget.map_or(Ok(()), crate::resource::Budget::check),
         )
-    }
-    pub fn preflight(&self, name: &str) -> Result<()> {
-        match self.held.metadata(std::ffi::OsStr::new(name)) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(path_error(error.to_string())),
-            Ok(metadata)
-                if metadata.is_file()
-                    && metadata.file_attributes() & 0x400 == 0
-                    && self.overwrite =>
-            {
-                Ok(())
-            }
-            Ok(_) => Err(conflict(&self.path.join(name))),
-        }
-    }
-    pub fn publish(&self, ctx: &DataContext, name: &str, raw: &[u8], maximum: usize) -> Result<()> {
-        self.preflight(name)?;
-        let destination = Destination::open(&self.path.join(name), self.overwrite)
-            .map_err(|error| publication_error(error, &self.path.join(name)))?;
-        let result = publish(ctx, &destination, raw, maximum);
-        finish_closes(result, destination.close(), &ctx.control)
     }
 }
 

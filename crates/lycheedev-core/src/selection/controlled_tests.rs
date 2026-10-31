@@ -137,7 +137,7 @@ fn cancellation_after_pin_commit_preserves_once_published_identity() {
     let f = Fixture::new();
     let (c, s) = control();
     let mut id = None;
-    let error = pin_selection_observed(&f.home(), spec(), Some(&c), |pin| {
+    let error = pin_selection_observed_with_check(&f.home(), spec(), &c, || Ok(()), |pin| {
         id = Some(pin.id.clone());
         s.cancel();
     })

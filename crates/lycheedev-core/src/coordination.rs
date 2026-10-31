@@ -3,7 +3,6 @@ use crate::{Result, ToolkitError, control::OperationControl, storage::{self,Excl
 use std::{fs,path::{Path,PathBuf}};
 pub struct InstallationMaintenanceLease {
     pub target: PathBuf,
-    parent: PathBuf,
     _lock: ExclusiveLock,
 }
 impl InstallationMaintenanceLease {
@@ -39,7 +38,6 @@ impl InstallationMaintenanceLease {
         )?;
         Ok(Self {
             target,
-            parent,
             _lock: lock,
         })
     }

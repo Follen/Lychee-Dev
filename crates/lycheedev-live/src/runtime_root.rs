@@ -444,22 +444,6 @@ impl RuntimeRootRecipe {
             trusted_image: None,
         })
     }
-    /// Only the named Lua reader may choose among distinct guarded roots. No
-    /// numeric address or caller-authored layout can mint these capabilities.
-    pub(crate) fn candidates(
-        module: &RuntimeModule,
-        budget: &mut RuntimeBudget,
-    ) -> std::result::Result<Vec<RootBinding>, RootFailure> {
-        resolve_candidates(module, budget).map(|proofs| {
-            proofs
-                .into_iter()
-                .map(|proof| RootBinding {
-                    proof,
-                    trusted_image: None,
-                })
-                .collect()
-        })
-    }
     /// Formal native-reader issuance. The held opaque layout comes only from
     /// this module's controlled EXE hash/PE verification, and supplies trusted
     /// locating metadata rather than reparsing mutable runtime header bounds.

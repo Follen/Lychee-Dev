@@ -785,9 +785,6 @@ fn metadata_inventory(
         ..Default::default()
     })
 }
-fn inventory(home: &Path, paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
-    inventory_recovering(home, paths, control, None, &[])
-}
 fn inventory_recovering(
     home: &Path,
     paths: &DataCachePaths,

@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
 use super::*;
 
+fn fixture_policy(proxy: String, no_proxy: &str) -> Policy {
+    Policy { proxy, http_proxy: String::new(), cgi: false,
+        bypass: no_proxy.split(',').filter_map(Rule::parse).collect() }
+}
+
 fn routed(no_proxy: &str, locator: &str) -> bool {
-    Policy::new("http://proxy.invalid:8080".into(), no_proxy)
+    fixture_policy("http://proxy.invalid:8080".into(), no_proxy)
         .select(locator)
         .unwrap()
         .is_some()
@@ -53,7 +58,7 @@ fn https_only_and_builtin_bypass() {
     assert!(routed("", "https://localhost./x"));
     assert!(routed("", "https://128.0.0.1/x"));
     assert!(
-        !Policy::new(String::new(), "")
+        !fixture_policy(String::new(), "")
             .select("https://cdn.example/x")
             .unwrap()
             .is_some()
@@ -151,7 +156,7 @@ fn proxy_schemes_and_remote_socks_dns() {
             Some(8123),
         ),
     ] {
-        let url = Policy::new(proxy.into(), "")
+        let url = fixture_policy(proxy.into(), "")
             .select("https://cdn.example/x")
             .unwrap()
             .unwrap();
@@ -166,7 +171,7 @@ fn malformed_configuration_order_and_redaction() {
     // Go init ignores errors when both url.Parse attempts fail.
     for proxy in ["%", "proxy.invalid/%zz", "user\nsecret"] {
         assert!(
-            Policy::new(proxy.into(), "")
+            fixture_policy(proxy.into(), "")
                 .select("https://cdn.example/x")
                 .unwrap()
                 .is_none()
@@ -174,12 +179,12 @@ fn malformed_configuration_order_and_redaction() {
     }
     // NO_PROXY avoids use of even an unsupported proxy scheme.
     assert!(
-        Policy::new("ftp://user:secret@proxy.invalid".into(), "cdn.example")
+        fixture_policy("ftp://user:secret@proxy.invalid".into(), "cdn.example")
             .select("https://cdn.example/x")
             .unwrap()
             .is_none()
     );
-    let selected = Policy::new("ftp://user:secret@proxy.invalid".into(), "")
+    let selected = fixture_policy("ftp://user:secret@proxy.invalid".into(), "")
         .select_raw("https://cdn.example/x")
         .unwrap()
         .unwrap();
@@ -199,7 +204,7 @@ fn malformed_configuration_order_and_redaction() {
 
 #[test]
 fn http_proxy_cgi_precedes_bypass_and_https_policy_stays_separate() {
-    let mut p = Policy::new(
+    let mut p = fixture_policy(
         "http://secure-proxy.example:8081".into(),
         "bypass.example:80",
     );
@@ -234,7 +239,7 @@ fn http_proxy_cgi_precedes_bypass_and_https_policy_stays_separate() {
 }
 #[test]
 fn cross_host_redirect_routes_each_origin_and_literal_default_port() {
-    let mut p = Policy::new(
+    let mut p = fixture_policy(
         "http://secure-proxy.example:8081".into(),
         "direct.example,plain.example:80",
     );
@@ -255,7 +260,7 @@ fn cross_host_redirect_routes_each_origin_and_literal_default_port() {
 #[test]
 fn cgi_only_rejects_successfully_parsed_http_proxy_before_bypass() {
     for raw in ["%", "proxy.invalid/%zz", "user\nsecret", ""] {
-        let mut p = Policy::new(String::new(), "*");
+        let mut p = fixture_policy(String::new(), "*");
         p.http_proxy = raw.into();
         p.cgi = true;
         assert!(
@@ -267,7 +272,7 @@ fn cgi_only_rejects_successfully_parsed_http_proxy_before_bypass() {
         "http://proxy.invalid:8080",
         "ftp://user:secret@proxy.invalid",
     ] {
-        let mut p = Policy::new(String::new(), "*");
+        let mut p = fixture_policy(String::new(), "*");
         p.http_proxy = raw.into();
         p.cgi = true;
         let error = p.select("http://127.0.0.1/x").unwrap_err();
@@ -285,7 +290,7 @@ fn raw_selected_proxy_preserves_own_authority_and_credentials() {
         "b%C3%BCcher.example:8443",
         "[fe80::1%25Ethernet]:8443",
     ] {
-        let selected = Policy::new(format!("https://{authority}"), "")
+        let selected = fixture_policy(format!("https://{authority}"), "")
             .select_raw("https://origin.example/a")
             .unwrap()
             .unwrap();
@@ -296,7 +301,7 @@ fn raw_selected_proxy_preserves_own_authority_and_credentials() {
 
 #[test]
 fn raw_proxy_route_keeps_cgi_and_cross_origin_bypass_order() {
-    let mut policy = Policy::new("https://BÜCHER.proxy:00443".into(), ".bypass.test");
+    let mut policy = fixture_policy("https://BÜCHER.proxy:00443".into(), ".bypass.test");
     policy.http_proxy = "http://u%FF:p@0x7f000001:0080".into();
     let selected = policy.select_raw("http://first.test/a").unwrap().unwrap();
     assert_eq!(selected.authority, "u%FF:p@0x7f000001:0080");

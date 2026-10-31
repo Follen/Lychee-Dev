@@ -25,6 +25,10 @@ Use the tasks declared by that schema for catalog, fields, semantics, queries
 and navigation. Report missing commands, fields or supported combinations as
 capability gaps; retain the selected version and the original task's scope.
 
+`schema source batch` and `schema source validate` expose `fileInput` schemas
+and complete examples for their `--file` batch and `--matrix` configuration.
+Single-addon validation still takes an addon directory and TOC manifest.
+
 Read each result's captures, completeness and coverage, not just its exit status.
 Agent matching-ID JSONL differs from ordinary command begin/end JSONL. See
 [data investigation](data-investigation.md) for session and coverage rules.

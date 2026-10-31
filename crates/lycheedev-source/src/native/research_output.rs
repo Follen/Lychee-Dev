@@ -61,9 +61,6 @@ pub(crate) struct ResearchProjectionResult {
     pub(crate) relations:Vec<Value>,
 }
 impl ResearchProjectionResult {
-    pub(crate) fn into_value(self)->Value {
-        super::research_use_index::assemble_projection(self.relations,owned_analysis(self.analysis))
-    }
     pub(super) fn into_context_rows(self)->Value {
         // ContextFiles never retains analysis; the operation answer owns its
         // shared reference. Do not expand a JSON copy just to discard it.
@@ -144,7 +141,6 @@ mod tests {
     fn references_share_analysis_and_serialize_every_original_field() {
         let analysis=fixture_analysis(json!({"state":"partial","graphControl":{"complete":false,"contexts":[null,{"path":"界😀\\\"\r\n","number":-0.0}],"unresolved":2}}));
         let rows=vec![json!({"target":"T","source":"A","site":{"start":3,"end":7}}),Value::Null];
-        let row_pointer=rows.as_ptr();
         let projection=ResearchProjectionResult{analysis:Arc::clone(&analysis),relations:rows};
         let answer=ResearchOperationAnswer::new(json!({"kind":"references","state":"partial","result":{"relationsSHA256":digest(&projection.relations),"relationCount":projection.relations.len()},"evidence":"full","executed":true,"operationIdentity":"identity","batch":0,"operation":0}),Some(Arc::clone(&analysis)));
         assert!(Arc::ptr_eq(&projection.analysis,answer.analysis.as_ref().unwrap()));
@@ -153,12 +149,6 @@ mod tests {
         assert_eq!(serde_json::to_vec(&answer).unwrap(),serde_json::to_vec(&expected).unwrap());
         let expected_projection=json!({"analysis":analysis.as_ref(),"relations":projection.relations});
         assert_eq!(serde_json::to_vec(&projection).unwrap(),serde_json::to_vec(&expected_projection).unwrap());
-        drop(answer);drop(analysis);
-        let pointer=projection.analysis["graphControl"]["contexts"].as_array().unwrap().as_ptr();
-        let moved=projection.into_value();
-        assert_eq!(moved["relations"].as_array().unwrap().as_ptr(),row_pointer);
-        assert_eq!(moved["analysis"]["graphControl"]["contexts"].as_array().unwrap().as_ptr(),pointer);
-        assert_eq!(moved,expected_projection);
     }
 
     #[test]

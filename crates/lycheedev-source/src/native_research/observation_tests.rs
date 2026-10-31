@@ -83,9 +83,7 @@ fn shared_analysis_two_real_scopes_keep_full_rows_answers_and_last_analysis() {
     let mut expected_scopes=Vec::new();let mut expected_references=Vec::new();let mut expected_rows=Vec::new();
     for program in &session.xml.programs {
         let graph=session.prepared.build_xml_plan("source-research-load",program.clone(),None,&control).unwrap();
-        let legacy=session.prepared.research_relations(&query.symbol,"incoming",Some(&graph),&session.xml).unwrap();
-        let mut projection=session.prepared.research_relations(&query.symbol,"incoming",Some(&graph),&session.xml).unwrap();
-        assert_eq!(serde_json::to_vec(&projection.clone()).unwrap(),serde_json::to_vec(&legacy).unwrap());
+        let mut projection=session.prepared.research_relations_with_context_observed(&query.symbol,"incoming",Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
         let scope=json!({"manifest":program.manifest,"loadContext":program.context,"snapshot":graph.snapshot_key,"entries":graph.native_invocations.as_ref().map(|facts|&facts.entries),"kind":"alternative_manifest_hypothetical_after_load"});
         // The previous full-buffer hash is an independent byte oracle for the
         // actual native rows, not a second call to the new streaming digest.
@@ -125,15 +123,10 @@ fn shared_control_same_graph_both_directions_and_distinct_graphs_preserve_wire()
         for direction in ["incoming","both"] {
             let query=planned_query("Target","target.lua",2,5,"function",direction);
             let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-            let expected=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
             let before=session.prepared.research_steps();
-            let fresh=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
+            let expected=session.prepared.research_relations_with_context_observed(&query.symbol,direction,Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
             let cost=session.prepared.research_steps()-before;
-            // The frozen oracle predates only incoming caller labels. Preserve
-            // its exact existing inverse; all analysis/coverage stays untouched.
-            assert_eq!(serde_json::to_vec(&fresh.clone()).unwrap(),serde_json::to_vec(&expected).unwrap());
-            let expected=fresh;
-            let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,None).unwrap().consume(&plan).unwrap();
+            let (answers,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,Some(&graph),&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();
             let shared=answers[0].analysis_control().unwrap();
             if let Some(first)=&same_graph_control {assert!(std::sync::Arc::ptr_eq(first,shared));}
             else {same_graph_control=Some(std::sync::Arc::clone(shared));}
@@ -167,13 +160,10 @@ fn shared_control_survives_real_large_projection_fallback_without_missing_rows()
     for direction in ["incoming","both"] {
         let query=planned_query("Target","target.lua",1,1,"function",direction);
         let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-        let expected=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
         let before=session.prepared.research_steps();
-        let fresh=session.prepared.research_relations(&query.symbol,direction,Some(&graph),&session.xml).unwrap();
+        let expected=session.prepared.research_relations_with_context_observed(&query.symbol,direction,Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
         let cost=session.prepared.research_steps()-before;
-        assert_eq!(serde_json::to_vec(&fresh.clone()).unwrap(),serde_json::to_vec(&expected).unwrap());
-        let expected=fresh;
-        let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,None).unwrap().consume(&plan).unwrap();
+        let (answers,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,Some(&graph),&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();
         assert!(projection.is_none(),"whole incoming and retained context rows exceed the unchanged 1 MiB limit");
         let shared=answers[0].analysis_control().unwrap();
         let before=session.prepared.research_steps();let passes=research_projection_passes();
@@ -185,7 +175,7 @@ fn shared_control_survives_real_large_projection_fallback_without_missing_rows()
         assert!(serde_json::to_vec(&actual.relations).unwrap().len()>1<<20);
         assert_eq!(actual.relations.iter().filter(|row|row["kind"]=="call").count(),2500);
         let answer=serde_json::to_value(&answers[0]).unwrap();
-        let incoming=session.prepared.research_relations(&query.symbol,"incoming",Some(&graph),&session.xml).unwrap();
+        let incoming=session.prepared.research_relations_with_context_observed(&query.symbol,"incoming",Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
         assert_eq!(answer["result"]["analysis"],incoming["analysis"]);
         assert_eq!(answer["result"]["relationsSHA256"],hash(&serde_json::to_vec(&incoming["relations"]).unwrap()));
     }
@@ -198,7 +188,7 @@ fn shared_control_preserves_original_near_reserve_reconstruction_and_errors() {
         let graph=session.prepared.build_xml_plan("shared-control-reserve",session.xml.programs[0].clone(),None,control).unwrap();
         let query=planned_query("Target","target.lua",2,5,"function",direction);
         let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
-        let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,None).unwrap().consume(&plan).unwrap();
+        let (answers,_,projection)=session.prepared.execute_research_operations_observed(&plan,&query,Some(&graph),&session.xml,None,&mut |_|{}).unwrap().consume(&plan).unwrap();
         assert!(projection.is_some());
         let projection=if reuse {projection} else {drop(projection);None};
         let start=(session.prepared.inputs().limits().construction_steps-1024).checked_add_signed(offset).unwrap();
@@ -207,7 +197,7 @@ fn shared_control_preserves_original_near_reserve_reconstruction_and_errors() {
         let result=session.prepared.project_research_relations_observed(&plan,&query,Some(&graph),&session.xml,projection,&mut |_|{})
             .map(|result|{
                 assert!(std::sync::Arc::ptr_eq(answers[0].analysis_control().unwrap(),result.analysis.control_identity()));
-                result.into_value()
+                serde_json::to_value(result).unwrap()
             }).map_err(|error|json!({"code":error.code,"message":error.message,"details":error.details}));
         (result,session.prepared.research_steps(),research_projection_passes()-passes)
     }

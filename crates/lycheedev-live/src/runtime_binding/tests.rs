@@ -281,342 +281,60 @@ fn bound(source: Fixture, budget: &mut RuntimeBudget) -> Bound<Fixture> {
     Bound::bind(source, admission(), "3.1.2", budget).unwrap()
 }
 
-mod observation {
-    use super::*;
-    use crate::runtime_observation::{
-        self, ObservationReader, RuntimeObservationFailure, RuntimeTargetObservation,
-    };
-    use lycheedev_core::control::OperationControl;
-    use serde_json::{Value, json};
 
-    fn identity() -> Value {
-        json!({"schema":crate::mailbox::SCHEMA,"runtime":"2".repeat(32),"nextSlot":1,"inputState":crate::mailbox::SCHEMA,
-            "guid":"Player-1-ABC","character":"测试角色","realm":"测试 realm", "product":"forever",
-            "build":"1.60.1.70338","release":lycheedev_core::VERSION,"slots":500,"inventory":500})
-    }
-    fn observation_fixture(payload: Option<&Value>) -> (Fixture, Arc<AtomicUsize>) {
-        let mut fixture = Fixture::new();
+#[test]
+fn formal_lookup_decode_preserves_identity_fields_and_optional_inventory() {
+    use serde_json::json;
+    for inventory in [None, Some(0), Some(200), Some(500)] {
+        let mut payload = json!({"schema":crate::mailbox::SCHEMA,"runtime":"2".repeat(32),"nextSlot":1,
+            "inputState":crate::mailbox::SCHEMA,"guid":"Player-1-ABC","character":"测试角色",
+            "realm":"测试 realm","product":"forever","build":"1.60.1.70338",
+            "release":lycheedev_core::VERSION,"slots":500});
+        if let Some(inventory) = inventory { payload["inventory"] = json!(inventory); }
         let dropped = Arc::new(AtomicUsize::new(0));
+        let mut fixture = Fixture::new();
         fixture.dropped = Some(dropped.clone());
-        fixture.evidence.pattern_hits = 1;
-        fixture.evidence.header_bytes = 512;
-        fixture.evidence.scanned_bytes = 4096;
-        fixture.evidence.module_read_calls = 3;
-        fixture.evidence.module_read_bytes = 4608;
-        if let Some(payload) = payload {
-            fixture.publication_payload(
-                &serde_json::to_vec(payload).unwrap(),
-                lycheedev_core::VERSION,
-            );
-        }
-        (fixture, dropped)
+        fixture.publication_payload(&serde_json::to_vec(&payload).unwrap(), lycheedev_core::VERSION);
+        let mut b = budget();
+        let request = b.request_id();
+        let mut reader = Bound::bind(fixture, admission(), lycheedev_core::VERSION, &mut b).unwrap();
+        let record = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap().unwrap();
+        let identity = crate::mailbox::decode_identity(&record.contract().unwrap(), lycheedev_core::VERSION).unwrap();
+        assert_eq!(identity.runtime, "2".repeat(32));
+        assert_eq!(identity.guid, "Player-1-ABC");
+        assert_eq!(identity.character, "测试角色");
+        assert_eq!(identity.realm, "测试 realm");
+        assert_eq!(identity.product, "forever");
+        assert_eq!(identity.build, "1.60.1.70338");
+        assert_eq!(identity.release, lycheedev_core::VERSION);
+        assert_eq!(identity.slots, 500);
+        assert_eq!(identity.inventory, inventory);
+        assert_eq!(b.request_id(), request);
+        assert!(b.usage().read_calls > 10);
+        assert!(b.usage().allocation_bytes > 0);
+        assert_eq!(dropped.load(Ordering::SeqCst), 0);
+        reader.source.close(&b).unwrap();
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
     }
-    fn description(
-        source: &Fixture,
-        admission: &RuntimeLayoutAdmission,
-        release: &str,
-        budget: &mut RuntimeBudget,
-    ) -> Result<RuntimeBindingDescription> {
-        let client = client();
-        budget.charge(description_cost(&client, release))?;
-        Ok(RuntimeBindingDescription {
-            window: RuntimeWindowDescription {
-                handle: "18446744073709551000".into(),
-                process_id: 42,
-                process_started_at: "134362582180138573".into(),
-            },
-            module: RuntimeModuleDescription {
-                base: "5368709120".into(),
-                size: 65536,
-                architecture: 0x8664,
-            },
-            client,
-            expected_release: release.into(),
-            layout_profile: admission.profile_id(),
-            initial_coverage: source.evidence().into(),
-            latest_coverage: source.evidence().into(),
-        })
-    }
-    impl ObservationReader for Bound<Fixture> {
-        fn identity(
-            &mut self,
-            budget: &mut RuntimeBudget,
-        ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
-            self.lookup(&Selector::Identity, budget)
-        }
-        fn description(
-            &mut self,
-            budget: &mut RuntimeBudget,
-        ) -> std::result::Result<RuntimeBindingDescription, RuntimeBindingFailure> {
-            self.describe(budget, description)
-        }
-        fn coverage(&self) -> RuntimeCoverage {
-            self.source.evidence().into()
-        }
-    }
-    fn observe(
-        fixture: Fixture,
-        limits: RuntimeLimits,
-    ) -> std::result::Result<RuntimeTargetObservation, RuntimeObservationFailure> {
-        runtime_observation::observe_with(&OperationControl::default(), limits, |budget| {
-            // Model the open/close reservation in the same ledger, then use the
-            // existing actual named-Lua-path fixture reader for all observations.
-            budget
-                .charge(RuntimeCost {
-                    os_call_units: 3,
-                    ..RuntimeCost::default()
-                })
-                .map_err(|cause| RuntimeBindingFailure {
-                    cause,
-                    stage: "module",
-                    root: Box::new(fixture.evidence.clone()),
-                    usage: budget.usage(),
-                    first_read_failure: None,
-                })?;
-            Bound::bind(fixture, admission(), lycheedev_core::VERSION, budget)
-        })
-    }
+}
 
-    #[test]
-    fn one_ledger_observes_identity_and_serializes_only_descriptive_facts() {
-        let (fixture, dropped) = observation_fixture(Some(&identity()));
-        let observed = observe(fixture, RuntimeLimits::defaults()).unwrap();
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-        assert_eq!(observed.identity.runtime, "2".repeat(32));
-        assert_eq!(observed.identity.guid, "Player-1-ABC");
-        assert_eq!(observed.identity.character, "测试角色");
-        assert!(!observed.identity.activation_only);
-        assert_eq!(observed.binding.client.product_code, "wow_forever");
-        assert_eq!(observed.budget.used.os_call_units, 3);
-        assert!(observed.budget.used.read_calls > 10);
-        assert!(observed.budget.used.work_units > 4 * 131072);
-        assert!(observed.budget.used.allocation_bytes > 0);
-        let value = serde_json::to_value(observed).unwrap();
-        assert_eq!(value["authority"], "observation_only");
-        assert_eq!(value["binding"]["window"]["handle"], "18446744073709551000");
-        assert_eq!(
-            value["binding"]["window"]["processStartedAt"],
-            "134362582180138573"
-        );
-        assert_eq!(
-            value["binding"]["module"],
-            json!({"base":"5368709120","size":65536,"architecture":0x8664})
-        );
-        assert_eq!(value["binding"]["initialCoverage"]["fullTextPass"], true);
-        assert_eq!(value["binding"]["latestCoverage"]["atomic"], false);
-        fn no_capabilities(value: &Value) {
-            match value {
-                Value::Object(fields) => {
-                    for (name, value) in fields {
-                        assert!(
-                            ![
-                                "serial",
-                                "request",
-                                "requestId",
-                                "root",
-                                "rootRva",
-                                "rootAddress",
-                                "anchorRva",
-                                "address",
-                                "state",
-                                "heap",
-                                "moduleSha256",
-                                "nonce",
-                                "ticket",
-                                "owner",
-                                "fence"
-                            ]
-                            .contains(&name.as_str()),
-                            "leaked {name}"
-                        );
-                        no_capabilities(value);
-                    }
-                }
-                Value::Array(values) => {
-                    for value in values {
-                        no_capabilities(value);
-                    }
-                }
-                _ => {}
-            }
-        }
-        no_capabilities(&value);
-    }
-    #[test]
-    fn non_current_identity_is_rejected_and_releases_reader() {
-        let mut payload = identity();
-        payload["schema"] = "lycheedev.slot.identity.v2".into();
-        payload["inputState"] = "lycheedev.input.hybrid.v2".into();
-        payload["slots"] = 200.into();
-        payload["inventory"] = 200.into();
-        let (fixture, dropped) = observation_fixture(Some(&payload));
-        let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert!(
-            failure
-                .cause
-                .contains("live.channel_identity_record_invalid")
-        );
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-    }
-    #[test]
-    fn current_capacity_does_not_invent_loaded_inventory_or_input_authority() {
-        for inventory in [None, Some(0), Some(200), Some(500)] {
-            let mut payload = identity();
-            if let Some(count) = inventory {
-                payload["inventory"] = json!(count);
-            } else {
-                payload.as_object_mut().unwrap().remove("inventory");
-            }
-            let (fixture, dropped) = observation_fixture(Some(&payload));
-            let observed = observe(fixture, RuntimeLimits::defaults()).unwrap();
-            assert_eq!(observed.identity.slots, 500);
-            assert_eq!(observed.identity.inventory, inventory);
-            assert_eq!(observed.identity.compatibility, "current");
-            assert!(!observed.identity.activation_only);
-            assert_eq!(
-                serde_json::to_value(&observed).unwrap()["authority"],
-                "observation_only"
-            );
-            assert_eq!(dropped.load(Ordering::SeqCst), 1);
-        }
-    }
-    #[test]
-    fn identity_disagreements_fail_after_real_named_lookup_and_release_reader() {
-        for (field, value, cause) in [
-            (
-                "runtime",
-                json!("3".repeat(32)),
-                "live.channel_identity_record_invalid",
-            ),
-            ("product", json!("cn-beta"), "live.runtime_identity_product"),
-            (
-                "build",
-                json!("1.60.1.70124"),
-                "live.runtime_identity_build",
-            ),
-            (
-                "release",
-                json!("wrong"),
-                "live.channel_identity_record_invalid",
-            ),
-            (
-                "schema",
-                json!("identity.v4"),
-                "live.channel_identity_record_invalid",
-            ),
-            ("guid", json!(""), "live.channel_identity_record_invalid"),
-            (
-                "inventory",
-                json!(501),
-                "live.channel_identity_record_invalid",
-            ),
-            ("slots", json!(64), "live.channel_identity_record_invalid"),
-        ] {
-            let mut payload = identity();
-            payload[field] = value;
-            let (fixture, dropped) = observation_fixture(Some(&payload));
-            let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-            assert_eq!(failure.cause, cause, "{field}");
-            assert_eq!(failure.stage, "identity");
-            assert!(failure.budget.unwrap().used.read_calls > 10);
-            assert_eq!(dropped.load(Ordering::SeqCst), 1);
-        }
-        let mut payload = identity();
-        payload["inventory"] = json!("500");
-        let (fixture, dropped) = observation_fixture(Some(&payload));
-        assert!(
-            observe(fixture, RuntimeLimits::defaults())
-                .unwrap_err()
-                .cause
-                .starts_with("live.channel_identity_record_invalid")
-        );
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-    }
-    #[test]
-    fn missing_identity_and_metadata_change_remain_failures_with_coverage() {
-        let (fixture, dropped) = observation_fixture(None);
-        let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert_eq!(failure.cause, "live.runtime_identity_unavailable");
-        assert!(failure.coverage.full_text_pass);
-        assert!(failure.budget.unwrap().used.read_calls > 0);
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-        let (mut fixture, dropped) = observation_fixture(Some(&identity()));
-        fixture.change_scope_at = 4; // bind + before/after lookup + description
-        let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert_eq!(failure.cause, "reader.runtime_metadata_changed");
-        assert_eq!(failure.stage, "description");
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-    }
-    #[test]
-    fn shared_budget_exhaustion_and_os_error_do_not_return_a_target_or_retain_reader() {
-        let (fixture, dropped) = observation_fixture(Some(&identity()));
-        let mut limits = RuntimeLimits::defaults();
-        limits.read_calls = 1;
-        let failure = observe(fixture, limits).unwrap_err();
-        assert_eq!(failure.cause, "memory.runtime_budget:reads");
-        assert_eq!(failure.budget.unwrap().used.read_calls, 1);
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-        let (fixture, dropped) = observation_fixture(Some(&identity()));
-        fixture.fail_read.set(true);
-        let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert_eq!(failure.cause, "fixture.os_partial_copy:299");
-        assert_eq!(failure.stage, "lookup");
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-    }
-    #[test]
-    fn bind_failure_and_outer_publication_release_mismatch_drop_owned_source() {
-        let (mut fixture, dropped) = observation_fixture(Some(&identity()));
-        fixture.fail_validation = 1;
-        let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert_eq!(failure.cause, "fixture.anchor_changed");
-        assert_eq!(failure.stage, "bind");
-        assert!(!failure.coverage.stable_guards);
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-        let (mut fixture, dropped) = observation_fixture(None);
-        fixture.publication_payload(&serde_json::to_vec(&identity()).unwrap(), "other-release");
-        let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert_eq!(
-            failure.cause,
-            "memory.mailbox_incompatible: mailbox_release_mismatch"
-        );
-        assert_eq!(failure.stage, "lookup");
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
-    }
-    #[test]
-    fn cancellation_before_open_does_not_issue_a_reader() {
-        let control = OperationControl::default();
-        control.tracked_cancel_handle().unwrap().cancel();
-        let opened = Cell::new(false);
-        let failure = runtime_observation::observe_with::<Bound<Fixture>>(
-            &control,
-            RuntimeLimits::defaults(),
-            |_| {
-                opened.set(true);
-                panic!("cancelled request opened reader")
-            },
-        )
-        .unwrap_err();
-        assert_eq!(failure.cause, "memory.runtime_cancelled");
-        assert_eq!(failure.stage, "budget");
-        assert!(failure.budget.is_none());
-        assert!(!opened.get());
-    }
-    #[test]
-    fn description_rejects_a_replacement_ledger_and_retains_original_usage() {
-        let mut budget = super::budget();
-        let mut reader = bound(Fixture::new(), &mut budget);
-        let used = budget.usage();
-        let failure = reader
-            .describe(&mut super::budget(), description)
-            .unwrap_err();
-        assert_eq!(failure.cause, "reader.runtime_budget_identity");
-        assert_eq!(failure.usage, used);
-        assert_eq!(reader.source.read_calls.get(), 0);
-        assert_eq!(
-            reader.describe(&mut budget, description).unwrap_err().stage,
-            "poisoned"
-        );
-    }
+#[test]
+fn formal_lookup_read_limit_retains_coverage_and_releases_its_owned_source() {
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let mut fixture = Fixture::new();
+    fixture.dropped = Some(dropped.clone());
+    fixture.publication();
+    let limits = RuntimeLimits { read_calls: 1, ..RuntimeLimits::defaults() };
+    let mut b = runtime_budget(&lycheedev_core::control::OperationControl::default(), limits).unwrap();
+    let mut reader = bound(fixture, &mut b);
+    let failure = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap_err();
+    assert_eq!(failure.cause, "memory.runtime_budget:reads");
+    assert_eq!(failure.usage.read_calls, 1);
+    assert_eq!(failure.root.recipe, Some(RecipeId::Forever));
+    assert!(failure.root.full_text_pass);
+    assert_eq!(dropped.load(Ordering::SeqCst), 0);
+    reader.source.close(&b).unwrap();
+    assert_eq!(dropped.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -654,7 +372,7 @@ fn stable_absence_keeps_request_usage_and_rechecks_each_lookup() {
     let mut reader = bound(Fixture::new(), &mut b);
     assert!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap()
             .is_none()
     );
@@ -663,7 +381,7 @@ fn stable_absence_keeps_request_usage_and_rechecks_each_lookup() {
     assert_eq!(reader.source.validations, 3);
     assert!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap()
             .is_none()
     );
@@ -677,7 +395,7 @@ fn bounded_publication_uses_named_path_and_returns_record() {
     f.publication();
     let mut b = budget();
     let mut reader = bound(f, &mut b);
-    let r = reader.lookup(&Selector::Identity, &mut b).unwrap().unwrap();
+    let r = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap().unwrap();
     assert_eq!(r.payload, b"identity");
     assert!(r.address > 0 && b.usage().read_calls > 10);
     assert_eq!(reader.source.validations, 3);
@@ -688,14 +406,14 @@ fn replacement_budget_poison_cannot_reset_ledger() {
     let mut reader = bound(Fixture::new(), &mut b);
     let original = b.usage();
     let e = reader
-        .lookup(&Selector::Identity, &mut budget())
+        .lookup_formal(&formal_identity_selector(), None, &mut budget())
         .unwrap_err();
     assert_eq!(e.cause, "reader.runtime_budget_identity");
     assert_eq!(e.usage, original);
     assert_eq!(reader.source.read_calls.get(), 0);
     assert_eq!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap_err()
             .stage,
         "poisoned"
@@ -716,7 +434,7 @@ fn cancellation_before_lookup_reads_nothing() {
     cancel.store(true, Ordering::Release);
     assert_eq!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap_err()
             .cause,
         "memory.runtime_cancelled"
@@ -729,7 +447,7 @@ fn root_before_lookup_failure_retains_evidence() {
     f.fail_validation = 2;
     let mut b = budget();
     let mut reader = bound(f, &mut b);
-    let e = reader.lookup(&Selector::Identity, &mut b).unwrap_err();
+    let e = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap_err();
     assert_eq!(e.cause, "fixture.anchor_changed");
     assert_eq!(e.stage, "before_lookup");
     assert!(!e.root.stable_guards);
@@ -743,14 +461,14 @@ fn post_lookup_root_change_discards_successful_record() {
     f.fail_validation = 3;
     let mut b = budget();
     let mut reader = bound(f, &mut b);
-    let e = reader.lookup(&Selector::Identity, &mut b).unwrap_err();
+    let e = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap_err();
     assert_eq!(e.cause, "fixture.anchor_changed");
     assert_eq!(e.stage, "after_lookup");
     assert!(e.usage.read_calls > 0);
     let calls = reader.source.read_calls.get();
     assert_eq!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap_err()
             .stage,
         "poisoned"
@@ -763,13 +481,13 @@ fn os_read_failure_keeps_exact_cause_and_never_retries() {
     f.fail_read.set(true);
     let mut b = budget();
     let mut reader = bound(f, &mut b);
-    let e = reader.lookup(&Selector::Identity, &mut b).unwrap_err();
+    let e = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap_err();
     assert_eq!(e.cause, "fixture.os_partial_copy:299");
     assert_eq!(e.stage, "lookup");
     assert_eq!(e.usage.read_calls, 1);
     assert_eq!(reader.source.validations, 3);
     reader.source.fail_read.set(false);
-    assert!(reader.lookup(&Selector::Identity, &mut b).is_err());
+    assert!(reader.lookup_formal(&formal_identity_selector(), None, &mut b).is_err());
     assert_eq!(reader.source.read_calls.get(), 1);
 }
 #[test]
@@ -780,7 +498,7 @@ fn reader_root_path_tearing_discards_observation() {
     let mut reader = bound(f, &mut b);
     assert_eq!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap_err()
             .cause,
         "mailbox.path_changed"
@@ -800,7 +518,7 @@ fn exhausted_shared_allocation_budget_fails_before_path_read() {
     let mut reader = bound(Fixture::new(), &mut b);
     assert_eq!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap_err()
             .cause,
         "memory.runtime_budget:allocations"
@@ -813,11 +531,9 @@ fn invalid_selector_cannot_reach_heap() {
     let mut reader = bound(Fixture::new(), &mut b);
     assert_eq!(
         reader
-            .lookup(
-                &Selector::Receipt {
-                    nonce: "0".repeat(32)
-                },
-                &mut b
+            .lookup_formal(
+                &crate::mailbox::Selector { kind: crate::mailbox::Kind::Receipt, ..formal_identity_selector() },
+                None, &mut b
             )
             .unwrap_err()
             .cause,
@@ -887,7 +603,7 @@ fn metadata_change_before_lookup_prevents_heap_read() {
     f.change_scope_at = 2;
     let mut b = budget();
     let mut reader = bound(f, &mut b);
-    let e = reader.lookup(&Selector::Identity, &mut b).unwrap_err();
+    let e = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap_err();
     assert_eq!(e.cause, "reader.runtime_metadata_changed");
     assert_eq!(e.stage, "before_lookup");
     assert_eq!(reader.source.read_calls.get(), 0);
@@ -900,13 +616,13 @@ fn metadata_change_after_lookup_discards_record_and_poisons() {
     f.change_scope_at = 3;
     let mut b = budget();
     let mut reader = bound(f, &mut b);
-    let e = reader.lookup(&Selector::Identity, &mut b).unwrap_err();
+    let e = reader.lookup_formal(&formal_identity_selector(), None, &mut b).unwrap_err();
     assert_eq!(e.cause, "reader.runtime_metadata_changed");
     assert_eq!(e.stage, "after_lookup");
     assert!(e.usage.read_calls > 0);
     assert_eq!(
         reader
-            .lookup(&Selector::Identity, &mut b)
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
             .unwrap_err()
             .stage,
         "poisoned"

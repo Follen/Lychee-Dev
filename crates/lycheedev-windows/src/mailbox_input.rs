@@ -84,30 +84,33 @@ impl MailboxWindow {
     fn verify(&self) -> Result<(), String> {
         self.identity.verify()?;
         let process = Process::open(self.identity.process.pid)?;
-        if process.identity() != &self.identity.process {
-            return Err("desktop.identity_changed".into());
-        }
-        let image = process.image_path()?;
-        let actual_executable: Vec<u16> = image.as_os_str().encode_wide().collect();
-        let mut class = [0u16; 256];
-        // SAFETY: The selected HWND is a scalar OS handle already identity-
-        // checked. The initialized 256-unit output slice stays writable/live
-        // for this synchronous call; Windows retains no pointer to it.
-        let length = unsafe { GetClassNameW(HWND(self.identity.hwnd as *mut _), &mut class) };
-        if length <= 0 {
-            return Err("desktop.identity_changed".into());
-        }
-        self.identity.verify()?;
-        process.verify()?;
-        if !equal_fold::equal_fold_utf16(&self.executable, &actual_executable)
-            || !char::decode_utf16(self.class.iter().copied())
-                .map(|value| value.unwrap_or(char::REPLACEMENT_CHARACTER))
-                .eq(char::decode_utf16(class[..length as usize].iter().copied())
-                    .map(|value| value.unwrap_or(char::REPLACEMENT_CHARACTER)))
-        {
-            return Err("desktop.identity_changed".into());
-        }
-        Ok(())
+        let result = (|| {
+            if process.identity() != &self.identity.process {
+                return Err("desktop.identity_changed".into());
+            }
+            let image = process.image_path()?;
+            let actual_executable: Vec<u16> = image.as_os_str().encode_wide().collect();
+            let mut class = [0u16; 256];
+            // SAFETY: The selected HWND is a scalar OS handle already identity-
+            // checked. The initialized 256-unit output slice stays writable/live
+            // for this synchronous call; Windows retains no pointer to it.
+            let length = unsafe { GetClassNameW(HWND(self.identity.hwnd as *mut _), &mut class) };
+            if length <= 0 {
+                return Err("desktop.identity_changed".into());
+            }
+            self.identity.verify()?;
+            process.verify()?;
+            if !equal_fold::equal_fold_utf16(&self.executable, &actual_executable)
+                || !char::decode_utf16(self.class.iter().copied())
+                    .map(|value| value.unwrap_or(char::REPLACEMENT_CHARACTER))
+                    .eq(char::decode_utf16(class[..length as usize].iter().copied())
+                        .map(|value| value.unwrap_or(char::REPLACEMENT_CHARACTER)))
+            {
+                return Err("desktop.identity_changed".into());
+            }
+            Ok(())
+        })();
+        process.finish(result)
     }
 }
 

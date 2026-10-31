@@ -648,6 +648,92 @@ fn mailbox_driver_cancellation_still_flushes_input_outcome() {
     assert_eq!(d.backend.inputs.len(), sends);
 }
 
+fn assert_input_fact_flush_failure(cancel: bool) {
+    let mut d = prepared();
+    let original = d.state.operation.clone().unwrap();
+    let input_error = ChannelError::from(
+        lycheedev_core::ToolkitError::new("external.io", "original input dispatch failed", 5)
+            .with_details(serde_json::json!({"queued":2,"stage":"post_message"})),
+    );
+    d.backend.input_error = Some(if cancel {
+        ChannelError::Joined {
+            causes: vec![input_error.clone(), ChannelError::Cancelled],
+        }
+    } else {
+        input_error.clone()
+    });
+    d.backend.cancel_in_input = cancel;
+    d.backend.input_outcomes.push_back(InputOutcome {
+        disposition: InputDisposition::Uncertain,
+        messages_queued: 2,
+        at_millis: 0,
+        reason: "original input dispatch failed".into(),
+        retryable: false,
+    });
+    d.journal.fail_event = Some("input_observed");
+    let control = OperationControl::default();
+    let before = d.backend.inputs.len();
+    let error = d.run(&control).unwrap_err();
+    assert_eq!(d.backend.inputs.len(), before + 1);
+    let durable = &d.journal.events.last().unwrap();
+    assert_eq!(durable.0, "input_intent");
+    assert!(durable.1.input.as_ref().unwrap().outcome.is_none());
+    assert_eq!(
+        durable.1.operation.as_ref().unwrap().recovery_budget,
+        original.recovery_budget
+    );
+    let nonce = durable
+        .1
+        .transaction
+        .as_ref()
+        .unwrap()
+        .envelope
+        .nonce
+        .clone();
+    let mut resumed = reload(d);
+    resumed.backend.cancel_in_input = false;
+    resumed.backend.pending_actions.insert("prepare".into());
+    assert!(
+        resumed
+            .run(&OperationControl::default())
+            .unwrap_err()
+            .is_pending()
+    );
+    assert_eq!(
+        resumed.backend.inputs.len(),
+        before + 1,
+        "unknown durable intent never replays"
+    );
+    assert_eq!(
+        resumed.state.transaction.as_ref().unwrap().envelope.nonce,
+        nonce
+    );
+    assert_eq!(
+        resumed.state.operation.as_ref().unwrap().recovery_budget,
+        original.recovery_budget
+    );
+    assert!(error_is(&error, "fixture.journal_write_failed"));
+    assert!(
+        error.any_cause(&|cause| cause == &input_error),
+        "original structured dispatch error was lost: {error:?}"
+    );
+    if cancel {
+        assert!(control.check().is_err());
+        assert!(
+            error.any_cause(&|cause| matches!(cause, ChannelError::Cancelled)),
+            "original cancellation was lost: {error:?}"
+        );
+    }
+}
+#[test]
+fn mailbox_driver_input_fact_flush_failure_keeps_dispatch_error() {
+    assert_input_fact_flush_failure(false);
+}
+#[test]
+fn mailbox_driver_input_fact_flush_failure_keeps_cancel_and_dispatch_error() {
+    assert_input_fact_flush_failure(true);
+}
+
 #[test]
 fn mailbox_driver_invalid_transport_outcome_becomes_unknown() {
     let mut d = prepared();
@@ -1142,7 +1228,10 @@ fn mailbox_driver_post_receipt_unknown_time_bound_is_persisted_once() {
         d.state.operation.as_ref().unwrap().stage,
         OperationStage::CommitReady
     );
-    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, recovered_at);
+    assert_eq!(
+        d.state.input.as_ref().unwrap().recovery_after_millis,
+        recovered_at
+    );
     let sends = d.backend.inputs.len();
     let mut d = reload(d);
     assert_eq!(
@@ -1162,7 +1251,10 @@ fn mailbox_driver_post_receipt_unknown_time_bound_is_persisted_once() {
             .unwrap_err()
             .is_pending()
     );
-    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, recovered_at);
+    assert_eq!(
+        d.state.input.as_ref().unwrap().recovery_after_millis,
+        recovered_at
+    );
     assert_eq!(d.backend.inputs.len(), sends);
     assert_eq!(
         d.journal
@@ -1680,7 +1772,10 @@ fn driver_durable_keyboard_retries_preserve_archive_capacity_and_original_deadli
         // retries. The final uncertain submission keeps its original error;
         // subsequent resumes below must wait without sending it again.
         if turn == 600 {
-            assert!(!err.is_pending(), "uncertain submission was rewritten: {err:?}");
+            assert!(
+                !err.is_pending(),
+                "uncertain submission was rewritten: {err:?}"
+            );
         } else {
             assert!(err.is_pending(), "turn {turn}: {err:?}");
         }
@@ -1746,10 +1841,10 @@ fn driver_durable_keyboard_retries_preserve_archive_capacity_and_original_deadli
     let exhausted = held_key_journal_turn(&mut d).unwrap_err();
     assert!(exhausted.is_pending(), "{exhausted:?}");
     // Durable budget exhaustion is a Pending cause, not a Contract variant.
-    assert!(super::super::recovery::has_code(
-        &exhausted,
-        "live.channel_budget_exhausted"
-    ), "{exhausted:?}");
+    assert!(
+        super::super::recovery::has_code(&exhausted, "live.channel_budget_exhausted"),
+        "{exhausted:?}"
+    );
     assert!(
         d.state
             .operation

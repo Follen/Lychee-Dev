@@ -13,6 +13,7 @@ pub(crate) trait DomainAccess {
     ) -> Result<(Vec<(u32, Row)>, bool)>;
     fn budget(&self) -> &Budget;
     fn budget_owner(&self) -> Arc<Budget>;
+    fn complete(&self) -> bool;
     fn mark_partial(&mut self, reason: &'static str);
     fn mark_truncated(&mut self, reason: &'static str);
     fn link(

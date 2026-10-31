@@ -59,7 +59,8 @@ fn owner_raw_success_retains_one_allocation_and_exact_public_consumer_value(){
     let response=RawResponse::decode(bytes).unwrap();
     assert_eq!(response.bytes.as_ptr(),pointer);assert_eq!(response.bytes.capacity(),capacity);
     assert!(!response.failed());assert!(response.error.is_none());
-    let mut frame=Vec::new();OwnerReply::Forward(response).write(&mut frame).unwrap();
+    let reply=finish_query_observation(Ok(Some(OwnerReply::Forward(response))),Ok(())).unwrap().unwrap();
+    let mut frame=Vec::new();reply.write(&mut frame).unwrap();
     let raw=read_raw_frame(&mut Cursor::new(frame),RESPONSE_BYTES).unwrap();
     let actual:Response=serde_json::from_slice(&raw).unwrap();
     assert_eq!(encoded(&actual),encoded(&old));
@@ -126,6 +127,163 @@ fn raw_child_errors_keep_primary_and_exact_retirement_merge_semantics(){
             assert_eq!(encoded(&actual),encoded(&expected));
         }
     }
+}
+
+fn query_observer_child_error()->OwnerReply {
+    let response=RawResponse::decode(br#"{"value":null,"error":{"code":"fixture.child_business","message":"original child failure","exit_code":4,"details":{"request":"original-fixed-input","nested":{"coverage":"partial"}}}}"#.to_vec()).unwrap();
+    let retirement=ToolkitError::new("fixture.analysis_retirement","original child retirement failure",5)
+        .with_details(json!({"rootReaped":true,"jobEmpty":false}));
+    OwnerReply::ChildError{response,retirement:Some(retirement),terminal:None}
+}
+fn query_observer_child_reply(observed:Result<()>)->Response {
+    // Use the real authenticated child frame decoder, owning join boundary,
+    // raw reply writer and final caller decoder. No fake replacement result.
+    let result=finish_query_observation(Ok(Some(query_observer_child_error())),observed);
+    let reply=match result {
+        Ok(Some(reply))=>reply,
+        Ok(None)=>panic!("a decoded child error cannot become an omitted reply"),
+        Err(error)=>OwnerReply::Local(Response{value:None,error:Some(error),terminal:None}),
+    };
+    let mut frame=Vec::new();reply.write(&mut frame).unwrap();
+    read_frame(&mut Cursor::new(frame),RESPONSE_BYTES).unwrap()
+}
+fn query_observer_failure()->ToolkitError {
+    ToolkitError::new("external.io","independent observer read and checked-close failure",5)
+        .with_details(json!({"observerEventClosed":false}))
+}
+fn expected_query_child_error()->ToolkitError {
+    ToolkitError::new("fixture.child_business","original child failure",4).with_details(json!({
+        "request":"original-fixed-input","nested":{"coverage":"partial"},
+        "analysisRetirementError":{"code":"fixture.analysis_retirement","message":"original child retirement failure","exit_code":5,"details":{"rootReaped":true,"jobEmpty":false}}
+    }))
+}
+fn assert_query_child_error(reply:Response)->ToolkitError {
+    assert!(reply.value.is_none());
+    let error=reply.error.expect("original typed child failure");
+    assert_eq!((error.code.as_str(),error.exit_code),("fixture.child_business",4));
+    assert_eq!(error.message,"original child failure");
+    assert_eq!(error.details["request"],"original-fixed-input");
+    assert_eq!(error.details["nested"],json!({"coverage":"partial"}));
+    assert_eq!(encoded(&error),encoded(&expected_query_child_error()));
+    error
+}
+#[test]
+fn query_observer_join_child_error_with_clean_observer_keeps_original_reply(){
+    let mut frame=Vec::new();
+    assert_eq!(write_query_observation(Ok(Some(query_observer_child_error())),Ok(Ok(())),None,|reply|reply.write(&mut frame)).unwrap(),Some(()));
+    let raw=read_raw_frame(&mut Cursor::new(frame),RESPONSE_BYTES).unwrap();
+    assert_eq!(raw.as_slice(),br#"{"value":null,"error":{"code":"fixture.child_business","message":"original child failure","exit_code":4,"details":{"analysisRetirementError":{"code":"fixture.analysis_retirement","message":"original child retirement failure","exit_code":5,"details":{"jobEmpty":false,"rootReaped":true}},"nested":{"coverage":"partial"},"request":"original-fixed-input"}}}"#.as_slice());
+    let error=assert_query_child_error(serde_json::from_slice(&raw).unwrap());
+    assert!(!error.details.to_string().contains("observerEventClosed"));
+}
+#[test]
+fn query_observer_join_keeps_child_retirement_and_observer_failure(){
+    let observer=query_observer_failure();
+    let expected=json!(&observer);
+    let reply=query_observer_child_reply(Err(observer));
+    assert!(reply.value.is_none());
+    let error=reply.error.unwrap();
+    assert_eq!((error.code.as_str(),error.exit_code),("fixture.child_business",4));
+    assert_eq!(error.message,"original child failure\nindependent observer read and checked-close failure");
+    assert_eq!(error.details,json!({
+        "schema":"lycheedev.file-cleanup.v1","primary":expected_query_child_error(),
+        "cleanup":expected,"control":null
+    }));
+}
+
+#[test]
+fn query_observer_join_actual_panic_publishes_all_child_causes_but_stays_fatal(){
+    let joined=std::thread::spawn(||->Result<()>{panic!("fixture observer panic")}).join();
+    let mut frame=Vec::new();
+    let fatal=write_query_observation(Ok(Some(query_observer_child_error())),joined,None,|reply|reply.write(&mut frame))
+        .expect_err("a panicked observer must exit the owner run, never continue warm admission");
+    assert_eq!(encoded(&fatal),encoded(&ToolkitError::new("source.native_session","Source request observer failed",5)));
+    let response:Response=read_frame(&mut Cursor::new(frame),RESPONSE_BYTES).unwrap();
+    assert!(response.value.is_none());
+    let error=response.error.unwrap();
+    assert_eq!((error.code.as_str(),error.exit_code),("fixture.child_business",4));
+    assert_eq!(error.message,"original child failure\nSource request observer failed");
+    assert_eq!(error.details,json!({"schema":"lycheedev.file-cleanup.v1","primary":expected_query_child_error(),
+        "cleanup":{"code":"source.native_session","message":"Source request observer failed","exit_code":5,"details":null},"control":null}));
+}
+
+#[test]
+fn query_observer_join_panic_preserves_fatal_with_control_or_write_failure(){
+    struct Disconnected;
+    impl Write for Disconnected {
+        fn write(&mut self,_:&[u8])->std::io::Result<usize>{Err(std::io::Error::other("fixture disconnected response writer"))}
+        fn flush(&mut self)->std::io::Result<()>{Ok(())}
+    }
+    for failure in 0..3 {
+        let control=if failure==1 {OperationControl::uncancelable(Instant::now())}else{OperationControl::default()};
+        if failure==0 {control.tracked_cancel_handle().unwrap().cancel();}
+        let joined=std::thread::spawn(||->Result<()>{panic!("fixture observer panic")}).join();
+        let attempts=std::cell::Cell::new(0);
+        let error=write_query_observation(Ok(Some(query_observer_child_error())),joined,None,|reply|{
+            attempts.set(attempts.get()+1);
+            control.check()?;
+            reply.write(&mut Disconnected)
+        }).expect_err("control or write failure cannot recover a fatal observer");
+        assert_eq!(attempts.get(),1,"the owned child reply is attempted before fatal cleanup");
+        assert_eq!((error.code.as_str(),error.exit_code),("source.native_session",5));
+        assert_eq!(error.details["schema"],"lycheedev.file-cleanup.v1");
+        assert_eq!(error.details["primary"],json!({"code":"source.native_session","message":"Source request observer failed","exit_code":5,"details":null}));
+        assert_eq!(error.details["control"],Value::Null);
+        let cleanup=&error.details["cleanup"];
+        assert_eq!(cleanup["code"],["command.cancelled","command.deadline","external.io"][failure]);
+        assert_eq!(cleanup["exit_code"],[7,5,5][failure]);
+        if failure==2 {assert_eq!(cleanup["message"],"fixture disconnected response writer");}
+        let primary_message=error.details["primary"]["message"].as_str().unwrap();
+        assert_eq!(error.message,format!("{primary_message}\n{}",cleanup["message"].as_str().unwrap()));
+    }
+}
+
+#[test]
+fn query_observer_join_borrows_wide_details_and_keeps_frame_bound_on_default_stack(){
+    std::thread::spawn(||{
+        let raw=br#"{"value":null,"error":{"code":"fixture.wide","message":"wide original","exit_code":4,"details":{"wide":18446744073709551616,"huge":1e999,"nested":[-18446744073709551617]}}}"#.to_vec();
+        let pointer=raw.as_ptr();let capacity=raw.capacity();
+        let terminal_value=json!({"workerPid":41,"workerCreated":42,"analysisPid":43,"analysisCreated":44,
+            "childHelloAuthenticated":true,"exit":null,"exitWaitError":null,"jobMemory":null,"jobMemoryError":null,
+            "terminateRequested":true,"jobTerminateAccepted":true,"rootKillAccepted":false,"rootReaped":true,
+            "pipeWorkerJoined":true,"jobEmpty":false,"analysisRetired":false,"handleCloseErrors":["original close detail"]});
+        let terminal=serde_json::from_value(terminal_value.clone()).unwrap();
+        let retirement=ToolkitError::new("fixture.retirement","retirement failure",5).with_details(json!({"jobEmpty":false}));
+        let reply=OwnerReply::ChildError{response:RawResponse::decode(raw).unwrap(),retirement:Some(retirement),terminal:Some(terminal)};
+        let reply=finish_query_observation(Ok(Some(reply)),Err(query_observer_failure())).unwrap().unwrap();
+        let OwnerReply::ChildError{response,..}=&reply else{panic!("child error remains its owning reply")};
+        assert_eq!(response.bytes.as_ptr(),pointer);assert_eq!(response.bytes.capacity(),capacity);
+        let mut frame=Vec::new();reply.write(&mut frame).unwrap();
+        let response:Response=read_frame(&mut Cursor::new(frame),RESPONSE_BYTES).unwrap();
+        assert_eq!(serde_json::to_value(response.terminal.as_ref().unwrap()).unwrap(),terminal_value);
+        let error=response.error.unwrap();assert_eq!((error.code.as_str(),error.exit_code),("fixture.wide",4));
+        assert_eq!(error.details["primary"]["details"],serde_json::from_str::<Value>(r#"{"wide":18446744073709551616,"huge":1e999,"nested":[-18446744073709551617],"analysisRetirementError":{"code":"fixture.retirement","message":"retirement failure","exit_code":5,"details":{"jobEmpty":false}}}"#).unwrap());
+        assert_eq!(error.details["cleanup"],json!(query_observer_failure()));
+
+        let original=format!("{{\"value\":null,\"error\":{{\"code\":\"fixture.full\",\"message\":\"original\",\"exit_code\":4,\"details\":{{\"padding\":\"{}\"}}}}}}","x".repeat(RESPONSE_BYTES-1024)).into_bytes();
+        let reply=OwnerReply::ChildError{response:RawResponse::decode(original).unwrap(),retirement:None,terminal:None};
+        let observer=ToolkitError::new("fixture.observer","y".repeat(2048),5);
+        let reply=finish_query_observation(Ok(Some(reply)),Err(observer)).unwrap().unwrap();
+        let mut frame=Vec::new();
+        assert_eq!(reply.write(&mut frame).unwrap_err().code,"source.native_frame_limit");
+        assert!(frame.is_empty(),"composed over-limit errors publish no partial frame");
+    }).join().unwrap();
+}
+#[test]
+fn query_observer_join_empty_and_local_failure_keep_existing_control_flow(){
+    assert!(finish_query_observation(Ok(None),Ok(())).unwrap().is_none());
+    assert!(write_query_observation(Ok(None),Ok(Ok(())),None,|_|panic!("rejected envelope must not publish a replacement")).unwrap().is_none());
+    let observer=query_observer_failure();
+    let error=finish_query_observation(Ok(None),Err(observer.clone())).err().unwrap();
+    assert_eq!(encoded(&error),encoded(&observer));
+    let primary=ToolkitError::new("command.cancelled","original local query stop",7)
+        .with_details(json!({"request":"local"}));
+    let clean=finish_query_observation(Err(primary.clone()),Ok(())).err().unwrap();
+    assert_eq!(encoded(&clean),encoded(&primary));
+    let error=finish_query_observation(Err(primary.clone()),Err(observer.clone())).err().unwrap();
+    assert_eq!((error.code.as_str(),error.exit_code),("command.cancelled",7));
+    assert_eq!(error.details["primary"],json!(primary));
+    assert_eq!(error.details["cleanup"],json!(observer));
 }
 #[test]
 fn raw_forward_write_failure_preserves_io_error_and_bounded_drop(){

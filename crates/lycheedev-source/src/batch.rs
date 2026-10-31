@@ -23,18 +23,29 @@ const WORKER_BYTES: usize = 768 << 20;
 const RESULT_BYTES: usize = 32 << 20;
 const WORKER_SCHEMA: &str = "lycheedev.source-native-batch.v1";
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct BatchRequest {
     pub requests: Vec<BatchItem>,
 }
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct BatchItem {
     pub id: String,
+    #[serde(deserialize_with = "present_operation")]
     pub query: Option<SearchQuery>,
+    #[serde(deserialize_with = "present_operation")]
     pub refs: Option<RelationQuery>,
+    #[serde(deserialize_with = "present_operation")]
     pub context: Option<ContextQuery>,
 }
-#[derive(Clone, Default, Debug)]
+fn present_operation<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    decoder: D,
+) -> std::result::Result<Option<T>, D::Error> {
+    T::deserialize(decoder).map(Some)
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct SearchQuery {
     pub mode: String,
     pub text: String,
@@ -42,7 +53,19 @@ pub struct SearchQuery {
     pub limit: i64,
     pub cursor: String,
 }
-#[derive(Clone, Default, Debug)]
+impl Default for SearchQuery {
+    fn default() -> Self {
+        Self {
+            mode: "precise".into(),
+            text: String::new(),
+            topic: String::new(),
+            limit: 10,
+            cursor: String::new(),
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct RelationQuery {
     pub symbol_id: String,
     pub symbol: String,
@@ -50,7 +73,19 @@ pub struct RelationQuery {
     pub limit: i64,
     pub cursor: String,
 }
-#[derive(Clone, Default, Debug)]
+impl Default for RelationQuery {
+    fn default() -> Self {
+        Self {
+            symbol_id: String::new(),
+            symbol: String::new(),
+            direction: "both".into(),
+            limit: 25,
+            cursor: String::new(),
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct ContextQuery {
     pub symbol_id: String,
     pub symbol: String,
@@ -59,6 +94,19 @@ pub struct ContextQuery {
     pub max_lines: i64,
     pub depth: i64,
     pub cursor: String,
+}
+impl Default for ContextQuery {
+    fn default() -> Self {
+        Self {
+            symbol_id: String::new(),
+            symbol: String::new(),
+            limit: 25,
+            max_bytes: 16384,
+            max_lines: 80,
+            depth: 0,
+            cursor: String::new(),
+        }
+    }
 }
 fn invalid_batch(message: impl Into<String>) -> ToolkitError {
     ToolkitError::new("codebase.invalid_batch", message, 2)
@@ -120,7 +168,7 @@ impl BatchRequest {
                     if !["", "api", "lua", "xml", "toc", "asset"].contains(&topic.as_str()) {
                         return Err(invalid_query("codebase.invalid_topic"));
                     }
-                    if query.limit > 200 {
+                    if !(1..=200).contains(&query.limit) {
                         return Err(invalid_query("codebase.invalid_search_limit"));
                     }
                     if !["", "precise", "exploratory"].contains(&query.mode.as_str()) {
@@ -140,10 +188,10 @@ impl BatchRequest {
                     if !(0..=4).contains(&query.depth) {
                         return Err(invalid_query("codebase.invalid_context_depth"));
                     }
-                    if query.max_bytes < 0 || query.max_bytes > 1 << 20 {
+                    if !(1..=1 << 20).contains(&query.max_bytes) {
                         return Err(invalid_query("codebase.invalid_context_bytes"));
                     }
-                    if query.max_lines < 0 || query.max_lines > 2000 {
+                    if !(1..=2000).contains(&query.max_lines) {
                         return Err(invalid_query("codebase.invalid_context_lines"));
                     }
                     research_limit(query.limit)?;
@@ -169,7 +217,6 @@ fn selector(id: &str, symbol: &str) -> Result<()> {
 }
 fn research_limit(value: i64) -> Result<usize> {
     match value {
-        0 => Ok(25),
         1..=200 => Ok(value as usize),
         _ => Err(invalid_query("codebase.invalid_relation_limit")),
     }
@@ -193,298 +240,72 @@ fn cursor_shape(raw: &str, context: bool) -> Result<()> {
     Ok(())
 }
 
-// Go accepts repeated known fields (merging pointed-to objects), null scalar
-// fields and case-insensitive names. Preserve object order to retain those rules
-// while rejecting unknown fields at every level and trailing JSON values.
-#[derive(Debug)]
-enum Json {
-    Null,
-    Scalar(Value),
-    Array(Vec<Json>),
-    Object(Vec<(String, Json)>),
-}
-impl<'de> Deserialize<'de> for Json {
-    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> std::result::Result<Self, D::Error> {
-        struct Visitor;
-        impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = Json;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("JSON value")
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Json, E> {
-                Ok(Json::Null)
-            }
-            fn visit_bool<E: serde::de::Error>(self, v: bool) -> std::result::Result<Json, E> {
-                Ok(Json::Scalar(json!(v)))
-            }
-            fn visit_i64<E: serde::de::Error>(self, v: i64) -> std::result::Result<Json, E> {
-                Ok(Json::Scalar(json!(v)))
-            }
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> std::result::Result<Json, E> {
-                Ok(Json::Scalar(json!(v)))
-            }
-            fn visit_f64<E: serde::de::Error>(self, v: f64) -> std::result::Result<Json, E> {
-                Ok(Json::Scalar(json!(v)))
-            }
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> std::result::Result<Json, E> {
-                Ok(Json::Scalar(json!(v)))
-            }
-            fn visit_string<E: serde::de::Error>(self, v: String) -> std::result::Result<Json, E> {
-                Ok(Json::Scalar(Value::String(v)))
-            }
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                mut seq: A,
-            ) -> std::result::Result<Json, A::Error> {
-                let mut rows = Vec::new();
-                while let Some(row) = seq.next_element()? {
-                    rows.push(row);
-                }
-                Ok(Json::Array(rows))
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                mut map: A,
-            ) -> std::result::Result<Json, A::Error> {
-                let mut fields = Vec::new();
-                while let Some(field) = map.next_entry()? {
-                    fields.push(field);
-                }
-                Ok(Json::Object(fields))
-            }
-        }
-        decoder.deserialize_any(Visitor)
-    }
-}
-fn object(value: Json) -> Result<Vec<(String, Json)>> {
-    match value {
-        Json::Object(fields) => Ok(fields),
-        Json::Null => Ok(Vec::new()),
-        _ => Err(invalid_batch("expected JSON object")),
-    }
-}
-fn string(target: &mut String, value: Json) -> Result<()> {
-    match value {
-        Json::Null => Ok(()),
-        Json::Scalar(Value::String(value)) => {
-            *target = value;
-            Ok(())
-        }
-        _ => Err(invalid_batch("expected JSON string")),
-    }
-}
-fn integer(target: &mut i64, value: Json) -> Result<()> {
-    match value {
-        Json::Null => Ok(()),
-        Json::Scalar(Value::Number(value)) if value.is_i64() => {
-            *target = value.as_i64().unwrap();
-            Ok(())
-        }
-        _ => Err(invalid_batch("expected signed 64-bit JSON integer")),
-    }
-}
-fn fold_key(name: &str) -> String {
-    name.chars()
-        .map(|ch| match ch {
-            '\u{017f}' => 's',
-            '\u{212a}' => 'k',
-            _ => ch.to_ascii_lowercase(),
-        })
-        .collect()
-}
-fn unknown(name: &str) -> ToolkitError {
-    invalid_batch(format!("unknown field {name:?}"))
-}
-fn decode_query(query: &mut Option<SearchQuery>, value: Json) -> Result<()> {
-    if matches!(value, Json::Null) {
-        *query = None;
-        return Ok(());
-    }
-    let target = query.get_or_insert_with(Default::default);
-    for (key, value) in object(value)? {
-        match fold_key(&key).as_str() {
-            "mode" => string(&mut target.mode, value)?,
-            "text" => string(&mut target.text, value)?,
-            "topic" => string(&mut target.topic, value)?,
-            "limit" => integer(&mut target.limit, value)?,
-            "cursor" => string(&mut target.cursor, value)?,
-            _ => return Err(unknown(&key)),
-        }
-    }
-    Ok(())
-}
-fn decode_refs(query: &mut Option<RelationQuery>, value: Json) -> Result<()> {
-    if matches!(value, Json::Null) {
-        *query = None;
-        return Ok(());
-    }
-    let target = query.get_or_insert_with(Default::default);
-    for (key, value) in object(value)? {
-        match fold_key(&key).as_str() {
-            "symbolid" => string(&mut target.symbol_id, value)?,
-            "symbol" => string(&mut target.symbol, value)?,
-            "direction" => string(&mut target.direction, value)?,
-            "limit" => integer(&mut target.limit, value)?,
-            "cursor" => string(&mut target.cursor, value)?,
-            _ => return Err(unknown(&key)),
-        }
-    }
-    Ok(())
-}
-fn decode_context(query: &mut Option<ContextQuery>, value: Json) -> Result<()> {
-    if matches!(value, Json::Null) {
-        *query = None;
-        return Ok(());
-    }
-    let target = query.get_or_insert_with(Default::default);
-    for (key, value) in object(value)? {
-        match fold_key(&key).as_str() {
-            "symbolid" => string(&mut target.symbol_id, value)?,
-            "symbol" => string(&mut target.symbol, value)?,
-            "limit" => integer(&mut target.limit, value)?,
-            "maxbytes" => integer(&mut target.max_bytes, value)?,
-            "maxlines" => integer(&mut target.max_lines, value)?,
-            "depth" => integer(&mut target.depth, value)?,
-            "cursor" => string(&mut target.cursor, value)?,
-            _ => return Err(unknown(&key)),
-        }
-    }
-    Ok(())
-}
-// encoding/json replaces invalid UTF-8 bytes and unpaired UTF-16 escapes
-// inside strings. Normalize those representations before the strict JSON parser;
-// malformed JSON syntax and raw control characters still fail normally.
-fn wire_json_text(raw: &[u8]) -> String {
-    let mut utf8 = String::new();
-    let mut rest = raw;
-    while !rest.is_empty() {
-        match std::str::from_utf8(rest) {
-            Ok(text) => {
-                utf8.push_str(text);
-                break;
-            }
-            Err(error) => {
-                let valid = error.valid_up_to();
-                utf8.push_str(std::str::from_utf8(&rest[..valid]).expect("validated UTF-8 prefix"));
-                utf8.push('\u{fffd}');
-                rest = &rest[valid + 1..];
-            }
-        }
-    }
-    let bytes = utf8.as_bytes();
-    let mut out = String::with_capacity(utf8.len());
-    let mut i = 0;
-    let mut quoted = false;
-    let code = |at: usize| -> Option<u16> {
-        let raw = bytes.get(at..at + 6)?;
-        if raw[0] != b'\\' || raw[1] != b'u' {
-            return None;
-        }
-        std::str::from_utf8(&raw[2..])
-            .ok()
-            .and_then(|hex| u16::from_str_radix(hex, 16).ok())
-    };
-    while i < bytes.len() {
-        if bytes[i] == b'"' {
-            quoted = !quoted;
-            out.push('"');
-            i += 1;
-            continue;
-        }
-        if quoted && bytes[i] == b'\\' {
-            if let Some(unit) = code(i) {
-                if (0xd800..=0xdbff).contains(&unit) {
-                    if code(i + 6).is_some_and(|low| (0xdc00..=0xdfff).contains(&low)) {
-                        out.push_str(&utf8[i..i + 12]);
-                        i += 12;
-                        continue;
-                    }
-                    out.push_str("\\ufffd");
-                    i += 6;
-                    continue;
-                }
-                if (0xdc00..=0xdfff).contains(&unit) {
-                    out.push_str("\\ufffd");
-                    i += 6;
-                    continue;
-                }
-            }
-            out.push('\\');
-            i += 1;
-            if i == bytes.len() {
-                break;
-            }
-            let next = utf8[i..].chars().next().expect("UTF-8 boundary");
-            out.push(next);
-            i += next.len_utf8();
-            continue;
-        }
-        let next = utf8[i..].chars().next().expect("UTF-8 boundary");
-        out.push(next);
-        i += next.len_utf8();
-    }
-    out
-}
 pub fn parse(raw: &[u8]) -> Result<BatchRequest> {
     if raw.len() > FILE_BYTES {
         return Err(invalid_batch("request file exceeds 64 KiB"));
     }
-    let tree: Json = serde_json::from_str(&wire_json_text(raw))
-        .map_err(|error| invalid_batch(error.to_string()))?;
-    // Go reuses existing slice elements when a repeated requests array is
-    // decoded. Omitted fields (including pointer objects) retain those values.
-    let mut backing: Vec<BatchItem> = Vec::new();
-    let mut length = 0;
-    for (key, value) in object(tree)? {
-        if fold_key(&key) != "requests" {
-            return Err(unknown(&key));
-        }
-        let rows = match value {
-            Json::Null => {
-                backing.clear();
-                length = 0;
-                continue;
-            }
-            Json::Array(rows) => rows,
-            _ => return Err(invalid_batch("requests must be an array")),
-        };
-        length = rows.len();
-        // encoding/json replaces an explicitly empty slice with a fresh slice.
-        if length == 0 {
-            backing.clear();
-        }
-        for (i, row) in rows.into_iter().enumerate() {
-            if i == backing.len() {
-                backing.push(BatchItem::default());
-            }
-            let item = &mut backing[i];
-            for (key, value) in object(row)? {
-                match fold_key(&key).as_str() {
-                    "id" => string(&mut item.id, value)?,
-                    "query" => decode_query(&mut item.query, value)?,
-                    "refs" => decode_refs(&mut item.refs, value)?,
-                    "context" => decode_context(&mut item.context, value)?,
-                    _ => return Err(unknown(&key)),
-                }
-            }
-        }
-    }
-    backing.truncate(length);
-    let request = BatchRequest { requests: backing };
+    let request: BatchRequest =
+        serde_json::from_slice(raw).map_err(|error| invalid_batch(error.to_string()))?;
     request.validate()?;
     Ok(request)
 }
+
+/// The file contract is owned alongside its typed admission and preparation.
+pub fn schema() -> Value {
+    let selector = json!([
+        {"required":["symbol"],"properties":{"symbol":{"minLength":1},"symbolId":{"maxLength":0}}},
+        {"required":["symbolId"],"properties":{"symbolId":{"minLength":1},"symbol":{"maxLength":0}}}
+    ]);
+    let limit = |default| json!({"type":"integer","minimum":1,"maximum":200,"default":default});
+    json!({"$schema":"https://json-schema.org/draft/2020-12/schema", "title":"Source batch file",
+        "type":"object","additionalProperties":false,"required":["requests"],
+        "description":"UTF-8 JSON, at most 65536 bytes; duplicate and unknown fields are rejected. Every item is validated before source preparation. Results retain request order and one fixed source selection.",
+        "properties":{"requests":{"type":"array","minItems":1,"maxItems":MAX_ITEMS,"items":{"$ref":"#/$defs/item"}}},
+        "$defs":{
+            "item":{"type":"object","additionalProperties":false,"properties":{
+                "id":{"type":"string","default":"","description":"Optional caller label, returned with this item."},
+                "query":{"$ref":"#/$defs/query"},"refs":{"$ref":"#/$defs/refs"},"context":{"$ref":"#/$defs/context"}},
+                "oneOf":[{"required":["query"]},{"required":["refs"]},{"required":["context"]}]},
+            "query":{"type":"object","additionalProperties":false,"required":["text"],"properties":{
+                "text":{"type":"string","minLength":1,"description":"Trimmed nonempty search text, at most 512 UTF-8 bytes."},
+                "mode":{"type":"string","enum":["","precise","exploratory"],"default":"precise"},
+                "topic":{"type":"string","enum":["","api","lua","xml","toc","asset"],"default":"","description":"Trimmed and case-normalized topic."},
+                "limit":limit(10),"cursor":{"type":"string","default":"","description":"Use the cursor from the same fixed query; an empty value starts its first page."}}},
+            "refs":{"type":"object","additionalProperties":false,"oneOf":selector.clone(),"properties":{
+                "symbolId":{"type":"string","default":""},"symbol":{"type":"string","default":""},
+                "direction":{"type":"string","enum":["","incoming","outgoing","both"],"default":"both"},
+                "limit":limit(25),"cursor":{"type":"string","default":""}}},
+            "context":{"type":"object","additionalProperties":false,"oneOf":selector,"properties":{
+                "symbolId":{"type":"string","default":""},"symbol":{"type":"string","default":""},"limit":limit(25),
+                "maxBytes":{"type":"integer","minimum":1,"maximum":1<<20,"default":16384},
+                "maxLines":{"type":"integer","minimum":1,"maximum":2000,"default":80},
+                "depth":{"type":"integer","minimum":0,"maximum":4,"default":0},
+                "cursor":{"type":"string","default":""}}}
+        },
+        "examples":[{"requests":[{"id":"find","query":{"text":"CreateFrame"}},
+            {"id":"relations","refs":{"symbol":"CreateFrame","direction":"incoming"}},
+            {"id":"context","context":{"symbol":"CreateFrame","maxBytes":16384,"maxLines":80}}]}]
+    })
+}
+
 pub fn read(
     path: &Path,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<BatchRequest> {
     control.check()?;
-    let mut raw = Vec::new();
-    std::fs::File::open(path)?
-        .take(FILE_BYTES as u64 + 1)
-        .read_to_end(&mut raw)?;
-    control.check()?;
-    parse(&raw)
+    let mut file = std::fs::File::open(path)?;
+    let result = (|| {
+        if !file.metadata()?.is_file() {
+            return Err(invalid_batch("request file is not a regular file"));
+        }
+        let mut raw = Vec::new();
+        (&mut file)
+            .take(FILE_BYTES as u64 + 1)
+            .read_to_end(&mut raw)?;
+        control.check()?;
+        parse(&raw)
+    })();
+    lycheedev_core::storage::finish_file(file, result, control)
 }
 
 #[derive(Clone, Debug)]
@@ -503,9 +324,6 @@ fn prepare_calls(request: &BatchRequest, flow: bool) -> Result<Vec<Operation>> {
                 let mut query = query.clone();
                 query.text = query.text.trim().into();
                 query.topic = query.topic.trim().to_lowercase();
-                if query.limit <= 0 {
-                    query.limit = 10;
-                }
                 Operation::Query(query)
             } else if let Some(query) = &item.refs {
                 Operation::Refs(RelationRequest {
@@ -519,11 +337,7 @@ fn prepare_calls(request: &BatchRequest, flow: bool) -> Result<Vec<Operation>> {
                         "outgoing" => RelationDirection::Outgoing,
                         _ => RelationDirection::Both,
                     },
-                    limit: if query.limit == 0 {
-                        25
-                    } else {
-                        query.limit as usize
-                    },
+                    limit: query.limit as usize,
                     cursor: query.cursor.clone(),
                 })
             } else {
@@ -534,21 +348,9 @@ fn prepare_calls(request: &BatchRequest, flow: bool) -> Result<Vec<Operation>> {
                     } else {
                         SymbolSelector::Id(query.symbol_id.clone())
                     },
-                    limit: if query.limit == 0 {
-                        25
-                    } else {
-                        query.limit as usize
-                    },
-                    max_bytes: if query.max_bytes == 0 {
-                        16 << 10
-                    } else {
-                        query.max_bytes as usize
-                    },
-                    max_lines: if query.max_lines == 0 {
-                        80
-                    } else {
-                        query.max_lines as usize
-                    },
+                    limit: query.limit as usize,
+                    max_bytes: query.max_bytes as usize,
+                    max_lines: query.max_lines as usize,
                     depth: query.depth as usize,
                     cursor: query.cursor.clone(),
                     flow,

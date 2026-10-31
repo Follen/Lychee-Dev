@@ -32,10 +32,13 @@ fn pipe() -> (Pipe, Pipe) {
     (Pipe(reader), Pipe(writer))
 }
 #[test]
+#[ignore = "child fixture only; invoked by no-inherit parent regressions"]
 fn owned_noinherit_entry() {
-    if std::env::var("LYCHEEDEV_DETACHED_FIXTURE").as_deref() == Ok("owned-test") {
-        std::thread::sleep(Duration::from_secs(3));
-    }
+    assert_eq!(
+        std::env::var("LYCHEEDEV_DETACHED_FIXTURE").expect("required owned child mode"),
+        "owned-test"
+    );
+    std::thread::sleep(Duration::from_secs(3));
 }
 #[test]
 fn no_inherit_releases_parent_pipe_before_owned_child_exit_and_preserves_identity() {
@@ -44,6 +47,7 @@ fn no_inherit_releases_parent_pipe_before_owned_child_exit_and_preserves_identit
     let args = [
         OsString::from("--exact"),
         OsString::from("owned_noinherit_entry"),
+        OsString::from("--ignored"),
         OsString::from("--nocapture"),
     ];
     // Control uses the same explicitly inheritable private pipe; it never changes global STD flags.
@@ -68,7 +72,7 @@ fn no_inherit_releases_parent_pipe_before_owned_child_exit_and_preserves_identit
     drop(reader);
     let (reader, writer) = pipe();
     let parent_env = std::env::var_os("LYCHEEDEV_DETACHED_FIXTURE");
-    let mut child = spawn_hidden_no_inherit(
+    let child = spawn_hidden_no_inherit(
         &exe,
         &args,
         cwd,
@@ -93,7 +97,7 @@ fn no_inherit_releases_parent_pipe_before_owned_child_exit_and_preserves_identit
     let identity = child.identity().clone();
     assert_eq!(
         child
-            .terminate_and_wait(Instant::now() + Duration::from_secs(2))
+            .terminate_and_close(Instant::now() + Duration::from_secs(2))
             .unwrap(),
         7
     );
@@ -103,8 +107,8 @@ fn no_inherit_releases_parent_pipe_before_owned_child_exit_and_preserves_identit
             .unwrap(),
         7
     );
-    assert!(child.try_wait().unwrap().is_some());
     assert!(process.verify().is_err());
+    process.close().unwrap();
     println!(
         "actual no-inherit child pid={} created={} parent={} pipeEOFBeforeChildExit=true",
         identity.pid,
@@ -119,6 +123,7 @@ fn failed_startup_drop_reaps_exact_owned_child_and_bounds_reject_before_spawn() 
     let args = [
         OsString::from("--exact"),
         OsString::from("owned_noinherit_entry"),
+        OsString::from("--ignored"),
     ];
     let child = spawn_hidden_no_inherit(
         &exe,
@@ -135,6 +140,7 @@ fn failed_startup_drop_reaps_exact_owned_child_and_bounds_reject_before_spawn() 
             .wait_exit_with_control(Instant::now() + Duration::from_secs(1), || Ok(()))
             .is_ok()
     );
+    process.close().unwrap();
     let own = Process::open(std::process::id()).unwrap();
     assert!(
         own.wait_exit_with_control(Instant::now() + Duration::from_millis(5), || Ok(()))
@@ -148,6 +154,7 @@ fn failed_startup_drop_reaps_exact_owned_child_and_bounds_reject_before_spawn() 
         .unwrap_err()
         .starts_with("command.cancelled")
     );
+    own.close().unwrap();
     assert!(
         spawn_hidden_no_inherit(std::path::Path::new("relative.exe"), &args, cwd, &[]).is_err()
     );

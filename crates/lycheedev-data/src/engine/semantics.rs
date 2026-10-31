@@ -1,10 +1,13 @@
 //! Pinned semantic enum/flag metadata, not inferred from column names.
-use super::{api::TableRequest, lifetime::RequestLifetime};
+use super::{
+    api::{SourceMode, TableRequest},
+    lifetime::RequestLifetime,
+};
+use crate::request::DataContext;
 use crate::{
     definitions,
     resource::{Budget, OwnedRetainedReservation},
 };
-use crate::request::DataContext;
 use lycheedev_core::{Result, selection::PinnedSet};
 use std::sync::Arc;
 #[derive(serde::Serialize)]
@@ -38,6 +41,13 @@ pub(super) fn read(
 ) -> Result<(OwnedSemantics, PinnedSet)> {
     let budget: &Arc<Budget> = &lifetime.budget;
     budget.check()?;
+    if table.mode != SourceMode::Static || !table.hotfix_captures.is_empty() {
+        return Err(crate::fault(
+            "data.semantics.source_mode",
+            2,
+            "Semantic metadata requires a static table without Hotfix captures",
+        ));
+    }
     let allocation = budget.reserve_retained(maximum)?.into_owned(budget)?;
     let (scope, pin) =
         crate::remote::provider::OpenedScope::open(inv, budget)?.admit_pinned(crate::fault(

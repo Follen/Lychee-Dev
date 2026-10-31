@@ -95,22 +95,6 @@ fn finish_parse(
         control: Default::default(),
     })
 }
-// Project selection and installation discovery contribute independent context.
-// Preserve the more specific handler diagnostic when adding project defaults.
-fn merge_error_context(error: &mut ToolkitError, defaults: Value) {
-    if !error.details.is_object() {
-        error.details = json!({});
-    }
-    if !error.details["__commandContext"].is_object() {
-        error.details["__commandContext"] = json!({});
-    }
-    let context = error.details["__commandContext"].as_object_mut().unwrap();
-    if let Some(defaults) = defaults.as_object() {
-        for (key, value) in defaults {
-            context.entry(key.clone()).or_insert_with(|| value.clone());
-        }
-    }
-}
 /// Describe rows keep the authoritative contract fields and add the current
 /// per-command effects so an agent can plan without a second table.
 fn describe_commands() -> Vec<Value> {
@@ -1365,22 +1349,19 @@ mod tests {
     }
 
     #[test]
-    fn installation_error_context_survives_project_context_merge() {
+    fn installation_and_project_context_survive_public_error_rendering() {
         let selection = json!({"directory":"fixture", "candidates":[], "issues":[]});
-        let mut error = ToolkitError::new("selection.installation_missing", "missing", 3)
-            .with_details(json!({"__commandContext":{"installationSelection":selection,"requestedProduct":"titan"}}));
-        merge_error_context(
-            &mut error,
-            json!({"project":"fixture-project", "snapshot":"PIN"}),
-        );
+        let context = json!({"installationSelection":selection,"requestedProduct":"titan","project":"fixture-project","snapshot":"PIN"});
+        let error = ToolkitError::new("selection.installation_missing", "missing", 3)
+            .with_details(json!({"__commandContext":context}));
+        let mut bytes = Vec::new();
+        render(&mut bytes, "json", &Err(error)).unwrap();
+        let public: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
-            error.details["__commandContext"],
+            public["context"],
             json!({"installationSelection":selection,"requestedProduct":"titan","project":"fixture-project","snapshot":"PIN"})
         );
-        let envelope = envelope(&Err(error));
-        assert_eq!(envelope["context"]["installationSelection"], selection);
-        assert_eq!(envelope["context"]["requestedProduct"], "titan");
-        assert!(envelope["error"].get("details").is_none());
+        assert!(public["error"].get("details").is_none());
     }
     use super::*;
     struct InvocationConsoleFixture {

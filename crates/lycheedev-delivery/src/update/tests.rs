@@ -82,8 +82,19 @@ fn remembered_removed_skill_is_not_reinstalled_but_explicit_target_is() {
     let f = Fixture::new();
     let targets = f.targets();
     managed(&f.old, VERSION, &f.state, &targets, false).unwrap();
-    let ctx = RequestContext { home: f.root.join("home"), cwd: f.root.clone(), control: OperationControl::default() };
-    crate::dispatch(&ctx, &crate::Request::SkillRemove { path: f.target.clone(), archive: f.root.join("removed") }).unwrap();
+    let ctx = RequestContext {
+        home: f.root.join("home"),
+        cwd: f.root.clone(),
+        control: OperationControl::default(),
+    };
+    crate::dispatch(
+        &ctx,
+        &crate::Request::SkillRemove {
+            path: f.target.clone(),
+            archive: f.root.join("removed"),
+        },
+    )
+    .unwrap();
     assert!(!f.target.exists());
     let control = OperationControl::default();
     let remembered = read_targets(&f.state, &control).unwrap();
@@ -430,4 +441,98 @@ fn checked_update_state_close_failure_preserves_cancellation_and_prior_commits()
     assert_eq!(fs::read(f.target.join("SKILL.md")).unwrap(), b"next");
     assert_eq!(fs::read(second.join("SKILL.md")).unwrap(), b"old");
     managed(&f.next, VERSION, &f.state, &targets, false).unwrap();
+}
+
+fn seed_configured_targets(home: &Path, rows: &[(String, Vec<u8>)]) {
+    use lycheedev_core::metadata::{Metadata, OwnedMutation};
+    let control = OperationControl::default();
+    lycheedev_core::workspace::initialize_controlled(home, &control).unwrap();
+    Metadata::with_owned_write(home, &control, |writer| {
+        for chunk in rows.chunks(64) {
+            let changes: Vec<_> = chunk
+                .iter()
+                .map(|(key, bytes)| OwnedMutation {
+                    key,
+                    expected_generation: 0,
+                    bytes,
+                })
+                .collect();
+            writer.commit(&changes)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+#[test]
+fn configured_addon_discovery_stopped_control_never_reads_workspace_targets() {
+    let f = Fixture::new();
+    let home = f.root.join("configured-home");
+    let client = f.root.join("configured-client");
+    seed_configured_targets(
+        &home,
+        &[(
+            "target/actual".into(),
+            serde_json::to_vec(&json!({"source":"installation","installation":client})).unwrap(),
+        )],
+    );
+    assert!(home.join("state/toolkit.sqlite").is_file());
+    let cancelled = OperationControl::default();
+    cancelled.tracked_cancel_handle().unwrap().cancel();
+    let expired = OperationControl::uncancelable(std::time::Instant::now());
+    for (control, expected) in [
+        (cancelled, "command.cancelled"),
+        (expired, "command.deadline"),
+    ] {
+        let error = configured_addon_targets(&home, &control).unwrap_err();
+        assert_eq!(
+            error.code, expected,
+            "the production discovery owner consumes the original stop before reading configured addon targets"
+        );
+    }
+}
+#[test]
+fn configured_addon_discovery_keeps_prefix_source_key_order_and_original_row_limit() {
+    let f = Fixture::new();
+    let home = f.root.join("configured-home");
+    let first = f.root.join("z-first-by-key");
+    let second = f.root.join("a-second-by-key");
+    let mut rows = Vec::new();
+    rows.push((
+        "other/unrelated".into(),
+        serde_json::to_vec(&json!({"source":"installation","installation":"unrelated"})).unwrap(),
+    ));
+    for index in 0..10002 {
+        let value = match index {
+            0 => json!({"source":"repository","installation":"filtered-source"}),
+            1 => json!({"source":"installation","installation":17}),
+            2 => json!({"source":"installation","installation":first}),
+            3 => json!({"source":"installation","installation":second}),
+            _ => {
+                json!({"source":"installation","installation":f.root.join(format!("client-{index:05}"))})
+            }
+        };
+        rows.push((
+            format!("target/{index:05}"),
+            serde_json::to_vec(&value).unwrap(),
+        ));
+    }
+    seed_configured_targets(&home, &rows);
+    let actual = configured_addon_targets(&home, &OperationControl::default()).unwrap();
+    assert_eq!(
+        actual.len(),
+        9999,
+        "the 10001-row source limit applies before source/installation filtering"
+    );
+    assert!(actual.iter().all(|target| target.component == "addon"));
+    assert_eq!(actual[0].path, first);
+    assert_eq!(
+        actual[1].path, second,
+        "metadata key order is preserved rather than path sorting"
+    );
+    assert_eq!(actual.last().unwrap().path, f.root.join("client-10000"));
+    assert!(
+        !actual
+            .iter()
+            .any(|target| target.path == f.root.join("client-10001"))
+    );
 }
