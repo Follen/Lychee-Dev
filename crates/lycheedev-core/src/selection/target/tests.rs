@@ -80,6 +80,27 @@ fn config(name: &str) -> TargetConfig {
     }
 }
 #[test]
+fn current_forever_target_accepts_formal_and_rejects_retired_products() {
+    let mut target = config("formal");
+    target.product = "forever".into();
+    for region in ["cn", "us", "eu", "kr", "tw"] {
+        target.region = region.into();
+        target.validate().unwrap();
+    }
+    for product in [
+        "forever-asia-beta",
+        "forever-cn-beta",
+        "wow_forever",
+        "wowf",
+    ] {
+        target.product = product.into();
+        assert_eq!(
+            target.validate().unwrap_err().code,
+            "selection.unsupported_data_product"
+        );
+    }
+}
+#[test]
 fn named_lookup_reads_all_pages_but_never_reference_history() {
     let f = Fixture::new();
     f.seed((0..1002).map(|i| {

@@ -2023,8 +2023,8 @@ mod tests {
         );
         assert_eq!(
             outcome.data["products"].as_array().unwrap().len(),
-            8,
-            "seven current deliveries plus the ambiguous legacy family"
+            6,
+            "six current products, including only formal Forever"
         );
         assert_eq!(outcome.data["result"]["schema"], "lycheedev.result.v1");
     }

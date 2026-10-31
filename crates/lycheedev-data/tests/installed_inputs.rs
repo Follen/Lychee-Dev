@@ -166,11 +166,18 @@ fn budgeted_parsers_preserve_authentication_and_field_limit_error_order() {
 fn strict_catalog_and_content_addressed_configuration() {
     let header = "Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\n";
     let row = format!("wow|12.1.0.69933|{}|{}|1\n", "a".repeat(32), "b".repeat(32));
-    let rows = installed::installed_rows_budgeted(format!("{header}{row}").as_bytes(), None).unwrap();
+    let rows =
+        installed::installed_rows_budgeted(format!("{header}{row}").as_bytes(), None).unwrap();
     assert_eq!(rows[0].product, "wow");
     assert!(rows[0].active);
-    assert!(installed::installed_rows_budgeted(format!("{header}{row}x|1|2\n").as_bytes(), None).is_err());
-    assert!(installed::installed_rows_budgeted(header.replace("Product!", "Version!").as_bytes(), None).is_err());
+    assert!(
+        installed::installed_rows_budgeted(format!("{header}{row}x|1|2\n").as_bytes(), None)
+            .is_err()
+    );
+    assert!(
+        installed::installed_rows_budgeted(header.replace("Product!", "Version!").as_bytes(), None)
+            .is_err()
+    );
     let raw =
         b"# config\nroot = 01234567890123456789012345678901\nencoding-size = 20 30\n".to_vec();
     let doc = installed::parse_configuration_budgeted(raw.clone(), &md5(&raw), None).unwrap();
@@ -205,7 +212,7 @@ fn strict_catalog_and_content_addressed_configuration() {
     );
 }
 #[test]
-fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
+fn formal_forever_target_preserves_wowf_identity_and_rejects_retired_slots() {
     let root = std::env::temp_dir().join(format!(
         "lychee-slot-{}-{}",
         std::process::id(),
@@ -218,7 +225,7 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     std::fs::create_dir_all(&client).unwrap();
     std::fs::write(
         client.join(".flavor.info"),
-        b"Product Flavor!STRING:0\nwow_cn_beta\n",
+        b"Product Flavor!STRING:0\nwowf\n",
     )
     .unwrap();
     let config=b"root = 01234567890123456789012345678901\nencoding = 01234567890123456789012345678901 abcdef01234567890123456789012345\nencoding-size = 20 30\n";
@@ -230,33 +237,33 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     let row = |product: &str, build: &str| {
         format!(
             "{product}|{build}|{key}|{key}|1|{}\n",
-            if product == "wow_cn_beta" { "cn" } else { "us" }
+            if product == "wowf" { "cn" } else { "us" }
         )
     };
     std::fs::write(
         root.join(".build.info"),
         format!(
             "{header}{}{}",
-            row("wow_cn_beta", "1.60.1.70338"),
-            row("wow_classic_beta", "1.60.1.70338")
+            row("wowf", "1.60.1.70658"),
+            row("wow_classic_beta", "1.60.1.70658")
         ),
     )
     .unwrap();
     let request = installed::LocalTargetRequest {
         installation: client.clone(),
-        product: Some("forever-cn-beta".into()),
+        product: Some("forever".into()),
         full_build: None,
         region: "cn".into(),
         language: "zhCN".into(),
         definition_commit: "a".repeat(40),
     };
     let resolved = installed::resolve_target(&request).unwrap();
-    assert_eq!(resolved.data.product, "forever-cn-beta");
-    assert_eq!(resolved.data.full_build, "1.60.1.70338");
-    assert_eq!(resolved.metadata.installed.product, "wow_cn_beta");
+    assert_eq!(resolved.data.product, "forever");
+    assert_eq!(resolved.data.full_build, "1.60.1.70658");
+    assert_eq!(resolved.metadata.installed.product, "wowf");
     assert_eq!(resolved.metadata.installed.metadata_branch, "cn");
-    assert_eq!(resolved.metadata.installed.channel, "cn-beta");
-    assert_eq!(resolved.metadata.installed.display_name, "Forever CN Beta");
+    assert!(resolved.metadata.installed.channel.is_empty());
+    assert!(resolved.metadata.installed.display_name.is_empty());
     let budget = parser_budget(Cost::defaults());
     let metered = installed::resolve_target_budgeted(&request, Some(&budget)).unwrap();
     assert_eq!(
@@ -321,73 +328,41 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
         .exit_code,
         7
     );
-    let legacy_cn = installed::LocalTargetRequest {
-        product: Some("forever".into()),
-        ..request.clone()
-    };
-    // Go 3.2's legacy family selector is valid for an exact regional client;
-    // the returned Data product remains the observed CN delivery track.
-    assert_eq!(
-        installed::resolve_target(&legacy_cn).unwrap().data,
-        resolved.data
-    );
-    let asia_client = root.join("another-renamed-client");
-    std::fs::create_dir_all(&asia_client).unwrap();
-    std::fs::write(
-        asia_client.join(".flavor.info"),
-        b"Product Flavor!STRING:0\nwow_classic_beta\n",
-    )
-    .unwrap();
-    let asia_request = installed::LocalTargetRequest {
-        installation: asia_client,
-        product: Some("forever-asia-beta".into()),
-        region: "tw".into(),
-        ..request.clone()
-    };
-    let asia = installed::resolve_target(&asia_request).unwrap();
-    assert_eq!(asia.data.product, "forever-asia-beta");
-    assert_eq!(asia.data.full_build, resolved.data.full_build);
-    assert_ne!(asia.data, resolved.data);
-    assert_eq!(asia.metadata.installed.product, "wow_classic_beta");
-    assert_eq!(asia.metadata.installed.metadata_branch, "us");
-    assert_eq!(
-        asia.data.region, "tw",
-        "publishing branch does not overwrite the caller's region"
-    );
-    let common_cn = installed::resolve_target(&installed::LocalTargetRequest {
-        installation: root.clone(),
-        product: Some("forever-cn-beta".into()),
-        ..request.clone()
-    })
-    .unwrap();
-    assert_eq!(common_cn.data, resolved.data);
-    let common_metered = installed::resolve_target_budgeted(
-        &installed::LocalTargetRequest {
-            installation: root.clone(),
-            product: Some("forever-cn-beta".into()),
-            ..request.clone()
-        },
-        Some(&parser_budget(Cost::defaults())),
-    )
-    .unwrap();
-    assert_eq!(
-        serde_json::to_value(common_metered).unwrap(),
-        serde_json::to_value(&common_cn).unwrap()
-    );
-    let common_asia = installed::resolve_target(&installed::LocalTargetRequest {
-        installation: root.clone(),
-        product: Some("forever-asia-beta".into()),
+    assert!(!client.join("version.txt").exists());
+    let regional = installed::resolve_target(&installed::LocalTargetRequest {
         region: "tw".into(),
         ..request.clone()
     })
     .unwrap();
-    assert_eq!(common_asia.data, asia.data);
+    assert_eq!(regional.data.product, "forever");
+    assert_eq!(
+        regional.data.region, "tw",
+        "publishing branch never replaces the requested region"
+    );
+    assert_eq!(regional.metadata.installed.metadata_branch, "cn");
+    let common = installed::resolve_target(&installed::LocalTargetRequest {
+        installation: root.clone(),
+        ..request.clone()
+    })
+    .unwrap();
+    assert_eq!(common.data, resolved.data);
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        assert_eq!(
+            installed::resolve_target(&installed::LocalTargetRequest {
+                product: Some(product.into()),
+                ..request.clone()
+            })
+            .unwrap_err()
+            .code,
+            "selection.unsupported_data_product"
+        );
+    }
     std::fs::write(
         root.join(".build.info"),
         format!(
             "{header}{}{}",
-            row("wow_cn_beta", "1.60.1.70338"),
-            row("wow_cn_beta", "1.60.1.70338")
+            row("wowf", "1.60.1.70658"),
+            row("wowf", "1.60.1.70658")
         ),
     )
     .unwrap();
@@ -397,46 +372,34 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     );
     assert_eq!(
         installed::resolve_target(&installed::LocalTargetRequest {
-            full_build: Some("1.60.1.70338".into()),
+            full_build: Some("1.60.1.70658".into()),
             ..request.clone()
         })
         .unwrap_err()
         .code,
         "records.build_ambiguous"
     );
+    for rows in [
+        row("wow_classic_beta", "1.60.1.70658"),
+        row("wow_cn_beta", "1.60.1.70658"),
+        row("wowf", "5.5.4.69934"),
+    ] {
+        std::fs::write(root.join(".build.info"), format!("{header}{rows}")).unwrap();
+        assert_eq!(
+            installed::resolve_target(&request).unwrap_err().code,
+            "selection.installation_metadata_conflict"
+        );
+    }
     std::fs::write(
         root.join(".build.info"),
-        format!("{header}{}", row("wow_classic_beta", "1.60.1.70338")),
+        format!("{header}{}", row("wowf", "1.60.1.70658")),
     )
     .unwrap();
-    assert_eq!(
-        installed::resolve_target(&request).unwrap_err().code,
-        "selection.installation_metadata_conflict"
-    );
-    std::fs::write(
-        root.join(".build.info"),
-        format!("{header}{}", row("wow_cn_beta", "5.5.4.69934")),
-    )
-    .unwrap();
-    assert_eq!(
-        installed::resolve_target(&request).unwrap_err().code,
-        "selection.installation_metadata_conflict"
-    );
-    std::fs::write(
-        root.join(".build.info"),
-        format!("{header}{}", row("wow_cn_beta", "1.60.1.70338")),
-    )
-    .unwrap();
-    std::fs::write(client.join("version.txt"), "1.60.1.70124").unwrap();
-    // Fixed Go inspectExactClient returns the successfully resolved canonical
-    // wow_forever identity with this later catalog conflict. The explicit
-    // regional selector associates only wow_cn_beta issues, so it reports no
-    // installation; the unfiltered selector and pinned reader still reject
-    // the conflicting client rather than borrowing the sibling's archives.
-    let regional_error = installed::resolve_target(&request).unwrap_err();
-    assert_eq!(regional_error.code, "selection.installation_missing");
-    let issue = &regional_error.details["__commandContext"]["installationSelection"]["issues"][0];
-    assert_eq!(issue["productCode"], "wow_forever");
+    std::fs::write(client.join("version.txt"), "1.60.1.70707").unwrap();
+    let conflict = installed::resolve_target(&request).unwrap_err();
+    assert_eq!(conflict.code, "selection.installation_metadata_conflict");
+    let issue = &conflict.details["__commandContext"]["installationSelection"]["issues"][0];
+    assert_eq!(issue["productCode"], "wowf");
     assert_eq!(issue["reason"], "selection.installation_metadata_conflict");
     assert_eq!(
         installed::resolve_target(&installed::LocalTargetRequest {
@@ -561,12 +524,12 @@ fn target_root_and_client_share_metadata_selection() {
             "titan",
         ),
         (
-            "renamed-beta",
-            Some("wow_cn_beta"),
+            "renamed-formal",
+            Some("wowf"),
             None,
-            "wow_cn_beta",
-            "1.60.1.70338",
-            "forever-cn-beta",
+            "wowf",
+            "1.60.1.70658",
+            "forever",
         ),
     ] {
         let fixture = InstallationFixture::new();
@@ -595,7 +558,8 @@ fn pin_reader_casc_root_precedes_client_markers_but_target_needs_client() {
             .code,
         "selection.installation_missing"
     );
-    let metadata = installed::resolve_local_budgeted(&fixture.root, "wow", "12.1.0.69933", None).unwrap();
+    let metadata =
+        installed::resolve_local_budgeted(&fixture.root, "wow", "12.1.0.69933", None).unwrap();
     let pin = lycheedev_core::selection::DataPin {
         product: "retail".into(),
         region: "cn".into(),
@@ -628,72 +592,91 @@ fn pin_reader_casc_root_precedes_client_markers_but_target_needs_client() {
 }
 
 #[test]
-fn pin_reader_preserves_canonical_family_and_exact_regional_slot() {
+fn formal_pin_reader_never_borrows_retired_slots_or_relabels_legacy_configs() {
     let fixture = InstallationFixture::new();
-    let build = "1.60.1.70338";
-    let cn = fixture.client("_cn_beta_", Some("wow_cn_beta"), Some(build));
-    let asia = fixture.client("_classic_beta_", Some("wow_classic_beta"), Some(build));
+    let build = "1.60.1.70658";
+    let formal = fixture.client("_forever_", Some("wowf"), None);
+    let sibling = fixture.client("_retail_", Some("wow"), Some("12.1.0.69933"));
     fixture.catalog(&[
+        ("wowf", build, true),
+        ("wow", "12.1.0.69933", true),
         ("wow_cn_beta", build, true),
-        ("wow_classic_beta", build, true),
     ]);
-    for (path, sibling, slot, product) in [
-        (&cn, &asia, "wow_cn_beta", "forever-cn-beta"),
-        (&asia, &cn, "wow_classic_beta", "forever-asia-beta"),
-    ] {
-        let target = installed::resolve_target(&fixture.request(path, Some(product))).unwrap();
-        assert_eq!(
-            installed::data_installation_root_budgeted(path, "wow_forever", build, None).unwrap(),
-            (fixture.root.clone(), slot.to_owned())
-        );
-        assert_eq!(
-            installed::resolve_local_budgeted(path, slot, build, None)
-                .unwrap()
-                .installed
-                .product,
-            slot
-        );
-        assert_eq!(
-            installed::resolve_pinned_target_budgeted(path, &target.data, None)
-                .unwrap()
-                .data,
-            target.data
-        );
-        assert_eq!(
-            installed::resolve_pinned_target_budgeted(sibling, &target.data, None)
-                .unwrap_err()
-                .code,
-            "records.pinned_build_changed"
-        );
-        assert_eq!(
-            installed::data_installation_root_budgeted(path, slot, "1.60.1.70000", None)
-                .unwrap_err()
-                .code,
-            "records.pinned_build_changed"
-        );
-    }
+    let target = installed::resolve_target(&fixture.request(&formal, Some("forever"))).unwrap();
+    assert_eq!(target.metadata.installed.product, "wowf");
+    assert_eq!(
+        installed::data_installation_root_budgeted(&formal, "wowf", build, None).unwrap(),
+        (fixture.root.clone(), "wowf".into())
+    );
+    assert_eq!(
+        installed::resolve_pinned_target_budgeted(&formal, &target.data, None)
+            .unwrap()
+            .data,
+        target.data
+    );
+    assert_eq!(
+        installed::resolve_pinned_target_budgeted(&sibling, &target.data, None)
+            .unwrap_err()
+            .code,
+        "records.pinned_build_changed"
+    );
+    assert_eq!(
+        installed::data_installation_root_budgeted(&formal, "wow_forever", build, None)
+            .unwrap_err()
+            .code,
+        "records.pinned_build_changed"
+    );
+    assert_eq!(
+        installed::data_installation_root_budgeted(&formal, "wowf", "1.60.1.70707", None)
+            .unwrap_err()
+            .code,
+        "records.pinned_build_changed"
+    );
     assert_eq!(
         installed::resolve_target(&fixture.request(&fixture.root, Some("forever")))
-            .unwrap_err()
-            .code,
-        "selection.installation_ambiguous"
+            .unwrap()
+            .data,
+        target.data
     );
     assert_eq!(
         installed::resolve_local_budgeted(&fixture.root, "wow_forever", build, None)
             .unwrap_err()
             .code,
-        "records.build_ambiguous"
+        "records.build_unavailable"
     );
+    let retired =
+        installed::resolve_local_budgeted(&fixture.root, "wow_cn_beta", build, None).unwrap();
+    let legacy = lycheedev_core::selection::DataPin {
+        build_config: retired.installed.build_config,
+        cdn_config: retired.installed.cdn_config,
+        ..target.data.clone()
+    };
+    let original = legacy.clone();
+    assert_eq!(
+        installed::resolve_pinned_target_budgeted(&fixture.root, &legacy, None)
+            .unwrap_err()
+            .code,
+        "records.pinned_build_changed"
+    );
+    assert_eq!(
+        legacy, original,
+        "legacy family-wide pins keep their original config identity"
+    );
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        let pin = lycheedev_core::selection::DataPin {
+            product: product.into(),
+            ..legacy.clone()
+        };
+        assert_eq!(
+            installed::resolve_pinned_target_budgeted(&fixture.root, &pin, None)
+                .unwrap_err()
+                .code,
+            "selection.unsupported_data_product"
+        );
+    }
     fixture.catalog(&[("wow_cn_beta", build, true)]);
     assert_eq!(
-        installed::resolve_local_budgeted(&fixture.root, "wow_forever", build, None)
-            .unwrap()
-            .installed
-            .product,
-        "wow_cn_beta"
-    );
-    assert_eq!(
-        installed::resolve_local_budgeted(&fixture.root, "wow_classic_beta", build, None)
+        installed::resolve_local_budgeted(&fixture.root, "wowf", build, None)
             .unwrap_err()
             .code,
         "records.build_unavailable"
@@ -837,9 +820,14 @@ fn installation_selection_and_pinned_reads_share_cancellation_and_budget() {
 fn data_root_missing_and_catalog_errors_keep_wire_sentinels() {
     let fixture = InstallationFixture::new();
     assert_eq!(
-        installed::data_installation_root_budgeted(&fixture.root.join("absent"), "wow", "12.1.0.69933", None)
-            .unwrap_err()
-            .code,
+        installed::data_installation_root_budgeted(
+            &fixture.root.join("absent"),
+            "wow",
+            "12.1.0.69933",
+            None
+        )
+        .unwrap_err()
+        .code,
         "selection.installation_missing"
     );
     let header = "Product|Version|Build Key|CDN Key|Active\n";
@@ -859,15 +847,25 @@ fn data_root_missing_and_catalog_errors_keep_wire_sentinels() {
         format!("wow|12.1.0.69933|bad|{}|0\n", "b".repeat(32)),
     ] {
         std::fs::write(fixture.root.join(".build.info"), format!("{header}{row}")).unwrap();
-        let error = installed::resolve_local_budgeted(&fixture.root, "wow", "12.1.0.69933", None).unwrap_err();
+        let error = installed::resolve_local_budgeted(&fixture.root, "wow", "12.1.0.69933", None)
+            .unwrap_err();
         assert_eq!(error.code, "records.invalid_metadata");
         assert_eq!(error.exit_code, 4);
-        assert_eq!(error.details["sourcePath"], serde_json::json!(fixture.root.join(".build.info")));
-        assert!(error.details["formatHint"].as_str().unwrap().contains("Pipe-delimited"));
+        assert_eq!(
+            error.details["sourcePath"],
+            serde_json::json!(fixture.root.join(".build.info"))
+        );
+        assert!(
+            error.details["formatHint"]
+                .as_str()
+                .unwrap()
+                .contains("Pipe-delimited")
+        );
     }
     fixture.catalog(&[("wow_classic_beta", "5.5.4.69934", true)]);
     let metadata =
-        installed::resolve_local_budgeted(&fixture.root, "wow_classic_beta", "5.5.4.69934", None).unwrap();
+        installed::resolve_local_budgeted(&fixture.root, "wow_classic_beta", "5.5.4.69934", None)
+            .unwrap();
     let pin = lycheedev_core::selection::DataPin {
         product: "forever-asia-beta".into(),
         full_build: "5.5.4.69934".into(),
@@ -881,7 +879,7 @@ fn data_root_missing_and_catalog_errors_keep_wire_sentinels() {
         installed::resolve_pinned_target_budgeted(&fixture.root, &pin, None)
             .unwrap_err()
             .code,
-        "selection.data_product_build_mismatch"
+        "selection.unsupported_data_product"
     );
 }
 

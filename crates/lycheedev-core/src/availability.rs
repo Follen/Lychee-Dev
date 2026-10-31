@@ -186,7 +186,7 @@ pub fn list(
         match parsed {
             Err(error) => entry["error"] = json!(error.message),
             Ok((mut rows, mut rejected)) => {
-                if profile.reused_slot {
+                if profile.id == "forever" {
                     rows.retain(|row|{if row.full_build.starts_with(&format!("{series}.")){true}else{rejected+=1;entry["error"]=json!(format!("selection.data_product_build_mismatch: {product} slot {slot} serves {}; verified series is {series}",row.full_build));false}});
                 }
                 entry["totalRows"] = json!(rows.len());
@@ -226,9 +226,12 @@ mod tests {
             Ok(manifest().into_bytes())
         };
         let result = list("cn", false, 1, &control, &mut fetch).unwrap();
-        assert_eq!(calls.len(), 7);
-        assert_eq!(calls[4].1, "wow_classic_beta");
-        assert_eq!(calls[5].1, "wow_cn_beta");
+        assert_eq!(calls.len(), 6);
+        assert_eq!(calls[4].1, "wowf");
+        assert!(calls.iter().all(|(_, slot)| !matches!(
+            slot.as_str(),
+            "wow_forever" | "wow_classic_beta" | "wow_cn_beta"
+        )));
         assert_eq!(result["products"][0]["totalRows"], 2);
         assert_eq!(result["products"][0]["truncated"], true);
         assert_eq!(
@@ -248,46 +251,33 @@ mod tests {
         );
     }
     #[test]
-    fn equal_build_products_are_observed_independently_at_their_catalog_slots() {
-        let mut slots = Vec::new();
-        let result = list("cn", false, 20, &OperationControl::default(), &mut |region, slot, _| {
-            slots.push(slot.to_owned());
-            Ok(format!("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\n{region}|{}|{}|70338|1.60.1.70338\n", "a".repeat(32), "b".repeat(32)).into_bytes())
-        }).unwrap();
-        assert_eq!(
-            slots
-                .iter()
-                .filter(|s| s.as_str() == "wow_classic_beta")
-                .count(),
-            1
-        );
-        assert_eq!(
-            slots.iter().filter(|s| s.as_str() == "wow_cn_beta").count(),
-            1
-        );
-        let asia = &result["products"][4];
-        let cn = &result["products"][5];
-        assert_eq!(asia["product"], "forever-asia-beta");
-        assert_eq!(cn["product"], "forever-cn-beta");
-        assert_eq!(asia["productCode"], "wow_classic_beta");
-        assert_eq!(cn["productCode"], "wow_cn_beta");
-        assert_eq!(asia["rows"][0]["fullBuild"], cn["rows"][0]["fullBuild"]);
-        assert!(
-            cn["locator"]
-                .as_str()
-                .unwrap()
-                .contains("/wow_cn_beta/versions")
-        );
+    fn formal_forever_manifest_uses_wowf_for_every_region() {
+        for region in ["cn", "us", "eu", "kr", "tw"] {
+            let mut slots = Vec::new();
+            let result = list(region, false, 20, &OperationControl::default(), &mut |region, slot, _| {
+                slots.push(slot.to_owned());
+                Ok(format!("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\n{region}|7feb61f3c994bcb168526b8db521514a|c74a0a5afa69d7b60e07f7dae9fc7969|70707|1.60.1.70707\n").into_bytes())
+            }).unwrap();
+            assert_eq!(slots.iter().filter(|slot| *slot == "wowf").count(), 1);
+            assert!(!slots.iter().any(|slot| matches!(
+                slot.as_str(),
+                "wow_forever" | "wow_classic_beta" | "wow_cn_beta"
+            )));
+            let formal = &result["products"][4];
+            assert_eq!(formal["product"], "forever");
+            assert_eq!(formal["productCode"], "wowf");
+            assert_eq!(formal["rows"][0]["fullBuild"], "1.60.1.70707");
+            assert_eq!(formal["locator"], locator(region, "wowf"));
+        }
     }
     #[test]
-    fn seven_products_have_the_fixed_reference_order_slots_and_schema() {
+    fn six_current_products_have_exact_order_slots_and_schema() {
         let expected = [
             ("retail", "wow"),
             ("classic", "wow_classic"),
             ("classic-era", "wow_classic_era"),
             ("titan", "wow_classic_titan"),
-            ("forever-asia-beta", "wow_classic_beta"),
-            ("forever-cn-beta", "wow_cn_beta"),
+            ("forever", "wowf"),
             ("anniversary", "wow_anniversary"),
         ];
         let result = list("us", false, 1, &OperationControl::default(), &mut |region, _, _| {

@@ -220,11 +220,11 @@ fn validate_data(data: &selection::DataPin) -> Result<()> {
             "Unknown data product",
         )
     })?;
-    if profile.reused_slot && !data.full_build.starts_with(&format!("{}.", profile.series)) {
+    if profile.id == "forever" && !data.full_build.starts_with(&format!("{}.", profile.series)) {
         return Err(fault(
             "selection.data_product_build_mismatch",
             4,
-            "Unverified reused data slot build",
+            "Pinned build is outside the supported Forever series",
         ));
     }
     if ![
@@ -474,7 +474,11 @@ pub(crate) fn dispatch(ctx: &DataContext, request: &LocalRequest) -> Result<Outc
     ctx.control.check()?;
     let snapshot = &request.snapshot;
     let maximum = request.max_bytes;
-    let budget = Budget::controlled(hotfix_limits(maximum), ctx.control.deadline(), ctx.control.clone());
+    let budget = Budget::controlled(
+        hotfix_limits(maximum),
+        ctx.control.deadline(),
+        ctx.control.clone(),
+    );
     budget.check()?;
     let mut filter = request.filter.clone();
     let mut pin =
@@ -530,10 +534,19 @@ pub(crate) fn dispatch(ctx: &DataContext, request: &LocalRequest) -> Result<Outc
     } else {
         (
             None,
-            read_file(match &request.input { LocalInput::File(path) => path, LocalInput::Capture(_) => unreachable!("archived input handled above") }, maximum, &budget)?,
+            read_file(
+                match &request.input {
+                    LocalInput::File(path) => path,
+                    LocalInput::Capture(_) => unreachable!("archived input handled above"),
+                },
+                maximum,
+                &budget,
+            )?,
         )
     };
-    let named = request.table.as_deref()
+    let named = request
+        .table
+        .as_deref()
         .map(|name| named_definition(ctx, &data, name, &budget, request.offline))
         .transpose()?;
     if let Some((bundle, _)) = &named {
@@ -667,6 +680,30 @@ pub(crate) fn dispatch(ctx: &DataContext, request: &LocalRequest) -> Result<Outc
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn formal_forever_hotfix_admission_does_not_relabel_retired_data() {
+        let mut data = selection::DataPin {
+            product: "forever".into(),
+            full_build: "1.60.1.70658".into(),
+            region: "cn".into(),
+            language: "zhCN".into(),
+            ..Default::default()
+        };
+        validate_data(&data).unwrap();
+        for product in ["forever-asia-beta", "forever-cn-beta"] {
+            data.product = product.into();
+            assert_eq!(
+                validate_data(&data).unwrap_err().code,
+                "selection.unsupported_data_product"
+            );
+        }
+        data.product = "forever".into();
+        data.full_build = "5.5.4.69934".into();
+        assert_eq!(
+            validate_data(&data).unwrap_err().code,
+            "selection.data_product_build_mismatch"
+        );
+    }
     #[test]
     fn public_layout_comes_from_schema_and_does_not_guess_other_numbers() {
         use lycheedev_core::public_json;

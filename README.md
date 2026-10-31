@@ -31,6 +31,12 @@ by [release/version.json](release/version.json).
 Source, data and asset work do not require a running game. Live work requires a
 logged-in client with the managed addon loaded.
 
+The six supported products are Retail, Classic, Classic Era, Titan, formal
+Forever and Anniversary. Formal Forever uses product ID `forever`, official
+remote product/flavor `wowf` and client folder `_forever_`; the two Forever beta
+products are outside the current support scope. Read the installed CLI catalog
+for each target's version and interface constraints.
+
 ## Requirements
 
 - Windows amd64 (`x86_64-pc-windows-msvc`); this is the only released target.
@@ -78,6 +84,11 @@ lycheedev update
 applies an already installed release offline; repeated `--path` / `--installation`
 options scope the targets explicitly. Filesystem completion does not activate a
 running game or an existing agent context: the client still needs a reload.
+
+The installed CLI's `schema update` explains the embedded release-channel policy.
+The updater selects and validates a candidate from that authority; the Skill
+does not choose a toolkit version or npm tag. Recovery keeps the original
+package and targets.
 
 ## Discover capabilities
 

@@ -12,6 +12,14 @@ Lychee Dev 是供 Agent 和开发者使用的 WoW 调查工具。用户应能从
 
 **addon 沿用 [addon/](addon/) 中的现有实现。** 保留其现有工具、界面、功能开关、客户端适配、中英文 locale 和 Mailbox v1。Rust Live 接入现有 addon；本方案不要求重写 addon、替换传输协议或重做游戏内产品。后续真实缺陷按具体问题修复。
 
+### 客户端产品身份
+
+当前支持范围为 Retail、Classic、Classic Era、Titan、正式 Forever 和 Anniversary 六个产品。Forever 的规范产品 ID 与 Source family 均为 `forever`，官方远端产品与安装 flavor 均为 `wowf`，实际客户端目录为 `_forever_`，可执行文件为 `Wow.exe`。`wow_forever` 不得作为远端产品码；`forever-asia-beta` / `wow_classic_beta` 和 `forever-cn-beta` / `wow_cn_beta` 不再作为当前支持目标。
+
+这一范围贯穿 CLI 发现和选择、Source/Data/Changes、安装识别、Delivery、addon Compat/ClientGate、Live 绑定及恢复。目录只是线索；安装识别交叉核对 `.flavor.info`、存在时的 `version.txt` 和共享根 `.build.info`，按产品选择可执行文件；Live 再核指定进程和新鲜 INPUT 中的实际产品/build。正式 Forever 不回退到 Beta 目录、数据 slot、远端端点或缓存身份。版本系列、TOC Interface 与完整 build 分别保留，不从远端最新 build 推导最低支持边界。
+
+历史 PIN、CAP、原始输入和未完成恢复保留原产品、build/config 及父身份。历史记录可读与当前目标可选分别判断；旧 `forever` DataPin 也不能仅凭名称被认作来自 `wowf`，不能静默重标、重新选择或覆盖原身份。正式产品的实现与离线验证属于本轮；真实客户端测试仍由用户后续安排。
+
 ## 2. 先定义完整业务
 
 接口围绕用户要得到的结果设计。常用任务有直接的领域接口，复杂调查有通用查询和组合能力。
@@ -57,7 +65,7 @@ Skill 必须特别精简。正文只保留短用途说明、Source/Data/Live 的
 
 产品/版本速查必须保留用户常用说法与规范产品身份的映射，例如 `forever／无限服`，以及对应版本系列和已知 build ID 范围。它们是理解用户意图需要的当前产品词汇，不属于旧架构兼容资料。速查与 CLI 产品目录使用同一来源更新，不把版本系列、build ID 和 TOC Interface 混为一谈，不猜测范围边界。
 
-`forever／无限服` 可以表达共同产品家族；实际 Data 或 Live 目标仍区分 `forever-asia-beta` 与 `forever-cn-beta`。Agent 结合明确区域、当前项目或实际安装完成选择，只在这些信息仍不足时澄清。相同 build 或常用简称不合并两个产品的身份。
+`forever／无限服` 指向正式产品 `forever`。区域、build、locale、Source 与 Data 固定身份仍分别选择；相同常用简称不授权修改项目中的旧 PIN 或恢复记录。
 
 Skill 及其 references、CLI 帮助、能力描述、示例和普通错误构成面向 Agent 的产品使用面。这些内容不得混入历史 Go 版本、迁移阶段、旧入口对照、oracle、开发分支、内部构建身份、审计轮次或性能验收记录，也不引导 Agent 阅读仓库交接和研发文档。Agent 无需了解产品的重构过程即可完成任务。
 
@@ -85,7 +93,9 @@ Agent 仅凭安装后的 Skill 与 CLI，就应能找到能力、构造合法请
 
 ### 请求上下文与独立生命周期
 
-各领域共享固定输入身份、期限、取消和结果来源等必要上下文。Source/Data/Changes 均使用固定引用；目录只是位置。两个 Forever beta 可以共享 Source family，但必须保留独立 Data 身份。
+各领域共享固定输入身份、期限、取消和结果来源等必要上下文。Source/Data/Changes 均使用固定引用；目录只是位置。Source family 与 Data 产品身份分别校验；保留历史 Beta 记录不恢复它们的当前目标资格。
+
+`target resolve --from` 只补齐缺失的固定选择，已有 Source/Data/Changes 按原身份继承。Core 的共同选择所有者统一拒绝覆盖已固定组件；切换 Data 需使用不含 Data 的父选择或独立新选择，local/remote 不另加重复的父身份校验。
 
 | 所有者 | 拥有的状态 | 结束或失败的影响 |
 | --- | --- | --- |
@@ -223,6 +233,8 @@ OperationControl 统一原始 deadline、带时间的取消及停止原因。资
 5. 用户已接受当前性能，以已测结果为基线，先完成全部业务回归，再循环审计与修复；需要用户或游戏配合的验证留在最后。
 
 npm 负责分发和启动当前 Rust 产品，安装与更新由 Delivery 完成。沿用仓库现有构建工具链和 runner；工具、日志和检查服务于业务交付，不另建验收平台。锁定依赖、许可证及对应源码随交付要求处理，历史发布产物保持不可变。
+
+npm 自更新从构建时嵌入的 `release/npm-channel.json` 导出统一选择策略，CLI 的 schema/help/describe、registry selector 和候选准入消费同一策略。不能按版本手写渠道表或为未知版本回退到 `latest`；同渠道的后续版本按清单合同判断。Skill 只引导读取当前 CLI 合同，不指定工具版本或渠道。已创建的 Handoff 恢复仍使用原 tarball、targets 和 deadline，不重新选包。
 
 ### CI：统一构建，复用本轮产物
 

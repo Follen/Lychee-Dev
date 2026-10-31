@@ -28,13 +28,13 @@ Read the full build from client metadata; TOC Interface is a separate identifier
 | Classic / 怀旧服 / 经典版 | `classic` | `5.5.4.*` | `50504` |
 | Classic Era / 永久60 / 经典旧世 | `classic-era` | `1.15.9.*` | `11509` |
 | Titan / 泰坦 / 经典泰坦 / 时光服 | `titan` | `3.80.2.*` | `38002` |
-| Forever Asia Beta / 无限服 / 无限服（国际服） | `forever-asia-beta` | `1.60.1.*` | `16001` |
-| Forever CN Beta / 国服无限服 / 无限服（国服） | `forever-cn-beta` | `1.60.1.*` | `16001` |
+| Forever / 无限服 / 国服无限服 | `forever` | `1.60.1.*` | `16001` |
 | Anniversary / 周年服 | `anniversary` | `2.5.6.*` | `20506` |
 
-`forever`／无限服 names the shared Source family. Its two Data/Live products
-remain independent even with identical builds. Resolve from the request, project
-or installation; ask only for identity still ambiguous after CLI discovery.
+Formal Forever uses remote product and installation flavor `wowf`, folder
+`_forever_` and `Wow.exe`. The two Forever beta products are unsupported current
+targets. Preserve existing pins and recovery identities; resolve a new target
+from the request, project or installation using CLI discovery.
 
 ## Discover, then act
 

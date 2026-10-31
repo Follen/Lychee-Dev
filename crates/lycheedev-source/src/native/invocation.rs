@@ -2290,7 +2290,7 @@ mod vararg_adjustment_tests {
         .unwrap();
         let prepared = prepare(inputs, &control).unwrap();
         let EntryResolution::Unique { candidate } = prepared
-            .entry_symbol_candidates("input.lua", "subject", &control)
+            .entry_candidates("input.lua", text.lines().position(|line| line.contains("function subject(")).unwrap()+1, &control)
             .unwrap()
         else {
             panic!("unique subject entry")

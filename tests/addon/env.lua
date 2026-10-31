@@ -23,7 +23,7 @@ local TEST_BUILDS = {
     ["classic-era"] = { "1.15.9", "70003", "Sep 29 2026", 11509 },
     anniversary = { "2.5.6", "70006", "Sep 29 2026", 20506 },
     titan = { "3.80.2", "63000", "Aug 05 2026", 38002 },
-    forever = { "1.60.1", "69893", "Sep 17 2026", 16001 },
+    forever = { "1.60.1", "70658", "fixture date", 16001 },
 }
 
 -- ClientGate.lua derives the profile from GetBuildInfo()'s interface, which

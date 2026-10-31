@@ -25,9 +25,23 @@ impl Fixture {
         fs::create_dir(&root).unwrap();
         let home = root.join("home");
         lycheedev_core::workspace::initialize(&home).unwrap();
-        let ctx = DataContext {home,cwd:root.clone(),control:OperationControl::default(),source:Default::default()};
-        let request = Request {provider:if source=="wago" {Provider::Wago} else {Provider::Raidbots(root.join("DBCache.bin"))},
-            query:q(),max_pages:2048,fetch:FetchBudget::default(),csv:None};
+        let ctx = DataContext {
+            home,
+            cwd: root.clone(),
+            control: OperationControl::default(),
+            source: Default::default(),
+        };
+        let request = Request {
+            provider: if source == "wago" {
+                Provider::Wago
+            } else {
+                Provider::Raidbots(root.join("DBCache.bin"))
+            },
+            query: q(),
+            max_pages: 2048,
+            fetch: FetchBudget::default(),
+            csv: None,
+        };
         Self { root, ctx, request }
     }
     fn cache(&mut self, rows: &[(i32, u32, u8, &[u8])]) -> PathBuf {
@@ -65,6 +79,20 @@ fn q() -> Query {
         locale: "enUS".into(),
         limit: 50,
         ..Default::default()
+    }
+}
+#[test]
+fn current_hotfix_query_accepts_formal_forever_and_rejects_retired_products() {
+    let mut query = q();
+    query.product = "forever".into();
+    query.full_build = "1.60.1.70707".into();
+    query.validate().unwrap();
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        query.product = product.into();
+        let error = query.validate().unwrap_err();
+        assert_eq!(error.code, "records.hotfix_query");
+        assert!(error.message.contains("selection.unsupported_data_product"));
+        assert_eq!(error.exit_code, 2);
     }
 }
 fn html(payload: &str) -> Vec<u8> {
@@ -117,7 +145,15 @@ impl wago::Fetcher for Pages {
     }
 }
 fn run_wago(f: &Fixture, query: Query, pages: &Pages) -> Result<RemoteResult> {
-    wago::query(&f.ctx,query,f.request.fetch.clone(),f.request.max_pages,&budget(&f.ctx,&f.request),pages,"http://fixture.invalid")
+    wago::query(
+        &f.ctx,
+        query,
+        f.request.fetch.clone(),
+        f.request.max_pages,
+        &budget(&f.ctx, &f.request),
+        pages,
+        "http://fixture.invalid",
+    )
 }
 fn two() -> Pages {
     Pages::new(vec![
@@ -171,7 +207,7 @@ fn cursor_roundtrip_pins_scope_and_source() {
         after: "id:9".into(),
         ..Default::default()
     }
-    .encode(&budget(&f.ctx,&f.request))
+    .encode(&budget(&f.ctx, &f.request))
     .unwrap();
     assert_eq!(Cursor::decode(&c, &q(), "wago").unwrap().resume_page, 3);
     assert!(Cursor::decode("broken", &q(), "wago").is_err());
@@ -184,7 +220,7 @@ fn cursor_roundtrip_pins_scope_and_source() {
 fn raidbots_preserves_physical_metadata_and_declared_coverage() {
     let mut f = Fixture::new("raidbots");
     let path = f.cache(&[(-3, 55, 1, b"\xde\xad"), (4, 56, 3, b"")]);
-    let out = dispatch(&f.ctx,&f.request).unwrap();
+    let out = dispatch(&f.ctx, &f.request).unwrap();
     assert_eq!(out.data["records"][0]["push"], -3);
     assert_eq!(out.data["records"][0]["payloadHex"], "dead");
     assert_eq!(out.data["records"][0]["regionId"], 71);
@@ -204,7 +240,7 @@ fn raidbots_latest_is_signed_batch_before_cursor_paging() {
     f.cache(&[(-3, 1, 1, b"a"), (4, 2, 1, b"b"), (4, 3, 3, b"")]);
     f.request.query.latest = true;
     f.request.query.limit = 1;
-    let first = dispatch(&f.ctx,&f.request).unwrap();
+    let first = dispatch(&f.ctx, &f.request).unwrap();
     assert_eq!(first.data["records"].as_array().unwrap().len(), 1);
     assert_eq!(first.data["records"][0]["recordId"], 2);
     assert_eq!(first.data["coverage"]["selectedPush"], 4);
@@ -216,7 +252,7 @@ fn raidbots_latest_is_signed_batch_before_cursor_paging() {
     assert_eq!(first.data["coverage"]["matched"], 2);
     assert_eq!(first.data["coverage"]["returned"], 1);
     f.request.query.cursor = first.data["nextCursor"].as_str().unwrap().into();
-    let second = dispatch(&f.ctx,&f.request).unwrap();
+    let second = dispatch(&f.ctx, &f.request).unwrap();
     assert_eq!(second.data["records"].as_array().unwrap().len(), 1);
     assert_eq!(second.data["records"][0]["recordId"], 3);
     // Retained scan semantics require no AfterIndex for Complete.
@@ -235,7 +271,7 @@ fn raidbots_latest_is_signed_batch_before_cursor_paging() {
 
     f.request.query.cursor.clear();
     f.request.query.limit = 2;
-    let whole = dispatch(&f.ctx,&f.request).unwrap();
+    let whole = dispatch(&f.ctx, &f.request).unwrap();
     assert_eq!(whole.data["records"].as_array().unwrap().len(), 2);
     assert_eq!(whole.data["records"][0], first.data["records"][0]);
     assert_eq!(whole.data["records"][1], second.data["records"][0]);
@@ -256,7 +292,7 @@ fn raidbots_stale_snapshot_refused() {
     )
     .unwrap();
     assert_eq!(
-        dispatch(&f.ctx,&f.request).unwrap_err().code,
+        dispatch(&f.ctx, &f.request).unwrap_err().code,
         "records.hotfix_snapshot_stale"
     );
 }
@@ -264,40 +300,48 @@ fn raidbots_stale_snapshot_refused() {
 fn raidbots_rejects_unsupported_filters_and_changed_cursor_bytes() {
     let mut f = Fixture::new("raidbots");
     let path = f.cache(&[(1, 1, 1, b"a"), (1, 2, 1, b"b")]);
-    for field in ["search","page","table"] {
+    for field in ["search", "page", "table"] {
         let mut request = f.request.clone();
-        match field {"search"=>request.query.search="x".into(),"page"=>request.query.page=1,"table"=>request.query.table="SpellEffect".into(),_=>unreachable!()};
+        match field {
+            "search" => request.query.search = "x".into(),
+            "page" => request.query.page = 1,
+            "table" => request.query.table = "SpellEffect".into(),
+            _ => unreachable!(),
+        };
         assert_eq!(
-            dispatch(&f.ctx,&request).unwrap_err().code,
+            dispatch(&f.ctx, &request).unwrap_err().code,
             "records.hotfix_filter_unsupported"
         );
     }
     f.request.query.limit = 1;
-    let first = dispatch(&f.ctx,&f.request).unwrap();
+    let first = dispatch(&f.ctx, &f.request).unwrap();
     f.request.query.cursor = first.data["nextCursor"].as_str().unwrap().into();
     let mut bytes = fs::read(&path).unwrap();
     *bytes.last_mut().unwrap() = b'c';
     fs::write(path, bytes).unwrap();
-    assert_eq!(dispatch(&f.ctx,&f.request).unwrap_err().code, "records.hotfix_cursor");
+    assert_eq!(
+        dispatch(&f.ctx, &f.request).unwrap_err().code,
+        "records.hotfix_cursor"
+    );
 }
 #[test]
 fn raidbots_parent_change_reuse_and_conflict() {
     let mut f = Fixture::new("raidbots");
     f.cache(&[(1, 1, 1, b"a")]);
-    let first = dispatch(&f.ctx,&f.request).unwrap();
+    let first = dispatch(&f.ctx, &f.request).unwrap();
     let id = first.data["snapshot"].as_str().unwrap().to_owned();
     f.ctx.source.snapshot = Some(id.clone());
-    assert_eq!(dispatch(&f.ctx,&f.request).unwrap().data["snapshot"], id);
+    assert_eq!(dispatch(&f.ctx, &f.request).unwrap().data["snapshot"], id);
     f.request.query.record_id = Some(1);
     assert_eq!(
-        dispatch(&f.ctx,&f.request).unwrap_err().code,
+        dispatch(&f.ctx, &f.request).unwrap_err().code,
         "records.hotfix_identity"
     );
 }
 #[test]
 fn parser_reads_fixed_real_pages() {
     let f = Fixture::new("wago");
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     for (raw, current, last, total) in [
         (
             include_bytes!("../../../../../tests/fixtures/hotfix-wago/response-page-1.html")
@@ -333,7 +377,7 @@ fn parser_reads_fixed_real_pages() {
 #[test]
 fn parser_preserves_raw_payload_and_flexible_numbers() {
     let f = Fixture::new("wago");
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     let raw = html(
         r#"{"component":"Hotfixes","props":{"hotfixes":{"current_page":1,"last_page":1,"per_page":25,"total":"1","data":[{"id":"25567226914","push_id":"-3","record_id":"55","status":null,"build":68974,"table_name":"SpellEffect","region_id":null,"data":[ 18446744073709551615, 1.2300 ]}]}}}"#,
     );
@@ -348,7 +392,7 @@ fn parser_preserves_raw_payload_and_flexible_numbers() {
 #[test]
 fn parser_rejects_protocol_changes_instead_of_empty_success() {
     let f = Fixture::new("wago");
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     for raw in [
         b"<div id='app'></div>".to_vec(),
         html("{oops"),
@@ -384,7 +428,7 @@ fn parser_accepts_single_quote_unquoted_and_casefolded_tags() {
         .replace("data-page=\"", "DATA-PAGE='")
         .replace("\"></div>", "'></DIV>");
     assert_eq!(
-        parse::parse(text.as_bytes(), &budget(&f.ctx,&f.request), &f.ctx.control)
+        parse::parse(text.as_bytes(), &budget(&f.ctx, &f.request), &f.ctx.control)
             .unwrap()
             .current_page,
         1
@@ -587,7 +631,10 @@ fn cancellation_before_network_or_snapshot_has_no_side_effect() {
     let mut f = Fixture::new("raidbots");
     f.cache(&[(1, 1, 1, b"a")]);
     f.ctx.control.tracked_cancel_handle().unwrap().cancel();
-    assert_eq!(dispatch(&f.ctx,&f.request).unwrap_err().code, "command.cancelled");
+    assert_eq!(
+        dispatch(&f.ctx, &f.request).unwrap_err().code,
+        "command.cancelled"
+    );
     let f = Fixture::new("wago");
     f.ctx.control.tracked_cancel_handle().unwrap().cancel();
     let pages = two();
@@ -605,23 +652,40 @@ fn csv_columns_quoting_manifest_and_implicit_overwrite() {
     r.records[0].table_name = " Vehicle,\"Seat\"\nX\rY".into();
     let path = f.root.join("hotfix.csv");
     fs::write(&path, b"prior").unwrap();
-    output::csv(&f.ctx, &path, &r, &budget(&f.ctx,&f.request)).unwrap();
+    output::csv(&f.ctx, &path, &r, &budget(&f.ctx, &f.request)).unwrap();
     let raw = fs::read(&path).unwrap();
-    let m: Value = serde_json::from_slice(&fs::read(path.with_extension("csv.manifest.json")).unwrap()).unwrap();
-    assert_eq!(raw, concat!(
-        "id,push_id,record_id,table_name,status,build,region_id,locale,payload_length\r\n",
-        "1,10,41,\" Vehicle,\"\"Seat\"\"\r\nXY\",1,68974,71,enUS,5\r\n",
-        "2,10,42,SpellEffect,1,68974,71,enUS,5\r\n",
-        "3,9,43,SpellEffect,3,68974,71,enUS,5\r\n",
-        "4,9,44,SpellEffect,3,68974,71,enUS,5\r\n",
-    ).as_bytes());
+    let m: Value =
+        serde_json::from_slice(&fs::read(path.with_extension("csv.manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        raw,
+        concat!(
+            "id,push_id,record_id,table_name,status,build,region_id,locale,payload_length\r\n",
+            "1,10,41,\" Vehicle,\"\"Seat\"\"\r\nXY\",1,68974,71,enUS,5\r\n",
+            "2,10,42,SpellEffect,1,68974,71,enUS,5\r\n",
+            "3,9,43,SpellEffect,3,68974,71,enUS,5\r\n",
+            "4,9,44,SpellEffect,3,68974,71,enUS,5\r\n",
+        )
+        .as_bytes()
+    );
     assert_eq!(m["schema"], "lycheedev.csv-export.v1");
     assert_eq!(m["rowCount"], 4);
     assert_eq!(m["complete"], true);
     assert_eq!(m["truncated"], false);
-    assert_eq!(m["columns"], json!([
-        "id", "push_id", "record_id", "table_name", "status", "build", "region_id", "locale", "payload_length"
-    ]));
+    assert_eq!(
+        m["columns"],
+        json!([
+            "id",
+            "push_id",
+            "record_id",
+            "table_name",
+            "status",
+            "build",
+            "region_id",
+            "locale",
+            "payload_length"
+        ])
+    );
     assert_eq!(m["source"]["provider"], "wago");
     assert_eq!(m["source"]["product"], "retail");
     assert_eq!(m["source"]["fullBuild"], "12.0.7.68974");
@@ -638,14 +702,18 @@ fn csv_refuses_workspace_and_sidecar_conflict_before_data() {
     let r = run_wago(&f, q(), &two()).unwrap();
     let path = f.ctx.home.join("evil.csv");
     assert_eq!(
-        output::csv(&f.ctx, &path, &r, &budget(&f.ctx,&f.request)).unwrap_err().code,
+        output::csv(&f.ctx, &path, &r, &budget(&f.ctx, &f.request))
+            .unwrap_err()
+            .code,
         "records.export_path"
     );
     let path = f.root.join("prior.csv");
     fs::write(&path, b"original").unwrap();
     fs::create_dir(f.root.join("prior.csv.manifest.json")).unwrap();
     assert_eq!(
-        output::csv(&f.ctx, &path, &r, &budget(&f.ctx,&f.request)).unwrap_err().code,
+        output::csv(&f.ctx, &path, &r, &budget(&f.ctx, &f.request))
+            .unwrap_err()
+            .code,
         "records.export_conflict"
     );
     assert_eq!(fs::read(path).unwrap(), b"original");
@@ -655,7 +723,7 @@ fn csv_refuses_workspace_and_sidecar_conflict_before_data() {
 fn parser_merges_duplicate_objects_and_reuses_row_slots_like_go() {
     let f = Fixture::new("wago");
     let payload = r#"{"component":"Hotfixes","props":{"hotfixes":{"current_page":1,"last_page":1,"per_page":25,"total":1,"data":[{"id":1,"build":"68974","table_name":"SpellEffect","status":1}]}},"props":{"hotfixes":{"data":[{"record_id":42}]}}}"#;
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     let p = parse::parse(&html(payload), &b, &f.ctx.control).unwrap();
     assert_eq!(p.records.len(), 1);
     assert_eq!(p.records[0].id, 1);
@@ -665,7 +733,7 @@ fn parser_merges_duplicate_objects_and_reuses_row_slots_like_go() {
 #[test]
 fn parser_supports_all_wire_html_entity_classes() {
     let f = Fixture::new("wago");
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     let raw = page(1, 1, 1, vec![row(1, 1, 1)]);
     let raw = String::from_utf8(raw)
         .unwrap()
@@ -676,7 +744,7 @@ fn parser_supports_all_wire_html_entity_classes() {
 #[test]
 fn page_sequence_decodes_query_keys_and_skips_malformed_pairs() {
     let f = Fixture::new("wago");
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     let next = parse::parse(&page(2, 2, 2, vec![row(2, 1, 1)]), &b, &f.ctx.control).unwrap();
     let mut previous = CursorPage {
         page: 1,
@@ -697,7 +765,7 @@ fn page_sequence_decodes_query_keys_and_skips_malformed_pairs() {
 #[test]
 fn capture_wire_preserves_payload_tokens_and_duplicate_members() {
     let f = Fixture::new("wago");
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     let mut r = run_wago(&f, q(), &two()).unwrap();
     r.records[0].payload = Some(
         serde_json::value::RawValue::from_string(
@@ -708,12 +776,11 @@ fn capture_wire_preserves_payload_tokens_and_duplicate_members() {
     let raw = wire_bytes(&r, &b, 32 << 20).unwrap();
     let raw = String::from_utf8(raw).unwrap();
     assert!(raw.contains(r#""payload":{"dup":1e+02,"dup":2,"html":"\u003c\u0026\u003e"}"#));
-
 }
 #[test]
 fn optional_definition_keeps_short_rows_and_status_decode_states() {
     let f = Fixture::new("wago");
-    let b = budget(&f.ctx,&f.request);
+    let b = budget(&f.ctx, &f.request);
     let definition = crate::schema::Definition {
         sha256: "a".repeat(64),
         r#match: "build".into(),
@@ -773,7 +840,7 @@ fn offline_wago_pins_change_and_capture_from_verified_pages() {
     let mut f = Fixture::new("wago");
     let fetched = run_wago(&f, q(), &two()).unwrap();
     f.ctx.source.offline = true;
-    let r = run(&f.ctx,&f.request, &budget(&f.ctx,&f.request)).unwrap();
+    let r = run(&f.ctx, &f.request, &budget(&f.ctx, &f.request)).unwrap();
     assert_eq!(r.change, fetched.change);
     assert!(r.snapshot.starts_with("PIN-"));
     let pin = selection::load_pinned(&f.ctx.home, &r.snapshot).unwrap();
@@ -788,7 +855,7 @@ fn offline_wago_pins_change_and_capture_from_verified_pages() {
     assert_eq!(body["snapshot"], r.snapshot);
     assert!(body.get("capture").is_none());
     f.ctx.source.snapshot = Some(r.snapshot.clone());
-    let again = run(&f.ctx,&f.request, &budget(&f.ctx,&f.request)).unwrap();
+    let again = run(&f.ctx, &f.request, &budget(&f.ctx, &f.request)).unwrap();
     assert_eq!(again.snapshot, r.snapshot);
 }
 #[test]
@@ -826,7 +893,7 @@ fn duplicate_row_arrays_keep_hidden_backing_slots_and_null_empty_reset() {
         let raw = format!(
             r#"{{"component":"Hotfixes","props":{{"hotfixes":{{"current_page":1,"last_page":1,"per_page":25,"total":2,"data":[{{"id":1,"record_id":10,"table_name":"First","build":"68974","locale":"enUS"}},{{"id":2,"record_id":20,"table_name":"Second","build":"68974","locale":"enUS"}}],"data":[{{"record_id":11}}]{reset},"data":{final_rows}}}}}}}"#
         );
-        let b = budget(&f.ctx,&f.request);
+        let b = budget(&f.ctx, &f.request);
         let parsed = parse::parse(&html(&raw), &b, &f.ctx.control).unwrap();
         assert_eq!(parsed.records.len(), 2);
         assert_eq!(parsed.records[1].record_id, 22);
@@ -858,7 +925,7 @@ fn pathological_json_depth_is_rejected_for_payload_and_cursor() {
         let raw = format!(
             r#"{{"component":"Hotfixes","props":{{"hotfixes":{{"current_page":1,"last_page":1,"per_page":25,"total":1,{contents}}}}}}}"#
         );
-        let b = budget(&f.ctx,&f.request);
+        let b = budget(&f.ctx, &f.request);
         assert!(parse::parse(&html(&raw), &b, &f.ctx.control).is_err());
     }
     let raw = format!(
@@ -904,7 +971,14 @@ fn raidbots_source_bytes_do_not_consume_metadata_allowance() {
         f.ctx.control.clone(),
     );
     assert_eq!(
-        super::super::local::read_source_file_controlled(&path, 512 << 20, &b, &f.ctx.control, |_| Ok(())).unwrap(),
+        super::super::local::read_source_file_controlled(
+            &path,
+            512 << 20,
+            &b,
+            &f.ctx.control,
+            |_| Ok(())
+        )
+        .unwrap(),
         fs::read(path).unwrap()
     );
     assert_eq!(b.snapshot().unwrap().metadata_bytes, 0);
@@ -924,7 +998,7 @@ fn empty_optional_fields_are_omitted_in_public_and_capture_bytes() {
             .contains_key("fields")
     );
     assert!(
-        !String::from_utf8(wire_bytes(&r, &budget(&f.ctx,&f.request), 1 << 20).unwrap())
+        !String::from_utf8(wire_bytes(&r, &budget(&f.ctx, &f.request), 1 << 20).unwrap())
             .unwrap()
             .contains("\"fields\"")
     );
@@ -944,12 +1018,33 @@ fn provider_zero_byte_budget_retains_256_mib_coverage_default() {
 
 #[test]
 fn presentation_callback_runs_once_with_live_budget_and_retains_committed_capture() {
-    let mut f=Fixture::new("wago");let pages=two();run_wago(&f,q(),&pages).unwrap();f.ctx.source.offline=true;
-    let mut calls=0;let mut committed=None;
-    let error=with_result(&f.ctx,&f.request,|result,budget| {calls+=1;budget.check()?;committed=result.capture.clone();
-        Err(ToolkitError::new("fixture.presentation_failed","closed output",5))}).unwrap_err();
-    assert_eq!(calls,1);assert_eq!(pages.calls.get(),2);
-    let committed=committed.unwrap();assert_eq!(error.details["completedCaptures"],json!([committed["id"]]));
-    assert_eq!(evidence::read_capture(&f.ctx.home,committed["id"].as_str().unwrap()).unwrap(),committed);
-    assert_eq!(error.details["primary"]["code"],"fixture.presentation_failed");
+    let mut f = Fixture::new("wago");
+    let pages = two();
+    run_wago(&f, q(), &pages).unwrap();
+    f.ctx.source.offline = true;
+    let mut calls = 0;
+    let mut committed = None;
+    let error = with_result(&f.ctx, &f.request, |result, budget| {
+        calls += 1;
+        budget.check()?;
+        committed = result.capture.clone();
+        Err(ToolkitError::new(
+            "fixture.presentation_failed",
+            "closed output",
+            5,
+        ))
+    })
+    .unwrap_err();
+    assert_eq!(calls, 1);
+    assert_eq!(pages.calls.get(), 2);
+    let committed = committed.unwrap();
+    assert_eq!(error.details["completedCaptures"], json!([committed["id"]]));
+    assert_eq!(
+        evidence::read_capture(&f.ctx.home, committed["id"].as_str().unwrap()).unwrap(),
+        committed
+    );
+    assert_eq!(
+        error.details["primary"]["code"],
+        "fixture.presentation_failed"
+    );
 }

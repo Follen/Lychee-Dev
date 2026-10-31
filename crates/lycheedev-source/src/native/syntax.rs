@@ -125,11 +125,7 @@ struct SourceFileSyntax {
     // Query-local syntax owners, never a second session-wide AST or graph.
     callable_owners:BTreeMap<SyntaxSite,Option<SyntaxSite>>,
 }
-impl SourceFileSyntax {
-    fn reference_at(&self,inputs:&SourceInputs,site:&Site)->Option<&IndexedReference> {
-        self.references_by_site.get(&SyntaxSite::from_site(inputs,site)?).map(|id|&self.references[*id])
-    }
-}
+
 #[cfg(test)]
 fn source_decl_id(inputs:&SourceInputs,site:&Site)->String {digest(&(inputs.identity_sha256(),"declaration",site))}
 // Binary SHA256 order is identical to the public fixed-width lowercase hex
@@ -161,6 +157,24 @@ fn source_decl_key(inputs:&SourceInputs,site:&Site)->DeclarationId {
 }
 fn syntax_owner(node:&emmylua_parser::LuaSyntaxNode,inputs:&SourceInputs,file:usize)->Option<SyntaxSite> {
     node.ancestors().skip(1).find_map(LuaClosureExpr::cast).map(|closure|SyntaxSite::at(file,inputs.original_range(&inputs.corpus.files[file].path,closure.get_range()).expect("admitted parser range")))
+}
+// Lua for variables belong to the body, not to the header or enclosing block.
+// Keep the indexed ordinary declaration lookup; only reject its out-of-scope
+// loop result before selecting an already-visible outer declaration.
+fn visible_source_declaration<'a>(facts:&'a emmylua_code_analysis::FileFacts,name:&str,offset:rowan::TextSize)->Option<&'a emmylua_code_analysis::Decl> {
+    let loop_visible=|decl:&emmylua_code_analysis::Decl| {
+        if !matches!(decl.kind,emmylua_code_analysis::DeclKind::Local{is_iter:true,..}) { return true; }
+        facts.scopes[decl.scope_id as usize].children.iter().any(|child| {
+            let emmylua_code_analysis::ScopeChild::Scope(id)=child else { return false; };
+            let scope=&facts.scopes[*id as usize];
+            scope.kind==emmylua_code_analysis::ScopeKind::Block && scope.start<=offset && offset<scope.end
+        })
+    };
+    let selected=facts.find_visible_decl_before_offset(name,offset)?;
+    if loop_visible(selected) { return Some(selected); }
+    facts.visible_decls_at_offset(offset).into_iter()
+        .filter(|decl|decl.name==name && loop_visible(decl))
+        .max_by_key(|decl|decl.name_offset())
 }
 fn unparen(mut expr:LuaExpr)->LuaExpr {
     while let LuaExpr::ParenExpr(ref paren)=expr {let Some(inner)=paren.get_expr()else{break};expr=inner;}expr
@@ -231,7 +245,7 @@ impl PreparedSnapshot {
         // Use the same Emmy NameUse records and visibility rule as admission.
         for use_ in &facts.name_uses {
             self.control.check().map_err(|e|e.to_string())?;
-            if let Some(decl)=facts.find_visible_decl_before_offset(&use_.name,use_.syntax.get_range().start()).filter(|decl|decl.kind.is_local()){
+            if let Some(decl)=visible_source_declaration(facts,&use_.name,use_.syntax.get_range().start()).filter(|decl|decl.kind.is_local()){
                 local_bindings.insert(source_site(use_.syntax.get_range()),self.syntax.declaration_by_site(source_site(decl.name_range)).expect("admitted local declaration site"));
             }
         }
@@ -270,7 +284,7 @@ impl PreparedSnapshot {
                 emmylua_parser::LuaSyntaxKind::NameExpr=>{
                     let model=self.analysis.semantic_model(binding.file_id);let facts=model.file_facts()?;
                     let use_=facts.name_use_at_offset(binding.syntax.get_range().start()).filter(|use_|use_.syntax==binding.syntax)?;
-                    let decl=facts.find_visible_decl_before_offset(&use_.name,use_.syntax.get_range().start()).filter(|decl|decl.kind.is_local())?;
+                    let decl=visible_source_declaration(facts,&use_.name,use_.syntax.get_range().start()).filter(|decl|decl.kind.is_local())?;
                     let key=SyntaxSite::at(self.inputs.corpus.index[&site.file],self.inputs.original_range(&site.file,decl.name_range).expect("admitted parser range"));
                     return self.syntax.declaration_by_site(key).map(|id|&self.syntax.declarations[id]);
                 },

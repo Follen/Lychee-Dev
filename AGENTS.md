@@ -4,7 +4,7 @@
 
 当前重构产品由 Rust CLI、现有 Lua addon、第一方 Agent Skill 和 npm 包组成，交付 Windows amd64；版本只以 `release/version.json` 为准。架构以 [DESIGN.md](DESIGN.md) 为基点，不从历史版本、旧测试或 Git 记录推导当前需求。
 
-开始工作先读本文件与 [handover.md](handover.md)，再按任务读取设计、待办和测试目录。五份文档各自只维护一种事实：
+开始工作先读本文件与 [handover.md](handover.md)，再按任务读取设计、待办和测试目录。核心文档与产品说明按以下分工维护：
 
 | 文档 | 负责什么 | 什么时候更新 |
 | --- | --- | --- |
@@ -13,8 +13,12 @@
 | [test.md](test.md) | 当前测试的用途、正式入口、输入、证明范围、待删测试和待补业务回归。 | 增删、改名、改接测试或改变测试覆盖与运行入口时，同批更新。 |
 | [handover.md](handover.md) | 当前分支与协作边界、最近实际状态、验证结果、阻塞和下一步。 | 实现或验证完成、分工变化、交接时替换过期内容。 |
 | AGENTS.md | 工作方法、上述文档关系、维护和验证规则。 | 工作规则改变时。 |
+| [CHANGELOG.md](CHANGELOG.md)、[PRODUCT.md](PRODUCT.md)、中英文 README 与 npm README | 当前基线的用户可见变化、产品范围及安装使用说明。 | 用户可见行为、支持范围或交付合同改变时；变更说明不代替发布验收。 |
+| [Skill](skills/lycheedev/SKILL.md) 与专项 references | 安装后 Agent 需要的产品词汇、能力选择和必要操作约束。 | 产品使用合同改变时；版本/渠道选择由 CLI 解释，不抄研发进度。 |
 
 每批改动收尾前检查受影响的文档并同步；不要求无关文件凑数改动。实现了某能力，就更新 todo 的状态、test 的实际覆盖和 handover 的验证事实；不能只改代码，留下相反的文档。设计要求不等于实现完成，列出测试也不等于测试已通过。
+
+产品支持范围以 DESIGN 的客户端身份合同为准。正式 Forever 全链使用 `forever` / `wowf` / `_forever_`；历史 Beta PIN、CAP、原始输入和恢复记录保持原身份，历史可读不能自动变为当前目标可选。Live 代码与离线适配可按任务推进，真实客户端操作按用户安排执行。
 
 Mailbox 的业务合同见 DESIGN 的 Live 章节，具体格式对照当前 [addon](addon/) 与 [Rust Live](crates/lycheedev-live/src/) 实现。其他研发说明与上述文档冲突时按当前设计修正；不另建 handoff、迁移账本或永久运行日记。
 

@@ -111,6 +111,20 @@ fn pin(
         inherit_parent(&mut spec, parent).map_err(|error| failed(error.code))?;
     }
     validate_spec(&spec)?;
+    if let Some(product) = spec
+        .source
+        .as_ref()
+        .map(|pin| pin.product.as_str())
+        .into_iter()
+        .chain(spec.data.as_ref().map(|pin| pin.product.as_str()))
+        .chain(spec.changes.as_ref().map(|pin| pin.product.as_str()))
+        .find(|product| matches!(*product, "forever-asia-beta" | "forever-cn-beta"))
+    {
+        return Err(failed(format!(
+            "selection.unsupported_data_product: retired product {product}"
+        )));
+    }
+
     let mut pin = PinnedSet {
         schema: "lycheedev.selection.v1".into(),
         id: String::new(),

@@ -29,6 +29,11 @@ runs the executable on the same arguments and forwards its stdout/stderr and exi
 code; it never downloads a fallback binary. There are no runtime npm dependencies
 and no install scripts.
 
+Supported products are Retail, Classic, Classic Era, Titan, formal Forever and
+Anniversary. Forever uses canonical ID `forever`, official remote product/flavor
+`wowf` and folder `_forever_`. The two Forever betas are outside the current
+support scope; existing evidence retains its original identity.
+
 Replace the example path with the reviewed package you intend to install.
 For registry installation, select that release's explicit published version or
 tag; an unqualified package name can select a different release.
@@ -49,6 +54,11 @@ updates, inspect targets with `lycheedev update --plan --format json` and apply
 `lycheedev update`; `--release <root>` applies an installed release offline. A
 filesystem update does not activate the running game or an existing agent
 context: the client still needs a reload.
+
+Read `lycheedev schema update` for the installed CLI's release-channel policy.
+Registry selection and candidate admission use the embedded channel authority;
+the Skill supplies no toolkit version or npm tag. Interrupted updates retain
+their original package and targets.
 
 Source, data and asset investigation do not require a running game. Live
 investigation requires a logged-in client with the managed addon loaded. Missing

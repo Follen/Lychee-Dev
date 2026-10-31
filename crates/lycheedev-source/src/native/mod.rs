@@ -72,3 +72,12 @@ mod sharing_tests;
 
 #[cfg(test)]
 mod digest_tests;
+
+#[cfg(test)]
+mod admission_contract_tests;
+#[cfg(test)]
+mod query_contract_tests;
+#[cfg(test)]
+mod entry_contract_tests;
+#[cfg(test)]
+mod owned_context_contract_tests;

@@ -297,7 +297,7 @@ fn compact_lexical_lookup_preserves_all_local_capture_shadow_and_bom_identities(
     assert_eq!(compact.local_read(&prepared.inputs, &unknown), None);
     // Complete graph consumers include captures, storage identities and exact
     // caller/parameter summaries observed by the production graph itself.
-    let graph = prepared.build("compact-lexical", None, &c).unwrap();
+    let graph = prepared.build_plan("compact-lexical", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c).unwrap();
     assert!(!graph.native_invocations.as_ref().unwrap().capture_facts.is_empty());
 }
 

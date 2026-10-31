@@ -135,20 +135,24 @@ fn host_identity_is_lazy_shared_and_uses_current_request_control_after_renewal()
     assert!(Arc::ptr_eq(cloned.environment.as_ref().unwrap(),&host_data));
     assert!(cloned.environment_value.get().is_none());
     assert_eq!(serde_json::to_vec(&cloned).unwrap(),expected_bytes);
-    let refreshed=input.execution("after_load",&["a.lua","a.lua"],&c).unwrap();
+    let mut prepared=prepare(input.clone(),&c).unwrap();
+    let refreshed=prepared.build_plan("host-identity-repeat","after_load",LoadPlan::Known(vec!["a.lua".into(),"a.lua".into()]),None,None,&c).unwrap().inputs;
     assert!(Arc::ptr_eq(refreshed.identity.environment.as_ref().unwrap(),&host_data));
     assert!(refreshed.identity.environment_value.get().is_none());
     assert_eq!(refreshed.identity_sha256(),hash(&serde_json::to_vec(&eager_identity(refreshed.identity())).unwrap()));
 
-    let mut prepared=prepare(input.clone(),&c).unwrap();
     c.tracked_cancel_handle().unwrap().cancel();
     let current=control();
     prepared.begin_research_request(&current).unwrap();
-    let renewed=prepared.inputs.execution("after_load",&["a.lua"],&current).unwrap();
+    let renewed=prepared.build_plan("host-identity-renewed","after_load",LoadPlan::Known(vec!["a.lua".into()]),None,None,&current).unwrap().inputs;
     assert!(Arc::ptr_eq(renewed.identity.environment.as_ref().unwrap(),&host_data));
     assert!(renewed.identity.environment_value.get().is_none());
-    assert_eq!(serialize_json_hash(renewed.identity(),&current,32<<20).unwrap(),(hash(&expected_bytes),expected_bytes.len()));
-    assert_eq!(renewed.identity_sha256(),input.identity_sha256());
+    let renewed_bytes=serde_json::to_vec(&eager_identity(renewed.identity())).unwrap();
+    assert_eq!(serialize_json_hash(renewed.identity(),&current,32<<20).unwrap(),(hash(&renewed_bytes),renewed_bytes.len()));
+    assert_eq!(renewed.identity_sha256(),hash(&renewed_bytes));
+    assert_eq!(renewed.identity()["loadPlan"],json!({"kind":"known","files":["a.lua"]}));
+    assert!(Arc::ptr_eq(&renewed.corpus,&input.corpus));
+    assert!(Arc::ptr_eq(&renewed.identity.common,&input.identity.common));
     assert_eq!(renewed.identity()["environment"],old_environment);
     assert_eq!(error_json(serialize_json_hash(renewed.identity(),&c,32<<20))["code"],"command.cancelled");
     current.tracked_cancel_handle().unwrap().cancel();
@@ -234,9 +238,15 @@ fn xml_identity_indexes_materialize_only_requested_value_and_refresh_shares_prog
     assert_eq!(identity(None)["xmlProgram"], Value::Null);
 
     let source = "M={}\n";
+    let mut files = vec![SourceFileInput { path:"a.lua".into(), original_utf8:source.into(), content_sha256:hash(source.as_bytes()), analysis_utf8:source.into(), map:SourceMap::Identity }];
+    // Admit the same generated inline Lua consumed by the production XML load plan.
+    for script in crate::xml_inline::extract("ui.xml", program.original("ui.xml").unwrap().as_bytes()).unwrap() {
+        let text = std::str::from_utf8(script.source_bytes()).unwrap();
+        files.push(SourceFileInput { path:script.key.clone(), original_utf8:text.into(), content_sha256:hash(text.as_bytes()), analysis_utf8:text.into(), map:SourceMap::Identity });
+    }
     let host = TrustedHostEnvironment::from_host_material("identity-fixture".into(), false, vec![], vec![], &c).unwrap();
     let base = SourceInputs::admit(SourceInputSpec {
-        files:vec![SourceFileInput { path:"a.lua".into(), original_utf8:source.into(), content_sha256:hash(source.as_bytes()), analysis_utf8:source.into(), map:SourceMap::Identity }],
+        files,
         workspace_root:std::env::current_dir().unwrap().join("identity-fixture"), source_identity:json!({"pin":"unchanged"}), phase:"after_load".into(),
         ordered_occurrences:vec!["a.lua".into()], config:crate::engine_config::research(), host,
         luac:LuacIdentity { version:"5.1.5".into(), platform:"windows-amd64".into(), executable_sha256:"a".repeat(64), executable_bytes:1 }, limits:SourceLimits::research(),
@@ -245,7 +255,8 @@ fn xml_identity_indexes_materialize_only_requested_value_and_refresh_shares_prog
     let expected = eager_identity(with_xml.identity());
     assert_eq!(with_xml.identity_sha256(), hash(&serde_json::to_vec(&expected).unwrap()));
     assert!(with_xml.identity.xml_value.get().is_none());
-    let next = with_xml.execution("after_load", &["a.lua", "a.lua"], &c).unwrap();
+    let prepared = prepare(Arc::new(with_xml.clone()), &c).unwrap();
+    let next = prepared.build_xml_plan("xml-identity", Arc::clone(&program), None, &c).unwrap().inputs;
     assert!(Arc::ptr_eq(next.identity.xml.as_ref().unwrap(), &program));
     assert!(next.identity.xml_value.get().is_none());
     assert_eq!(next.identity_sha256(), hash(&serde_json::to_vec(&eager_identity(next.identity())).unwrap()));

@@ -455,12 +455,12 @@ mod native_budget_recovery_tests {
         assert_eq!(prepared.files().len(),2);
 
         // Seeding the complete host environment creates no source mutation facts.
-        let seed=prepared.build_execution("host-seed","after_load",&[],None,&control).unwrap();
+        let seed=prepared.build_plan("host-seed", "after_load", LoadPlan::Known(vec![]), None, None, &control).unwrap();
         assert!(seed.object_mutations.is_empty());
         assert!(seed.native_invocations.as_ref().unwrap().control.complete);
         assert_eq!(seed.host_runtime.as_ref().unwrap().bindings.len(),namespace_count);
 
-        let EntryResolution::Unique{candidate}=prepared.entry_symbol_candidates("load.lua","After",&control).unwrap()else{panic!("unique explicit entry")};
+        let EntryResolution::Unique{candidate}=prepared.entry_candidates("load.lua",prepared.inputs().original("load.lua").unwrap().lines().position(|line|line.contains("function After(")).unwrap()+1,&control).unwrap()else{panic!("unique explicit entry")};
         let graph=prepared.build_plan("namespace-entry","after_load",LoadPlan::Known(vec!["load.lua".into()]),Some(EntryRequest{
             candidate:candidate.id.clone(),load_occurrence:Some(0),creation_context:None,arguments:EntryArguments::Exact(vec![]),
         }),None,&control).unwrap();
@@ -511,7 +511,7 @@ mod native_budget_recovery_tests {
         let fields=(0..108).map(|index|format!("f{index}=UnknownValue")).collect::<Vec<_>>().join(",");
         let source=format!("local target\n{}Suffix()\n",format!("target={{{fields}}}\nUnknownCall(target)\n").repeat(40));
         let (prepared,control)=prepared_source(source,247);
-        let graph=prepared.build("changing-prefix",None,&control).unwrap();
+        let graph=prepared.build_plan("changing-prefix", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
         let facts=graph.native_invocations.as_ref().unwrap();
         assert!(!facts.control.complete);
         assert!(facts.control.truncated);
@@ -551,7 +551,7 @@ mod native_budget_recovery_tests {
     fn intervening_write_invalidates_again_without_changing_frozen_old_views() {
         let source="local box={x=1}\nlocal prior=box\nUnknownCall(box)\nlocal lost=box.x\nbox.x=2\nlocal restored=box\nlocal restored_value=box.x\nUnknownCall()\nlocal lost_again=box.x\nlocal later=box\nUnknownCall()\nlocal same=box\n";
         let (prepared,control)=prepared_source(source.into(),0);
-        let graph=prepared.build("intervening-write",None,&control).unwrap();
+        let graph=prepared.build_plan("intervening-write", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
         assert!(graph.native_invocations.as_ref().unwrap().control.complete);
         let prior=use_at(&graph,prepared.inputs(),"local prior=box","box");
         let restored=use_at(&graph,prepared.inputs(),"local restored=box","box");
@@ -587,7 +587,7 @@ mod native_budget_recovery_tests {
     fn captured_cell_rebind_extends_the_full_footprint_and_preserves_other_locals() {
         let source="local box={x=1}\nlocal untouched={x=9}\nlocal function Read() return box end\nUnknownCall(Read)\nbox={x=2}\nlocal current=box\nUnknownCall()\nlocal lost=current.x\nUnknownCall()\nlocal still_lost=current.x\nlocal safe=untouched.x\n";
         let (prepared,control)=prepared_source(source.into(),0);
-        let graph=prepared.build("escaped-cell-rebind",None,&control).unwrap();
+        let graph=prepared.build_plan("escaped-cell-rebind", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
         let facts=graph.native_invocations.as_ref().unwrap();
         assert!(facts.control.complete);
         assert_eq!(facts.escape_events.len(),3);
@@ -616,7 +616,7 @@ mod native_budget_recovery_tests {
         ]{
             let source=format!("local box={{x=1}}\nUnknownCall(box)\n{branch}\nlocal after=box.x\n");
             let (prepared,control)=prepared_source(source,0);
-            let graph=prepared.build(name,None,&control).unwrap();
+            let graph=prepared.build_plan(name, &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
             let facts=graph.native_invocations.as_ref().unwrap();
             assert!(facts.control.complete);
             assert_eq!(facts.escape_events.len(),3);
@@ -635,7 +635,7 @@ mod native_budget_recovery_tests {
     fn checkpoint_storage_shares_namespace_states_and_preserves_explicit_entry() {
         let source=format!("local box={{x=0}}\n{}\nlocal function After() return box.x end\n",(0..12).map(|n|format!("if Flag then box.x={} else box.x={} end\n",n+1,n+2)).collect::<String>());
         let(prepared,control)=prepared_source(source,246);
-        let EntryResolution::Unique{candidate}=prepared.entry_symbol_candidates("load.lua","After",&control).unwrap()else{panic!("unique entry")};
+        let EntryResolution::Unique{candidate}=prepared.entry_candidates("load.lua",prepared.inputs().original("load.lua").unwrap().lines().position(|line|line.contains("function After(")).unwrap()+1,&control).unwrap()else{panic!("unique entry")};
         let graph=prepared.build_plan("shared-checkpoints","after_load",LoadPlan::Known(vec!["load.lua".into()]),Some(EntryRequest{candidate:candidate.id,load_occurrence:Some(0),creation_context:None,arguments:EntryArguments::Exact(vec![])}),None,&control).unwrap();
         let facts=graph.native_invocations.as_ref().unwrap();
         assert!(facts.control.complete,"{:?}",facts.control.boundaries);
@@ -653,7 +653,7 @@ mod native_budget_recovery_tests {
         for round in 1..=32{source.push_str(&format!("if Flag then box.v0={round} end\n"));}
         source.push_str("AfterBudget=1\n");
         let(prepared,control)=prepared_source(source,0);
-        let graph=prepared.build("changed-checkpoint-boundary",None,&control).unwrap();
+        let graph=prepared.build_plan("changed-checkpoint-boundary", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
         let facts=graph.native_invocations.as_ref().unwrap();
         assert!(!facts.control.complete);assert!(facts.control.truncated);
         assert!(facts.control.boundaries.iter().any(|boundary|boundary.reason=="native checkpoint slot budget exceeded"),"{:?}",facts.control.boundaries);
@@ -664,7 +664,7 @@ mod native_budget_recovery_tests {
     fn research_declarations_and_templates_do_not_consume_invocation_instances() {
         let source=(0..320).map(|index|format!("function F{index}() return {index} end\n")).collect::<String>();
         let(prepared,control)=prepared_source(source,0);
-        let EntryResolution::Unique{candidate}=prepared.entry_symbol_candidates("load.lua","F319",&control).unwrap()else{panic!("unique source entry")};
+        let EntryResolution::Unique{candidate}=prepared.entry_candidates("load.lua",320,&control).unwrap()else{panic!("unique source entry")};
         let graph=prepared.build_plan("many-module-declarations","after_load",LoadPlan::Known(vec!["load.lua".into()]),Some(EntryRequest{candidate:candidate.id,load_occurrence:Some(0),creation_context:None,arguments:EntryArguments::Exact(vec![])}),None,&control).unwrap();
         let facts=graph.native_invocations.as_ref().unwrap();
         assert!(facts.control.complete,"{:?}",facts.control.boundaries);
@@ -678,7 +678,7 @@ mod native_budget_recovery_tests {
     fn research_factory_instances_still_share_original_closure_budget() {
         let source=format!("local function Make() return function() return 1 end, function() return 2 end end\n{}", "local a,b=Make()\n".repeat(129));
         let(prepared,control)=prepared_source(source,0);
-        let graph=prepared.build("dynamic-instance-budget",None,&control).unwrap();
+        let graph=prepared.build_plan("dynamic-instance-budget", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
         let facts=graph.native_invocations.as_ref().unwrap();
         assert!(!facts.control.complete);assert!(facts.control.truncated);
         assert!(facts.control.boundaries.iter().any(|boundary|boundary.reason=="native closure instance budget exceeded"),"{:?}",facts.control.boundaries);
@@ -689,7 +689,7 @@ mod native_budget_recovery_tests {
     fn research_projects_all_admitted_storage_facts() {
         let source=format!("local original=7\n{}",(0..2200).map(|index|format!("local copy{index}=original\n")).collect::<String>());
         let(prepared,control)=prepared_source(source,0);
-        let graph=prepared.build("common-storage-projection",None,&control).unwrap();
+        let graph=prepared.build_plan("common-storage-projection", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
         let native=graph.native_invocations.as_ref().unwrap();
         assert!(native.control.complete,"{:?}",native.control.boundaries);
         let facts=graph.host_runtime.as_ref().unwrap();
@@ -704,7 +704,7 @@ mod native_budget_recovery_tests {
         for index in 0..180{source.push_str(&format!("changing.y={index}\nlocal copy{index}=stable.child.x\n"));}
         source.push_str("local before=stable.child.x\nlocal alias=stable.child\nalias.x=2\nlocal after=stable.child.x\n");
         let(prepared,control)=prepared_source(source,0);
-        let graph=prepared.build("reachable-shape-versions",None,&control).unwrap();
+        let graph=prepared.build_plan("reachable-shape-versions", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control).unwrap();
         assert!(graph.native_invocations.as_ref().unwrap().control.complete,"{:?}",graph.native_invocations.as_ref().unwrap().control.boundaries);
         let original=use_at(&graph,prepared.inputs(),"local original=stable.child.x","stable");
         let before=use_at(&graph,prepared.inputs(),"local before=stable.child.x","stable");

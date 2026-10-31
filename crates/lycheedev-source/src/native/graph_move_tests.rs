@@ -20,7 +20,7 @@ fn assert_graph_cancelled(prepared: &PreparedSnapshot, seed: &Graph) {
     let result = build_graph(prepared, &seed.scenario, seed.snapshot_inputs.as_ref().clone(), seed.inputs.clone());
     assert_eq!(result.as_ref().err(), Some(&expected.to_string()));
     assert_eq!(seed.inputs.shared_steps.load(Ordering::Relaxed), before);
-    let error = prepared.build("cancelled-public-build", None, control).err().unwrap();
+    let error = prepared.build_plan("cancelled-public-build", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, control).err().unwrap();
     assert_eq!(serde_json::to_value(error).unwrap(), serde_json::to_value(&expected).unwrap());
     assert_eq!(serde_json::to_value(seed.check().unwrap_err()).unwrap(), serde_json::to_value(expected).unwrap());
 }
@@ -29,7 +29,7 @@ fn assert_graph_cancelled(prepared: &PreparedSnapshot, seed: &Graph) {
 fn current_graph_rebuild_preserves_complete_facts_and_cancellation() {
     let c = control();
     let prepared = prepare(inputs(&c, false), &c).unwrap();
-    let graph = prepared.build("graph-rebuild-complete", None, &c).unwrap();
+    let graph = prepared.build_plan("graph-rebuild-complete", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c).unwrap();
     assert_graph(&graph, &c, None);
     assert!(!graph.calls.is_empty());
     let facts = graph.native_invocations.as_ref().unwrap();
@@ -58,8 +58,7 @@ fn graph_moves_preserve_unknown_plan_and_flow_budget_partial_graphs() {
         };
         let prepared = prepare(input, &c).unwrap();
         let graph = if budget {
-            prepared
-                .build("graph-move-budget", None, &c)
+            prepared.build_plan("graph-move-budget", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c)
                 .unwrap()
         } else {
             prepared
@@ -161,8 +160,7 @@ fn graph_moves_preserve_checkpoint_objects_cells_roots_and_full_json() {
     // containers and their nested object/cell payloads nonempty.
     let source = "function F(x) return x end\nlocal t={value=1}\nif Flag then t.value=2 else t.value=3 end\nA=t.value\nHost()\n";
     let prepared = prepare(graph_fixture_inputs(&c, false, source, None), &c).unwrap();
-    let graph = prepared
-        .build("graph-move-checkpoint", None, &c)
+    let graph = prepared.build_plan("graph-move-checkpoint", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c)
         .unwrap();
     let facts = graph.native_invocations.as_ref().unwrap();
     assert!(facts.control.complete);

@@ -58,7 +58,7 @@ fn pinned_empty_trivia_and_empty_statement_shapes_remain_distinct() {
 fn empty_known_loads_keep_occurrences_views_activations_and_explicit_entry() {
     let prepared=fixture(&[("zero.lua",""),("code.lua","function F(x) return x end\n"),("bom.lua","\u{feff}")],&["zero.lua","code.lua","zero.lua","bom.lua"]);
     {
-        let graph=prepared.build("empty-known",None,&prepared.control).unwrap();
+        let graph=prepared.build_plan("empty-known", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &prepared.control).unwrap();
         assert_eq!(graph.script_load_occurrences,["0:zero.lua","1:code.lua","2:zero.lua","3:bom.lua"]);
         assert_eq!(graph.functions.len(),1);assert_eq!(graph.functions[0].load_occurrence,1);
         assert!(graph.writes.iter().all(|write|write.site.file=="code.lua"));
@@ -130,7 +130,7 @@ fn malformed_and_missing_sources_keep_their_original_first_errors() {
 }
 
 fn builder(prepared:&PreparedSnapshot)->Builder {
-    let seed=prepared.build_execution("empty-block-reference","after_load",&[],None,&prepared.control).unwrap();
+    let seed=prepared.build_plan("empty-block-reference", "after_load", LoadPlan::Known(vec![]), None, None, &prepared.control).unwrap();
     Builder{inputs:seed.inputs.clone(),control:prepared.control.clone(),graph:seed.facts.clone(),
         harvest:harvest(&prepared.analysis,&["input.lua"],&prepared.inputs,&prepared.control).unwrap(),
         cells:BTreeMap::new(),objects:vec![],bodies:vec![],heap_observation:0,object_versions:vec![],object_view_ids:BTreeMap::new(),object_slots:0,field_write_observations:BTreeMap::new(),observation_failure:None,native:NativeInvocationState::default(),xml_objects:BTreeMap::new()}
@@ -178,7 +178,7 @@ fn empty_public_loads_preserve_cancellation_and_deadline_first_error() {
         prepared.control=stopped.clone();
         let expected=serde_json::to_value(stopped.check().unwrap_err()).unwrap();
         let before=prepared.inputs.shared_steps.load(Ordering::Relaxed);
-        let error=prepared.build("empty-stopped",None,&stopped).err().unwrap();
+        let error=prepared.build_plan("empty-stopped", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &stopped).err().unwrap();
         assert_eq!(serde_json::to_value(error).unwrap(),expected);
         let error=prepared.build_plan("empty-stopped","after_load",LoadPlan::Known(vec!["empty.lua".into(),"missing.lua".into()]),None,None,&stopped).err().unwrap();
         assert_eq!(serde_json::to_value(error).unwrap(),expected);

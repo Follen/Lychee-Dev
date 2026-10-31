@@ -90,6 +90,17 @@ Delivery的[npm回归](crates/lycheedev-delivery/src/npm_update.rs)覆盖预取�
 | [native_nominal_real.rs](crates/lycheedev-source/tests/native_nominal_real.rs)、[native_checker_families_real.rs](crates/lycheedev-source/tests/native_checker_families_real.rs)、[native_return_count_real.rs](crates/lycheedev-source/tests/native_return_count_real.rs) | 实际native的对象类型、方法、参数/返回基数和控制流；调用许可与返回观察独立，未知返回保留已知参数及返回前缀，条件调用和未知基数不伪报完成。[invocation.rs](crates/lycheedev-source/src/native/invocation.rs)中的vararg回归经真实Builder/Entry核非尾与括号单值、精确空/单/多值展开、固定参数/self偏移、赋值补nil及未知尾partial。 | 保留 |
 | [matrix_config.rs](crates/lycheedev-source/tests/matrix_config.rs)、[matrix_real.rs](crates/lycheedev-source/tests/matrix_real.rs)、[matrix_four_real.rs](crates/lycheedev-source/tests/matrix_four_real.rs) | 严格的 matrix 输入及多个固定产品各自的分析/失败/CAP；不合并客户端身份。 | 保留 |
 | [diff_prune.rs](crates/lycheedev-source/tests/diff_prune.rs) | 声明/签名/位置差异、同提交无变化、未完整分析的缺失语义，以及活动源码/证据保护和可回收对象。 | 保留 |
+| [admission_contract_tests.rs](crates/lycheedev-source/src/native/admission_contract_tests.rs)、[query_contract_tests.rs](crates/lycheedev-source/src/native/query_contract_tests.rs) | 原始输入/hash/BOM、host材料与指针/arity/rules、独立控制与停止；实际definitions/calls的词法/加载/捕获、游标归属及分页。 | 默认libtest |
+| [entry_contract_tests.rs](crates/lycheedev-source/src/native/entry_contract_tests.rs)、[owned_context_contract_tests.rs](crates/lycheedev-source/src/native/owned_context_contract_tests.rs) | 真实host/explicit-entry传播、参数/receiver/vararg、depth与verified-prefix；实际OwnedQuery的上下文隔离、对象epoch/member APIs与成员标量负例、已有检查器的精确诊断、捕获/逃逸与返回槽。 | 默认libtest |
+| [extraction_contract_tests.rs](crates/lycheedev-source/src/xml_program/extraction_contract_tests.rs) | production XML extractor的原始字节/顺序/实体/换行/位置、catalog来源、Unicode词法、Bindings元数据和未解决root text、完整声明/属性负例。 | 默认libtest |
+
+9个孤立Source examples及其专属probe support已退役。原Lua/JSON/XML输入保留；独立断言直接调用当前生产API，移除打印/汇总executor、旧fixture网络准备与纯观测输出。旧build/build_execution/query及entry-by-name包装、仅测试的refs/context投影与XML严格probe profile一并退役。测试使用正式build_plan/build_xml_plan、entry_candidates、freeze/OwnedQuery及实际inline编译行映射；引用/上下文保现有research投影与公共CLI覆盖。XML来源/复制/写入版本断言直接核实际Graph与Program action。已经由当前vararg/重入测试覆盖的预期继续使用原测试，过时的vararg拒绝不作为当前合同。
+
+这五份文件共35个默认测试，不再依赖手动运行example。词法预期覆盖`for`变量只在循环体可见，循环头和结束后继续选外层声明；[syntax.rs](crates/lycheedev-source/src/native/syntax.rs)的窄适配复用Emmy原scope/decl事实。XML身份用例包含原XML实际生成的inline Lua。OwnedQuery分别核实际返回槽、声明签名、真实diagnostic和返回基数coverage：声明已知不补写未观察到的实际返回数量。
+
+对象回归保成员值、epoch、跨文件/owner、引用分离、generic载体和动态unknown；按原注解固定number预期，从实际对象取member_type，独立比较number/string成员负例。structure_allowed只证明身份和形状可用。固定General Object关系采用浅比较，旧record/nullable整对象深比较目标没有当前业务合同依据，已从默认迁移断言中退役，未改成相反预期或移为ignored；原audit-record-union.lua仍保留。它不计深字段检查能力或通过。实际执行结果见handover。
+
+generic返回回归按冷查询精确区分Integer与Number，保三种phase/load-order上下文和原诊断集合，验证泛型扩宽整数可用于number返回声明。对象载体的身份/epoch/字段与查询来源位置分别断言，参数NameExpr与返回CallExpr不要求整个OwnedValue相等。
 
 ### Emmy adapter 与共享类型
 
@@ -202,13 +213,13 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 | N01 / Agent自解释 | 安装Skill→search/schema/help/describe。命令示例、必填/条件输入、更新policy与实际typed admission一致；Data请求和响应字段、普通/Agent framing、错误纠正可用；发现不创建home、不联网、不起worker。 |
 | N02 / 类型化编排 | CLI/Agent转正式领域请求，固定项目/矩阵/原始probe输入；Source/Data/Live各有独立归属。实际Data断管、CAP保留、Source复用与持久Live恢复互不冒充游戏行为。 |
 | N03 / Data查询与领域 | 原始DB2/CASC→Session/Engine/DataFusion；通用plan及全部领域任务、关系/顺序/精确数/数组/null、真实partial与完整空来源；page/export/CAP复用同handle，Explain/Analyze按声明执行。 |
-| N04 / 真实数据范围 | 固定原BLTE与独立逐行/像素预期；七产品独立PIN，两Forever保持缺密钥/分区事实。明确synthetic元数据与真实当前安装分别证明什么；旧build不冒充更新后安装。 |
+| N04 / 真实数据范围 | 六个当前产品的独立PIN、固定原BLTE与逐行/像素预期；正式Forever必须绑定wowf身份。两Beta原输入保留历史缺密钥/分区事实和退休目标负例，不转为正式版成功。明确synthetic元数据与真实当前安装分别证明什么；旧build不冒充更新后安装。 |
 | N05 / Source语义 | 固定源码和环境→实际Emmy/luac/TOC/XML；声明、引用、调用、位置、关系与值流，冷暖认证/按需原文、unknown/partial、会话复用与关闭。 |
 | N06 / Mailbox离线 | 当前addon writer↔正式Rust Driver/SessionOwner；精确JSON/字节、原request/deadline、取消、未知输入不重放、report/cleanup分离；formal Lua bridge只证明离线协议。 |
 | N07 / 实际worker | 排队、背压、断管、EOF、CPU执行中取消与deadline；同Job全部回收、epoch失效、不重放、已提交CAP保留。单根退出或强制清理不算原正常回收成功。 |
 | N08 / 资源与存储 | Data十进制5GB、共享blob一次计费、峰值、活跃/CAP保护、staging/spill/export；实际进程中断、原身份/锁/reparse/checked-close、发布后未知状态与退款。构建scratch不是产品Data总账。 |
 | N09 / 正式包 | 唯一TGZ的隔离npm/Skill/addon/luac、同包实际Source/Data与安装恢复；manifest/版本/提交/dirty/许可证/完整资源匹配，验证阶段无重建。 |
-| N10 / 实机 | 按handover最后H01—H08，七产品、500槽、绑定、多实例与恢复逐项实机；用户安排前不占用。 |
+| N10 / 实机 | 按handover最后H01—H08，六个当前产品、500槽、绑定、多实例与恢复逐项实机，Forever只验正式版；用户安排前不占用。 |
 | N11 / 原始源码编码 | 下述非UTF8与原位置合同，单文件告警不丢全快照或伪造语义。 |
 | N12 / CI产物流 | 测试/Release每配置生产一次，两shard覆盖唯一record；Lua/addon/Skill、安装/业务/审计/候选复用原物，漏程序/缺输入/篡改/未回收均失败。 |
 
@@ -230,11 +241,16 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 | Data领域 | 认证原DB2/CASC及固定定义；12种navigate/17独立向量、浮点/数组、自动CAP、三类unavailable与完整空来源，以及同会话错误恢复。 |
 | 查询与effective | 精确数值、lookup/batch/related/explain/analyze、同handle分页/CSV/JSON/CAP/release/close；两份原XFTH经正式Hotfix归档后验证新增/替换/删除、push/index/历史顺序、static不变及错误恢复。 |
 | Hotfix与demux | 原XFTH归档续读、固定Wago HTML离线重解析/过滤/游标及完整性、AVI原字节/限额/冲突保留。固定HTML不冒充当前远程服务验证。 |
-| 七产品Map | 保留真实BLTE全字节及原加密块，用明确synthetic元数据和新独立PIN读取，逐原文SHA/全部行值/顺序/分页/CSV/CAP核对；两个Forever保持73/81与缺key/不可读分区。Retail cold和显式prepare分别证明读取及generation复用。新旧PIN分开，不作为已更新真实安装或Live通过。 |
+| 当前产品Map | 六个支持产品各用独立PIN；正式Forever输入绑定wowf实际build/config，不能把Beta输入改名使用。保留真实BLTE全字节与原加密块，逐原文SHA/全部行值/顺序/分页/CSV/CAP核对，明确synthetic CASC元数据的范围。Retail cold和显式prepare分别证明读取及generation复用。 |
+| 历史Beta输入 | 原两个Forever Beta的73/81、缺key和不可读分区结果仅证明原固定输入；保留PIN/CAP/raw身份，验证历史读取不改写、当前目标选择拒绝，不计正式Forever或更新后安装通过。 |
 | 原资源导出 | 134400原BLTE与独立BLP/PNG/RGBA；原始字节、PNG/WebP64×64全像素，以及来源/导出/清单CAP依赖。 |
 | 受管交付 | 合成client的main/500槽/Skill安装、幂等、update、真实deny-delete故障、原归档/不传release的resume与重复resume、归档移除及无关文件保留。 |
 | npm自更新 | loopback registry只服务同一原TGZ，两次真实prepare/handoff/apply与隔离global-prefix安装；历史字节、新nonce、500槽、完整journal和服务/进程关闭。不发布或修改真实渠道。 |
 | 管理与Agent使用 | config/target/cache/keep/doctor只读诊断与离线target修复；独立Agent仅读安装Skill、实际metadata与用户原输入，自主完成Source和三个Data任务，Root另用未透露的oracle核有用答案、精确数值、partial及收尾。doctor Live repair仍留后。 |
+
+正式Forever回归贯穿产品目录与常用名、Source family、Data/Changes admission、wowf远端URL与缓存、`_forever_`安装发现、flavor/可用版本文件/`.build.info`交叉核对、addon profile、Live绑定和原恢复。正例至少区分本地build与远端最新build；负例包含退休Beta当前选择、跨slot/config/产品冲突和将`wow_forever`用作远端码。历史记录认证与新目标准入分别验证，原raw输入不改写。Live部分本轮只运行离线用例。
+
+[selection file测试](crates/lycheedev-core/src/selection/file/tests.rs)通过真实文件发布owner验证正式Forever/CAS既存身份、两个退休Beta的source/data/changes及parent继承拒绝、旧PIN原bytes/generation和历史reader不变；[CLI文件测试](crates/lycheedev-cli/src/target_remote/tests/file.rs)验证实际argv/dispatch错误封套、输入字节和无PIN/CAP发布。local/remote父Data冲突由共同Core继承owner处理，两真实target入口各保一项config反例，不另保重复pre-guard。
 
 ## 8. 执行与记录规则
 

@@ -142,8 +142,6 @@ fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
         assert_ne!(actual.as_ptr(), file.analysis.as_ptr());
         assert_eq!(actual, file.analysis.as_ref());
     }
-    assert_eq!(prepared.engine_text_cost().retained_bytes, input.corpus.files.iter().map(|file|file.analysis.len()).sum::<usize>());
-    assert_eq!(prepared.engine_text_cost().largest_file_bytes, input.corpus.files.iter().map(|file|file.analysis.len()).max().unwrap_or(0));
     let binding = input.host.bindings()[0].clone();
     assert!(Arc::ptr_eq(&binding.data, &input.host.bindings()[0].data));
     assert!(std::ptr::eq(
@@ -152,8 +150,7 @@ fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
     ));
     let original_binding = serde_json::to_value(binding.data.as_ref()).unwrap();
     assert_eq!(serde_json::to_value(&binding).unwrap(), original_binding);
-    let base = prepared
-        .build("base", None, &c)
+    let base = prepared.build_plan("base", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c)
         .unwrap();
     assert_graph(&base, &c, None);
     let duplicate = prepared
@@ -236,8 +233,7 @@ fn shared_corpus_does_not_share_request_ownership_or_cancellation() {
     let c = control();
     let input = inputs(&c, false);
     let mut prepared = prepare(input.clone(), &c).unwrap();
-    let old = prepared
-        .build("old", None, &c)
+    let old = prepared.build_plan("old", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c)
         .unwrap();
     let next = control();
     prepared.begin_research_request(&next).unwrap();
@@ -265,8 +261,7 @@ fn shared_corpus_does_not_share_request_ownership_or_cancellation() {
             .freeze(&old, NativeViewSelection::SourceTemplates, &next)
             .is_err()
     );
-    let fresh = prepared
-        .build("fresh", None, &next)
+    let fresh = prepared.build_plan("fresh", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &next)
         .unwrap();
     assert_eq!(old.snapshot_key, fresh.snapshot_key);
     assert!(
@@ -333,7 +328,7 @@ fn entry_line_lookup_preserves_typed_stop_causes() {
             let before = prepared.entry_candidate("a.lua", syntax).unwrap();
             if fallback { prepared.original_lines.clear(); }
             assert_eq!(prepared.entry_candidate("a.lua", syntax).unwrap(), before);
-            assert!(matches!(prepared.entry_symbol_candidates("a.lua", "F", &c).unwrap(), EntryResolution::Unique { .. }));
+            assert!(matches!(prepared.entry_candidates("a.lua", 1, &c).unwrap(), EntryResolution::Unique { .. }));
 
             let stopped = stopped_control(deadline, Instant::now() + Duration::from_secs(30));
             prepared.control = stopped.clone();
@@ -342,7 +337,7 @@ fn entry_line_lookup_preserves_typed_stop_causes() {
             // stringified line-lookup errors before public input_error mapping.
             let actual = prepared.entry_candidate("a.lua", syntax).unwrap_err();
             assert_eq!((actual.code, actual.exit_code), (expected.code.clone(), expected.exit_code));
-            let actual = prepared.entry_symbol_candidates("a.lua", "F", &stopped).unwrap_err();
+            let actual = prepared.entry_candidates("a.lua", 1, &stopped).unwrap_err();
             assert_eq!((actual.code, actual.exit_code), (expected.code, expected.exit_code));
         }
     }

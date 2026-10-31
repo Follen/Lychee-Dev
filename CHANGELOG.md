@@ -41,10 +41,32 @@ is not a published-release acceptance record.
 - Command errors expose the recognized command's correction metadata, required
   flags match typed admission, and Data Agent discovery describes actual response
   frames, result handles, exact values, paging, exports and captures.
+- Isolated Source probe executables and their dedicated support adapters have
+  been retired. Their independent Lua/JSON/XML inputs and useful assertions now
+  exercise the current native builder, owned queries and production XML extractor
+  in default tests. Test-only query projections and obsolete builder wrappers
+  have been removed.
+- The support scope now uses formal Forever (`forever`, official product `wowf`,
+  client folder `_forever_`) across source, data, delivery, addon and Live
+  contracts. The two Forever beta products are retired as current targets;
+  historical inputs and recovery records keep their exact identities. The
+  remaining implementation and acceptance work is tracked in `todo.md`.
 - Distribution is the npm package plus the native Windows amd64 payload. The npm
   package contains the native CLI, the addon and the Skill; the version and npm
   channel configuration are defined by `release/version.json` and
   `release/npm-channel.json`.
+
+### Fixed
+
+- Source lexical resolution now limits a `for` variable to the loop body, so it
+  does not shadow an outer declaration in the loop header or after the loop.
+- Source return validation accepts an inferred integer for a declared number,
+  including integer values widened by generic inference.
+- Selection files reject retired Forever beta products before publication,
+  including inherited components, while historical pins remain readable.
+- Update selection no longer hardcodes a toolkit version to an npm tag or falls
+  back to `latest`; candidate admission and public update metadata use the same
+  embedded channel authority.
 
 ### Verification and limits
 

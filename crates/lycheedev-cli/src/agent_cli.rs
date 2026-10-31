@@ -537,18 +537,9 @@ pub fn discover(inv: &Invocation) -> Option<Result<Outcome>> {
             let products = crate::discovery::product_matches(query);
             let mut next = json!({"schema":"lycheedev schema <command...>","help":"lycheedev <command> --help"});
             if !products.is_empty() {
-                let forever = products
-                    .iter()
-                    .any(|product| product["family"] == "forever");
-                next["product"] = if forever {
-                    json!(
-                        "Choose forever-asia-beta or forever-cn-beta by region; equal builds do not merge them."
-                    )
-                } else {
-                    json!(
-                        "Use the matched product identity as-is; keep its exact series/build and TOC interface."
-                    )
-                };
+                next["product"] = json!(
+                    "Use the matched product identity as-is; keep its exact series/build and TOC interface."
+                );
             }
             Ok(
                 json!({"schema":"lycheedev.cli-search.v1","query":query,"limit":SEARCH_LIMIT,
@@ -897,7 +888,7 @@ mod tests {
         assert!(parse(&args(&["cli", "search", "spell", "effects"])).is_err());
     }
     #[test]
-    fn product_search_returns_both_betas_and_a_conditional_next_hint() {
+    fn product_search_returns_formal_forever_and_a_conditional_next_hint() {
         let outcome = discover(&parse(&args(&["cli", "search", "无限服"])).unwrap())
             .unwrap()
             .unwrap()
@@ -908,9 +899,10 @@ mod tests {
             .iter()
             .map(|row| row["id"].as_str().unwrap())
             .collect();
-        assert!(ids.contains(&"forever-asia-beta"), "{ids:?}");
-        assert!(ids.contains(&"forever-cn-beta"), "{ids:?}");
-        assert!(outcome["next"]["product"].is_string());
+        assert_eq!(ids, ["forever"]);
+        let hint = outcome["next"]["product"].as_str().unwrap();
+        assert!(hint.contains("product identity"));
+        assert!(!hint.contains("beta"));
         let outcome = discover(&parse(&args(&["cli", "search", "spell"])).unwrap())
             .unwrap()
             .unwrap()

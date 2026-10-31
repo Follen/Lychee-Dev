@@ -120,24 +120,17 @@ fn lookup_freeze_preserves_public_declaration_bytes_and_static_kind_text() {
 }
 
 #[test]
-fn packed_declaration_target_keeps_public_reference_proof_and_context_identity() {
+fn packed_declaration_target_keeps_actual_definition_identity() {
     let control=OperationControl::uncancelable(Instant::now()+Duration::from_secs(30));
     let prepared=prepare(admitted(&control),&control).unwrap();
     let declaration=&prepared.syntax.declarations[0];
     let public_id=source_decl_id(&prepared.inputs,&declaration.site.public(&prepared.inputs));
     let query=prepared.source_queries(&control).unwrap();
-    let references=query.references(QueryTarget::Declaration(public_id.clone()),
-        ReferenceFilter::default(),PageRequest::default()).unwrap();
-    assert!(!references.has_more);
-    assert!(references.rows.iter().any(|row|row.roles.contains(&ReferenceRole::Read)));
-    for row in &references.rows{assert_eq!(row.lexical_declaration.as_deref(),Some(public_id.as_str()));}
-    let declared=references.rows.iter().find(|row|row.roles.contains(&ReferenceRole::Declaration)).unwrap();
-    assert_eq!(declared.id,digest(&(&public_id,"declaration_reference")));
-    assert_eq!(declared.proof,public_id);
-    let context=query.context(QueryTarget::Declaration(public_id.clone()),ContextOptions::default(),PageRequest::default()).unwrap();
-    let row=context.rows.iter().find(|row|row.kind=="lexical_declaration").unwrap();
-    assert_eq!(row.id,public_id);
-    assert_eq!(row.detail["declaration"]["id"],public_id);
+    let text=prepared.inputs.original("a.lua").unwrap();let start=text.find("return value").unwrap()+"return ".len();
+    let definition=query.definitions(&Site {file:"a.lua".into(),start:start as u32,end:(start+"value".len())as u32}).unwrap();
+    let QueryFact::Known{value}=definition.lexical else {panic!("original lexical declaration missing")};
+    assert_eq!(value.id,public_id);assert_eq!(value.site,declaration.site.public(&prepared.inputs));assert_eq!(value.kind,"local");
+    assert!(matches!(definition.selected,QueryFact::NotApplicable));
 }
 
 #[test]
@@ -160,8 +153,7 @@ fn compacted_lookup_keeps_original_query_cancellation_and_final_charge_boundary(
     assert_eq!(prepared.inputs.shared_steps.load(Ordering::Relaxed),limit-rows+1);
     let query=prepared.source_queries(&control).unwrap();
     control.tracked_cancel_handle().unwrap().cancel();
-    let error=query.references(QueryTarget::Declaration(prepared.syntax.declarations[0].id.public()),
-        ReferenceFilter::default(),PageRequest::default()).unwrap_err();
+    let error=query.calls(QueryTarget::Declaration(prepared.syntax.declarations[0].id.public()),PageRequest::default()).unwrap_err();
     assert_eq!(error.code,"command.cancelled");
     assert_eq!(prepared.inputs.shared_steps.load(Ordering::Relaxed),limit-rows+1);
 }

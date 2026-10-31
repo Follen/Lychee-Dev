@@ -136,7 +136,9 @@ fn typed_spec_timestamp_is_normalized_and_invalid_or_unknown_documents_are_rejec
         decoded.spec.changes.unwrap().fetched_at,
         "2026-10-15T01:02:03.12Z"
     );
-    let error = wire::decode(changes("bad", "").as_bytes(), &control).err().unwrap();
+    let error = wire::decode(changes("bad", "").as_bytes(), &control)
+        .err()
+        .unwrap();
     assert_eq!(error.message, "invalid selection timestamp");
     assert_eq!(error.code, "command.failed");
     let error = wire::decode(
@@ -271,9 +273,7 @@ fn child_pin_inherits_matching_parent_source_and_rejects_conflict() {
     let parent = f.run(&spec()).unwrap();
     let inherited = source();
     let child = f
-        .run(
-            &serde_json::to_vec(&json!({"parent":parent.id,"source":inherited})).unwrap(),
-        )
+        .run(&serde_json::to_vec(&json!({"parent":parent.id,"source":inherited})).unwrap())
         .unwrap();
     assert_eq!(child.source, parent.source);
     assert_eq!(child.parent, parent.id);
@@ -310,8 +310,7 @@ fn real_metadata_schema_lease_wait_observes_original_deadline_and_releases_input
     let f = Fixture::new();
     fs::write(&f.path, spec()).unwrap();
     let lease =
-        crate::metadata::owned_write::owned_lease(&f.home, "metadata-schema", &f.control)
-            .unwrap();
+        crate::metadata::owned_write::owned_lease(&f.home, "metadata-schema", &f.control).unwrap();
     let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(30));
     let error = resolve_selection_file_controlled(&f.home, &f.path, &control).unwrap_err();
     assert_eq!(
@@ -329,5 +328,178 @@ fn real_metadata_schema_lease_wait_observes_original_deadline_and_releases_input
     // not retain its input File. A later fresh invocation can acquire metadata.
     fs::remove_file(&f.path).unwrap();
     assert!(f.run(&spec()).is_ok());
+    f.cleanup();
+}
+
+#[test]
+fn formal_forever_file_publishes_complete_fixed_identity_and_reauthenticates_cas_winner() {
+    let f = Fixture::new();
+    let raw = serde_json::to_vec(&json!({
+        "source": {"repository":"wow-ui-source","product":"forever","requestedRef":"forever","exactCommit":"4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069","parserRevision":"file-fixture"},
+        "data": {"product":"forever","region":"cn","fullBuild":"1.60.1.70658","buildConfig":"165410aca770316ea0f88100bb4830c2","cdnConfig":"c74a0a5afa69d7b60e07f7dae9fc7969","language":"zhCN","definitionCommit":"e".repeat(40)},
+        "changes": {"provider":"fixture","product":"forever","fullBuild":"1.60.1.70658","region":"cn","scope":"all","fetchedAt":"2026-10-31T00:00:00Z","sha256":"f".repeat(64)}
+    })).unwrap();
+    let pin = f.run(&raw).unwrap();
+    assert_eq!(pin.source.as_ref().unwrap().product, "forever");
+    assert_eq!(
+        pin.data.as_ref().unwrap().build_config,
+        "165410aca770316ea0f88100bb4830c2"
+    );
+    assert_eq!(
+        pin.data.as_ref().unwrap().cdn_config,
+        "c74a0a5afa69d7b60e07f7dae9fc7969"
+    );
+    assert_eq!(pin.data.as_ref().unwrap().full_build, "1.60.1.70658");
+    assert_eq!(pin.changes.as_ref().unwrap().product, "forever");
+    let key = format!("pin/{}", pin.id);
+    let before = Metadata::read_document_raw_controlled(&f.home, &key, &f.control).unwrap();
+    assert_eq!(f.run(&raw).unwrap().id, pin.id);
+    let after = Metadata::read_document_raw_controlled(&f.home, &key, &f.control).unwrap();
+    assert_eq!(after.generation, before.generation);
+    assert_eq!(after.bytes, before.bytes);
+    assert_eq!(fs::read(&f.path).unwrap(), raw);
+    let metadata = Metadata::open_controlled(&f.home, false, &f.control).unwrap();
+    assert_eq!(metadata.list::<Value>("pin/", 100).unwrap().len(), 1);
+    assert!(metadata.list::<Value>("capture/", 100).unwrap().is_empty());
+    metadata.close().unwrap();
+    f.cleanup();
+}
+
+#[test]
+fn retired_file_source_data_changes_and_shared_family_specs_reject_before_publication() {
+    let f = Fixture::new();
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        let mut source = source();
+        source["product"] = json!(product);
+        let data = json!({"product":product,"region":"cn","fullBuild":"1.60.1.70532","buildConfig":"b".repeat(32),"cdnConfig":"c".repeat(32),"language":"zhCN","definitionCommit":"d".repeat(40)});
+        let changes = json!({"provider":"fixture","product":product,"fullBuild":"1.60.1.70532","region":"cn","scope":"all","fetchedAt":"2026-10-31T00:00:00Z","sha256":"e".repeat(64)});
+        let mut family = source.clone();
+        family["product"] = json!("forever");
+        for spec in [
+            json!({"source":source}),
+            json!({"data":data}),
+            json!({"changes":changes}),
+            json!({"source":family,"data":data,"changes":changes}),
+        ] {
+            let raw = serde_json::to_vec(&spec).unwrap();
+            let error = f.run(&raw).unwrap_err();
+            assert_eq!(error.code, "command.failed");
+            assert_eq!(error.exit_code, 5);
+            assert_eq!(
+                error.message,
+                format!("selection.unsupported_data_product: retired product {product}")
+            );
+            assert!(error.details.is_null());
+            assert_eq!(fs::read(&f.path).unwrap(), raw);
+        }
+    }
+    let metadata = Metadata::open_controlled(&f.home, false, &f.control).unwrap();
+    assert!(metadata.list::<Value>("pin/", 100).unwrap().is_empty());
+    assert!(metadata.list::<Value>("capture/", 100).unwrap().is_empty());
+    metadata.close().unwrap();
+    // The failed file and writer owners are closed; this same original operation
+    // can authenticate and publish a supported selection afterwards.
+    fs::remove_file(&f.path).unwrap();
+    assert_eq!(
+        f.run(&spec()).unwrap().source.as_ref().unwrap().product,
+        "retail"
+    );
+    f.cleanup();
+}
+
+#[test]
+fn inherited_retired_target_rejects_without_changing_historical_read_or_cas_identity() {
+    let f = Fixture::new();
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        let legacy_spec = SelectionSpec {
+            source: Some(SourcePin {
+                repository: "wow-ui-source".into(),
+                product: "forever".into(),
+                requested_ref: "forever".into(),
+                exact_commit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069".into(),
+                parser_revision: "historical-file-fixture".into(),
+            }),
+            data: Some(DataPin {
+                product: product.into(),
+                region: "cn".into(),
+                full_build: "1.60.1.70532".into(),
+                build_config: "b".repeat(32),
+                cdn_config: "c".repeat(32),
+                language: "zhCN".into(),
+                definition_commit: "d".repeat(40),
+            }),
+            ..Default::default()
+        };
+        // This low-level frozen identity writer is not a current target selector.
+        let legacy = pin_selection_controlled(&f.home, legacy_spec.clone(), &f.control).unwrap();
+        let key = format!("pin/{}", legacy.id);
+        let before = Metadata::read_document_raw_controlled(&f.home, &key, &f.control).unwrap();
+        let error = f
+            .run(&serde_json::to_vec(&json!({"parent":legacy.id})).unwrap())
+            .unwrap_err();
+        assert_eq!(error.code, "command.failed");
+        assert_eq!(error.exit_code, 5);
+        assert_eq!(
+            error.message,
+            format!("selection.unsupported_data_product: retired product {product}")
+        );
+        assert_eq!(
+            stored_pin(&before.bytes, &legacy.id, &f.control)
+                .unwrap()
+                .data,
+            legacy.data
+        );
+        assert_eq!(
+            load_pinned_controlled(&f.home, &legacy.id, &f.control)
+                .unwrap()
+                .data,
+            legacy.data
+        );
+        assert_eq!(
+            pin_selection_controlled(&f.home, legacy_spec, &f.control)
+                .unwrap()
+                .id,
+            legacy.id
+        );
+        // Existing parent conflicts still take precedence over current admission.
+        let mut conflict = legacy.data.clone().unwrap();
+        conflict.build_config = "f".repeat(32);
+        let error = f
+            .run(&serde_json::to_vec(&json!({"parent":legacy.id,"data":conflict})).unwrap())
+            .unwrap_err();
+        assert_eq!(error.message, "selection.fixed_data_conflict");
+        let malformed = json!({"data":{"product":product,"region":"cn","fullBuild":"+1.60.1.70532","buildConfig":"b".repeat(32),"cdnConfig":"c".repeat(32),"language":"zhCN","definitionCommit":"d".repeat(40)}});
+        assert_eq!(
+            f.run(&serde_json::to_vec(&malformed).unwrap())
+                .unwrap_err()
+                .message,
+            "selection.unresolved_data"
+        );
+        let after = Metadata::read_document_raw_controlled(&f.home, &key, &f.control).unwrap();
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(after.bytes, before.bytes);
+    }
+    let metadata = Metadata::open_controlled(&f.home, false, &f.control).unwrap();
+    assert_eq!(metadata.list::<Value>("pin/", 100).unwrap().len(), 2);
+    assert!(metadata.list::<Value>("capture/", 100).unwrap().is_empty());
+    metadata.close().unwrap();
+    f.cleanup();
+}
+
+#[test]
+fn file_admission_does_not_restrict_other_original_source_product_strings() {
+    let f = Fixture::new();
+    for product in [
+        "custom-source-product",
+        "forever-asia-beta-extra",
+        "FOREVER-ASIA-BETA",
+    ] {
+        let mut source = source();
+        source["product"] = json!(product);
+        let pin = f
+            .run(&serde_json::to_vec(&json!({"source":source})).unwrap())
+            .unwrap();
+        assert_eq!(pin.source.as_ref().unwrap().product, product);
+    }
     f.cleanup();
 }

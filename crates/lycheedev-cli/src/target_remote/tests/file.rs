@@ -55,10 +55,7 @@ fn selection_file_actual_failure_keeps_dispatch_stage_and_no_pin() {
     workspace::initialize(&path).unwrap();
     let inv = request(&path, "selection.json");
     for (raw, message) in [
-        (
-            br#"{"unknown":true}"#.as_slice(),
-            "unknown field `unknown`",
-        ),
+        (br#"{"unknown":true}"#.as_slice(), "unknown field `unknown`"),
         (b"null".as_slice(), "invalid type: null"),
     ] {
         std::fs::write(path.join("selection.json"), raw).unwrap();
@@ -77,6 +74,43 @@ fn selection_file_actual_failure_keeps_dispatch_stage_and_no_pin() {
         assert_eq!(value["context"], json!({}));
         assert_eq!(value["captures"], json!([]));
     }
+    std::fs::remove_dir_all(path).unwrap();
+}
+#[test]
+fn selection_file_actual_dispatch_rejects_retired_forever_without_publishing_or_rewriting_input() {
+    let path = home();
+    workspace::initialize(&path).unwrap();
+    let mut spec = source_spec();
+    spec["source"]["product"] = json!("forever");
+    spec["source"]["requestedRef"] = json!("forever");
+    spec["data"] = json!({
+        "product": "forever-cn-beta", "region": "cn", "language": "zhCN",
+        "fullBuild": "1.60.1.70532", "buildConfig": "b".repeat(32),
+        "cdnConfig": "c".repeat(32), "definitionCommit": "d".repeat(40)
+    });
+    let raw = serde_json::to_vec(&spec).unwrap();
+    let file = path.join("selection.json");
+    std::fs::write(&file, &raw).unwrap();
+    let inv = request(&path, "selection.json");
+    let error = crate::command_fault(&inv, crate::dispatch(&inv).unwrap_err());
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("command.failed", 5)
+    );
+    assert_eq!(
+        error.message,
+        "selection.unsupported_data_product: retired product forever-cn-beta"
+    );
+    let envelope = crate::envelope(&Err(error));
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["error"]["stage"], "dispatch");
+    assert_eq!(envelope["context"], json!({}));
+    assert_eq!(envelope["captures"], json!([]));
+    assert_eq!(std::fs::read(&file).unwrap(), raw);
+    let metadata = Metadata::open_controlled(&path, false, &inv.control).unwrap();
+    assert!(metadata.list::<Value>("pin/", 100).unwrap().is_empty());
+    assert!(metadata.list::<Value>("capture/", 100).unwrap().is_empty());
+    metadata.close().unwrap();
     std::fs::remove_dir_all(path).unwrap();
 }
 #[test]

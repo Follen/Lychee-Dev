@@ -41,14 +41,7 @@ fn selection_error(code: &str) -> ToolkitError {
 pub(crate) fn product(value: &str) -> Result<(&'static str, &'static str)> {
     let profile = client::product(value)
         .ok_or_else(|| selection_error("selection.unsupported_data_product"))?;
-    Ok((
-        if value == "forever" {
-            "wow_forever"
-        } else {
-            profile.catalog_product
-        },
-        profile.catalog_product,
-    ))
+    Ok((profile.catalog_product, profile.catalog_product))
 }
 impl Request {
     pub fn validate(&self) -> Result<()> {
@@ -74,7 +67,7 @@ impl Request {
 pub(crate) fn release_product(product: &str, build: &str) -> Result<()> {
     let profile = client::product(product)
         .ok_or_else(|| selection_error("selection.unsupported_data_product"))?;
-    if profile.reused_slot
+    if profile.id == "forever"
         && (catalog::build_components(build).is_none()
             || !build.starts_with(&format!("{}.", profile.series)))
     {

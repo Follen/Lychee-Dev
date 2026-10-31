@@ -116,7 +116,7 @@ fn compact_retained_bom_keys_use_original_offsets_and_analysis_values() {
 #[test]
 fn compact_retained_maps_preserve_native_function_and_parameter_descriptors() {
     let prepared = fixture();
-    let graph = prepared.build("retained-site-values", None, &prepared.control).unwrap();
+    let graph = prepared.build_plan("retained-site-values", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &prepared.control).unwrap();
     let before = serde_json::to_vec(&graph.facts).unwrap();
     let steps = prepared.inputs.shared_steps.load(Ordering::Relaxed);
     let mut functions = 0;
@@ -172,7 +172,7 @@ fn compact_retained_lookup_preserves_explicit_entry_selection_and_public_catalog
 fn compact_retained_lookup_preserves_public_stop_causes_without_extra_charges() {
     for deadline in [false, true] {
         let mut prepared = fixture();
-        let graph = prepared.build("retained-site-stop", None, &prepared.control).unwrap();
+        let graph = prepared.build_plan("retained-site-stop", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &prepared.control).unwrap();
         let site = prepared.entry_catalog[0].closure.clone();
         let syntax = prepared.closure_syntax(&site).unwrap();
         let stopped = stopped_control(deadline, prepared.control.deadline());

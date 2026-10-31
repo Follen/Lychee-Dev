@@ -361,7 +361,11 @@ fn visit_batch_data(
 }
 pub fn validate_pin(pin: &SourcePin) -> Result<()> {
     let repo = catalog::lookup(&pin.repository)?;
-    if !repo.tracks.contains_key(&pin.product)
+    // Frozen regional pins retain their original identity and authenticated
+    // objects. They are not active tracks and cannot select or sync a branch.
+    let retired_forever = pin.repository == "wow-ui-source"
+        && matches!(pin.product.as_str(), "forever-asia-beta" | "forever-cn-beta");
+    if (!repo.tracks.contains_key(&pin.product) && !retired_forever)
         || !valid_digest(&pin.exact_commit, 40)
         || pin.parser_revision != PARSER
     {
@@ -938,6 +942,26 @@ fn take_batch_object(
 mod tests {
     use super::*;
     #[test]
+    fn frozen_forever_beta_pins_remain_readable_without_active_track_admission() {
+        let home = Path::new("unused-retired-forever-admission");
+        let control = OperationControl::default();
+        for product in ["forever-asia-beta", "forever-cn-beta"] {
+            let pin = SourcePin { repository:"wow-ui-source".into(), product:product.into(),
+                requested_ref:"refs/heads/forever".into(), exact_commit:"a".repeat(40), parser_revision:PARSER.into() };
+            validate_pin(&pin).unwrap();
+            assert_eq!(resolve_source_with_control(home,"wow-ui-source",product,&pin.exact_commit,&control).unwrap_err().code,"codebase.unknown_product");
+            assert_eq!(mirror_health_with_control(home,"wow-ui-source",product,&control).unwrap_err().code,"codebase.unknown_product");
+            assert_eq!(blob_with_control(home,&pin,"../Fixture.lua",MAX_SOURCE_BYTES,&control).unwrap_err().code,"codebase.invalid_span");
+            for invalid in [
+                SourcePin { product:"forever-unknown-beta".into(), ..pin.clone() },
+                SourcePin { repository:"elvui".into(), ..pin.clone() },
+                SourcePin { exact_commit:"a".repeat(39), ..pin.clone() },
+                SourcePin { parser_revision:"retired-parser".into(), ..pin.clone() },
+            ] { assert_eq!(validate_pin(&invalid).unwrap_err().code,"codebase.invalid_source_pin"); }
+        }
+    }
+
+    #[test]
     fn asset_recovery_budget_keeps_document_requests_paths_and_control_bounded() {
         let home = Path::new("unused-asset-budget-home");
         let pin = SourcePin {
@@ -1142,6 +1166,21 @@ mod tests {
             exact_commit: commit.trim().into(),
             parser_revision: PARSER.into(),
         };
+        // The old product remains part of its frozen pin; the same actual
+        // commit/tree/blob authentication reads its original object unchanged.
+        for product in ["forever-asia-beta", "forever-cn-beta"] {
+            let frozen = SourcePin { product:product.into(), ..pin.clone() };
+            let files = tree_with_control(&home,&frozen,&Default::default()).unwrap();
+            assert_eq!(files.len(),1);
+            assert_eq!(files[0].path,"Fixture.lua");
+            assert_eq!(files[0].object,object);
+            let (raw,hash) = blob_with_control(&home,&frozen,"Fixture.lua",MAX_SOURCE_BYTES,&Default::default()).unwrap();
+            assert_eq!(raw,input);
+            assert_eq!(hash,object);
+            let mut tampered = files;
+            tampered[0].bytes += 1;
+            assert_eq!(visit_blobs_with_control(&home,&frozen,&tampered,&Default::default(),|_,_|Ok(())).unwrap_err().code,"codebase.source_integrity");
+        }
         let canonical_home = fs::canonicalize(&home).unwrap();
         let canonical_files = tree_with_control(&canonical_home, &pin, &Default::default()).unwrap();
         let files = tree_with_control(&home, &pin, &Default::default()).unwrap();

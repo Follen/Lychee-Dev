@@ -170,7 +170,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
 }
 fn game_executable(path: &Path) -> bool {
     path.file_name().is_some_and(|name| {
-        ["wow.exe", "wowclassic.exe", "wowb.exe"]
+        ["wow.exe", "wowclassic.exe"]
             .iter()
             .any(|n| name.to_string_lossy().eq_ignore_ascii_case(n))
     })

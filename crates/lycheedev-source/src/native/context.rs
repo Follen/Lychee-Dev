@@ -17,7 +17,7 @@ use lycheedev_emmy_adapter::session::{
     BindingContext, BindingDecision, BindingReference, BindingSite, BoundValue, CallObservation,
     CallPermit, DerivedNumber, DerivedNumberRule, FieldPresence, FunctionRef, ObjectField,
     ObjectRef, ObjectShape, ObjectViewKey as NativeObjectViewKey,
-    OwnedBindingSession as BindingSession, SelectedValue, ShapeEnumeration, SourceSpan,
+    SelectedValue, ShapeEnumeration, SourceSpan,
 };
 use lycheedev_emmy_adapter::session::{
     EnvironmentCallable, EnvironmentOrigin, EnvironmentRecord, EnvironmentReturn,
@@ -143,7 +143,6 @@ pub struct PreparedSnapshot {
     control: OperationControl,
     owner: Arc<()>,
     analysis: EmmyLuaAnalysis,
-    engine_text_cost: lycheedev_emmy_adapter::IngestionTextCost,
     contribution_order: Arc<[FileId]>,
     workspace_facts: Arc<lycheedev_emmy_adapter::session::WorkspaceFactsCache>,
     config: Emmyrc,
@@ -164,7 +163,6 @@ impl PreparedSnapshot {
         inputs: Arc<SourceInputs>,
         control: &OperationControl,
         analysis: EmmyLuaAnalysis,
-        engine_text_cost: lycheedev_emmy_adapter::IngestionTextCost,
         contribution_order: Arc<[FileId]>,
         observer: &mut impl FnMut(&'static str),
     ) -> Result<Self> {
@@ -176,7 +174,6 @@ impl PreparedSnapshot {
             control: control.clone(),
             owner: Arc::new(()),
             analysis,
-            engine_text_cost,
             contribution_order,
             workspace_facts: Arc::new(
                 lycheedev_emmy_adapter::session::WorkspaceFactsCache::default(),
@@ -334,20 +331,6 @@ impl PreparedSnapshot {
     fn parameter_identity(&self, site: &Site) -> Option<&SemanticId> {
         self.parameters
             .get(&SyntaxSite::from_site(&self.inputs, site)?)
-    }
-    fn graph_inner(
-        &self,
-        name: &str,
-        phase: &str,
-        ordered: &[&str],
-        scope: Option<&str>,
-    ) -> Result<Graph> {
-        self.control.check().map_err(|e| e.to_string())?;
-        let owned = self
-            .inputs
-            .execution(phase, ordered, &self.control)
-            .map_err(|e| e.to_string())?;
-        self.graph_owned(name, scope, owned)
     }
     fn graph_owned(
         &self,
@@ -1214,7 +1197,7 @@ fn owned_byte_range(range: TextRange) -> lycheedev_emmy_adapter::ByteRange {
 #[cfg(test)]
 mod call_return_evidence_tests {
     use super::*;
-    use lycheedev_emmy_adapter::session::{DiagnosticRun, OwnedQuery};
+    use lycheedev_emmy_adapter::session::{DiagnosticRun, OwnedBindingSession as BindingSession, OwnedQuery};
 
     #[test]
     fn deferred_selected_calls_keep_declared_types_without_claiming_observed_arity() {
@@ -1246,8 +1229,7 @@ mod call_return_evidence_tests {
                 limits: SourceLimits::research(),
             }, &control).unwrap();
             let prepared = prepare(inputs, &control).unwrap();
-            let graph = prepared
-                .build("deferred-call-return", None, &control)
+            let graph = prepared.build_plan("deferred-call-return", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &control)
                 .unwrap();
             let call = graph
                 .calls

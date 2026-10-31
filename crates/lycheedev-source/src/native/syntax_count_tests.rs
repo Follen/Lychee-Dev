@@ -92,13 +92,13 @@ fn replay_observes_cancellation_and_exact_ast_boundary() {
 }
 
 #[test]
-fn prepared_index_and_reference_queries_preserve_original_source_identity() {
+fn prepared_index_and_call_queries_preserve_original_source_identity() {
     let snapshot=prepared(&[("z.lua","local root=1; function F(x) local y=x; return y,root end; F(root)"),("bom.lua","\u{feff}local text='你好'; Obj.value=text; Obj:Run(text)"),("empty.lua","")]);
     let identity=snapshot.inputs.identity_sha256().to_owned();
     let rebuilt=snapshot.build_syntax_index(&counts(&snapshot)).unwrap();
     assert_eq!(index_evidence(&snapshot.syntax),index_evidence(&rebuilt));
-    let refs=snapshot.source_queries(&snapshot.control).unwrap().references(QueryTarget::All,ReferenceFilter::default(),PageRequest{limit:200,..PageRequest::default()}).unwrap();
-    assert!(!serde_json::to_vec(&refs).unwrap().is_empty());
+    let calls=snapshot.source_queries(&snapshot.control).unwrap().calls(QueryTarget::All,PageRequest{limit:200,..PageRequest::default()}).unwrap();
+    assert_eq!(calls.rows.len(),2); assert!(!calls.has_more);
     assert_eq!(snapshot.inputs.identity_sha256(),identity);
 }
 

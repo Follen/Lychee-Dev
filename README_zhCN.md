@@ -28,6 +28,11 @@ Lychee Dev 是面向开发者与 Agent 的魔兽世界调查工具：Rust 原生
 
 源码、数据与资源工作不需要运行游戏；实机工作需要一个已登录且加载受管插件的客户端。
 
+当前支持 Retail、Classic、Classic Era、Titan、正式 Forever 和 Anniversary 六个产品。
+正式 Forever 的产品 ID 为 `forever`，官方远端产品/flavor 为 `wowf`，客户端目录为
+`_forever_`；两个 Forever Beta 不在当前支持范围。各目标的版本与 Interface 约束读取
+已安装 CLI 的产品目录。
+
 ## 环境要求
 
 - Windows amd64（`x86_64-pc-windows-msvc`），当前唯一交付目标。
@@ -69,6 +74,9 @@ lycheedev update
 `update` 同步 npm CLI 与受管 Skill/插件。`--release <root>` 用已安装的发布包离线
 应用；重复的 `--path` / `--installation` 显式限定目标。文件完成不等于运行中的游戏
 或已有 Agent 上下文已激活：客户端仍需要 reload。
+
+`schema update` 解释当前 CLI 内嵌发布清单的渠道策略；候选选择与校验使用同一来源，
+Skill 不指定工具版本或 npm tag。中断恢复保留原包和原目标。
 
 ## 发现能力
 

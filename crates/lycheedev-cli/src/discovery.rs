@@ -145,14 +145,14 @@ pub fn result_contract() -> Value {
     })
 }
 
-/// Current product identities (verified series/interface only). Two Forever
-/// deliveries share a source family but remain separate Data/Live identities.
+/// Current product identities (verified series/interface only), including the
+/// formal Forever product shared by Source and Data.
 pub fn products() -> Value {
     Value::Array(lycheedev_core::client::discovery_products())
 }
 
-/// Common-name matching for `cli search`; returns canonical pending products so
-/// the agent can choose by region instead of merging the two beta deliveries.
+/// Common-name matching for `cli search` returns the canonical product identity.
+/// Region selection remains a separate target parameter.
 pub fn product_matches(query: &str) -> Vec<Value> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -256,34 +256,31 @@ mod tests {
     }
 
     #[test]
-    fn product_catalog_keeps_forever_betas_distinct() {
+    fn product_catalog_exposes_one_formal_forever_identity() {
         let rows = products();
         let rows = rows.as_array().unwrap();
-        assert_eq!(rows.len(), 8, "seven deliveries plus legacy family alias");
-        let forever: Vec<_> = rows
-            .iter()
-            .filter(|row| row["family"] == "forever")
-            .collect();
-        assert_eq!(forever.len(), 3);
-        let deliveries: Vec<_> = forever
-            .iter()
-            .filter(|row| row["delivery"] == true)
-            .map(|row| row["id"].as_str().unwrap())
-            .collect();
-        assert_eq!(deliveries, ["forever-asia-beta", "forever-cn-beta"]);
-        for row in &forever {
-            assert_eq!(row["buildSeries"], json!(["1.60.1"]));
-            assert_eq!(row["tocInterfaces"], json!([16001]));
-        }
+        assert_eq!(rows.len(), 6);
+        let ids: std::collections::BTreeSet<_> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["retail", "classic", "classic-era", "titan", "forever", "anniversary"].into_iter().collect());
+        let forever: Vec<_> = rows.iter().filter(|row| row["family"] == "forever").collect();
+        assert_eq!(forever.len(), 1);
+        let row = forever[0];
+        assert_eq!(row["id"], "forever");
+        assert_eq!(row["catalogProduct"], "wowf");
+        assert_eq!(row["delivery"], true);
+        assert_eq!(row["ambiguousLocally"], false);
+        assert_eq!(row["buildSeries"], json!(["1.60.1"]));
+        assert_eq!(row["tocInterfaces"], json!([16001]));
     }
 
     #[test]
-    fn common_names_match_both_beta_deliveries_without_merging() {
+    fn common_names_match_formal_forever_without_regional_product_aliases() {
         let rows = product_matches("无限服");
         let ids: Vec<_> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
-        assert!(ids.contains(&"forever-asia-beta"), "{ids:?}");
-        assert!(ids.contains(&"forever-cn-beta"), "{ids:?}");
-        assert!(!ids.contains(&"retail"));
+        assert_eq!(ids, ["forever"]);
+        for retired in ["asia-beta", "cn-beta"] {
+            assert!(product_matches(retired).is_empty(), "retired product matched {retired}");
+        }
         for (name, expected) in [
             ("时光服", "titan"),
             ("经典版", "classic"),

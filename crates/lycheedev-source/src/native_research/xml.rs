@@ -306,7 +306,7 @@ mod tests{
             let count=if ordinal<745{4}else{3};
             let path=format!("Interface/AddOns/Blizzard_Identity/Frames{ordinal}.xml");
             let raw=format!("<Ui>{}</Ui>","<Script>local value = 1 &lt; 2</Script>".repeat(count));
-            let program=crate::xml_program::extract_with_deadline(&path,raw.as_bytes(),&catalog,None,&Default::default()).unwrap();
+            let program=crate::xml_program::extract_production_with_catalog(&path,raw.as_bytes(),&catalog).unwrap();
             for script in xml_inline::scripts(&program,raw.as_bytes()).unwrap(){scripts.insert(script.key.clone(),script);}
             documents.insert(path,raw);
         }

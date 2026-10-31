@@ -1,4 +1,4 @@
-//! Ordered XML program extraction shared by production Source and the v8 probe.
+//! Ordered XML program extraction for production Source.
 //! Schema ancestry is extraction provenance, never Lua nominal inheritance.
 use std::{collections::{BTreeMap,BTreeSet},time::Instant};
 use emmylua_parser::{LuaAstNode,LuaAstToken,LuaCallExpr,LuaLanguageLevel,LuaNameToken,LuaParseErrorKind,LuaParser,ParserConfig};
@@ -7,6 +7,8 @@ use serde::Serialize;
 use serde_json::{Value,json};
 use sha2::{Digest,Sha256};
 use crate::xml_inline::source_map::{Span,Origin,MappedText,xml_char,borrowed_span,raw_cursor};
+#[cfg(test)]
+mod extraction_contract_tests;
 type Result<T> = std::result::Result<T,String>;
 fn hash(bytes:&[u8])->String{format!("{:x}",Sha256::digest(bytes))}
 fn err<T>(message:&str)->Result<T>{Err(message.to_owned())}
@@ -21,7 +23,6 @@ pub const MAX_SEGMENTS:usize=200_000;
 pub const MAX_OCCURRENCES:usize=20_000;
 pub const MAX_SCRIPTS:usize=4096;
 pub const MAX_DEPTH:usize=128;
-pub const MAX_OUTPUT:usize=8<<20;
 pub const MAX_SYNTAX_FACTS:usize=20_000;
 // XML 1.0 Fifth Edition productions [3], [4], [4a], [5]. These are explicit
 // Unicode ranges, not Unicode-category/ASCII approximations. The separate
@@ -85,37 +86,6 @@ pub struct ScriptSource {
     pub implicit_parameters: &'static str,
 }
 
-impl ScriptSource {
-    /// Fixed luac 5.1.5 -p - may consume these exact bytes. This method never launches it.
-    pub fn compiler_input(&self) -> &[u8] { self.compiler.text.as_bytes() }
-
-    /// luac reports lines, not known columns. Keep all source segments on the line.
-    pub fn compiler_line(&self, line: usize) -> Result<Value> {
-        if line == 0 { return err("xml.invalid_compiler_line"); }
-        // Lua 5.1.5 llex.c inclinenumber: CR and LF each advance a line;
-        // adjacent opposite newline bytes (CRLF or LFCR) form one advance.
-        // Scan actual compiler bytes; entity-produced CR must not be rewritten.
-        let bytes=self.compiler.text.as_bytes();
-        let next_line=|start:usize|->Option<usize> {
-            let newline=start+bytes[start..].iter().position(|byte|matches!(*byte,b'\r'|b'\n'))?;
-            let mut end=newline+1;
-            if bytes.get(end).is_some_and(|byte|matches!(*byte,b'\r'|b'\n') && *byte!=bytes[newline]) {
-                end+=1;
-            }
-            Some(end)
-        };
-        let mut start = 0;
-        for _ in 1..line {
-            start=next_line(start).ok_or("xml.compiler_line_outside_input")?;
-        }
-        let end=next_line(start).unwrap_or(bytes.len());
-        if start == end {
-            return Ok(json!({"columnKnown":false,"compiledLine":line,"accuracy":"synthetic-anchor","anchor":self.element}));
-        }
-        Ok(json!({"columnKnown":false,"compiledLine":line,"sourceMap":self.compiler.project(Span::new(start,end))?}))
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub struct XmlProgram {
     #[serde(rename="xmlRuleRevision")]
@@ -130,13 +100,6 @@ pub struct XmlProgram {
     pub scripts: Vec<ScriptSource>,
     pub diagnostics: Vec<ProfileDiagnostic>,
     pub coverage: Value,
-}
-
-impl XmlProgram {
-    pub fn compiler_inputs(&self) -> BTreeMap<String, Vec<u8>> {
-        self.scripts.iter().enumerate().map(|(index, script)|
-            (format!("xml-script-{index:04}.lua"), script.compiler_input().to_vec())).collect()
-    }
 }
 
 pub const SCRIPT_CATALOG_TYPES:[&str;4]=["ScriptsType","ActorScriptsType","AnimScriptsType","AnimGroupScriptsType"];
@@ -412,7 +375,7 @@ fn attributes(raw: &[u8], e: &BytesStart<'_>) -> Result<BTreeMap<String, Attribu
 struct Element { name: String, occurrence: Option<usize> }
 struct Body { kind: String, tag: String, start: usize, content_start: usize, occurrence: usize, decoded: MappedText }
 
-pub struct ExtractionLimits { pub scripts:usize, pub decoded:usize, pub maps:usize, pub occurrences:usize, pub facts:usize }
+struct ExtractionLimits { scripts:usize, decoded:usize, maps:usize, occurrences:usize, facts:usize }
 impl Default for ExtractionLimits {
     fn default()->Self { Self { scripts:MAX_SCRIPTS,decoded:MAX_DECODED,maps:2*MAX_SEGMENTS+2*MAX_SCRIPTS,
         occurrences:MAX_OCCURRENCES,facts:MAX_SYNTAX_FACTS*MAX_SCRIPTS } }
@@ -504,10 +467,6 @@ fn syntax_facts(source: &MappedText, remaining_facts:usize) -> Result<Value> {
 
 
 /// One transactional parse: malformed XML returns Err and no partial program.
-pub fn extract(path: &str, raw: &[u8]) -> Result<XmlProgram> {
-    extract_with_deadline(path,raw,&catalog()?,None,&ExtractionLimits::default())
-}
-
 pub fn extract_production(path: &str, raw: &[u8]) -> Result<XmlProgram> {
     extract_production_with_catalog(path,raw,&catalog()?)
 }
@@ -515,14 +474,10 @@ pub fn extract_production(path: &str, raw: &[u8]) -> Result<XmlProgram> {
 /// The caller may borrow one verified immutable catalog for a single preparation.
 /// The production profile, limits and complete per-document evidence are unchanged.
 pub(crate) fn extract_production_with_catalog(path:&str,raw:&[u8],catalog:&Catalog)->Result<XmlProgram> {
-    extract_profile(path,raw,catalog,None,&ExtractionLimits::default(),true)
+    extract_program(path,raw,catalog,&ExtractionLimits::default())
 }
 
-pub fn extract_with_deadline(path: &str, raw: &[u8], catalog: &Catalog, deadline: Option<Instant>, limits:&ExtractionLimits) -> Result<XmlProgram> {
-    extract_profile(path,raw,catalog,deadline,limits,false)
-}
-
-fn extract_profile(path: &str, raw: &[u8], catalog: &Catalog, deadline: Option<Instant>, limits:&ExtractionLimits, preserve_unknown_handlers:bool) -> Result<XmlProgram> {
+fn extract_program(path: &str, raw: &[u8], catalog: &Catalog, limits:&ExtractionLimits) -> Result<XmlProgram> {
     if raw.len() > MAX_FILE || path.len() > 4096 { return err("xml.input_budget"); }
     let text = std::str::from_utf8(raw).map_err(|_| "xml.non_utf8")?;
     if !text.chars().all(xml_char) { return err("xml.invalid_character"); }
@@ -537,7 +492,7 @@ fn extract_profile(path: &str, raw: &[u8], catalog: &Catalog, deadline: Option<I
     let mut declaration = false;
     let started = Instant::now();
     loop {
-        if started.elapsed().as_secs() >= 30 || deadline.is_some_and(|end| Instant::now() >= end) {
+        if started.elapsed().as_secs() >= 30 {
             return err("xml.deadline");
         }
         let before=raw_cursor(raw.len(),prefix_bytes,reader.buffer_position())?;
@@ -568,8 +523,7 @@ fn extract_profile(path: &str, raw: &[u8], catalog: &Catalog, deadline: Option<I
                 let attrs = attributes(raw,&e)?;
                 let parent = stack.iter().rev().find_map(|entry| entry.occurrence);
                 let under_scripts = stack.last().is_some_and(|entry| entry.name == "Scripts");
-                let handler = under_scripts && (preserve_unknown_handlers || catalog.handlers.contains(&tag));
-                if under_scripts && !handler { return err("xml.unsupported_handler"); }
+                let handler = under_scripts;
                 let occurrence;
                 let mut body_kind = None;
                 if program.source_profile=="Bindings" {
@@ -706,7 +660,7 @@ fn extract_profile(path: &str, raw: &[u8], catalog: &Catalog, deadline: Option<I
         "schemaCompanionSHA256":hash(XSD),"handlerKinds":catalog.handlers,
         "handlerCatalogDeclarations":catalog.handler_declarations,
         "limits":{"fileBytes":MAX_FILE,"decodedBytesAggregate":MAX_DECODED,"segmentsAggregate":MAX_SEGMENTS,
-            "syntaxFactsPerScript":MAX_SYNTAX_FACTS,"outputBytes":MAX_OUTPUT,
+            "syntaxFactsPerScript":MAX_SYNTAX_FACTS,
             "occurrences":MAX_OCCURRENCES,"scripts":MAX_SCRIPTS,"depth":MAX_DEPTH,"cooperativeParseWallSeconds":30}});
     Ok(program)
 }

@@ -89,7 +89,6 @@ pub fn prepare_observed(
             inputs,
             control,
             analysis,
-            ingested.text_cost,
             ingested.contribution_order,
             &mut observer,
         ),
@@ -97,11 +96,6 @@ pub fn prepare_observed(
     )
 }
 impl PreparedSnapshot {
-    /// Additional engine-owned source text, excluding parser/index allocations.
-    /// The original source corpus stays shared by graph/request views.
-    pub fn engine_text_cost(&self) -> lycheedev_emmy_adapter::IngestionTextCost {
-        self.engine_text_cost
-    }
     pub fn inputs(&self) -> &SourceInputs {
         &self.inputs
     }
@@ -123,58 +117,6 @@ impl PreparedSnapshot {
     }
     pub fn workspace_facts(&self) -> Arc<lycheedev_emmy_adapter::session::WorkspaceFactsCache> {
         Arc::clone(&self.workspace_facts)
-    }
-    pub fn check(&self) -> lycheedev_core::Result<()> {
-        self.control.check()
-    }
-    pub fn build(
-        &self,
-        name: &str,
-        scope: Option<&str>,
-        control: &OperationControl,
-    ) -> lycheedev_core::Result<Graph> {
-        require_same_control(&self.control, control)?;
-        if name.len() > 256 {
-            return Err(input_error("graph name byte budget exceeded"));
-        }
-        let ordered: Vec<_> = self.inputs.ordered.iter().map(String::as_str).collect();
-        let result = public_result(
-            self.graph_inner(
-                name,
-                &self.inputs.phase,
-                &ordered,
-                scope,
-            ),
-            &self.control,
-        );
-        control.check()?;
-        result
-    }
-    /// A changed phase/order makes a new immutable admission, graph and provider identity.
-    /// It reuses the same admitted syntax and the original operation deadline.
-    pub fn build_execution(
-        &self,
-        name: &str,
-        phase: &str,
-        ordered: &[&str],
-        scope: Option<&str>,
-        control: &OperationControl,
-    ) -> lycheedev_core::Result<Graph> {
-        require_same_control(&self.control, control)?;
-        if name.len() > 256 {
-            return Err(input_error("graph name byte budget exceeded"));
-        }
-        let result = public_result(
-            self.graph_inner(
-                name,
-                phase,
-                ordered,
-                scope,
-            ),
-            &self.control,
-        );
-        control.check()?;
-        result
     }
     pub fn freeze(
         &self,
@@ -198,36 +140,6 @@ impl PreparedSnapshot {
             file,
             self.inputs.original_range(file, site.syntax.get_range())?,
         ))
-    }
-    pub fn query<T>(
-        &self,
-        graph: &Graph,
-        selection: NativeViewSelection,
-        control: &OperationControl,
-        query: impl FnOnce(
-            &EmmyLuaAnalysis,
-            Arc<BindingSession>,
-            &OperationControl,
-        ) -> lycheedev_core::Result<T>,
-    ) -> lycheedev_core::Result<T> {
-        require_same_control(&self.control, control)?;
-        graph.check()?;
-        let provider = self.freeze(graph, selection, control)?;
-        let session = BindingSession::new_checked(provider, || self.control.check())?;
-        let result = query(&self.analysis, session, &self.control);
-        self.control.check()?;
-        control.check()?;
-        result
-    }
-    pub fn serialize<T: Serialize>(
-        &self,
-        value: &T,
-        control: &OperationControl,
-    ) -> lycheedev_core::Result<Vec<u8>> {
-        require_same_control(&self.control, control)?;
-        let result = serialize_json(value, &self.control, self.inputs.corpus.limits.output_bytes);
-        control.check()?;
-        result
     }
 }
 

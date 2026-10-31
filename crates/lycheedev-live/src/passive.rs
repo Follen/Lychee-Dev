@@ -162,7 +162,7 @@ fn discover_inner(ctx: &LiveContext, request: &InstancesRequest, source: &impl S
             .unwrap_or_default()
             .to_string_lossy()
             .to_ascii_lowercase();
-        if !window.visible || !["wow.exe", "wowclassic.exe", "wowb.exe"].contains(&name.as_str()) {
+        if !window.visible || !["wow.exe", "wowclassic.exe"].contains(&name.as_str()) {
             continue;
         }
         let mut candidate = Candidate {

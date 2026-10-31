@@ -30,12 +30,12 @@ fn client() -> ClientInstallation {
     ClientInstallation {
         directory: "synthetic".into(),
         product: "forever".into(),
-        product_code: "wow_forever".into(),
-        catalog_product: "wow_classic_beta".into(),
-        display_name: "Forever Asia Beta".into(),
-        channel: "asia-beta".into(),
+        product_code: "wowf".into(),
+        catalog_product: "wowf".into(),
+        display_name: "Forever".into(),
+        channel: String::new(),
         metadata_branch: "us".into(),
-        full_build: "1.60.1.70338".into(),
+        full_build: "1.60.1.70658".into(),
         interface: 16001,
         interface_known: true,
         toc: "Lychee Dev.toc".into(),
@@ -288,7 +288,7 @@ fn formal_lookup_decode_preserves_identity_fields_and_optional_inventory() {
     for inventory in [None, Some(0), Some(200), Some(500)] {
         let mut payload = json!({"schema":crate::mailbox::SCHEMA,"runtime":"2".repeat(32),"nextSlot":1,
             "inputState":crate::mailbox::SCHEMA,"guid":"Player-1-ABC","character":"测试角色",
-            "realm":"测试 realm","product":"forever","build":"1.60.1.70338",
+            "realm":"测试 realm","product":"forever","build":"1.60.1.70658",
             "release":lycheedev_core::VERSION,"slots":500});
         if let Some(inventory) = inventory { payload["inventory"] = json!(inventory); }
         let dropped = Arc::new(AtomicUsize::new(0));
@@ -305,7 +305,7 @@ fn formal_lookup_decode_preserves_identity_fields_and_optional_inventory() {
         assert_eq!(identity.character, "测试角色");
         assert_eq!(identity.realm, "测试 realm");
         assert_eq!(identity.product, "forever");
-        assert_eq!(identity.build, "1.60.1.70338");
+        assert_eq!(identity.build, "1.60.1.70658");
         assert_eq!(identity.release, lycheedev_core::VERSION);
         assert_eq!(identity.slots, 500);
         assert_eq!(identity.inventory, inventory);
@@ -572,7 +572,7 @@ fn bind_guard_failure_preserves_partial_root_evidence_and_cause() {
 
 #[test]
 fn malformed_build_does_not_enter_catalog_matching() {
-    for build in ["1.60.1", "1.60.1.70338.0", "1.60..70338", "1.60.1.70338x"] {
+    for build in ["1.60.1", "1.60.1.70658.0", "1.60..70338", "1.60.1.70658x"] {
         let mut c = client();
         c.full_build = build.into();
         assert_eq!(
@@ -699,17 +699,12 @@ fn formal_identity_selector() -> crate::mailbox::Selector {
     }
 }
 #[test]
-fn go320_formal_abi_follows_all_seven_exact_product_slots_without_old_build_allowlist() {
+fn formal_abi_follows_all_six_current_products_without_a_build_allowlist() {
     for product in &client::PRODUCTS {
         let mut c = client();
         c.product = product.family.into();
-        c.product_code = if product.family == "forever" {
-            "wow_forever"
-        } else {
-            product.catalog_product
-        }
-        .into();
-        c.catalog_product = if product.id != product.family {
+        c.product_code = product.catalog_product.into();
+        c.catalog_product = if product.id == "forever" || product.id != product.family {
             product.catalog_product
         } else {
             ""
@@ -850,16 +845,33 @@ fn go320_state_null_is_observation_and_does_not_decide_driver_retry_policy() {
 }
 
 #[test]
-fn go320_generic_forever_identity_cannot_replace_a_selected_regional_slot() {
-    let mut legacy = client();
-    legacy.catalog_product.clear();
-    legacy.channel.clear();
-    assert_eq!(
-        RuntimeLayoutAdmission::select_formal(&legacy, RecipeId::ForeverContext)
-            .err()
-            .unwrap(),
-        "reader.runtime_layout_unsupported"
-    );
+fn formal_forever_abi_rejects_retired_catalogs_and_same_name_without_exact_wowf_identity() {
+    for (code, catalog, channel) in [
+        ("wow_forever", "wow_classic_beta", "asia-beta"),
+        ("wow_forever", "wow_cn_beta", "cn-beta"),
+        ("wow_forever", "", ""),
+        ("wowf", "", ""),
+        ("wowf", "wow_classic_beta", ""),
+        ("wowf", "wowf", "asia-beta"),
+    ] {
+        let mut legacy = client();
+        legacy.product_code = code.into();
+        legacy.catalog_product = catalog.into();
+        legacy.channel = channel.into();
+        assert_eq!(
+            RuntimeLayoutAdmission::select_formal(&legacy, RecipeId::ForeverContext)
+                .err()
+                .unwrap(),
+            "reader.runtime_client_identity",
+            "{code}/{catalog}/{channel}"
+        );
+    }
+    // Local and remote latest are distinct observations, not minimum-build bounds.
+    for build in ["1.60.1.70658", "1.60.1.70707"] {
+        let mut formal = client();
+        formal.full_build = build.into();
+        assert!(RuntimeLayoutAdmission::select_formal(&formal, RecipeId::ForeverContext).is_ok());
+    }
 }
 #[test]
 fn go320_candidate_selection_uses_actual_named_lua_observations() {

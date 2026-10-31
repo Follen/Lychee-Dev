@@ -221,6 +221,13 @@ fn initialize<C: FnMut() -> Result<()>>(
     if !valid_product(product_name) {
         return Err(format());
     }
+    if matches!(product_name, "forever-asia-beta" | "forever-cn-beta") {
+        return Err(ToolkitError::new(
+            "selection.unsupported_data_product",
+            "Retired Forever beta products cannot initialize a new project",
+            2,
+        ));
+    }
     let path = directory(path, scope)?;
     let directory = storage::Directory::open_shared_controlled(&path, scope)?;
     let result = (|| {
@@ -307,14 +314,20 @@ fn lock<C: FnMut() -> Result<()>>(
     })();
     finish_directory(directory, result, scope)
 }
-pub(in crate::selection) fn execute(ctx: &RequestContext, request: &ProjectRequest) -> Result<Outcome> {
-    let mut scope = Scope { control: &ctx.control, supplemental: || Ok(()) };
+pub(in crate::selection) fn execute(
+    ctx: &RequestContext,
+    request: &ProjectRequest,
+) -> Result<Outcome> {
+    let mut scope = Scope {
+        control: &ctx.control,
+        supplemental: || Ok(()),
+    };
     let mut publication = Publication::default();
     let result = (|| {
         let value = match request {
-            ProjectRequest::Init { path, product } => initialize(
-                &ctx.cwd.join(path), product, &mut scope, &mut publication,
-            )?,
+            ProjectRequest::Init { path, product } => {
+                initialize(&ctx.cwd.join(path), product, &mut scope, &mut publication)?
+            }
             ProjectRequest::Status { path } | ProjectRequest::Lock { path, .. } => {
                 // Find the nearest declaration before authenticating the pin;
                 // an explicitly selected directory is not stat'ed yet.
@@ -323,22 +336,31 @@ pub(in crate::selection) fn execute(ctx: &RequestContext, request: &ProjectReque
                     None => find(&ctx.cwd, &mut scope)?,
                 };
                 match request {
-                    ProjectRequest::Lock { snapshot, .. } => lock(&ctx.home, &path, snapshot, &mut scope, &mut publication)?,
+                    ProjectRequest::Lock { snapshot, .. } => {
+                        lock(&ctx.home, &path, snapshot, &mut scope, &mut publication)?
+                    }
                     _ => inspect(&path, &mut scope)?,
                 }
             }
         };
         let mut out = Outcome::new(serde_json::to_value(&value)?);
         if matches!(request, ProjectRequest::Lock { .. }) {
-            out.selection = json!({"snapshot":value.lock.as_ref().expect("successful lock").selection.id});
+            out.selection =
+                json!({"snapshot":value.lock.as_ref().expect("successful lock").selection.id});
         }
         Ok(out)
     })();
     publication.finish(scope.finish(result, []))
 }
 
-pub(in crate::selection) fn optional(request: PinSelectionRequest<'_>, control: &OperationControl) -> Result<Option<(PathBuf, PinnedSet)>> {
-    let mut scope = Scope { control, supplemental: || Ok(()) };
+pub(in crate::selection) fn optional(
+    request: PinSelectionRequest<'_>,
+    control: &OperationControl,
+) -> Result<Option<(PathBuf, PinnedSet)>> {
+    let mut scope = Scope {
+        control,
+        supplemental: || Ok(()),
+    };
     let result = (|| {
         scope.check()?;
         if request.snapshot.is_some_and(|id| !id.is_empty()) {
@@ -354,7 +376,12 @@ pub(in crate::selection) fn optional(request: PinSelectionRequest<'_>, control: 
         };
         let project = path.to_string_lossy();
         let pin = resolve_pin_request_controlled_with_check(
-            PinSelectionRequest { project: Some(&project), ..request }, control, || Ok(()),
+            PinSelectionRequest {
+                project: Some(&project),
+                ..request
+            },
+            control,
+            || Ok(()),
         )?;
         Ok(Some((path, pin)))
     })();

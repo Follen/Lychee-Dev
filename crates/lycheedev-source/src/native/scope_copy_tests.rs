@@ -5,7 +5,7 @@ fn scope_projection_preserves_full_host_projection_and_charges() {
         let c = control();
         let source = "local one=1\nlocal two=2\nfunction F(x) return one,two,x end\nif Flag then A=one else A=two end\nlocal a,b,c=F(one)\nHost(a,b,c)\n";
         let prepared = prepare(graph_fixture_inputs(&c, flow, source, None), &c).unwrap();
-        let graph = prepared.build("scope-host", None, &c).unwrap();
+        let graph = prepared.build_plan("scope-host", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c).unwrap();
         let native = graph.native_invocations.as_ref().unwrap();
         let host = graph.host_runtime.as_ref().unwrap();
         assert!(native.control.complete);
@@ -96,7 +96,7 @@ fn scope_projection_preserves_host_transfer_cap_prefix_and_first_error() {
     let c = control();
     let source = "function F(x) return x end\nA=1\nF(A)\nHost(A)\n";
     let prepared = prepare(graph_fixture_inputs(&c, true, source, None), &c).unwrap();
-    let seed = prepared.build("scope-transfer-cap", None, &c).unwrap();
+    let seed = prepared.build_plan("scope-transfer-cap", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c).unwrap();
     assert!(seed.native_invocations.as_ref().unwrap().capture_facts.is_empty());
     let existing = seed.host_runtime.as_ref().unwrap().transfers.len();
     // A cap at successive positions crosses the read/write/argument/return
@@ -139,7 +139,7 @@ fn scope_projection_preserves_capture_cap_after_transfer_prefix() {
     let c = control();
     let source = "local one=1\nlocal two=2\nfunction F() return one,two end\nHost()\n";
     let prepared = prepare(graph_fixture_inputs(&c, true, source, None), &c).unwrap();
-    let seed = prepared.build("scope-capture-cap", None, &c).unwrap();
+    let seed = prepared.build_plan("scope-capture-cap", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c).unwrap();
     let captures = seed.native_invocations.as_ref().unwrap().capture_facts.len();
     assert!(captures >= 2);
     let (result, total, complete) = run_scope_projection(
@@ -169,7 +169,7 @@ fn scope_projection_preserves_capture_cap_after_transfer_prefix() {
 fn scope_projection_preserves_xml_shared_budget_prefix_and_cancellation() {
     let c = control();
     let prepared = prepare(inputs(&c, false), &c).unwrap();
-    let seed = prepared.build("scope-xml-budget", None, &c).unwrap();
+    let seed = prepared.build_plan("scope-xml-budget", &prepared.inputs().phase, LoadPlan::Known(prepared.inputs().ordered.clone()), None, None, &c).unwrap();
     // No Lua actions: every charge belongs to the unchanged action loop or a
     // handler reference. Multiple handlers exercise failure after earlier updates.
     let program = crate::xml_load::Program::from_sources("Main.toc", [

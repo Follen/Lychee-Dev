@@ -109,7 +109,7 @@ fn run_xml_case(selected:&str){
             assert!(semantic["gaps"].as_array().unwrap().iter().any(|gap|gap["code"]=="xml_handler_callable_unavailable"));
         }
         if name=="native_mixin_not_lua_alias"{assert!(semantic["xmlFacts"]["copies"].as_array().unwrap().is_empty());}
-        if name=="ordered_copy_versions"||name=="invalidated_mixin_source"{assert_public_queries(&home,&addon,&compiler,name=="invalidated_mixin_source");}
+        if name=="ordered_copy_versions"||name=="invalidated_mixin_source"{assert_xml_graph_and_definitions(&home,&addon,&compiler,name=="invalidated_mixin_source");}
         reports.push(json!({"case":name,"report":addon.join("report.json"),"expectedValid":mismatches==0,"expectedMismatches":mismatches,"objects":objects,"entries":entries}));
     }
     fs::write(stage.join("report.json"),serde_json::to_vec_pretty(&json!({"source":pin.source,"cases":reports})).unwrap()).unwrap();
@@ -117,45 +117,214 @@ fn run_xml_case(selected:&str){
 }
 fn summary(value:&Value)->Value{json!({"diagnostics":value["diagnostics"],"gaps":value["gaps"],"xmlFacts":value["xmlFacts"],"xmlEntries":value["xmlEntries"]})}
 
-fn assert_public_queries(home:&Path,addon:&Path,compiler:&luac::Runtime,invalidated:bool){
-    let control=OperationControl::default();let closure=Closure::inspect_with_control(home,addon,"Main.toc",&control).unwrap();
-    let (files,_)=xml_inline::inputs(&closure.documents).unwrap();
-    let program=Arc::new(xml_load::Program::from_closure(&closure,&control).unwrap());
-    let runtime=compiler.manifest();let host=TrustedHostEnvironment::from_host_material("xml-query-fixture".into(),false,vec![],vec![],&control).unwrap();
-    let mut config=emmylua_code_analysis::Emmyrc::default();config.runtime.version=emmylua_code_analysis::EmmyrcLuaVersion::Lua51;
-    let inputs=SourceInputs::admit(SourceInputSpec{files:files.into_iter().map(|(path,bytes)|{let text=String::from_utf8(bytes).unwrap();SourceFileInput{path,content_sha256:storage::sha256(text.as_bytes()),analysis_utf8:text.clone(),original_utf8:text,map:SourceMap::Identity}}).collect(),workspace_root:PathBuf::from("C:/lycheedev/xml-query-fixture"),source_identity:json!({"fixture":"ordered-xml-original-bytes"}),phase:"after_load".into(),ordered_occurrences:vec![],config,host,luac:LuacIdentity{version:runtime.version.clone(),platform:runtime.platform.clone(),executable_sha256:runtime.sha256.clone(),executable_bytes:runtime.bytes},limits:SourceLimits::research()},&control).unwrap();
-    let prepared=prepare(inputs,&control).unwrap();let graph=prepared.build_xml_plan("xml-query",program,None,&control).unwrap();
-    let facade=prepared.source_queries(&control).unwrap();let query=facade.with_execution(&graph,QuerySelector::AllOccurrences,&control).unwrap();
-    let refs=query.references(QueryTarget::All,ReferenceFilter::default(),PageRequest{limit:200,bytes:2<<20,cursor:None}).unwrap();
-    assert!(refs.rows.iter().any(|row|row.site.file=="ui.xml"&&matches!(row.selected,QueryFact::Known{..})),"XML references must use the shared query surface");
-    let xml=graph.xml.as_ref().unwrap();let method=xml.references.iter().find(|reference|reference.role=="handler_method").unwrap();
-    let site=Site{file:method.origin.path.clone(),start:method.origin.bytes.start as u32,end:method.origin.bytes.end as u32};
-    if invalidated{
-        assert!(matches!(query.definitions(&site).unwrap().selected,QueryFact::Unavailable{..}));
-        assert!(xml.gaps.iter().any(|gap|gap["code"]=="xml_mixin_source_field_unavailable"&&gap["field"]=="Run"));
-        assert!(xml.copies.is_empty(),"invalidated source fields must not claim stale copied writes");
-        let mixin=xml.references.iter().find(|reference|reference.role=="mixin").unwrap();
-        let site=Site{file:mixin.origin.path.clone(),start:mixin.origin.bytes.start as u32,end:mixin.origin.bytes.end as u32};
-        let context=query.context(QueryTarget::Site(site),ContextOptions{depth:4,snippet_bytes:4096},PageRequest{limit:200,bytes:2<<20,cursor:None}).unwrap();
-        assert!(context.rows.iter().any(|row|row.kind=="selected_use"&&row.detail["selected"]["state"]=="unavailable"));
-        assert!(!context.rows.iter().any(|row|row.kind=="xml_mixin_copy_edge"));
+fn assert_xml_graph_and_definitions(
+    home: &Path,
+    addon: &Path,
+    compiler: &luac::Runtime,
+    invalidated: bool,
+) {
+    let control = OperationControl::default();
+    let closure = Closure::inspect_with_control(home, addon, "Main.toc", &control).unwrap();
+    let (files, _) = xml_inline::inputs(&closure.documents).unwrap();
+    let program = Arc::new(xml_load::Program::from_closure(&closure, &control).unwrap());
+    let runtime = compiler.manifest();
+    let host = TrustedHostEnvironment::from_host_material(
+        "xml-query-fixture".into(),
+        false,
+        vec![],
+        vec![],
+        &control,
+    )
+    .unwrap();
+    let mut config = emmylua_code_analysis::Emmyrc::default();
+    config.runtime.version = emmylua_code_analysis::EmmyrcLuaVersion::Lua51;
+    let inputs = SourceInputs::admit(
+        SourceInputSpec {
+            files: files
+                .into_iter()
+                .map(|(path, bytes)| {
+                    let text = String::from_utf8(bytes).unwrap();
+                    SourceFileInput {
+                        path,
+                        content_sha256: storage::sha256(text.as_bytes()),
+                        analysis_utf8: text.clone(),
+                        original_utf8: text,
+                        map: SourceMap::Identity,
+                    }
+                })
+                .collect(),
+            workspace_root: PathBuf::from("C:/lycheedev/xml-query-fixture"),
+            source_identity: json!({"fixture":"ordered-xml-original-bytes"}),
+            phase: "after_load".into(),
+            ordered_occurrences: vec![],
+            config,
+            host,
+            luac: LuacIdentity {
+                version: runtime.version.clone(),
+                platform: runtime.platform.clone(),
+                executable_sha256: runtime.sha256.clone(),
+                executable_bytes: runtime.bytes,
+            },
+            limits: SourceLimits::research(),
+        },
+        &control,
+    )
+    .unwrap();
+    let prepared = prepare(inputs, &control).unwrap();
+    let graph = prepared
+        .build_xml_plan("xml-query", program.clone(), None, &control)
+        .unwrap();
+    let facade = prepared.source_queries(&control).unwrap();
+    let query = facade
+        .with_execution(&graph, QuerySelector::AllOccurrences, &control)
+        .unwrap();
+    let xml = graph.xml.as_ref().unwrap();
+    let native = graph.native_invocations.as_ref().unwrap();
+    assert!(
+        xml.references
+            .iter()
+            .any(|reference| reference.origin.path == "ui.xml"
+                && matches!(graph.uses[reference.use_fact].decision, Decision::Bound(_))),
+        "XML references retain actual selected graph values"
+    );
+    let method = xml
+        .references
+        .iter()
+        .find(|reference| reference.role == "handler_method")
+        .unwrap();
+    let site = Site {
+        file: method.origin.path.clone(),
+        start: method.origin.bytes.start as u32,
+        end: method.origin.bytes.end as u32,
+    };
+    if invalidated {
+        assert!(matches!(
+            query.definitions(&site).unwrap().selected,
+            QueryFact::Unavailable { .. }
+        ));
+        let gap = xml
+            .gaps
+            .iter()
+            .find(|gap| {
+                gap["code"] == "xml_mixin_source_field_unavailable" && gap["field"] == "Run"
+            })
+            .unwrap();
+        let field_use = &graph.uses[gap["fieldUse"].as_u64().unwrap() as usize];
+        assert!(
+            matches!(field_use.decision, Decision::Unavailable(_)),
+            "invalidated source field remains unavailable in the actual XML load"
+        );
+        let mixin = xml
+            .references
+            .iter()
+            .find(|reference| reference.role == "mixin")
+            .unwrap();
+        assert_eq!(field_use.site, graph.uses[mixin.use_fact].site);
+        assert_eq!(field_use.context, graph.uses[mixin.use_fact].context);
+        assert!(matches!(
+            native.query_views.get(&field_use.context),
+            Some(NativeQueryView::Xml { .. })
+        ));
+        assert!(
+            xml.copies.is_empty(),
+            "invalidated source fields must not claim stale copied writes"
+        );
+        control.check().unwrap();
         return;
     }
-    let definition=query.definitions(&site).unwrap();assert!(matches!(definition.selected,QueryFact::Known{value:ValueDefinition{function:Some(_),..}}));
-    let copy=&xml.copies[0];let site=Site{file:copy.origin.path.clone(),start:copy.origin.bytes.start as u32,end:copy.origin.bytes.end as u32};
-    let context=query.context(QueryTarget::Site(site),ContextOptions{depth:4,snippet_bytes:4096},PageRequest{limit:200,bytes:2<<20,cursor:None}).unwrap();
-    assert!(context.rows.iter().any(|row|row.kind=="xml_mixin_copy_edge"&&matches!(&row.origin,ValueOrigin::Xml{xml}if xml.path=="ui.xml")&&row.snippet.as_deref()==Some("M")));
-    let flag_copies=xml.copies.iter().filter(|copy|copy.field=="flag").collect::<Vec<_>>();assert_eq!(flag_copies.len(),2);assert_ne!(flag_copies[0].source_field_write,flag_copies[1].source_field_write);assert_ne!(flag_copies[0].destination_object,flag_copies[1].destination_object);
-    let selector=refs.rows.iter().find(|row|row.site.file==copy.origin.path&&row.site.start==copy.origin.bytes.start as u32).unwrap().occurrence.clone();
-    assert!(matches!(selector,QuerySelector::XmlOccurrence{..}));
-    let other=refs.rows.iter().find(|row|matches!(row.occurrence,QuerySelector::XmlOccurrence{..})&&row.occurrence!=selector).unwrap().occurrence.clone();
-    let scoped=facade.with_execution(&graph,selector,&control).unwrap();
-    let page=scoped.context(QueryTarget::All,ContextOptions{depth:4,snippet_bytes:4096},PageRequest{limit:1,bytes:2<<20,cursor:None}).unwrap();
-    let cursor=page.next_cursor.expect("XML occurrence context has multiple provenance records");
-    let continuation=scoped.context(QueryTarget::All,ContextOptions{depth:4,snippet_bytes:4096},PageRequest{limit:1,bytes:2<<20,cursor:Some(cursor.clone())}).unwrap();
-    assert!(!continuation.rows.is_empty());assert_ne!(page.rows[0].id,continuation.rows[0].id);
-    let other=facade.with_execution(&graph,other,&control).unwrap();
-    assert!(other.context(QueryTarget::All,ContextOptions{depth:4,snippet_bytes:4096},PageRequest{limit:1,bytes:2<<20,cursor:Some(cursor.clone())}).is_err(),"XML action cursor must not cross to another XML action");
-    let load=facade.with_execution(&graph,QuerySelector::LoadOccurrence{occurrence:0},&control).unwrap();
-    assert!(load.context(QueryTarget::All,ContextOptions{depth:4,snippet_bytes:4096},PageRequest{limit:1,bytes:2<<20,cursor:Some(cursor)}).is_err(),"XML cursor must not cross to a Lua load occurrence");
+    let definition = query.definitions(&site).unwrap();
+    assert!(matches!(
+        definition.selected,
+        QueryFact::Known {
+            value: ValueDefinition {
+                function: Some(_),
+                ..
+            }
+        }
+    ));
+    let mut actions = std::collections::BTreeSet::new();
+    for copy in &xml.copies {
+        let original = program.original(&copy.origin.path).unwrap();
+        assert_eq!(copy.origin.path, "ui.xml");
+        assert_eq!(copy.origin.sha256, storage::sha256(original.as_bytes()));
+        assert_eq!(
+            &original[copy.origin.bytes.start..copy.origin.bytes.end],
+            "M",
+            "copy provenance uses the original XML attribute bytes"
+        );
+        let reference = &graph.uses[copy.reference_use];
+        let field = &graph.uses[copy.field_use];
+        let destination = &graph.writes[copy.destination_field_write];
+        let source = &graph.writes[copy.source_field_write];
+        assert_eq!(
+            reference.site,
+            Site {
+                file: copy.origin.path.clone(),
+                start: copy.origin.bytes.start as u32,
+                end: copy.origin.bytes.end as u32
+            }
+        );
+        assert_eq!(field.site, reference.site);
+        assert_eq!(field.decision, copy.selected_value);
+        assert_eq!(source.decision, copy.selected_value);
+        assert_eq!(destination.decision, copy.selected_value);
+        assert_eq!(
+            field.writes,
+            vec![source.id],
+            "copy follows the source field's observed write epoch"
+        );
+        assert_eq!(
+            destination.cell,
+            format!("object:{}:field:{}", copy.destination_object, copy.field)
+        );
+        assert_eq!(
+            source.cell,
+            format!("object:{}:field:{}", copy.source_object, copy.field)
+        );
+        assert_eq!(destination.inputs, vec![copy.reference_use, copy.field_use]);
+        assert_eq!(reference.context, destination.context);
+        let Some(NativeQueryView::Xml { action }) = native.query_views.get(&reference.context)
+        else {
+            panic!("copy must belong to a real XML action")
+        };
+        actions.insert(*action);
+        let xml_load::Action::Mixin {
+            instance,
+            reference: action_reference,
+        } = &program.actions()[*action]
+        else {
+            panic!("copy action must be a mixin application")
+        };
+        assert_eq!(action_reference.name, "M");
+        assert_eq!(action_reference.origin, copy.origin);
+        let object = xml
+            .objects
+            .iter()
+            .find(|object| object.object == copy.destination_object)
+            .unwrap();
+        assert_eq!(&object.instance, instance);
+        assert!(
+            matches!(&graph.values[object.value].origin, ValueOrigin::Xml { xml: origin } if origin.path == "ui.xml")
+        );
+    }
+    assert_eq!(
+        actions.len(),
+        2,
+        "the two copied objects retain separate XML actions"
+    );
+    let flag_copies = xml
+        .copies
+        .iter()
+        .filter(|copy| copy.field == "flag")
+        .collect::<Vec<_>>();
+    assert_eq!(flag_copies.len(), 2);
+    assert_ne!(
+        flag_copies[0].source_field_write,
+        flag_copies[1].source_field_write
+    );
+    assert_ne!(
+        flag_copies[0].destination_object,
+        flag_copies[1].destination_object
+    );
+    control.check().unwrap();
 }

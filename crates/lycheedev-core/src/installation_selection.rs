@@ -335,11 +335,7 @@ pub fn select_with(
     let conflict = report.issues.iter().any(|issue| {
         product.is_empty()
             || issue.product_code.is_empty()
-            || profile.is_some_and(|profile| {
-                issue.product_code == profile.catalog_product
-                    || (product == "forever"
-                        && matches!(issue.product_code.as_str(), "wow_forever" | "wow_cn_beta"))
-            })
+            || profile.is_some_and(|profile| issue.product_code == profile.catalog_product)
     });
     control.check()?;
     if ambiguous {
@@ -595,42 +591,36 @@ mod tests {
     }
 
     #[test]
-    fn regional_clients_stay_separate_and_related_failures_block_family_selection() {
+    fn formal_forever_selection_ignores_retired_beta_clients_and_keeps_exact_conflicts() {
         let fixture = Fixture::new();
-        let cn = fixture.client("_cn_beta_", "wow_cn_beta", "");
+        let formal = fixture.client("_forever_", "wowf", "");
+        fixture.client("_cn_beta_", "wow_cn_beta", "");
         fixture.client("_classic_beta_", "wow_classic_beta", "");
         fixture.catalog(&[
-            ("wow_cn_beta", "1.60.1.70245"),
-            ("wow_classic_beta", "1.60.1.70124"),
+            ("wowf", "1.60.1.70658"),
+            ("wow_cn_beta", "1.60.1.70532"),
+            ("wow_classic_beta", "1.60.1.70450"),
         ]);
         assert_eq!(
-            error_code(&fixture.0, "forever"),
-            "selection.installation_ambiguous"
+            select(&fixture.0, "forever").unwrap().directory,
+            client::display_path(&formal)
         );
-        assert_eq!(
-            select(&fixture.0, "forever-cn-beta")
-                .unwrap()
-                .catalog_product,
-            "wow_cn_beta"
-        );
-        assert_eq!(
-            select(&fixture.0, "forever-asia-beta").unwrap().full_build,
-            "1.60.1.70124"
-        );
-        fs::write(cn.join("version.txt"), "5.5.4.69934").unwrap();
-        assert_eq!(
-            error_code(&fixture.0, "forever"),
-            "selection.installation_metadata_conflict"
-        );
+        assert_eq!(select(&fixture.0, "forever").unwrap().product_code, "wowf");
+        for retired in ["forever-asia-beta", "forever-cn-beta"] {
+            assert_eq!(
+                error_code(&fixture.0, retired),
+                "selection.unsupported_data_product"
+            );
+        }
         let report = discover(&fixture.0).unwrap();
-        assert_eq!(report.issues[0].product_code, "wow_cn_beta");
-        assert!(select(&fixture.0, "forever-asia-beta").is_ok());
-        fs::write(cn.join("version.txt"), "1.60.1.70000").unwrap();
+        assert_eq!(report.candidates.len(), 1);
+        assert_eq!(report.issues.len(), 2);
+        fs::write(formal.join("version.txt"), "1.60.1.70707").unwrap();
         assert_eq!(
-            error_code(&cn, ""),
+            error_code(&fixture.0, "forever"),
             "selection.installation_metadata_conflict"
         );
-        assert_eq!(discover(&cn).unwrap().issues[0].product_code, "wow_forever");
+        assert_eq!(discover(&formal).unwrap().issues[0].product_code, "wowf");
     }
     #[test]
     fn marker_and_known_executable_discovery_is_one_level_and_sorted() {
@@ -838,7 +828,7 @@ mod tests {
                 version: "",
                 rows: &[],
                 observed: "wow_classic_beta",
-                reason: r#"selection.client_identity: unsupported build for slot "wow_classic_beta""#,
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "unsupported CN slot",
@@ -848,7 +838,7 @@ mod tests {
                 version: "",
                 rows: &[],
                 observed: "wow_cn_beta",
-                reason: r#"selection.client_identity: unsupported build for slot "wow_cn_beta""#,
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "unsupported explicit product",
@@ -898,7 +888,7 @@ mod tests {
                 version: "9.9.9.1",
                 rows: &[],
                 observed: "",
-                reason: "selection.client_identity: unsupported test track",
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "unknown Asia folder build",
@@ -908,7 +898,7 @@ mod tests {
                 version: "9.9.9.1",
                 rows: &[],
                 observed: "",
-                reason: "selection.client_identity: unsupported test track",
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "unknown CN slot build",
@@ -918,7 +908,7 @@ mod tests {
                 version: "9.9.9.1",
                 rows: &[],
                 observed: "wow_cn_beta",
-                reason: "selection.client_identity: unsupported test track",
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "unknown Asia slot build",
@@ -928,7 +918,7 @@ mod tests {
                 version: "9.9.9.1",
                 rows: &[],
                 observed: "wow_classic_beta",
-                reason: "selection.client_identity: unsupported build",
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "regular catalog ambiguous",
@@ -951,7 +941,7 @@ mod tests {
                     ("wow_classic_beta", "5.5.4.1"),
                 ],
                 observed: "wow_classic_beta",
-                reason: "selection.client_identity: ambiguous active builds",
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "late test track",
@@ -961,7 +951,7 @@ mod tests {
                 version: "5.5.4.1",
                 rows: &[],
                 observed: "wow_classic",
-                reason: "selection.client_identity: unsupported test track",
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
             Case {
                 name: "catalog conflict",
@@ -970,8 +960,8 @@ mod tests {
                 flavor: "wow_cn_beta",
                 version: "1.60.1.1",
                 rows: &[("wow_cn_beta", "1.60.1.2")],
-                observed: "wow_forever",
-                reason: "selection.installation_metadata_conflict",
+                observed: "wow_cn_beta",
+                reason: "selection.client_identity: unsupported retired Forever product",
             },
         ];
         for case in cases {

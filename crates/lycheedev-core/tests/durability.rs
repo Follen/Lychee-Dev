@@ -1,10 +1,10 @@
 use lycheedev_core::{
     cache, evidence,
     metadata::Metadata,
+    request::RequestContext,
     selection::{self, SelectionSpec, SourcePin},
     storage::{self, ExclusiveLock},
     workspace,
-    request::RequestContext,
 };
 use serde_json::json;
 use std::{fs, path::PathBuf};
@@ -59,10 +59,7 @@ fn bounded_identity_hash_rejects_actual_size_and_observes_cancel_before_open() {
     drop(held);
     let token = TrackedCancellation::new();
     token.cancel();
-    let cancelled = OperationControl::tracked(
-        Instant::now() + Duration::from_secs(10),
-        token,
-    );
+    let cancelled = OperationControl::tracked(Instant::now() + Duration::from_secs(10), token);
     assert_eq!(
         storage::locked_sha256(&temp.0.join("missing"), 64, &cancelled)
             .unwrap_err()
@@ -80,7 +77,11 @@ fn bounded_identity_hash_rejects_actual_size_and_observes_cancel_before_open() {
 #[test]
 fn doctor_provider_warnings_do_not_fail_but_error_checks_retain_the_combined_report() {
     let temp = initialized();
-    let request = RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() };
+    let request = RequestContext {
+        home: temp.0.clone(),
+        cwd: temp.0.clone(),
+        control: Default::default(),
+    };
     let warning =
         json!({"id":"luals.runtime","ok":false,"status":"warn","detail":"fixture unavailable"});
     let report = lycheedev_core::doctor::inspect_with_checks(&request, vec![warning]).unwrap();
@@ -107,7 +108,11 @@ fn doctor_provider_warnings_do_not_fail_but_error_checks_retain_the_combined_rep
     );
 }
 fn context(home: &std::path::Path) -> RequestContext {
-    RequestContext { home: home.to_owned(), cwd: home.to_owned(), control: Default::default() }
+    RequestContext {
+        home: home.to_owned(),
+        cwd: home.to_owned(),
+        control: Default::default(),
+    }
 }
 
 #[test]
@@ -282,9 +287,15 @@ fn corrupt_original_evidence_is_detected_and_cache_prune_keeps_evidence() {
     )
     .unwrap();
     cache::publish(&temp.0, b"ordinary", 100, None).unwrap();
-    cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
-        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: false,
-    })
+    cache::dispatch(
+        &context(&temp.0),
+        cache::CacheRequest::Prune {
+            target_bytes: 0,
+            dry_run: false,
+            max_objects: 0,
+            include_uncommitted: false,
+        },
+    )
     .unwrap();
     assert_eq!(
         evidence::read_blob(&temp.0, &capture["blob"], 100).unwrap(),
@@ -338,9 +349,15 @@ fn protected_cache_survives_prune_and_corruption_is_visible() {
         Some(json!({"kind":"operation","owner":"OP-active","retainedAt":"2026-10-08T00:00:00Z"})),
     )
     .unwrap();
-    let result = cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
-        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: false,
-    })
+    let result = cache::dispatch(
+        &context(&temp.0),
+        cache::CacheRequest::Prune {
+            target_bytes: 0,
+            dry_run: false,
+            max_objects: 0,
+            include_uncommitted: false,
+        },
+    )
     .unwrap();
     assert!(!result.complete);
     assert_eq!(result.data["skippedProtected"], 1);
@@ -377,7 +394,17 @@ fn newer_config_is_not_overwritten_with_defaults() {
     )
     .unwrap();
     assert_eq!(
-        workspace::set_config(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &workspace::ConfigUpdate { download_workers: Some(1), ..Default::default() })
+        workspace::set_config(
+            &RequestContext {
+                home: temp.0.clone(),
+                cwd: temp.0.clone(),
+                control: Default::default()
+            },
+            &workspace::ConfigUpdate {
+                download_workers: Some(1),
+                ..Default::default()
+            }
+        )
         .err()
         .unwrap()
         .code,
@@ -402,14 +429,21 @@ fn fresh_archive_preserves_opaque_legacy_bytes_and_refuses_new_workspace() {
             .unwrap()
             .exists()
     );
-    let completed = lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).unwrap();
+    let completed =
+        lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).unwrap();
     let archive = PathBuf::from(completed["plan"]["archivePath"].as_str().unwrap());
     assert_eq!(fs::read(archive.join("profiles")).unwrap(), old);
     assert!(temp.0.join("workspace.json").exists());
-    assert_eq!(lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).unwrap(), completed);
+    assert_eq!(
+        lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).unwrap(),
+        completed
+    );
     let new = initialized();
     assert_eq!(
-        lycheedev_core::archive::plan_controlled(&new.0, &Default::default()).err().unwrap().code,
+        lycheedev_core::archive::plan_controlled(&new.0, &Default::default())
+            .err()
+            .unwrap()
+            .code,
         "vault.workspace_exists"
     );
     let _ = fs::remove_dir_all(archive);
@@ -445,7 +479,10 @@ fn archive_rejects_redirected_intent_destination_before_any_move() {
     plan["archivePath"] = json!(temp.0.parent().unwrap().join("unrelated-owner"));
     storage::atomic_json(&journal, &plan).unwrap();
     assert_eq!(
-        lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default()).err().unwrap().code,
+        lycheedev_core::archive::fresh_controlled(&temp.0, &Default::default())
+            .err()
+            .unwrap()
+            .code,
         "vault.archive_state"
     );
     assert_eq!(fs::read(temp.0.join("owner.bin")).unwrap(), b"kept");
@@ -455,7 +492,11 @@ fn archive_rejects_redirected_intent_destination_before_any_move() {
 #[test]
 fn doctor_is_readonly_for_metadata_and_surfaces_corrupt_cache_result() {
     let temp = initialized();
-    let request = RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() };
+    let request = RequestContext {
+        home: temp.0.clone(),
+        cwd: temp.0.clone(),
+        control: Default::default(),
+    };
     let report = lycheedev_core::doctor::inspect(&request).unwrap();
     assert_eq!(report.data["healthy"], true);
     assert!(!temp.0.join("state/toolkit.sqlite").exists());
@@ -504,16 +545,28 @@ fn staging_accounting_orphan_retention_and_active_stage_guards_are_honest() {
     let status = cache::dispatch(&context(&temp.0), cache::CacheRequest::Status).unwrap();
     assert_eq!(status.data["uncommittedCount"], 1);
     assert_eq!(status.data["uncommittedBytes"], 10);
-    let protected = cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
-        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: true,
-    })
+    let protected = cache::dispatch(
+        &context(&temp.0),
+        cache::CacheRequest::Prune {
+            target_bytes: 0,
+            dry_run: false,
+            max_objects: 0,
+            include_uncommitted: true,
+        },
+    )
     .unwrap();
     assert_eq!(protected.data["skippedInUse"], 1);
     assert!(file.exists());
     drop(owner);
-    let removed = cache::dispatch(&context(&temp.0), cache::CacheRequest::Prune {
-        target_bytes: 0, dry_run: false, max_objects: 0, include_uncommitted: true,
-    })
+    let removed = cache::dispatch(
+        &context(&temp.0),
+        cache::CacheRequest::Prune {
+            target_bytes: 0,
+            dry_run: false,
+            max_objects: 0,
+            include_uncommitted: true,
+        },
+    )
     .unwrap();
     assert_eq!(removed.data["removedUncommitted"], 1);
     assert!(!file.exists());
@@ -611,7 +664,11 @@ fn retention_uses_published_wire_schema_and_cannot_hide_another_owner() {
 #[test]
 fn target_file_pins_exact_resolved_context_and_running_reference_blocks_remove() {
     let temp = initialized();
-    let ctx = RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() };
+    let ctx = RequestContext {
+        home: temp.0.clone(),
+        cwd: temp.0.clone(),
+        control: Default::default(),
+    };
     assert_eq!(
         selection::target::execute(&ctx, &selection::target::TargetRequest::List)
             .unwrap()
@@ -623,14 +680,32 @@ fn target_file_pins_exact_resolved_context_and_running_reference_blocks_remove()
     let selected = workspace::resolve_file(&ctx, &spec).unwrap();
     let pin = selected.data["id"].as_str().unwrap();
     assert!(selection::load_pinned(&temp.0, pin).is_ok());
-    selection::target::execute(&ctx, &selection::target::TargetRequest::Add {
-        config: selection::target::TargetConfig { schema: "lycheedev.target.v1".into(), name: "explicit".into(), product: "retail".into(), region: "us".into(), locale: "enUS".into(), source: "remote".into(), ..Default::default() }, replace: false,
-    }).unwrap();
+    selection::target::execute(
+        &ctx,
+        &selection::target::TargetRequest::Add {
+            config: selection::target::TargetConfig {
+                schema: "lycheedev.target.v1".into(),
+                name: "explicit".into(),
+                product: "retail".into(),
+                region: "us".into(),
+                locale: "enUS".into(),
+                source: "remote".into(),
+                ..Default::default()
+            },
+            replace: false,
+        },
+    )
+    .unwrap();
     let mut metadata = Metadata::open(&temp.0, true).unwrap();
     metadata.put("target-ref/explicit/operation/OP-running",&json!({"schema":"lycheedev.target-ref.v1","name":"explicit","kind":"operation","id":"OP-running","createdAt":"2026-10-08T00:00:00Z"}),None).unwrap();
-    let remove = selection::target::TargetRequest::Remove { key: "explicit".into() };
+    let remove = selection::target::TargetRequest::Remove {
+        key: "explicit".into(),
+    };
     assert_eq!(
-        selection::target::execute(&ctx, &remove).err().unwrap().code,
+        selection::target::execute(&ctx, &remove)
+            .err()
+            .unwrap()
+            .code,
         "selection.target_in_use"
     );
     metadata
@@ -811,7 +886,7 @@ fn evidence_pending_intent_rejects_forgery_and_recovers_delete_before_checkpoint
 }
 
 #[test]
-fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
+fn historical_regional_projects_keep_exact_pins_without_becoming_formal_forever() {
     use selection::{ChangePin, DataPin};
     let temp = initialized();
     let source = SourcePin {
@@ -860,6 +935,10 @@ fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
         )
         .unwrap();
         ids.push(pin.id.clone());
+        assert!(
+            lycheedev_core::client::product(product).is_none(),
+            "historical records do not grant new target support"
+        );
         assert_eq!(
             selection::load_pinned(&temp.0, &pin.id)
                 .unwrap()
@@ -872,14 +951,39 @@ fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
         let path = temp.0.join(product);
         std::fs::create_dir_all(&path).unwrap();
         let path = path.to_str().unwrap();
-        selection::execute_project(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &selection::ProjectRequest::Init { path: path.into(), product: product.into() })
+        // Exact historical declaration bytes are independent fixture input;
+        // current project initialization no longer supports these products.
+        let project_raw = format!(
+            "{{\n  \"schema\": \"lycheedev.project.v1\",\n  \"product\": \"{product}\"\n}}\n"
+        )
+        .into_bytes();
+        std::fs::write(
+            std::path::Path::new(path).join("lycheedev.json"),
+            &project_raw,
+        )
         .unwrap();
-        selection::execute_project(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &selection::ProjectRequest::Lock { path: Some(path.into()), snapshot: pin.id.clone() })
+        selection::execute_project(
+            &RequestContext {
+                home: temp.0.clone(),
+                cwd: temp.0.clone(),
+                control: Default::default(),
+            },
+            &selection::ProjectRequest::Lock {
+                path: Some(path.into()),
+                snapshot: pin.id.clone(),
+            },
+        )
         .unwrap();
-        let status = selection::inspect_project_controlled(std::path::Path::new(path), &Default::default()).unwrap();
+        let status =
+            selection::inspect_project_controlled(std::path::Path::new(path), &Default::default())
+                .unwrap();
         assert_eq!(status["state"], "locked");
         assert_eq!(status["lock"]["selection"]["source"]["product"], "forever");
         assert_eq!(status["lock"]["selection"]["data"]["product"], product);
+        assert_eq!(
+            std::fs::read(std::path::Path::new(path).join("lycheedev.json")).unwrap(),
+            project_raw
+        );
         let opposite = if product == "forever-cn-beta" {
             "forever-asia-beta"
         } else {
@@ -910,7 +1014,17 @@ fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
     );
     let cn_path = temp.0.join("forever-cn-beta");
     assert_eq!(
-        selection::execute_project(&RequestContext { home: temp.0.clone(), cwd: temp.0.clone(), control: Default::default() }, &selection::ProjectRequest::Lock { path: Some(cn_path), snapshot: ids[0].clone() })
+        selection::execute_project(
+            &RequestContext {
+                home: temp.0.clone(),
+                cwd: temp.0.clone(),
+                control: Default::default()
+            },
+            &selection::ProjectRequest::Lock {
+                path: Some(cn_path),
+                snapshot: ids[0].clone()
+            }
+        )
         .unwrap_err()
         .code,
         "selection.project_conflict"

@@ -300,6 +300,72 @@ fn mailbox_admission_reuse_preserves_con_identity_log_and_absolute_budget() {
 }
 
 #[test]
+fn mailbox_admission_historical_forever_metadata_is_readable_but_never_retargets_its_lease_to_wowf()
+{
+    let mut f = Fixture::new();
+    f.target.client.product = "forever".into();
+    f.target.client.product_code = "wow_forever".into();
+    f.target.client.catalog_product = "wow_classic_beta".into();
+    f.target.client.full_build = "1.60.1.70338".into();
+    f.target.client.interface = 16001;
+    let mut original_identity = identity();
+    original_identity.product = "forever".into();
+    original_identity.build = "1.60.1.70338".into();
+    let mut book = f.book();
+    let record = book
+        .create(
+            f.target.clone(),
+            original_identity,
+            &FixedClock,
+            &mut Tokens(1),
+            &OperationControl::default(),
+        )
+        .unwrap();
+    let target_path = ConnectionBook::target_path(&record.paths);
+    let metadata_bytes = fs::read(&target_path).unwrap();
+    let log_bytes = fs::read(record.paths.log_path()).unwrap();
+    let owner_bytes = fs::read(f.marker()).unwrap();
+    let status = book
+        .status(&record.state.id, &OperationControl::default())
+        .unwrap();
+    assert_eq!(status.metadata.target.client, f.target.client);
+    assert_eq!(status.state.identity, record.state.identity);
+    assert!(
+        book.find_selected(
+            &f.target,
+            &TargetFilter::default(),
+            &OperationControl::default()
+        )
+        .unwrap()
+        .is_some()
+    );
+    // Keep product/build/PID/HWND equal: the exact catalog identity still prevents reuse.
+    let mut formal = f.target.clone();
+    formal.client.product_code = "wowf".into();
+    formal.client.catalog_product = "wowf".into();
+    assert_code(
+        book.find_selected(
+            &formal,
+            &TargetFilter::default(),
+            &OperationControl::default(),
+        ),
+        "live.channel_ownership_changed",
+    );
+    assert_eq!(fs::read(&target_path).unwrap(), metadata_bytes);
+    assert_eq!(fs::read(record.paths.log_path()).unwrap(), log_bytes);
+    assert_eq!(fs::read(f.marker()).unwrap(), owner_bytes);
+    assert_eq!(
+        book.status(&record.state.id, &OperationControl::default())
+            .unwrap()
+            .metadata
+            .target
+            .client
+            .catalog_product,
+        "wow_classic_beta"
+    );
+}
+
+#[test]
 fn mailbox_admission_target_filters_and_same_build_instances_never_cross() {
     let f = Fixture::new();
     let mut book = f.book();

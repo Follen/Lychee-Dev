@@ -6,7 +6,8 @@
 
 ## 当前死代码与冗余测试专项
 
-- [ ] **AUDIT-DEAD｜生产路径、有效覆盖与文档复审。** 确认无消费者路径/测试包装/旧工具已清，独立业务预期迁正式入口；Skill已精简，版本/渠道与请求/响应/错误由CLI自解释。当前全目标编译及受影响回归通过，最终交叉审查完成；桌面钩子fixture的本机失败保留并交CI干净runner验证。尚待独立Agent实际使用、完整CI/Release和唯一正式包验收，前轮结果只作基线，Live留后。
+- [ ] **AUDIT-DEAD｜生产路径、有效覆盖与文档复审。** 9个Source examples已退役，35个迁移默认测试、当前全目标编译与受影响回归通过；原始失败保留，实际结果见handover。仍须最终独立Agent、最终快照完整CI/Release及唯一TGZ验收和闭包复审，Live实机留后。
+- [ ] **FOREVER-FORMAL｜正式Forever最终数据与包验收。** `forever` / `wowf` / `_forever_`全链实现及当前产品/退休Beta离线正负例已验证，旧PIN/CAP/raw输入与恢复身份保留；只读本地70658与远端70707证据不推导最低build。仍须正式wowf固定数据实际读取、最终CI和同包业务验收；Live实机由用户后续安排。
 
 ## 1. 旧代码、旧测试、Go 与旧 CI 的剩余清理
 
@@ -14,7 +15,7 @@
 
 ## 2. 当前路径测试与交付
 
-- [ ] **LIVE-CLIENT｜最后完成真实客户端验证。** 见 handover 最后一节 H01—H08，七产品与两 Forever beta 分别记录；缺客户端/环境时留下具体缺口。
+- [ ] **LIVE-CLIENT｜最后完成真实客户端验证。** 见 handover 最后一节 H01—H08，六个当前产品分别记录，Forever仅正式版；两个Beta历史结果不能计为正式Forever通过。用户安排前不操作游戏；缺客户端/环境时留下具体缺口。
 - [ ] **LIVE-01｜发送前INPUT修复的实机复验。** 已在Retail复现采样后的500槽acquire与verify分别耗时519/517ms，导致发送前复核拒绝、零输入入队。Invoke准备后重新采样、独立Reload及激活身份检查已通过真实DiskPublications回归和Live完整库516项，保留one-use、同profile、最终publication与原deadline。两个实机CON均已正式关闭，本轮按用户要求不占用Live；再次授权实机时使用当前候选产物验证实际发送与清理。
 
 本待办不包含未经确认的新功能，也不授权删除旧数据、操作游戏或发布产品。

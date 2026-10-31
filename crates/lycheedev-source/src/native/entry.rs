@@ -47,24 +47,6 @@ impl PreparedSnapshot {
     pub fn entry_catalog(&self,control:&OperationControl)->lycheedev_core::Result<&[EntryCandidate]>{
         require_same_control(&self.control,control)?;Ok(&self.entry_catalog)
     }
-    /// Resolves a declared function name to source closures; it never chooses a loaded instance.
-    pub fn entry_symbol_candidates(&self,file:&str,name:&str,control:&OperationControl)->lycheedev_core::Result<EntryResolution>{
-        require_same_control(&self.control,control)?;
-        let file_id=*self.files.get(file).ok_or_else(||input_error("entry file is not admitted"))?;
-        let model=self.analysis.semantic_model(file_id);
-        let root=model.syntax_tree().ok_or_else(||input_error("entry syntax missing"))?.get_red_root();
-        let mut candidates=Vec::new();
-        for node in root.descendants(){
-            control.check()?;self.inputs.charge(1)?;
-            let closure=if let Some(stat)=emmylua_parser::LuaFuncStat::cast(node.clone()){
-                stat.get_func_name().filter(|item|item.get_text()==name).and_then(|_|stat.get_closure())
-            }else if let Some(stat)=emmylua_parser::LuaLocalFuncStat::cast(node){
-                stat.get_local_name().and_then(|item|item.get_name_token()).filter(|item|item.get_text()==name).and_then(|_|stat.get_closure())
-            }else{None};
-            if let Some(closure)=closure{candidates.push(self.entry_candidate(file,closure.get_syntax_id())?);}
-        }
-        Ok(match candidates.len(){0=>EntryResolution::Absent,1=>EntryResolution::Unique{candidate:candidates.remove(0)},_=>EntryResolution::SelectorRequired{candidates}})
-    }
     fn entry_candidate(&self,file:&str,syntax:LuaSyntaxId)->lycheedev_core::Result<EntryCandidate>{
         let range=syntax.get_range();let mapped=self.inputs.original_range(file,range)?;let site=Site::at(file,mapped);
         let input=self.inputs.file(file).map_err(|message|input_error(&message))?;

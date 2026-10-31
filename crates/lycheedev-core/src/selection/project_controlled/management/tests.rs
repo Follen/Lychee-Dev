@@ -30,7 +30,15 @@ impl Fixture {
         }
     }
     fn init(&self, product: &str) -> Value {
-        execute(&self.inv, &ProjectRequest::Init { path: ".".into(), product: product.into() }).unwrap().data
+        execute(
+            &self.inv,
+            &ProjectRequest::Init {
+                path: ".".into(),
+                product: product.into(),
+            },
+        )
+        .unwrap()
+        .data
     }
     fn pin(&self, product: &str, letter: char) -> PinnedSet {
         pin_selection_controlled(
@@ -54,15 +62,78 @@ impl Fixture {
     }
 }
 #[test]
+fn formal_forever_initializes_but_retired_projects_only_keep_original_read_and_lock_identity() {
+    let formal = Fixture::new();
+    assert_eq!(formal.init("forever")["project"]["product"], "forever");
+    formal.done();
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        let f = Fixture::new();
+        let error = execute(
+            &f.inv,
+            &ProjectRequest::Init {
+                path: ".".into(),
+                product: product.into(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "selection.unsupported_data_product");
+        assert_eq!(error.exit_code, 2);
+        assert!(!f.inv.cwd.join("lycheedev.json").exists());
+        assert!(!f.inv.cwd.join("lycheedev.lock.json").exists());
+        // Historical project bytes are an input, never produced by current admission.
+        let raw = format!(
+            "{{\n  \"schema\": \"lycheedev.project.v1\",\n  \"product\": \"{product}\"\n}}\n"
+        )
+        .into_bytes();
+        fs::write(f.inv.cwd.join("lycheedev.json"), &raw).unwrap();
+        let pin = f.pin(product, 'a');
+        let status = execute(&f.inv, &ProjectRequest::Status { path: None }).unwrap();
+        assert_eq!(status.data["project"]["product"], product);
+        let locked = execute(
+            &f.inv,
+            &ProjectRequest::Lock {
+                path: None,
+                snapshot: pin.id.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(locked.data["lock"]["selection"]["id"], pin.id);
+        assert_eq!(
+            locked.data["lock"]["selection"]["source"]["product"],
+            product
+        );
+        assert_eq!(fs::read(f.inv.cwd.join("lycheedev.json")).unwrap(), raw);
+        assert_eq!(
+            load_pinned_controlled(&f.inv.home, &pin.id, &f.inv.control)
+                .unwrap()
+                .source,
+            pin.source
+        );
+        f.done();
+    }
+}
+#[test]
 fn default_init_requires_existing_directory_and_validates_product_first() {
     let f = Fixture::new();
     let missing = f.root.join("missing");
     let text = missing.to_str().unwrap();
-    let bad = execute(&f.inv, &ProjectRequest::Init { path: text.into(), product: "INVALID".into() })
+    let bad = execute(
+        &f.inv,
+        &ProjectRequest::Init {
+            path: text.into(),
+            product: "INVALID".into(),
+        },
+    )
     .unwrap_err();
     assert_eq!(bad.code, "selection.project_format");
-    let absent = execute(&f.inv, &ProjectRequest::Init { path: text.into(), product: "retail".into() })
-        .unwrap_err();
+    let absent = execute(
+        &f.inv,
+        &ProjectRequest::Init {
+            path: text.into(),
+            product: "retail".into(),
+        },
+    )
+    .unwrap_err();
     assert_eq!(absent.code, "external.io");
     assert!(!missing.exists());
     f.done();
@@ -79,12 +150,24 @@ fn default_init_status_and_lock_keep_public_shapes_and_checked_owners() {
     );
     assert!(!f.inv.cwd.join("lycheedev.lock.json").exists());
     let pin = f.pin("retail", 'a');
-    let out = execute(&f.inv, &ProjectRequest::Lock { path: None, snapshot: pin.id.clone() }).unwrap();
+    let out = execute(
+        &f.inv,
+        &ProjectRequest::Lock {
+            path: None,
+            snapshot: pin.id.clone(),
+        },
+    )
+    .unwrap();
     assert_eq!(out.data["lock"]["selection"]["id"], pin.id);
     assert_eq!(out.selection, json!({"snapshot":pin.id}));
     let mut nested = f.inv.clone();
     nested.cwd = nested.cwd.join("nested");
-    assert_eq!(execute(&nested, &ProjectRequest::Status { path: None }).unwrap().data["state"], "locked");
+    assert_eq!(
+        execute(&nested, &ProjectRequest::Status { path: None })
+            .unwrap()
+            .data["state"],
+        "locked"
+    );
     f.inv
         .control
         .ordered_child(f.inv.control.deadline())
@@ -98,9 +181,15 @@ fn existing_declaration_and_orphan_lock_are_never_blessed_or_replaced() {
     f.init("retail");
     let original = fs::read(f.inv.cwd.join("lycheedev.json")).unwrap();
     assert_eq!(
-        execute(&f.inv, &ProjectRequest::Init { path: ".".into(), product: "classic".into() })
-            .unwrap_err()
-            .code,
+        execute(
+            &f.inv,
+            &ProjectRequest::Init {
+                path: ".".into(),
+                product: "classic".into()
+            }
+        )
+        .unwrap_err()
+        .code,
         "selection.project_conflict"
     );
     assert_eq!(
@@ -110,9 +199,15 @@ fn existing_declaration_and_orphan_lock_are_never_blessed_or_replaced() {
     fs::remove_file(f.inv.cwd.join("lycheedev.json")).unwrap();
     fs::write(f.inv.cwd.join("lycheedev.lock.json"), b"foreign").unwrap();
     assert_eq!(
-        execute(&f.inv, &ProjectRequest::Init { path: ".".into(), product: "retail".into() })
-            .unwrap_err()
-            .code,
+        execute(
+            &f.inv,
+            &ProjectRequest::Init {
+                path: ".".into(),
+                product: "retail".into()
+            }
+        )
+        .unwrap_err()
+        .code,
         "selection.project_conflict"
     );
     assert!(!f.inv.cwd.join("lycheedev.json").exists());
@@ -124,19 +219,39 @@ fn lock_uses_wrapper_find_then_pin_then_explicit_directory_order() {
     let mut nearest = f.inv.clone();
     nearest.cwd = f.root.join("project");
     assert_eq!(
-        execute(&nearest, &ProjectRequest::Lock { path: None, snapshot: "missing".into() }).unwrap_err().code,
+        execute(
+            &nearest,
+            &ProjectRequest::Lock {
+                path: None,
+                snapshot: "missing".into()
+            }
+        )
+        .unwrap_err()
+        .code,
         "selection.project_missing"
     );
     let missing = f.root.join("missing");
     assert_eq!(
-        execute(&f.inv, &ProjectRequest::Lock { path: Some(missing.clone()), snapshot: "missing".into() })
+        execute(
+            &f.inv,
+            &ProjectRequest::Lock {
+                path: Some(missing.clone()),
+                snapshot: "missing".into()
+            }
+        )
         .unwrap_err()
         .code,
         "vault.record_missing"
     );
     let pin = f.pin("retail", 'a');
     assert_eq!(
-        execute(&f.inv, &ProjectRequest::Lock { path: Some(missing.clone()), snapshot: pin.id.clone() })
+        execute(
+            &f.inv,
+            &ProjectRequest::Lock {
+                path: Some(missing.clone()),
+                snapshot: pin.id.clone()
+            }
+        )
         .unwrap_err()
         .code,
         "external.io"
@@ -155,16 +270,29 @@ fn lock_replaces_valid_other_product_but_preserves_malformed_previous_lock() {
         inspect_value(&f.inv.cwd, &f.inv.control).unwrap_err().code,
         "selection.project_conflict"
     );
-    execute(&f.inv, &ProjectRequest::Lock { path: None, snapshot: new.id.clone() }).unwrap();
+    execute(
+        &f.inv,
+        &ProjectRequest::Lock {
+            path: None,
+            snapshot: new.id.clone(),
+        },
+    )
+    .unwrap();
     assert_eq!(
         inspect_value(&f.inv.cwd, &f.inv.control).unwrap()["lock"]["selection"]["id"],
         new.id
     );
     fs::write(&path, b"{\"schema\":\"foreign\"}").unwrap();
     assert_eq!(
-        execute(&f.inv, &ProjectRequest::Lock { path: None, snapshot: new.id.clone() })
-            .unwrap_err()
-            .code,
+        execute(
+            &f.inv,
+            &ProjectRequest::Lock {
+                path: None,
+                snapshot: new.id.clone()
+            }
+        )
+        .unwrap_err()
+        .code,
         "selection.project_format"
     );
     assert_eq!(fs::read(&path).unwrap(), b"{\"schema\":\"foreign\"}");
@@ -178,7 +306,14 @@ fn real_project_lease_wait_checks_original_cancel_without_exposing_token() {
     let mut inv = f.inv.clone();
     inv.control = OperationControl::tracked(Instant::now() + Duration::from_secs(30), stop.clone());
     ExclusiveLock::set_blob_wait_observer(move || stop.cancel());
-    let error = execute(&inv, &ProjectRequest::Init { path: ".".into(), product: "retail".into() }).unwrap_err();
+    let error = execute(
+        &inv,
+        &ProjectRequest::Init {
+            path: ".".into(),
+            product: "retail".into(),
+        },
+    )
+    .unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("command.cancelled", 7)
@@ -198,30 +333,108 @@ fn project_status_is_workspace_independent_and_rejects_nearer_invalid_file() {
     f.init("retail");
     let mut inv = f.inv.clone();
     inv.home = f.root.join("absent-home");
-    assert_eq!(execute(&inv, &ProjectRequest::Status { path: None }).unwrap().data["state"], "unlocked");
+    assert_eq!(
+        execute(&inv, &ProjectRequest::Status { path: None })
+            .unwrap()
+            .data["state"],
+        "unlocked"
+    );
     assert!(!inv.home.exists());
     inv.cwd = inv.cwd.join("nested");
     fs::write(inv.cwd.join("lycheedev.json"), b"invalid").unwrap();
-    assert_eq!(execute(&inv, &ProjectRequest::Status { path: None }).unwrap_err().code, "selection.project_format");
+    assert_eq!(
+        execute(&inv, &ProjectRequest::Status { path: None })
+            .unwrap_err()
+            .code,
+        "selection.project_format"
+    );
     f.done();
 }
 #[test]
 fn optional_default_consumer_imports_same_pin_and_preserves_cancellation() {
     let f = Fixture::new();
-    assert!(optional(PinSelectionRequest { home: &f.inv.home, cwd: &f.inv.cwd, snapshot: None, project: None }, &f.inv.control).unwrap().is_none());
+    assert!(
+        optional(
+            PinSelectionRequest {
+                home: &f.inv.home,
+                cwd: &f.inv.cwd,
+                snapshot: None,
+                project: None
+            },
+            &f.inv.control
+        )
+        .unwrap()
+        .is_none()
+    );
     f.init("retail");
     let pin = f.pin("retail", 'a');
-    execute(&f.inv, &ProjectRequest::Lock { path: None, snapshot: pin.id.clone() }).unwrap();
-    let (path, actual) = optional(PinSelectionRequest { home: &f.inv.home, cwd: &f.inv.cwd, snapshot: None, project: None }, &f.inv.control).unwrap().unwrap();
+    execute(
+        &f.inv,
+        &ProjectRequest::Lock {
+            path: None,
+            snapshot: pin.id.clone(),
+        },
+    )
+    .unwrap();
+    let (path, actual) = optional(
+        PinSelectionRequest {
+            home: &f.inv.home,
+            cwd: &f.inv.cwd,
+            snapshot: None,
+            project: None,
+        },
+        &f.inv.control,
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(path, f.inv.cwd);
     assert_eq!(actual.id, pin.id);
     let mut inv = f.inv.clone();
-    assert_eq!(resolve_pin_request(PinSelectionRequest { home: &inv.home, cwd: &inv.cwd, snapshot: Some(""), project: None }, &inv.control).unwrap().id, pin.id);
+    assert_eq!(
+        resolve_pin_request(
+            PinSelectionRequest {
+                home: &inv.home,
+                cwd: &inv.cwd,
+                snapshot: Some(""),
+                project: None
+            },
+            &inv.control
+        )
+        .unwrap()
+        .id,
+        pin.id
+    );
     let stop = TrackedCancellation::new();
     inv.control = OperationControl::tracked(Instant::now() + Duration::from_secs(30), stop.clone());
     stop.cancel();
-    assert_eq!(optional(PinSelectionRequest { home: &inv.home, cwd: &inv.cwd, snapshot: Some(""), project: None }, &inv.control).unwrap_err().code, "command.cancelled");
-    assert_eq!(resolve_pin_request(PinSelectionRequest { home: &inv.home, cwd: &inv.cwd, snapshot: Some(""), project: None }, &inv.control).unwrap_err().code, "command.cancelled");
+    assert_eq!(
+        optional(
+            PinSelectionRequest {
+                home: &inv.home,
+                cwd: &inv.cwd,
+                snapshot: Some(""),
+                project: None
+            },
+            &inv.control
+        )
+        .unwrap_err()
+        .code,
+        "command.cancelled"
+    );
+    assert_eq!(
+        resolve_pin_request(
+            PinSelectionRequest {
+                home: &inv.home,
+                cwd: &inv.cwd,
+                snapshot: Some(""),
+                project: None
+            },
+            &inv.control
+        )
+        .unwrap_err()
+        .code,
+        "command.cancelled"
+    );
     f.done();
 }
 #[test]

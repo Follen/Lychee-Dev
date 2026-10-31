@@ -155,14 +155,13 @@ fn empty_output_and_one_broken_window_keep_public_inventory_shape() {
     beta.executable = good.join("WowB.exe").to_string_lossy().into_owned();
     let source = Fake::new(vec![window(&broken, 11), hidden, foreign, beta]);
     let report = serde_json::to_value(discover(&fixture.context(), &InstancesRequest::default(), &source).unwrap()).unwrap();
-    assert_eq!(report["candidates"].as_array().unwrap().len(), 2);
+    assert_eq!(report["candidates"].as_array().unwrap().len(), 1);
     assert_eq!(report["candidates"][0]["state"], "identity_unreadable");
     assert_eq!(
         report["candidates"][0]["client"],
         json!({"directory":"","product":"","productCode":"","fullBuild":"","interface":0,"toc":"","identitySource":""})
     );
-    assert_eq!(report["candidates"][1]["state"], "unobserved");
-    assert_eq!(report["installations"].as_array().unwrap().len(), 1);
+    assert_eq!(report["installations"].as_array().unwrap().len(), 0);
 }
 
 fn marker(client: &Path, window: &Window) -> PathBuf {
@@ -277,31 +276,59 @@ fn enumeration_failure_is_an_external_failure_not_an_empty_inventory() {
 }
 
 #[test]
-fn catalog_scan_keeps_approved_cn_product_distinct() {
+fn passive_formal_forever_uses_wowf_without_version_file_and_never_admits_beta_slots() {
     let fixture = Fixture::new();
-    for (folder, product) in [
-        ("_classic_beta_", "wow_classic_beta"),
-        ("_cn_beta_", "wow_cn_beta"),
+    let formal = fixture.0.join("_forever_");
+    fs::create_dir(&formal).unwrap();
+    fs::write(formal.join(".flavor.info"), "wowf").unwrap();
+    fs::write(formal.join("Wow.exe"), []).unwrap();
+    let mut windows = vec![window(&formal, 31)];
+    for (pid, folder, product) in [
+        (32, "_classic_beta_", "wow_classic_beta"),
+        (33, "_cn_beta_", "wow_cn_beta"),
     ] {
         let path = fixture.0.join(folder);
         fs::create_dir(&path).unwrap();
         fs::write(path.join(".flavor.info"), product).unwrap();
+        fs::write(path.join("Wow.exe"), []).unwrap();
+        windows.push(window(&path, pid));
     }
-    fs::write(fixture.0.join(".build.info"), "Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0|Build Key!HEX:16|CDN Key!HEX:16\nus|1|1.60.1.70338|wow_classic_beta|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\ncn|1|1.60.1.70338|wow_cn_beta|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\n").unwrap();
+    fs::write(fixture.0.join(".build.info"), "Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0|Build Key!HEX:16|CDN Key!HEX:16\ncn|1|1.60.1.70658|wowf|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\nus|1|1.60.1.70338|wow_classic_beta|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\ncn|1|1.60.1.70338|wow_cn_beta|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\n").unwrap();
     let ctx = fixture.context();
-    let request = InstancesRequest { installation: Some(fixture.0.clone()) };
-    let report = discover(&ctx, &request, &Fake::new(vec![])).unwrap();
-    assert_eq!(report.installations.len(), 2);
-    assert!(
-        report
-            .installations
-            .iter()
-            .any(|item| item.client.product == "forever"
-                && item.client.catalog_product == "wow_classic_beta")
-    );
-    assert!(report.installations.iter().any(
-        |item| item.client.product == "forever" && item.client.catalog_product == "wow_cn_beta"
-    ));
+    let report = discover(
+        &ctx,
+        &InstancesRequest {
+            installation: Some(fixture.0.clone()),
+        },
+        &Fake::new(windows),
+    )
+    .unwrap();
+    assert!(!formal.join("version.txt").exists());
+    assert!(!report.installations.is_empty());
+    for item in &report.installations {
+        assert_eq!(item.client.product, "forever");
+        assert_eq!(item.client.product_code, "wowf");
+        assert_eq!(item.client.catalog_product, "wowf");
+        assert_eq!(item.client.full_build, "1.60.1.70658");
+        assert_eq!(item.client.interface, 16001);
+        assert_eq!(
+            Path::new(&item.client.directory).file_name().unwrap(),
+            "_forever_"
+        );
+    }
+    let candidates = report.candidates.unwrap();
+    assert_eq!(candidates.len(), 3);
+    let current = candidates
+        .iter()
+        .find(|c| c.window.process_id == 31)
+        .unwrap();
+    assert_eq!(current.state, "unobserved");
+    assert_eq!(current.client.product_code, "wowf");
+    for candidate in candidates.iter().filter(|c| c.window.process_id != 31) {
+        assert_eq!(candidate.state, "identity_unreadable");
+        assert!(candidate.client.product.is_empty());
+    }
+    assert!(!ctx.home.exists());
 }
 
 #[test]

@@ -38,10 +38,13 @@ English and Simplified Chinese copy and exact operation identity.
 
 The addon selects six runtime profile families from
 `addon/Core/ClientGate.lua`: Retail, Classic, Classic Era, Titan, Forever and
-Anniversary. Retail has two admitted interface baselines. The CLI distinguishes
-seven delivery products: the two Forever betas share an addon profile but retain
-independent Data and Live identities. Support in code is not proof of interactive
-acceptance on every client.
+Anniversary. Retail has two admitted interface baselines. The six supported
+products include formal Forever: canonical ID and Source family `forever`,
+official remote product and installation flavor `wowf`, client directory
+`_forever_`, executable `Wow.exe`. The two Forever beta products are outside the
+current support scope. Historical pins, captures and recovery records retain
+their original identities. Actual implementation and verification status is
+recorded in [handover.md](handover.md); interactive acceptance requires the client.
 
 ## Brand Commitments
 

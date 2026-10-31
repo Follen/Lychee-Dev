@@ -55,7 +55,7 @@
       "--raidbots <DBCache.bin>",
       "--from <cache-capture-or-time>",
       "--to <time>",
-      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary>",
+      "--product <retail|classic|classic-era|titan|forever|anniversary>",
       "--build <full-build>",
       "--region <us|eu|cn|kr|tw>",
       "--locale <locale>",
@@ -925,7 +925,7 @@
       "--file <selection.json>",
       "--target <name>",
       "--installation <game-root-or-client>",
-      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary>",
+      "--product <retail|classic|classic-era|titan|forever|anniversary>",
       "--build <full-build>",
       "--definitions <commit-or-full-ref>",
       "--region <us|eu|cn|kr|tw>",
@@ -937,7 +937,9 @@
       "lycheedev target resolve --home EXAMPLE_HOME --installation CLIENT_DIR --product retail --build 12.1.5.70448 --definitions DBD_COMMIT --region us --locale enUS --offline --format json"
     ],
     "constraints": [
-      "CLIENT_DIR must match retail/build 12.1.5.70448; DBD_COMMIT is the fixed definitions commit for that build. --offline requires needed inputs already recorded or present. Retain the returned DATA_PIN."
+      "CLIENT_DIR must match retail/build 12.1.5.70448; DBD_COMMIT is the fixed definitions commit for that build. --offline requires needed inputs already recorded or present. Retain the returned DATA_PIN.",
+      "--from fills missing fixed selections and preserves existing Source/Data/Changes unchanged. To select another Data identity, omit --from or use a parent that contains Source but no Data; changing inherited Data returns selection.fixed_data_conflict.",
+      "--file publishes a new fixed selection and rejects retired Forever beta product IDs, including inherited components. Existing historical PINs remain readable through target show."
     ]
   },
   {
@@ -984,7 +986,7 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl",
-      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary>",
+      "--product <retail|classic|classic-era|titan|forever|anniversary>",
       "--region <us|eu|cn|kr|tw>",
       "--locale <locale>",
       "--build <full-build>",

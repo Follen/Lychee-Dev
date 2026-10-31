@@ -2,8 +2,8 @@
 #![forbid(unsafe_code)]
 use crate::{
     Outcome, Result, ToolkitError,
-    request::RequestContext,
     metadata::Metadata,
+    request::RequestContext,
     storage::{self, ExclusiveLock},
 };
 use serde::{Deserialize, Serialize};
@@ -17,9 +17,7 @@ mod file;
 pub mod target;
 pub use file::resolve_selection_file_controlled;
 mod project_controlled;
-pub use project_controlled::{
-    resolve_pin_request_controlled_with_check,
-};
+pub use project_controlled::resolve_pin_request_controlled_with_check;
 
 /// Borrowed inputs for resolving an immutable snapshot or project selection.
 ///
@@ -124,8 +122,8 @@ pub fn source_interface(pin: &SourcePin) -> Option<u32> {
         })
         .map(|baseline| baseline.interface)
 }
-/// Family-wide Blizzard source pins support each delivery track, but an exact
-/// regional pin never grants access to the other regional track.
+/// Current and historical frozen selections retain their source-family
+/// relationship. Target admission separately controls current product support.
 pub fn source_supports_product(source: &SourcePin, product: &str) -> bool {
     source.product == product
         || source.repository == "wow-ui-source"
@@ -371,19 +369,33 @@ pub fn inspect_project_controlled(
 ) -> Result<Value> {
     project_controlled::inspect_value(path, control)
 }
-pub fn resolve_pin_request(request: PinSelectionRequest<'_>, control: &crate::control::OperationControl) -> Result<PinnedSet> {
+pub fn resolve_pin_request(
+    request: PinSelectionRequest<'_>,
+    control: &crate::control::OperationControl,
+) -> Result<PinnedSet> {
     resolve_pin_request_controlled_with_check(request, control, || Ok(()))
 }
 /// Optional nearest-project lookup without a command-shaped input.
-pub fn resolve_optional_project(request: PinSelectionRequest<'_>, control: &crate::control::OperationControl) -> Result<Option<(PathBuf, PinnedSet)>> {
+pub fn resolve_optional_project(
+    request: PinSelectionRequest<'_>,
+    control: &crate::control::OperationControl,
+) -> Result<Option<(PathBuf, PinnedSet)>> {
     project_controlled::optional(request, control)
 }
 
 #[derive(Clone, Debug)]
 pub enum ProjectRequest {
-    Init { path: PathBuf, product: String },
-    Status { path: Option<PathBuf> },
-    Lock { path: Option<PathBuf>, snapshot: String },
+    Init {
+        path: PathBuf,
+        product: String,
+    },
+    Status {
+        path: Option<PathBuf>,
+    },
+    Lock {
+        path: Option<PathBuf>,
+        snapshot: String,
+    },
 }
 
 pub fn execute_project(ctx: &RequestContext, request: &ProjectRequest) -> Result<Outcome> {
@@ -446,7 +458,7 @@ mod product_tests {
     }
 
     #[test]
-    fn shared_source_supports_each_exact_track_without_collapsing_pin_identity() {
+    fn historical_beta_pins_keep_source_family_and_distinct_original_identity() {
         let mut identities = vec![];
         for product in ["forever-asia-beta", "forever-cn-beta"] {
             let spec = SelectionSpec {

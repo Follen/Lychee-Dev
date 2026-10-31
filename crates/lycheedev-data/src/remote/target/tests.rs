@@ -1,4 +1,5 @@
 use super::*;
+use lycheedev_core::metadata::Metadata;
 use md5::{Digest, Md5};
 use std::{
     cell::RefCell,
@@ -135,16 +136,14 @@ fn inputs(product: &str, build: &str) -> Fetch {
     fetch
 }
 #[test]
-fn fixed_product_profiles_and_legacy_alias_have_distinct_cache_and_slot_identity() {
+fn current_product_profiles_route_only_formal_forever_to_wowf() {
     for (name, code, slot) in [
         ("retail", "wow", "wow"),
         ("classic", "wow_classic", "wow_classic"),
         ("classic-era", "wow_classic_era", "wow_classic_era"),
         ("titan", "wow_classic_titan", "wow_classic_titan"),
-        ("forever-asia-beta", "wow_classic_beta", "wow_classic_beta"),
-        ("forever-cn-beta", "wow_cn_beta", "wow_cn_beta"),
+        ("forever", "wowf", "wowf"),
         ("anniversary", "wow_anniversary", "wow_anniversary"),
-        ("forever", "wow_forever", "wow_classic_beta"),
     ] {
         assert_eq!(super::product(name).unwrap(), (code, slot));
         Request {
@@ -154,10 +153,19 @@ fn fixed_product_profiles_and_legacy_alias_have_distinct_cache_and_slot_identity
         .validate()
         .unwrap();
     }
-    for name in ["wow", "retail-beta", "forever-cn", "Retail", ""] {
+    for name in [
+        "wow",
+        "retail-beta",
+        "forever-cn",
+        "Retail",
+        "",
+        "forever-asia-beta",
+        "forever-cn-beta",
+        "wow_forever",
+    ] {
         assert!(super::product(name).is_err());
     }
-    for name in ["forever", "forever-asia-beta", "forever-cn-beta"] {
+    for name in ["forever"] {
         assert!(release_product(name, "1.60.1.9").is_ok());
         assert!(release_product(name, "1.61.0.9").is_err());
     }
@@ -307,12 +315,12 @@ fn interrupted_pair_fetch_cannot_publish_half_an_observation_or_pin() {
 #[test]
 fn reused_slot_wrong_release_fails_before_configuration_or_definition_fetch() {
     let fixture = Fixture::new();
-    let fetch = inputs("forever-cn-beta", "5.5.4.70000");
+    let fetch = inputs("forever", "5.5.4.70000");
     let defs = Defs::default();
     let error = resolve_with(
         &fixture.home,
         &Request {
-            product: "forever-cn-beta".into(),
+            product: "forever".into(),
             ..request()
         },
         &fixture.control,
@@ -441,7 +449,7 @@ fn offline_legacy_cached_time_is_rejected_before_data_fetch() {
 }
 
 #[test]
-fn family_wide_blizzard_source_parent_supports_exact_regional_data_track() {
+fn blizzard_forever_source_parent_supports_formal_wowf_data() {
     let fixture = Fixture::new();
     let source = selection::SourcePin {
         repository: "wow-ui-source".into(),
@@ -463,17 +471,17 @@ fn family_wide_blizzard_source_parent_supports_exact_regional_data_track() {
         &fixture.home,
         &Request {
             parent: parent.id,
-            product: "forever-cn-beta".into(),
+            product: "forever".into(),
             ..request()
         },
         &fixture.control,
         None,
-        &inputs("forever-cn-beta", "1.60.1.70000"),
+        &inputs("forever", "1.60.1.70658"),
         &Defs::default(),
     )
     .unwrap();
     assert_eq!(result.pin.source.as_ref(), Some(&source));
-    assert_eq!(result.pin.data.as_ref().unwrap().product, "forever-cn-beta");
+    assert_eq!(result.pin.data.as_ref().unwrap().product, "forever");
 }
 
 #[test]
@@ -542,9 +550,10 @@ fn independent_budget_stop_after_definitions_prevents_pin_and_capture_publicatio
     // reports missing metadata here instead of creating an empty database.
     assert!(!fixture.home.join("state/toolkit.sqlite").exists());
     assert!(!fixture.home.join("state/data/evidence-v2.sqlite").exists());
-    let absent = lycheedev_core::metadata::Metadata::open_controlled(
-        &fixture.home, false, &fixture.control,
-    ).err().unwrap();
+    let absent =
+        lycheedev_core::metadata::Metadata::open_controlled(&fixture.home, false, &fixture.control)
+            .err()
+            .unwrap();
     assert_eq!(absent.code, "vault.record_missing");
 }
 
@@ -630,9 +639,10 @@ fn target_pin_schema_wait_keeps_short_budget_identity_before_publication() {
     // reports missing metadata here instead of creating an empty database.
     assert!(!fixture.home.join("state/toolkit.sqlite").exists());
     assert!(!fixture.home.join("state/data/evidence-v2.sqlite").exists());
-    let absent = lycheedev_core::metadata::Metadata::open_controlled(
-        &fixture.home, false, &fixture.control,
-    ).err().unwrap();
+    let absent =
+        lycheedev_core::metadata::Metadata::open_controlled(&fixture.home, false, &fixture.control)
+            .err()
+            .unwrap();
     assert_eq!(absent.code, "vault.record_missing");
     fixture
         .store()
@@ -640,4 +650,166 @@ fn target_pin_schema_wait_keeps_short_budget_identity_before_publication() {
         .unwrap()
         .close()
         .unwrap();
+}
+
+#[test]
+fn formal_wowf_resolution_preserves_legacy_parent_configs_and_rejects_retired_admission() {
+    let fixture = Fixture::new();
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        let fetch = Fetch::default();
+        let defs = Defs::default();
+        assert_eq!(
+            resolve_with(
+                &fixture.home,
+                &Request {
+                    product: product.into(),
+                    ..request()
+                },
+                &fixture.control,
+                None,
+                &fetch,
+                &defs
+            )
+            .unwrap_err()
+            .code,
+            "selection.unsupported_data_product"
+        );
+        assert!(fetch.calls.borrow().is_empty());
+        assert!(defs.calls.borrow().is_empty());
+    }
+    let legacy_data = DataPin {
+        product: "forever".into(),
+        region: "cn".into(),
+        language: "zhCN".into(),
+        full_build: "1.60.1.70658".into(),
+        build_config: "b".repeat(32),
+        cdn_config: "c".repeat(32),
+        definition_commit: "d".repeat(40),
+    };
+    let legacy = selection::pin_selection_controlled(
+        &fixture.home,
+        SelectionSpec {
+            data: Some(legacy_data.clone()),
+            ..Default::default()
+        },
+        &fixture.control,
+    )
+    .unwrap();
+    let pin_key = format!("pin/{}", legacy.id);
+    let before =
+        Metadata::read_document_raw_controlled(&fixture.home, &pin_key, &fixture.control).unwrap();
+    let fetch = inputs("forever", "1.60.1.70658");
+    let defs = Defs::default();
+    let error = resolve_with(
+        &fixture.home,
+        &Request {
+            product: "forever".into(),
+            parent: legacy.id.clone(),
+            ..request()
+        },
+        &fixture.control,
+        None,
+        &fetch,
+        &defs,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "selection.fixed_data_conflict");
+    assert_eq!(error.exit_code, 4);
+    assert_eq!(error.message, "cannot change inherited data");
+    assert_eq!(
+        fetch.calls.borrow().len(),
+        4,
+        "valid wowf catalogs and both authenticated configurations reach the shared pin owner"
+    );
+    assert_eq!(defs.calls.borrow().len(), 1);
+    assert_eq!(defs.calls.borrow()[0].0, "d".repeat(40));
+    assert_eq!(
+        selection::load_pinned_controlled(&fixture.home, &legacy.id, &fixture.control)
+            .unwrap()
+            .data,
+        Some(legacy_data)
+    );
+    let after =
+        Metadata::read_document_raw_controlled(&fixture.home, &pin_key, &fixture.control).unwrap();
+    assert_eq!(after.generation, before.generation);
+    assert_eq!(
+        after.bytes, before.bytes,
+        "failed derivation keeps the exact original parent bytes"
+    );
+    let metadata = Metadata::open_controlled(&fixture.home, false, &fixture.control).unwrap();
+    assert_eq!(metadata.list::<serde_json::Value>("pin/", 100).unwrap().len(), 1);
+    assert!(metadata.list::<serde_json::Value>("capture/", 100).unwrap().is_empty());
+    metadata.close().unwrap();
+    assert!(fixture.store().observation("wowf", "cn").unwrap().is_none());
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        let data = DataPin {
+            product: product.into(),
+            ..legacy.data.clone().unwrap()
+        };
+        let old = selection::pin_selection_controlled(
+            &fixture.home,
+            SelectionSpec {
+                data: Some(data.clone()),
+                ..Default::default()
+            },
+            &fixture.control,
+        )
+        .unwrap();
+        let fetch = Fetch::default();
+        assert_eq!(
+            resolve_with(
+                &fixture.home,
+                &Request {
+                    product: "forever".into(),
+                    parent: old.id.clone(),
+                    ..request()
+                },
+                &fixture.control,
+                None,
+                &fetch,
+                &defs
+            )
+            .unwrap_err()
+            .code,
+            "selection.product_mismatch"
+        );
+        assert!(fetch.calls.borrow().is_empty());
+        assert_eq!(
+            selection::load_pinned_controlled(&fixture.home, &old.id, &fixture.control)
+                .unwrap()
+                .data,
+            Some(data)
+        );
+    }
+    let fetch = inputs("forever", "1.60.1.70658");
+    let formal = resolve_with(
+        &fixture.home,
+        &Request {
+            product: "forever".into(),
+            ..request()
+        },
+        &fixture.control,
+        None,
+        &fetch,
+        &Defs::default(),
+    )
+    .unwrap();
+    assert_eq!(formal.pin.data.as_ref().unwrap().product, "forever");
+    let calls = fetch.calls.borrow();
+    assert_eq!(
+        calls[0],
+        "https://cn.version.battlenet.com.cn/wowf/versions"
+    );
+    assert_eq!(calls[1], "https://cn.version.battlenet.com.cn/wowf/cdns");
+    assert!(calls.iter().all(|url| !url.contains("wow_forever")
+        && !url.contains("wow_classic_beta")
+        && !url.contains("wow_cn_beta")));
+    assert!(fixture.store().observation("wowf", "cn").unwrap().is_some());
+    assert!(
+        fixture
+            .store()
+            .observation("wow_forever", "cn")
+            .unwrap()
+            .is_none()
+    );
 }

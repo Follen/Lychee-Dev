@@ -210,7 +210,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         }
         if matches!(
             source.structural_type(),
-            LuaType::IntegerConst(_) | LuaType::DocIntegerConst(_)
+            LuaType::Integer | LuaType::IntegerConst(_) | LuaType::DocIntegerConst(_)
         ) && matches!(target.structural_type(), LuaType::Number)
         {
             return Ok(true);

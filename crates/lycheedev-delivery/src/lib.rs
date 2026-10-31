@@ -240,6 +240,64 @@ mod selection_tests {
         assert!(!ctx.home.exists());
     }
     #[test]
+    fn addon_status_uses_formal_forever_wowf_without_version_file_and_rejects_beta_targets() {
+        let fixture = Fixture::new();
+        let formal = fixture.0.join("_forever_");
+        fs::rename(fixture.0.join("_classic_titan_"), &formal).unwrap();
+        fs::write(formal.join(".flavor.info"), "wowf").unwrap();
+        fs::remove_file(formal.join("version.txt")).unwrap();
+        fs::write(formal.join("Wow.exe"), []).unwrap();
+        fs::write(fixture.0.join(".build.info"), "Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0|Build Key!HEX:16|CDN Key!HEX:16\ncn|1|1.60.1.70658|wowf|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\n").unwrap();
+        let ctx = fixture.context();
+        let root = fixture.addon_status(&ctx, &fixture.0, "formal Forever root");
+        let exact = fixture.addon_status(&ctx, &formal, "formal Forever client");
+        assert_eq!(root, exact);
+        assert_eq!(root["client"]["product"], "forever");
+        assert_eq!(root["client"]["productCode"], "wowf");
+        assert_eq!(root["client"]["catalogProduct"], "wowf");
+        assert_eq!(root["client"]["fullBuild"], "1.60.1.70658");
+        assert_eq!(root["client"]["interface"], 16001);
+        assert_eq!(root["installation"]["state"], "absent");
+        for (folder, flavor) in [
+            ("_classic_beta_", "wow_classic_beta"),
+            ("_cn_beta_", "wow_cn_beta"),
+        ] {
+            let beta = fixture.0.join(folder);
+            fs::create_dir(&beta).unwrap();
+            fs::write(beta.join(".flavor.info"), flavor).unwrap();
+            fs::write(beta.join("version.txt"), "1.60.1.70338").unwrap();
+            let consistent_root = fixture.0.join(format!("retired-{flavor}"));
+            let consistent_beta = consistent_root.join(folder);
+            fs::create_dir_all(&consistent_beta).unwrap();
+            fs::write(consistent_beta.join(".flavor.info"), flavor).unwrap();
+            fs::write(consistent_beta.join("version.txt"), "1.60.1.70338").unwrap();
+            fs::write(consistent_root.join(".build.info"), format!("Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0|Build Key!HEX:16|CDN Key!HEX:16\ncn|1|1.60.1.70338|{flavor}|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\n")).unwrap();
+            // The exact inspector rejects retired identity even with matching launcher evidence.
+            let retired = lycheedev_core::client::inspect_with(
+                &consistent_beta,
+                &mut lycheedev_core::installation_selection::InvocationMetadata(&ctx.control),
+            ).unwrap_err();
+            assert_eq!(retired.code, "selection.client_identity");
+            assert_eq!(retired.message, "unsupported retired Forever product");
+            for (scope, label) in [(&beta, "formal catalog parent"), (&consistent_beta, "matching Beta catalog")] {
+                let error = dispatch(&ctx, &Request::AddonStatus(AddonSelector::Installation(scope.to_path_buf()))).unwrap_err();
+                // Selection retains the precise inspector reason inside its public conflict report.
+                assert_eq!(error.code, "selection.installation_metadata_conflict", "{label}");
+                assert_eq!(error.exit_code, 4);
+                let report = &error.details["__commandContext"]["installationSelection"];
+                assert_eq!(report["candidates"], serde_json::json!([]), "{label}");
+                let issues = report["issues"].as_array().unwrap();
+                assert_eq!(issues.len(), 1, "{label}");
+                assert_eq!(issues[0]["productCode"], flavor, "{label}");
+                assert_eq!(issues[0]["reason"], "selection.client_identity: unsupported retired Forever product", "{label}");
+            }
+        }
+        assert_eq!(fixture.addon_status(&ctx, &formal, "formal client after rejected Beta scopes"), exact);
+        assert!(!formal.join("version.txt").exists());
+        assert!(!ctx.home.exists());
+    }
+
+    #[test]
     fn selection_fixtures_with_identical_timestamps_own_independent_roots() {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -218,7 +218,4 @@ impl SourceInputs {
         // Only parser-owned ranges reach this internal helper; admission checks the complete transform.
         Site::at(file,self.original_range(file,range).expect("admitted parser range"))
     }
-    fn execution(&self,phase:&str,ordered:&[&str],control:&OperationControl)->lycheedev_core::Result<Arc<Self>> {
-        control.check()?;let mut next=self.clone();next.phase=phase.into();next.load_plan=None;next.entry=None;next.ordered=ordered.iter().map(|name|(*name).into()).collect();next.validate_execution()?;next.refresh_identity(control)?;Ok(Arc::new(next))
-    }
 }

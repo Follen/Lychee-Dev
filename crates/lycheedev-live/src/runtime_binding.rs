@@ -150,16 +150,12 @@ impl RuntimeLayoutAdmission {
         Ok(admission)
     }
     fn check_client(client: &ClientInstallation) -> Result<()> {
-        // The API family may be shared, but ABI admission remains tied to the
-        // exact observed delivery slot. No regional catalog evidence is borrowed.
+        // ABI admission follows the current exact delivery identity. Historical
+        // family names and retired Beta catalog records cannot authorize a target.
         let known = client::product(client::client_data_product(client))
             .ok_or("reader.runtime_client_identity")?;
-        let expected_code = if known.family == "forever" {
-            "wow_forever"
-        } else {
-            known.catalog_product
-        };
-        let expected_catalog = if known.id != known.family {
+        let expected_code = known.catalog_product;
+        let expected_catalog = if known.id == "forever" || known.id != known.family {
             known.catalog_product
         } else {
             ""

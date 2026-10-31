@@ -195,7 +195,7 @@ mod tests {
             );
             assert_eq!(result.data["development"], crate::VERSION.contains('-'));
             assert_eq!(result.data["exitCodes"].as_array().unwrap().len(), 8);
-            assert_eq!(result.data["products"].as_array().unwrap().len(), 8);
+            assert_eq!(result.data["products"].as_array().unwrap().len(), 6);
             assert_eq!(result.data["result"]["schema"], "lycheedev.result.v1");
             assert!(result.data["discovery"].as_array().unwrap().len() >= 2);
             let input = ["--help".to_owned()];

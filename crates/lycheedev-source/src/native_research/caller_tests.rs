@@ -47,7 +47,7 @@ fn incoming_alias_calls_keep_reference_spelling_and_nearest_definition() {
     let source="function Target(x) return x end\nAlias=Target\nfunction ActualCaller() return Alias(1) end\n";
     let session=planner_fixture(BTreeMap::from([("logic.lua".into(),source.into())]),BTreeMap::new(),None);
     let control=session.prepared.operation_control();
-    let graph=session.prepared.build_execution("caller-alias","after_load",&["logic.lua"],None,control).unwrap();
+    let graph=session.prepared.build_plan("caller-alias", "after_load", LoadPlan::Known(vec!["logic.lua".into()]), None, None, control).unwrap();
     let symbol=planned_query("Target","logic.lua",1,1,"function","incoming").symbol;
     let result=session.prepared.research_relations_with_context_observed(&symbol,"incoming",Some(&graph),&session.xml,None,None,&mut |_|{}).map(|result|serde_json::to_value(result).unwrap()).unwrap();
     let row=result["relations"].as_array().unwrap().iter().find(|row|row["kind"]=="call"&&row["referenceExpression"]=="Alias").expect("selected alias is retained");

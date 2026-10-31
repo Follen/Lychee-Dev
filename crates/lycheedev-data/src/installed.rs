@@ -248,21 +248,17 @@ pub fn resolve_pinned_target_budgeted(
             "Unknown toolkit product",
         )
     })?;
-    if profile.reused_slot
+    if profile.id == "forever"
         && (!lycheedev_core::selection::valid_build(&pin.full_build)
             || !pin.full_build.starts_with(&format!("{}.", profile.series)))
     {
         return Err(fault(
             "selection.data_product_build_mismatch",
             4,
-            "Pinned build is outside the verified reused-slot series",
+            "Pinned build is outside the supported Forever series",
         ));
     }
-    let product_code = if pin.product == "forever" {
-        "wow_forever"
-    } else {
-        profile.catalog_product
-    };
+    let product_code = profile.catalog_product;
     let (common_root, product_code) =
         data_installation_root_budgeted(installation, product_code, &pin.full_build, budget)?;
     let metadata = resolve_local_budgeted(&common_root, &product_code, &pin.full_build, budget)?;
@@ -800,31 +796,28 @@ pub fn resolve_local_budgeted(
         let raw = read(root, &catalog_path, 1 << 20, budget)?;
         let rows = installed_rows_budgeted(&raw, budget)?;
         Ok((raw, rows))
-    })().map_err(|mut error: ToolkitError| {
+    })()
+    .map_err(|mut error: ToolkitError| {
         if error.code == "records.invalid_metadata" {
             if error.details.is_null() {
                 error.details = serde_json::json!({});
             }
             if let Some(details) = error.details.as_object_mut() {
-                details.entry("sourcePath").or_insert_with(|| serde_json::json!(catalog_path));
-                details.entry("formatHint").or_insert_with(|| serde_json::json!("Pipe-delimited launcher build catalog with a header and row boundary"));
+                details
+                    .entry("sourcePath")
+                    .or_insert_with(|| serde_json::json!(catalog_path));
+                details.entry("formatHint").or_insert_with(|| {
+                    serde_json::json!(
+                        "Pipe-delimited launcher build catalog with a header and row boundary"
+                    )
+                });
             }
         }
         error
     })?;
-    let exact = rows
-        .iter()
-        .any(|row| row.active && row.product == product_code && row.full_build == full_build);
-    // Fixed Go catalog.go permits the canonical Forever family only when an
-    // exact row is absent. An observed regional slot never enters this fallback.
-    let legacy_slots = !exact && product_code == "wow_forever" && full_build.starts_with("1.60.1.");
-    let mut matches = rows.into_iter().filter(|row| {
-        row.active
-            && row.full_build == full_build
-            && (row.product == product_code
-                || (legacy_slots
-                    && matches!(row.product.as_str(), "wow_classic_beta" | "wow_cn_beta")))
-    });
+    let mut matches = rows
+        .into_iter()
+        .filter(|row| row.active && row.full_build == full_build && row.product == product_code);
     let selected = matches.next();
     if matches.next().is_some() {
         return Err(fault(

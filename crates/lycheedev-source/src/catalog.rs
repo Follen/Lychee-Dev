@@ -28,8 +28,6 @@ pub fn repositories() -> Vec<Repository> {
                 ("anniversary", "classic_anniversary"),
                 ("titan", "classic_titan"),
                 ("forever", "forever"),
-                ("forever-asia-beta", "forever"),
-                ("forever-cn-beta", "forever"),
             ],
         ),
         (
@@ -92,13 +90,11 @@ pub fn lookup(key: &str) -> Result<Repository> {
 mod tests {
     use super::*;
     #[test]
-    fn regional_source_tracks_alias_only_the_shared_forever_ref() {
+    fn current_forever_track_uses_only_the_formal_product() {
         let repository = lookup("wow-ui-source").unwrap();
-        for product in ["forever", "forever-asia-beta", "forever-cn-beta"] {
-            assert_eq!(
-                repository.tracks.get(product).map(String::as_str),
-                Some("forever")
-            );
+        assert_eq!(repository.tracks.get("forever").map(String::as_str), Some("forever"));
+        for retired in ["forever-asia-beta", "forever-cn-beta"] {
+            assert!(!repository.tracks.contains_key(retired));
         }
         assert_eq!(repository.tracks["classic-beta"], "classic_beta");
         assert_eq!(repository.tracks["classic-era"], "classic_era");

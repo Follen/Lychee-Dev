@@ -103,12 +103,12 @@ mod tests {
     #[test]
     fn exact_endpoint_and_bounded_utf8_admission() {
         assert_eq!(
-            locator("cn", "wow_cn_beta").unwrap(),
-            "https://cn.version.battlenet.com.cn/wow_cn_beta/versions"
+            locator("cn", "wowf").unwrap(),
+            "https://cn.version.battlenet.com.cn/wowf/versions"
         );
         assert_eq!(
-            locator("us", "wow_classic_beta").unwrap(),
-            "https://us.version.battle.net/wow_classic_beta/versions"
+            locator("us", "wowf").unwrap(),
+            "https://us.version.battle.net/wowf/versions"
         );
         for slot in [
             "",
