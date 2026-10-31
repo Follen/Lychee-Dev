@@ -8,7 +8,7 @@
 - 本轮死代码、冗余测试、CLI/Skill和文档审计，以及正式Forever非Live实现与包验收均已完成。最后两侧只读闭包复审未发现新确认缺陷；两个仅供测试读取预算/数量的薄getter保留为可收窄候选，没有增加另一套执行器。
 - 正式Forever规范ID/Source family为`forever`，官方远端/flavor为`wowf`，目录`_forever_`，可执行文件`Wow.exe`；当前支持六产品。两个Beta退出当前目标准入，历史PIN/CAP/raw和恢复身份保留。
 - 未合并、未发布、未改npm标签、未全局安装Skill/npm。游戏进程读取、输入、真实部署和Live实机测试继续留待用户安排；本次正式Forever只读游戏文件。
-- 所有工作者已完成；Root负责文档、集成和唯一native队列，当前队列空闲。未新增工作树或PR，无关未跟踪`Microsoft/`目录保留。
+- 所有工作者已完成；Root负责文档、集成和唯一native队列，当前队列空闲。未新增工作树或PR；PowerShell临时ModuleAnalysisCache已清理。
 
 ## 八项审计：发现、修复与验证
 
@@ -36,7 +36,8 @@
 
 - 原53份工作树已用git worktree remove清理48份，无独立代码变更；两个witness的7项差异经原字节核对仅为CRLF。分支与PR保留。
 - 剩5份：主checkout、当前pr14-local-dev、明确保留的rust-refactor；pr14-agent-e85-first-check保原prepared fence/ordinary.lease.original及未确认回收owner，pr14-fc001-offline保未确认source-pack owner。回收按owner证据判断。
-- 此前13个scratch、rust327-audit、8份旧编译副本及ModuleAnalysisCache删除被自动审批拒绝，未换工具绕过。当前产物、活动项目/CAP、固定输入和未解决恢复保留。
+- 用户追加脚本清理授权后，固定清单脚本已删除70个目标：58个已结束且可重建scratch、11份退役程序副本（rust-audit-next八份、rust327-audit三份）及一个ModuleAnalysisCache文件，合计19,254,546,378字节；磁盘可用空间增加约19.28GB。原报告、build记录和封存日志保留；rust327-audit内仍复用的Lua与suspended-fixture保留。
+- 另28个scratch保留：15个evidence输入、2个被当前包验收引用的目录、10个active/interrupted且回收未确认的owner，以及1个封存日志校验异常目录。清理清单、结果和复核在`.tmp/cleanup-clean07/`；17份当前验收报告、原TGZ、build-16、Lua及源码摘要复核通过，5个工作树和PR继续保留。
 - REG-01旧准备错误5未再复现、原因未定；恢复`4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b`和`de770010-ea9c-40fa-a48e-27141a6e0d64`保留。旧CI与旧包结果只作输入/方法基线。
 
 ## 下一步

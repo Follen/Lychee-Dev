@@ -4,9 +4,9 @@
 
 这里只保留未完成事项；完成项移出，当前验证事实见handover。新增缺口先核当前正式路径和既有能力，再确定实现与验证范围。
 
-## 1. 旧代码、旧测试、Go 与旧 CI 的剩余清理
+## 1. 工作区恢复与材料保留
 
-- [ ] **CLEAN-07｜未完成恢复与被拒绝材料。** 本批闲置工作树已按新授权清理48份；当前/主checkout/明确保留树保留，e85与fc001另保原prepared fence及未确认回收owner。此前13个scratch、rust327-audit、8份旧编译副本与ModuleAnalysisCache删除被自动审批拒绝，未绕过。活动输入、CAP、最终CI包/当前构建及未解决恢复不在删除范围。
+- [ ] **CLEAN-07｜未完成恢复与日志差异。** 已清理48份闲置工作树；本次脚本另删除58个已结束的可重建scratch、11份退役程序副本及ModuleAnalysisCache，70个目标共约19.25GB。仍保留10个active/interrupted且回收未确认的owner与1个封存日志校验异常目录，待按原身份和证据核实；e85/fc001原prepared fence及未确认owner保留。15个evidence输入和2个被当前验收引用的目录属于有效材料，当前CI包、build-16、Lua、活动项目/CAP及固定输入继续保留。
 
 ## 2. 当前路径测试与交付
 
