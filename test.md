@@ -215,7 +215,7 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 | N09 / DELIVERY-01 | 统一 Release/npm 包在隔离 prefix/HOME 安装，包内 Skill/CLI/luac/addon。 | 真正完成 Source/Data/安装任务，路径/版本/许可证与包内容一致；旧 Go install smoke 已删，当前入口 tools/rust-package-smoke + CI validate-package。 |
 | N10 / LIVE-CLIENT | 真实客户端和已授权实例操作。 | 按 handover 最后 H01—H08 记录七产品、当前绑定、500 槽、多实例、恢复和所需性能；离线通过不代替本项。 |
 | N11 / SOURCE-02 | 含非 UTF-8 注释/字符串的固定 Lua 输入；当前 Source query/inspect/context/validate/closure/native。 | 见 7.1；单文件编码告警不能中断全快照或伪造语义。最终已安装 Release 的实际 Forever 冷/热索引、inspect、同提交 diff、受管 luac、完整 native IPC 告警与会话复用均通过。research-material CAS 回归覆盖注释分析视图、不可转换 token/字符串 gap、篡改及普通 UTF-8 快路径；32 MiB+17 文件的超限冷/热索引回归也已通过。 |
-| N12 / CI-01—04 | 实际workflow、构建产物和下游runner；结构检查与真实CI结果。 | 每种配置编译一次，两个命名组共用同一93+1构建记录；汇总逐程序核计划/结果、哈希、提交、覆盖及回收。41114329228的十二个job全通过：两组24/69程序、222项Lua、两个显式文件symlink、固定资源、跨job路径、许可证closure、Release、唯一TGZ生产/审计/安装、包内Source/Data及候选封存。已独立下载并核全部11项SHA256SUMS和各报告共同身份；候选只复制原TGZ，输入缺失无隐式重建。实际验收commit、哈希与证明范围见handover。 |
+| N12 / CI-01—04 | 实际workflow、构建产物和下游runner；结构检查与真实CI结果。 | 每种配置编译一次，两个命名组共用同一93+1构建记录；汇总逐程序核计划/结果、哈希、提交、覆盖及回收。41182067569的十二个job全通过：两组24/69程序、222项Lua、两个显式文件symlink、固定资源、跨job路径、许可证closure、Release、唯一TGZ生产/审计/安装、包内Source/Data及候选封存。已独立下载并核全部11项SHA256SUMS和各报告共同身份；候选只复制原TGZ，输入缺失无隐式重建。实际验收commit、哈希与证明范围见handover。 |
 
 ### 7.1 N11：Source 编码回归的具体业务
 
@@ -229,6 +229,22 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 - 实际输入使用 Forever 1.60.1.70450、源码提交 `172a387e3ab85b26e6640d3058d5ec1e6ccd4c63`：`Interface/AddOns/Blizzard_NewPlayerExperience/Camelot/Blizzard_TutorialData.lua` 第 400 行，0x92 在偏移 12719。最终已安装 Release 已通过包内 Source sync 获取并验证 4,481 文档/AST、0 跳过、0 语法诊断、1 编码告警，以及原字节、U+FFFD、同提交 diff 和受管 luac。公共 native refs 首次/复用均通过，第二次命中同一输入的缓存并只传快照标识，编码告警不变，随后 session 关闭。
 - 完整 XML 来源映射的响应回归使用真实提取的实体、换行、合成 wrapper、空映射及 null 原始位置，对照 canonical JSON 字节和输入身份；[raw_response_tests.rs](crates/lycheedev-source/src/native_session/raw_response_tests.rs) 覆盖 typed reply、固定帧上限、owner 原字节转发、公开 Value 解码及同会话第二次查询。该回归不代替上述真实全快照的内存与 IPC 验证。
 - 旧参考缺少这个修复时，不以旧结果为正确性标准；不把 Go 源码、旧 JSON cache 或发行版本改动带回 Rust。
+
+### 7.2 最终安装包的非Live业务验收
+
+验收使用完整CI的唯一TGZ和真实隔离npm安装，不另编CLI、不重打包。原生version、commit、dirty、资源及producer身份逐项绑定；每个完整业务owner在同一Job/原期限内完成并确认回收。实际报告及独立哈希汇总见handover。
+
+| 业务 | 输入、独立预期与证明范围 |
+| --- | --- |
+| Source调查/验证 | tiny原始Git项目、Forever固定提交及四产品固定API；实际项目选择、query/inspect/native refs/context/batch、UTF8续读、原编码、TOC/XML加载顺序/内联Lua、语法和语义矩阵、CAP/bundle/keep/remove及关闭。静态候选/partial不升级为运行时结论。 |
+| Data领域 | 认证原DB2/CASC及固定定义；12种navigate/17独立向量、浮点/数组、自动CAP、三类unavailable与完整空来源，以及同会话错误恢复。 |
+| 查询与effective | 精确数值、lookup/batch/related/explain/analyze、同handle分页/CSV/JSON/CAP/release/close；两份原XFTH经正式Hotfix归档后验证新增/替换/删除、push/index/历史顺序、static不变及错误恢复。 |
+| Hotfix与demux | 原XFTH归档续读、固定Wago HTML离线重解析/过滤/游标及完整性、AVI原字节/限额/冲突保留。固定HTML不冒充当前远程服务验证。 |
+| 七产品Map | 保留真实BLTE全字节及原加密块，用明确synthetic元数据和新独立PIN读取，逐原文SHA/全部行值/顺序/分页/CSV/CAP核对；两个Forever保持73/81与缺key/不可读分区。Retail cold和显式prepare分别证明读取及generation复用。新旧PIN分开，不作为已更新真实安装或Live通过。 |
+| 原资源导出 | 134400原BLTE与独立BLP/PNG/RGBA；原始字节、PNG/WebP64×64全像素，以及来源/导出/清单CAP依赖。 |
+| 受管交付 | 合成client的main/500槽/Skill安装、幂等、update、真实deny-delete故障、原归档/不传release的resume与重复resume、归档移除及无关文件保留。 |
+| npm自更新 | loopback registry只服务同一原TGZ，两次真实prepare/handoff/apply与隔离global-prefix安装；历史字节、新nonce、500槽、完整journal和服务/进程关闭。不发布或修改真实渠道。 |
+| 管理与Agent使用 | config/target/cache/keep/doctor只读诊断与离线target修复；独立Agent仅读安装Skill、实际metadata与用户原输入，自主完成Source和三个Data任务，Root另用未透露的oracle核有用答案、精确数值、partial及收尾。doctor Live repair仍留后。 |
 
 ## 8. 执行与记录规则
 

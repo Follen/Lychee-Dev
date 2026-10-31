@@ -1,51 +1,56 @@
 # 当前交接
 
-架构见 [DESIGN.md](DESIGN.md)，剩余事项见 [todo.md](todo.md)，测试用途见 [test.md](test.md)，工作规则见 [AGENTS.md](AGENTS.md)。这里只保存当前状态。
+架构见 [DESIGN.md](DESIGN.md)，未完成项见 [todo.md](todo.md)，测试用途见 [test.md](test.md)，工作规则见 [AGENTS.md](AGENTS.md)。这里只维护当前状态。
 
-## 目标、分支与授权范围
+## 目标、分支与范围
 
-- 2026-10-31用户要求循环审计八项：架构/模块边界、业务完整性、Skill-CLI一致性、有效覆盖、死代码、全仓集成、Rust原生度、冗余测试。每轮修复并验证确认问题后继续复审，直到每项不再发现新问题。当前从已验证HEAD 210d3f934d27f12171503d983060920ab4e5da13继续；先独立深审，再集中修改和受影响验证。前批已通过结果在路径未变时继续有效，不能充当本批新改动通过。Live实机仍留后，不连接/读取游戏进程、发送输入、更改真实安装或全局Skill。
-- 工作区`.worktrees/pr14-local-dev`，分支`rust-refactor`，既有[draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。产品提交`d6a3a8dd293cdbb117c703cb903786f18c023d01`，main历史整合提交`1e7b1dd98e5d19fbf01327a05bd138aa7954f92f`，均已推送。main为`cbf96df6465c661e2e5a21b0c972d6bd76beab83`；先移植行为再接入历史，整合前后Rust tree均为`8fae72bf0dc39d2b1c3cd84757f723311cada0ec`。Rust版本仍以release/version.json的3.5.0为准。
-- 当前PR可合并但仍draft，未合并、未发布、未修改远程npm标签；preserveLatest仅随main更新为3.2.7。已有提交/推送/PR维护/完整CI与正式包验收授权已执行；不新增实机或发布授权。性能已接受，不补优化或比较轮次。
-- 用户追加再做8轮，每轮覆盖原八项；发现问题修复后复审，末轮仍有新问题就继续。非Live业务须跑实际任务与结果核对，可安排子代理模拟使用者；复用固定输入和最终同一CI包，不按轮数重复编译。Live范围保持不变。
-- 当前分工：rust_business_audit负责Data/Core清理与Source native_session/analysis_process、CLI Data进程消费者；go326_doctor负责Windows（不含broker/destination）、Delivery/Live/formal_live及Core storage；go326_delivery负责CLI/Skill、Source/Emmy清理和Windows destination/Data assets旧发布路线及相应测试迁移；协调者独占Windows broker、Source batch/assets/index、Core process测试helper、tools/CI和共享文档。所有原生构建由协调者串行执行。
+- 用户要求追加八轮全仓审计，每轮覆盖架构、业务、CLI/Skill、有效覆盖、死代码、全仓集成、Rust原生度与冗余测试；确认问题修复并验证后继续复审，直到各项不再发现新问题。非Live业务须用最终正式包完成实际任务，独立Agent仅靠安装Skill与CLI发现能力验证可用性。性能已接受，不补优化或比较轮次。
+- 工作区`.worktrees/pr14-local-dev`，分支`rust-refactor`，既有[draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。主修复`5a5e7a7fcd5ef41e848c317f29f4804dda2fc6f1`及两项PNG正例夹具修正`ff65b19779c63196a8fb8a65b00a6f7c778a5dae`均已集中提交推送。main3.2.7的行为与历史已接入；当前main为`cbf96df6465c661e2e5a21b0c972d6bd76beab83`。
+- Rust版本以release/version.json的3.5.0为准，beta/preserveLatest3.2.7未变。已有提交/推送、PR维护、完整CI和正式包验收授权继续有效；PR仍draft，未合并、未发布、未变npm标签。禁止游戏进程查询/Live连接或输入、真实安装写入和全局Skill安装；自有合成客户端、进程/pipe/event及隔离npm前缀可用于离线验收。
+- 各模块追加八轮阅读、修复及最终静态交叉复审完成，未发现新增确认产品问题。最终同包非Live业务已全部验收，AUDIT-08完成。协调者已核原始结果及独立预期，所有原生owner均回收，所有子代理STOPEDIT；结果文档与PR按当前实际状态维护；清理受阻的临时副本单独保留。
 
-## 当前补审状态
+## 本批修复
 
-- 主修复已集中推送5a5e7a7fcd5ef41e848c317f29f4804dda2fc6f1。各模块追加八轮阅读、修复及最终静态交叉复审完成，最新未发现新增确认问题；非Live最终包全业务和独立Agent自解释仍待实际验收，AUDIT-08未勾选。
-- 本批已修：Semantics只许static/空captures、partial Aura不生否定事实；Source/Hotfix项目与最近锁、明确snapshot优先、严格batch/matrix/schema/Skill合同；Windows进程/pipe/event/Job/线程checked-close；doctor实际archive、正式安装完成Receipt、npm完成journal/结构化错误；Source Hello原control、observer读取错误、child/retirement/observer组合与原fatal退出；NativeReader独立child取消和原ledger。旧Live observation、destination executor、Source/Emmy无用包装、JSON codec、镜像断言及空跑helper已退役或改接当前路径，独立业务预期保留。详细用途在test.md和相应回归，不保存逐轮日志。
-- 实际本地绿：Core842/1ignored、Data920/1ignored、Source726/5ignored、CLI237；最新Source会话84、显式公开多进程IPC1（含原60s idle退出，110.77s）；formal25/update26/1helper ignored/doctor8，及Windows/Emmy/Node专项。最终业务源构建4abbaa2c65d32ba8dc630917b727ed9b8f9b579b483c52ea962484d9b743c353，93程序+1support，receipt b90c3d99-271b-4513-9d98-aa46efce1d5f，回收确认；IPC只证明该开发CLI及已认证luac资源，不能冒充安装包Release。
-- [本批CI 41179518527](https://github.com/Follen/Lychee-Dev/actions/runs/41179518527)实际checkout15704913e6152282207642c53f1e1d103b647b8a，与5a5e7a7fcd同Git tree。Node309/workflow21、Lua/ZIP、两配置构建、data-delivery、优化Release/唯一TGZ、内容审计和隔离安装均绿；source-runtime有两项PNG正例夹具仍无IHDR而失败，candidate因此跳过。已仅补两夹具首chunk长度13/IHDR，保24bytes及123×456等原断言；新owned all-targets与两个实际目标6+13已绿且回收（source5e7159bdeb4474570bca74ca699257c716fbbc3955aabb7f277bf6e7459ba548，receipt12dc3d96-8c1d-4209-b640-d2e1ebe90d5b）。下一步推夹具修复、跑新完整CI，不将前次失败run标通过。
-- 上述原TGZ已下载并独立核ZIP SHA498a24ad6917bfe0c1960b719b41fc0222cbe0585bf7829b4d4fc7256c52e11d。TGZ8f0df308acf499077c4f4b4b2e673f0cc91142e289b68dbf406812e72395c9d7/CLI443095fc80b803ec67061b5b8943e1bf7b617e4749667fea2ee3a5db89648104已通过本机真实隔离npm/Skill安装、commit/dirty/source与原产物绑定；报告.tmp/rust-audit-next/ci-41179518527/local-npm/report.json为partial_passed，业务另计。为现有精确commit gate临时detach后已回rust-refactor；handover有本批结果待最终文档提交。最终业务统一消费新完整CI同一TGZ，禁止改写producer身份或下载record的原CI绝对root来假装本机测试。
-- 临时实测控制器已准备但未执行业务：Source公开/Forever编码/四产品矩阵、七产品Map（含Retail冷/prepare和两Forever73/81 partial）及资源RGBA；Data12种navigate/17独立向量、query/Page/CSV/CAP/partial恢复/Hotfix/AVI；Delivery真实文件升级故障/原意图resume/remove与loopback registry的完整npm prepare→handoff→apply。独立cli_blackbox_usability代理仅读安装Skill和已生成describe（exit0/输入稳定/回收确认），没有读实现或答案；首次metadata临时runner把自身可变receipt算入日志而cleanup失败，已修caller并原样保留cd6b6abc-e255-479e-870e-b09e902e2a63记录，不重跑describe。该代理native目前暂停，待本地fixture验证结束再恢复metadata写worker；业务只用新最终报告，必须实际核有用回答/partial/错误恢复/关闭，不以exit0或脚本语法检查算通过。
-
-## 前批实现与审计结果
-
-| 范围 | 最终行为 |
+| 方向 | 修复与保留边界 |
 | --- | --- |
-| main3.2.7绑定 | ReceiverBindings归一化内容与main一致：先核有效方案，等待加载/脱战，重读玩家修改，停止同步事件重入，保存原方案，手动重置清旧诊断。旧protocol独立场景已并入当前addon套件。 |
-| Data领域 | 法术EffectBasePointsF/Speed/RangeMin/Max保留原浮点/数组；DecorGet与CreatureDisplay按文件两阶段的partial空选择报unavailable，完整空来源仍not_found。完整法术闭包、光环/召唤、遭遇树、生物显示/资源与自动CAP用独立预期回归。 |
-| Data内核 | 删除SQL-only planner胶水和旧SQL测试；精确SUM/AVG、负零、除零、双分区聚合、Decimal schema、HashJoin、COUNT边界迁到typed生产入口。关闭sql feature；datafusion-sql仍是固定上游必选依赖，不宣称整个依赖消失。 |
-| Agent使用面 | requestSchema完整公开十五种wire请求、字段/默认/限制/示例与恢复含义，复用原查询/领域合同。Catalog/Close改为空struct变体，复用serde拒绝未知字段。doctor无效no-cache参数和兼容说明移除。 |
-| Delivery/Core | status共用既有受控、有界、checked-close库存检查器，保留原control及I/O/清理错误。Core根进程挂起入Job后恢复，按原control等同Job自然清空并join pipe workers；失败只用原5秒资源收尾窗口，保留primary/cleanup，未确认回收不报成功。取消与PSS清理复合错误保留原错误码。 |
-| 死代码/冗余 | doctor测试改走正式report/close helper，无消费者包装删除。镜像/重复断言和旧Lua builder删除；字符隔离、INPUT、非空History迁入当前addon。bridge证明测试实际读取memory/numeric两份证据，逐字段负例到达对应校验。CLI数值目标改名data_agent_public_numbers。 |
-| CI | 每配置一次构建、固定资源和唯一TGZ传递保持；两个文件symlink用例在各自Windows runner显式执行，同一预编译程序/record，无重编或跳过。 |
+| 架构/模块 | Source会话与Core默认入口共用原control/checked-close；child、observer、retirement原因按Core同一结构保留，原fatal仍退出。 |
+| 业务完整性 | Semantics只许static/空captures；partial Aura不生成否定事实；Source/Hotfix项目、最近锁与明确snapshot优先一致；doctor和正式安装保实际归档、原完成Receipt；npm完成journal故障保已完成事实。 |
+| CLI/Skill | batch/matrix使用严格typed codec与完整文件schema/例子；命令路径、实际envelope字段和显式AgentJSONL一致；独立Agent实际任务见下。 |
+| 有效覆盖 | 原Hello取消/期限、observer读错与复合错误、真实deny-delete/checked-close进入正式入口；离线NativeReader同ledger保配额与独立child取消。两个PNG正例补首chunk长度13/IHDR，保24bytes及原123×456断言。 |
+| 死代码 | 退役旧Live observation、destination executor、Source/Emmy无消费者包装及重复JSON codec；实际消费者、RAII和受支持旧客户端格式保留。 |
+| 全仓集成 | CI校验完整字节/集合/渠道/原copy关系，Lua37×6报告与Skill是正式gate；同一原TGZ用于审计、隔离安装、业务和候选，不重写producer身份。 |
+| Rust原生度 | Windows Process/pipe/event/Job/线程操作逐项checked-close；npm子命令原structured details不丢失；Source默认fixture入口不保留第二条不受控生产路径。 |
+| 冗余测试 | 删除镜像断言、空helper和旧执行器测试，独立业务预期迁入正式路径；测试、Release各编译一次，后续消费者只使用认证产物。 |
 
-## 当前完整验证与产物
+详细用途及证明范围见 [test.md](test.md) 和相应可复用回归；表中实现不等于实机通过。
 
-- [完整CI 41114329228](https://github.com/Follen/Lychee-Dev/actions/runs/41114329228)已completed/success，十二个job全部success：静态、固定资源、Lua/ZIP、测试构建、Release构建、两组Rust、唯一TGZ生产、隔离安装/业务、独立内容审计、候选封存及ci-required。
-- 实际验收checkout为PR合成提交`b13e2fe6dbec312b0386f9405b93f3b3832e68e7`，源码摘要`b5ccdb4b7ceabaa540e1250e37f3e265d4afcda7da37ac2a5ba51a5078230bf8`。测试产出93程序+1 support，两个组24/69全通过；汇总和独立下载核对确认93个程序恰好一次、无缺失/重叠、身份与回收成立，record SHA256为`aed4308412c7cdecc6d1f964ed53bef0a787cb3b97f64409fbb5de21b1b4abae`。
-- 37套addon×六种配置共222项全部通过；Node工具300项和workflow合同21项通过。Data字段/schema缺陷先实际复现再修复；最终完整CI覆盖全部当前程序。Source库712、Core844、Delivery175及Live离线516均通过；ignored辅助/环境项目不冒充通过。两个文件symlink在CI各实际运行1项并通过，原本机1314覆盖缺口已闭合。Windows另两项sealed helper本地通过，helper来自同次Cargo输出，没有另编。
-- [当前候选](https://github.com/Follen/Lychee-Dev/actions/runs/41114329228/artifacts/13007625875)已独立下载核验：ZIP SHA256 `c80a17fc9f83f98febe0e08e8a7e3f1c9f14944239bfe52386633dfad9172d91`，全部11项SHA256SUMS成立；候选、安装、审计、包内业务报告绑定同一TGZ及CLI、原提交/源码/record，未改写身份。
-- TGZ SHA256：`9a0ed9aec011a2901206f82af0ea26fd776e4cd340f06ac06db118b750206f3f`。Release CLI SHA256：`0e384b8c317f2e181a9fc73cc5707ea6e58411243a89a40954da07203117b2ea`。正式TGZ隔离安装、Skill launcher、内容审计、已安装Release的固定Source native与Data query/Page/CAP/release/close均通过，inputsStable/handlesReaped成立。此为固定最小包业务，不扩大为所有数据或游戏行为。
-- 测试/Release配置各生产一次；Lua供应包原字节、addon ZIP、许可证closure、原receipt/日志/timings和唯一TGZ均通过明确本轮产物复用。依赖下载缓存命中；本次依赖合同改变后两配置新key首次构建并已保存缓存。只记录结果的文档提交跳过CI，避免再次构建；候选继续保留上述实际验收提交。
+## 当前完整CI与唯一正式包
 
-## 保留事实与后续
+- [CI 41182067569](https://github.com/Follen/Lychee-Dev/actions/runs/41182067569)十二个job全部success，含static、固定工具/ZIP、Lua、两配置构建、两组Rust、Release组装、Skill/隔离安装、TGZ内容审计、候选封存和ci-required。前次41179518527仅两项旧PNG正例夹具失败，已修复，不将旧run标通过。
+- 实际验收checkout `a2e95cbd63fb7696d2adf868e98eaaf2e0a7b5a9`，与ff65b19779同Git tree `abc26153b99893db7a93d45b664b36c33fa81717`；源码摘要`5e7159bdeb4474570bca74ca699257c716fbbc3955aabb7f277bf6e7459ba548`。93程序+1support，24/69两组全部通过且逐程序无缺失/重复、哈希/身份与回收成立；record SHA256 `b4d97aba454bbf6aa406db2d0db153b4fb302a3776ad14f4814ec7eaced192cb`。两个文件symlink在CI各显式运行1项通过。Node309/workflow21、37套Lua×6配置共222项均通过；ignored和helper不冒充业务通过。
+- [候选产物](https://github.com/Follen/Lychee-Dev/actions/runs/41182067569/artifacts/13035850632)已独立下载，ZIP SHA256 `e5c867ac1fb9f79bb68aacec9d91a3cf86fbd9fe4c41819936fe44293e603772`，全部11项SHA256SUMS及报告共同身份核对通过；证明`.tmp/rust-audit-next/ci-41182067569/independent-candidate-proof.json`。
+- 唯一TGZ SHA256 `3e2286a7b4c532e537a5b1f11645829cb7c84a889335a9950dad1231b6d9724a`；Release CLI SHA256 `2793e8acf61111fd296843b1f8bbeaaf307100d4e1c652fece31363bcdf7186f`；luac SHA256 `5aa1605bfea56e6c2961c6b4b0f845a699b43f9b3666dd64f50289c3952d441b`。测试/Release各生产一次，成功配置缓存与Lua/ZIP/许可证closure复用；没有本机重编Release或重打包。
+- 本机正式`tools/rust-package-smoke.mjs validate`已通过真实隔离npm/Skill启动器、完整payload与native version/commit/dirty绑定；报告`.tmp/rust-audit-next/ci-41182067569/local-npm/report.json`为partial_passed/npmSmoke passed，扩大业务另计。为原精确commit gate临时detach同一checkout后已回rust-refactor；原producer/record绝对root未被改写。所有后续业务统一使用该安装包。
 
-- 未改路径的既有完整Source/Emmy、四产品XML/源码矩阵、已安装Retail/Forever调查及七产品Map/资源业务仍有效。两个Forever beta各自73行可读、8行不可用，保持独立PIN/partial。原证据仍在`.tmp/business-regression`与`.tmp/rust-disk/evidence`；本轮不补性能轮次。
-- REG-01：此前Delivery升级准备曾报Windows错误5，原失败记录`default-report.json`和fixture保留；同程序exact、完整事务组、当前完整库及CI均通过，原因未定，不增加重试或削弱断言。
-- 活动项目/CAP、外部固定参考、未解决恢复记录`4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b`/`de770010-ea9c-40fa-a48e-27141a6e0d64`、明确保留的`.worktrees/rust-refactor`均保留。此前十三个已解决scratch删除遭自动审批拒绝，未重试绕过。本轮`.tmp/rust327-audit`已检查为465文件/4,950,653,420字节、无reparse/活动项目，全部构建receipt retired且handlesReaped；删除同样被自动审批返回`blocked by policy`，已保留，不换路径或工具绕过。
-- 前批非Live业务与审计已完成。本批下一步：完成当前资源与旧publisher处理、统一新红/旧绿，再推进追加八轮，修复后执行受影响验证；最终集中提交推送、跑完整CI及同一Release/TGZ验收。实机仍按最后一节留后。
+## 最终包非Live实际业务
+
+- 已通过Data27项业务检查/15会话，含12类navigate/17独立向量、Semantics三类拒绝及恢复、typed query/lookup/batch/related/explain/analyze、同handle分页/CSV/JSON/精确整数/CAP/release/close、三类partial选择器与恢复、原XFTH归档续读、固定Wago HTML离线重解析/游标和AVI导出/限额/冲突。报告`.tmp/rust-audit-next/final-data-41182067569-2/report.json`，inputsStable/handlesReaped均true。
+- 独立cli_blackbox_usability代理仅用安装Skill、实际describe/search/schema及用户原输入，未读产品实现/预期/oracle。最终Source+三个Data用户任务及version共5case通过，源码定义/调用位置、注释字符串排除、静态partial、完整物品信息、精确整数分页CSV/CAP、partial缺密钥与同会话恢复均有可用回答；原token保9007199254740993和9223372036854775807。Source关闭、Data close与释放、输入稳定及整个Job回收均已确认。报告`.tmp/rust-disk/evidence/c7fa865e-ada4-432b-bd3c-b457a0cd884a/business-report.json`；代理只读复核与Root私有独立oracle核对均通过（`.tmp/rust-audit-next/blackbox-independent-proof.json`），无遗留实际使用阻碍。
+- 前次exact-numbers使用的Root输入有19bytes故意损坏catalog，产品正确拒绝；旧输入/失败记录保留，业务另建与原PIN匹配的有效164bytes目录，新bundle SHA `bc585704e0ddaa7928906192c84e0f17c769b4375fd5dbf1dc3092eeaad8ed6a`。临时runner的CAP API、目录准备、timeout参数与可变manifest/receipt日志问题均在harness修正，不计为产品缺陷或改写既有失败。
+- Source公开项目全流程、Forever4481文档原编码/冷暖索引/原字节/luac/native首次与复用、四产品固定API矩阵均通过，含项目/最近锁/明确PIN、真实调用/context/batch、UTF8续读、严格输入、TOC/XML顺序/内联Lua、证据bundle/keep/remove及checked close。三个最终包报告分别为`.tmp/rust-disk/evidence/7c7774e3-6d3d-41a3-8a9d-8a98c043ee9f/business-report.json`、`214cfc2d-d1d6-405e-956e-66b2506d712a/business-report.json`及`7005e180-5be6-417c-aec7-6cc16e50bfb5/business-report.json`（后两路径同evidence父目录）。
+- effective另11项检查通过：正式CLI将两份原XFTH9归档成CAP，实际Agent核新增/替换/删除、push/index/历史顺序、精确CSV/JSON/CAP及三个错误后的同会话恢复，static不变；报告`.tmp/rust-disk/evidence/a19fb88b-7595-4044-8746-4580ed2c176e/business-report.json`。
+- 七产品Map实际验收全部通过：Retail1187/Classic285/Era59/Anniversary83/Titan130完整行，以及两Forever各73/81行、8行不可读的原partial/缺key/分区身份。逐行全值/顺序、分页、CSV、CAP、release/close全部核对；Retail cold与显式prepare分别跑过。真实安装在任务期间被外部更新，旧PIN已按合同拒绝；未修改真实安装或重标旧PIN。复用共74175bytes原BLTE，在明确synthetic的最小CASC元数据中以七个新独立PIN执行，原加密块逐字节不变；manifest `.tmp/rust-audit-next/map-synthetic-inputs-41182067569/inputs.json` SHA `91c5326b8832b7822f4125d6c1447680ff5e2ef979949e2eb4a115ba2774ec49`。这证明固定真实原始数据业务，不扩大为当前安装新build或Live通过。
+- 同一Retail原BLTE的134400资源验收通过：原BLP全字节、PNG/WebP64×64全部RGBA和CAP依赖/清单都匹配独立原文；报告`.tmp/rust-disk/evidence/4c969bb9-1542-4ccf-bf1b-b1c68acf00f3/business-report.json`。
+- Delivery七阶段通过：新装/500槽/Skill、幂等、update plan/apply、已由最终CLI确认的合成3.0.0干净受管输入、slot250真实deny-delete失败、原archive/不传release的resume与重复resume、完整归档移除/无关文件保留；报告`.tmp/rust-audit-next/final-delivery-41182067569-3/report.json`。同一原TGZ的loopback registry完成两次真实npm pack→handoff→全局布局隔离prefix安装→apply，第二次新nonce、第一份完成history字节不变、500槽和sentinel、服务/进程回收全部通过，报告`.tmp/rust-audit-next/final-npm-loopback-41182067569/report.json`；没有发布或更改真实npm标签。
+- 管理七阶段通过：配置持久化/非法值恢复，synthetic client的named/direct target及固定PIN/CAP，当前US可用清单原观察，cache损坏只读校验/显式prune/keep保护，doctor只读诊断及target配置修复、移除named target后原PIN/CAP保留；报告`.tmp/rust-disk/evidence/9e748408-cf27-47f5-974c-de80a0558f92/business-report.json`。doctor未带Live选择器/--fix，SQLite SHM与空WAL为临时读侧文件，主库/配置/PIN/CAP/合成client持久字节不变。零字节cache目标因明确保护内容而保持complete=false。
+- 18个最终安装包控制器的独立汇总全部passed，均核相同TGZ/CLI/commit/source、inputsStable和handlesReaped；完整报告引用及哈希在`.tmp/rust-audit-next/acceptance-summary.json`。临时harness的路径/参数/返回字段/DDL准备错误已纠正，失败记录保留；未放宽产品校验，未触发新产品构建。
+
+## 保留事项与收尾
+
+- 当前没有未解决的确认产品缺陷；末次交叉复审和最终同包业务均通过。18个控制器不包含实机，也不把网络清单、partial、helper或输入构造算成完整游戏行为。
+- REG-01旧升级准备错误5未再复现、原因未定，当前最终包正常安装/升级、真实错误5注入和原意图恢复全通过；旧记录不改写。未解决恢复记录`4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b`、`de770010-ea9c-40fa-a48e-27141a6e0d64`、活动项目/CAP与明确保留的`.worktrees/rust-refactor`保留。
+- 早前13个已解决scratch和`.tmp/rust327-audit`（465文件/4,950,653,420bytes，已核回收/归属/reparse）删除被自动审批拒绝，保持原处，不换工具或路径重试。本批8份退役/reaped的旧编译输出（约13.05GB）、以及新生成的Microsoft/Windows/PowerShell/ModuleAnalysisCache清理同样被自动审批返回blocked by policy，未执行删除、未改路径或工具重试。最终CI包、最新本地构建、原业务输入/证据及未解决恢复全部保留。
+- 文档链接/路径与差异检查通过；本结果文档提交使用[skip ci]，实际验收继续绑定ff65对应的上述完整CI与同一原包，不重复构建。PR保持draft/未合并/未发布。剩余清理见CLEAN-07；实机仅按用户后续安排执行，见最后一节。
 
 ## 最后执行：用户后续安排的Live实机
 
