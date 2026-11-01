@@ -7,10 +7,10 @@
 ## 1. 当前基线
 
 - 日期：2026-11-02；工作树 `.worktrees/Rust-refactor`，本地分支 `Rust-refactor`，沿用远端 `rust-refactor` 和 PR #14。
-- 整批 Publish 实现已提交并推送为 `6e531619bb227b235815b2e7c54fbf47ac80228c`。后续自解释与交付验证仍按本文完成标准执行，当前验证事实见 handover。
+- 当前业务代码基线为 `fd441078b2e914ab7ba0bbf74c45d296b091c396`，包含整批 Rust Publish、自解释输入示例与明确通道搜索修复，已推送到原 PR #14。验证事实见 handover。
 - 原业务依据为固定 [Fuploader 134cba232f5ae84109bb35d9eafe1093399edc1b](https://github.com/Follen/Fuploader/tree/134cba232f5ae84109bb35d9eafe1093399edc1b) 的代码、可执行输入合同和平台说明。已经接入的官方 NewBee 通道也纳入本次范围。
 - 当前 [命令目录](crates/lycheedev-cli/src/commands.json) 共 312 条：原 Lychee Dev 68 条，Publish 244 条。原 Fuploader 204 条叶命令已全部接入；另外已有官方 NewBee 38 条及 CurseForge 恢复入口 2 条。
-- 已完成批次的离线验证见 handover；小黑盒和 ModUs 全部业务已通过离线回归。CI #23 的 12 个阶段及 Release 原 TGZ 验证通过；本地同包验收发现 NewBee Creator 搜索混入官方通道，修复后继续验收。实际 SDK 与平台业务验收另行记录。整合前的包验收保留原证明范围。
+- 全平台业务已通过离线回归；修复后的 CI #24 全部 12 个阶段通过，包含优化 Release、原 TGZ 内容、隔离安装、Skill 及候选封装。原 TGZ 的本地 39 项业务检查也通过，覆盖通道发现、输入计划、打包和四平台备份及复用。实际 SDK、账号和平台发布验收仍在 todo 中单列，Live 留待用户安排。
 
 原命令统一增加 `publish` 前缀；小黑盒 `plugin version-edit`、`plugin version-delete` 分别整合为 `publish blackbox version edit`、`publish blackbox version delete`。ModUs `config backup-edit/backup-delete` 保留别名，共用 `backup rename/delete` 的执行器和输入定义。
 
