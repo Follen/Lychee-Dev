@@ -293,13 +293,45 @@ pub(super) fn file_input(path: &str) -> Option<Value> {
         }
         _ => return None,
     };
+    let mut example = match tail {
+        "plugin init" => json!({"id":91,"dir":"Addon"}),
+        "plugin sync" => json!({"dir":"SyncAddon"}),
+        "wa pull" => json!({"id":92,"out":"pull-wa.txt"}),
+        "wa init" => json!({"id":92,"dir":"new-wa-project"}),
+        "config pull" => json!({"id":99}),
+        "config init" => json!({"id":99,"dir":"new-config-project"}),
+        "plugin pack" => json!({"dir":"Addon","version":"1.0.0","out":"AuthorAddon.zip"}),
+        "plugin version upload" => {
+            json!({"id":91,"version":"1.0.0","game_versions":"auto","changelog":"Release notes","file":"AuthorAddon.zip"})
+        }
+        "plugin create" => {
+            json!({"name":"Author addon","description":{"file":"body.md"},"categories":[7],"logo":"image.png","screenshots":["image.png"],"visibility":"private"})
+        }
+        "plugin edit" => json!({"id":91,"name":"Updated addon"}),
+        "wa create" => {
+            json!({"name":"Author aura","description":{"file":"body.md"},"wa_str":{"file":"wa.txt"},"categories":[7],"game_version_id":2,"thumbnail":"image.png","visibility":"private"})
+        }
+        "wa edit" => json!({"id":92,"name":"Updated aura"}),
+        "config create" => {
+            json!({"backup_id":88,"title":"Author configuration","content":{"file":"body.md"},"visibility":"private"})
+        }
+        "media upload" => json!({"resource":"wa","file":"image.png"}),
+        "wa update" => json!({"id":92,"file":"wa.txt","wa_log":"Updated version"}),
+        "config update" => json!({"id":99,"file":"body.md"}),
+        "plugin changelog edit" => json!({"file_id":991,"changelog":"Updated release notes"}),
+        "plugin comments reply" | "wa comments reply" | "config comments reply" => {
+            json!({"review_id":719,"content":"Author reply"})
+        }
+        _ => unreachable!(),
+    };
+    example["schema"] = schema["properties"]["schema"]["const"].clone();
     if tail == "plugin pack" {
         return Some(
-            json!({"flag":"--input","description":"One UTF-8 JSON object from a file or '-' for piped stdin. Paths resolve from the invocation directory. Purely offline: uses no credentials, HTTP session, network or home. --plan validates selected files/layout without creating a ZIP; execution reuses an existing matching ZIP or publishes a new output without overwriting unrelated files.","schema":schema}),
+            json!({"flag":"--input","description":"One UTF-8 JSON object from a file or '-' for piped stdin. Paths resolve from the invocation directory. Purely offline: uses no credentials, HTTP session, network or home. --plan validates selected files/layout without creating a ZIP; execution reuses an existing matching ZIP or publishes a new output without overwriting unrelated files.","schema":schema,"example":example}),
         );
     }
     Some(
-        json!({"flag":"--input","description":"One UTF-8 JSON document from a file or '-' for piped stdin through EOF, at most 32 MiB. Paths resolve from the invocation directory. --plan admits local fields and selected file bytes without credentials, network or home writes. Execution uses NCC_TOKEN or the official local ncc login; there is no desktop-token fallback.","schema":schema}),
+        json!({"flag":"--input","description":"One UTF-8 JSON document from a file or '-' for piped stdin through EOF, at most 32 MiB. Paths resolve from the invocation directory. Replace example IDs using the field's current option/query command, and provide your selected files/content. --plan admits local fields and selected file bytes without credentials, network or home writes. Execution uses NCC_TOKEN or the official local ncc login; there is no desktop-token fallback.","schema":schema,"example":example}),
     )
 }
 #[cfg(test)]
@@ -402,6 +434,7 @@ mod tests {
         )
         .unwrap();
         PluginPack::parse(br#"{"schema":"lycheedev.publish.v1.newbee.official.plugin.pack","dir":"Addon","version":"fixture","out":"fixture.zip"}"#,&root.0,&call.control).unwrap().run(&call.control).unwrap();
+        std::fs::copy(root.0.join("fixture.zip"), root.0.join("AuthorAddon.zip")).unwrap();
         for (tail, doc) in [
             (
                 vec!["plugin", "init"],
@@ -483,6 +516,27 @@ mod tests {
             assert_eq!(result["credential_reads"], false);
             assert_eq!(result["author_writes"], 0);
             assert!(!result.to_string().contains("PRIVATE_"));
+            assert!(!call.home.exists());
+        }
+        for definition in crate::contract::all() {
+            let Some(input) = file_input(&definition.path) else {
+                continue;
+            };
+            std::fs::write(
+                root.0.join("input.json"),
+                serde_json::to_vec(&input["example"]).unwrap(),
+            )
+            .unwrap();
+            let mut args = definition.path.split_whitespace().collect::<Vec<_>>();
+            args.extend(["--input", "input.json", "--plan"]);
+            let mut call = invocation(&args);
+            call.cwd = root.0.clone();
+            call.home = root.0.join("absent-home");
+            let result = crate::dispatch(&call)
+                .unwrap_or_else(|error| panic!("{}: {error:?}", definition.path))
+                .data;
+            assert_eq!(result["credential_reads"], false, "{}", definition.path);
+            assert_eq!(result["author_writes"], 0, "{}", definition.path);
             assert!(!call.home.exists());
         }
     }

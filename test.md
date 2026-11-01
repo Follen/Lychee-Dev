@@ -25,7 +25,7 @@
 | [ModUs 备份生成](crates/lycheedev-publish/src/modus/backup/local/tests.rs)、[上传](crates/lycheedev-publish/src/modus/backup/upload/tests.rs)与[管理](crates/lycheedev-publish/src/modus/backup/tests.rs) | 原生 config-backup.v2、精确角色路径和 ZIP 成员、原目录与对象复用；字体去重、对象/存储/备份分开登记、旧 CDN 字节保留 pending、未知登记只读恢复；完整跨分支引用、实际 build、逐项删除及已完成项保留。只用合成文件与回环 HTTP。 |
 | [ModUs 项目](crates/lycheedev-publish/src/modus/project/tests.rs) | 原生扁平表单、动态分类、许可证/平台约束、受限项目、稀疏编辑及清空；未知创建按完整新 ID 集合读回、删除原目标恢复；图片操作未知时不把元数据当字节证明。共用现有 Mutation 与读回摘要，无 UI 步骤状态机。 |
 | [Windows RSA](crates/lycheedev-windows/src/credentials/rsa.rs) | 独立生成的合成密钥解密原生输出，核 PKCS1 随机填充、原消息和长度边界；与 AES-GCM 共用原 CNG 句柄收尾。 |
-| [公开 CLI](crates/lycheedev-cli/src/publish_cli.rs) | 输入准入、离线计划、脱敏、显式会话和错误分类；元数据共用全局发现检查。 |
+| [公开 CLI](crates/lycheedev-cli/src/publish_cli.rs) | 输入准入、离线计划、脱敏、显式会话和错误分类；NewBee 两通道从当前命令目录取得真实展示示例，以自有文件/备份交给公开 `--plan`，核无凭据读取或账号目录创建；元数据共用全局发现检查。 |
 
 这些回归证明离线协议和真实 Rust 入口。实际厂商 SDK、账号、平台发布及游戏行为按各自验收记录，不用回环测试代替。
 
@@ -46,7 +46,7 @@
 
 | 模块 | 用途与主要分组 | 能证明的范围 |
 | --- | --- | --- |
-| [Publish](crates/lycheedev-publish/src/) | 严格JSON保重复键/私有marker边界；CurseForge完整上传协议核明确拒绝/未连接可纠正、不确定不重放、真实验证来源。NewBee核两类会话、三类完整表单、明确ID恢复、跨请求复用、精确role/layout、关系/媒体/版本/日志与完整列表删除；备份核显式选择、未选角色/.bak排除、空目录、ZIP/target/字体绑定与持锁、篡改/链接/CRC拒绝、原字节隔离PUT、收据复用、丢响应恢复、创建与改名分别保留、名称/UTC过滤及完整引用重查。 | 原生回环HTTP真实字节与固定业务预期。独立ASAR及真实Node合成SDK facade核固定模块提取、所选字体快照、结果协议、秘密隔离和原索引复用；不执行真实官方N-API或读取用户凭据。其余平台继续补齐；真实账号/官方客户端和发布另验。 |
+| [Publish](crates/lycheedev-publish/src/) | 严格JSON保重复键/私有marker边界；CurseForge完整上传协议核明确拒绝/未连接可纠正、不确定不重放、真实验证来源。NewBee核两类会话、三类完整表单、明确ID恢复、跨请求复用、精确role/layout、关系/媒体/版本/日志与完整列表删除；备份核显式选择、未选角色/.bak排除、空目录、ZIP/target/字体绑定与持锁、篡改/链接/CRC拒绝、原字节隔离PUT、收据复用、丢响应恢复、创建与改名分别保留、名称/UTC过滤及完整引用重查。DD、小黑盒和 ModUs 的完整业务见上表当前入口。 | 原生回环HTTP真实字节与固定业务预期。独立ASAR及真实Node合成SDK facade核固定模块提取、所选字体快照、结果协议、秘密隔离和原索引复用；不执行真实官方N-API或读取用户凭据。真实账号/官方客户端和发布另验。 |
 | [CLI](crates/lycheedev-cli/src/) | contract/agent_cli/discovery：解析、发现、schema/help/describe、产品称呼、游戏/远端/凭据效果、doctor修复依赖；publish_cli：完整嵌套/条件字段、当前选项说明及本地计划的秘密隔离/无会话准入；data_agent/transport：帧、取消通道与保留提交事实的标准流输出；formal_live：原连接与输入编排；init/project/target/doctor：工作区、选择与诊断。 | 入口合同与应用编排；mock 不证明原生进程、游戏或已安装包。开发CLI黑盒另核生产解析与实际标准输出；Release同包另验。 |
 | [Core](crates/lycheedev-core/src/) | 身份/选择、control（不可变 deadline + TrackedCancellation 世系）、公共精确 JSON、存储发布、CAP/依赖、缓存与 Data 计量、当前 Mailbox 数据合同。进程回归用自有根进程与无stdio后代核同一Job、原期限及checked回收；不以根退出代替后代回收。私有预声明发布复用已认证摘要的回归覆盖新发、复用、同长损坏正文、长度与maximum。 | 共享机制；旧 schema 迁移、historical reader 与旧工作区布局断言已删除。 |
 | [Data](crates/lycheedev-data/src/) | Agent Session/Engine/DataFusion、generation、元数据/DBD、CASC/BLTE/WDC、Hotfix、assets、keys、remote 与资源占用。HTTP body/gzip/取消/收费测试直接走正式collect_admitted，不保留仅测试消费的两层异步包装。 | 当前查询、输入和生命周期；旧 local_query/relational/navigate/migration-oracle 测试随旧实现删除；旧 Engine 固定快照/provider 资格层（engine/source、snapshot_cache、provider Fixed*）及内部测试已随旧实现退役，当前路径为 source_demand/session_engine/pull_provider/provider::runtime。 |

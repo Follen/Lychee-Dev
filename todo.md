@@ -10,6 +10,7 @@
 
 - [ ] **PUBLISH-PLATFORM｜真实环境验收。** 实际厂商 SDK、账号登录和各平台真实发布/读回未执行；离线合成 SDK、回环协议及发布包验证分别记录。按明确账号、目标和发布内容开展实际业务验收；本轮不读取用户账号、不提交真实平台写入，Live 仍留待用户安排。
 - [ ] **PUBLISH-DELIVERY｜完整交付验证。** 新 Publish 尚未完成整批 CI、Release 和正式包验收。当前离线回归与真实 SDK/账号/平台验收分别记录，复用原产物；Live 由用户安排。
+- [ ] **PUBLISH-CLEANUP｜专属临时副本。** `.tmp/fuploader-integration/` 的 91 个文件、6,644,866 字节已核实无产品调用；删除被自动审批以 `blocked by policy` 拒绝，原件保持原样，范围见 FUPLOADER。
 
 ## 1. 工作区恢复与材料保留
 

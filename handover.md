@@ -4,8 +4,8 @@
 
 ## 分支、范围与状态
 
-- 当前工作树`.worktrees/Rust-refactor`，本地分支`Rust-refactor`跟踪`origin/rust-refactor`；main3.2.7已同步。远端按用户选择保留原名及[draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)，推送使用`git push origin HEAD:refs/heads/rust-refactor`。产品代码提交为`66aa8f5e0bb57cf3b974b5a48b27dca36e6b7c8d`，开发版本3.5.0/beta；latest继续3.2.7。
-- 既有死代码、冗余测试、CLI/Skill、文档审计与正式Forever非Live基线已验证完成。用户已要求严格执行 [Fuploader 整合文档](FUPLOADER.md)；当前从现有发布能力收拢开始，随后依次补 DD 备份、小黑盒、ModUs 和同包验收。以下旧CI/包验收只覆盖原基线，不计为新Publish业务通过。
+- 当前工作树`.worktrees/Rust-refactor`，本地分支`Rust-refactor`跟踪`origin/rust-refactor`；main3.2.7已同步。远端按用户选择保留原名及[draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)，推送使用`git push origin HEAD:refs/heads/rust-refactor`。整批 Publish 已提交推送为`6e531619bb227b235815b2e7c54fbf47ac80228c`，开发版本3.5.0/beta；latest继续3.2.7。
+- 既有死代码、冗余测试、CLI/Skill、文档审计与正式Forever非Live基线已验证完成。用户已要求严格执行 [Fuploader 整合文档](FUPLOADER.md)；当前全平台 Rust 路径和离线回归已接通，继续 CLI 示例与同包验收。以下旧CI/包验收只覆盖原基线，不计为新Publish业务通过。
 - 正式Forever规范ID/Source family为`forever`，官方远端/flavor为`wowf`，目录`_forever_`，可执行文件`Wow.exe`；当前支持六产品。两个Beta退出当前目标准入，历史PIN/CAP/raw和恢复身份保留。
 - 未合并、未发布、未改npm标签、未全局安装Skill/npm。游戏进程读取、输入、真实部署和Live实机测试继续留待用户安排；本次正式Forever只读游戏文件。
 - 所有工作者已完成；Root负责文档、集成和唯一native队列，单一native队列由Root串行使用。未新增工作树或PR；PowerShell临时ModuleAnalysisCache已清理。
@@ -36,8 +36,10 @@
 - native 缓存加 2 GiB 预留曾超出默认 50 GiB；两处旧 Publish 增量缓存删除被自动审核拒绝，没有删除。最近一批现有缓存约 51 GiB，加 2 GiB 预留超出单次 52 GiB；改用 runner 已有单次 54 GiB 配置，仓库默认和构建目录不变。
 - 当前整批离线验证：CLI 275、公开集成 3、Publish 338 全部通过，5 个 helper ignored；测试 owner 330008b2-7e9a-4ea8-8dc3-948c1461b6a6 已退休且 handlesReaped=true，源码摘要 9b5fe390e9f7d1438e562f9677d5bca43a4dfaf6c828ab93550ae551a15ace1b。主客户端/Creator 身份、完整表单、ZIP/TOC、插件/WA 版本、媒体、原生六分区备份、精确角色、字体复用、跨五分支引用、原对象/批次恢复均有真实 Rust 路径回归；复用测试生产的 CLI。
 - 本批确认并修复下载校验根错误（6 项旧回归失败）及备份恢复忽略 CDN 字节不匹配（1 项新回归失败）；修复后上述整批复验通过，原失败 owner 24eb7ba3-2aa9-4674-9f10-b3d213ab8098、a8ed97ea-21c5-454c-8ace-d53c8f59b634 已收尾。补核备份缺失文件、改名目标已满足和确认拒绝后复用原 PUT。
-- 当前 workspace all-targets check 通过，owner ce544558-8653-4953-8387-f4a248cdf64e 已退休且 handlesReaped=true；源码摘要与上述测试相同。312 条静态/本批 CLI 动态 Skill 合同、版本 3.5.0 一致性、原生边界清单和含 FUPLOADER 的 36 份文档链接通过；受影响 Node 工具 79 项全部通过。下一步集中提交推送并执行整批 CI/Release 同包验收。
-- 新 Publish 尚未提交、推送或运行完整 CI/Release 同包验收；没有实际平台发布、账号读取、厂商 SDK 执行、全局安装或 Live。下方旧 CI/原包验收只覆盖整合前基线。
+- 整批 workspace all-targets check 通过，owner ce544558-8653-4953-8387-f4a248cdf64e 已退休且 handlesReaped=true；源码摘要与上述测试相同。312 条静态/该批 CLI 动态 Skill 合同、版本 3.5.0 一致性、原生边界清单和含 FUPLOADER 的 36 份文档链接通过；受影响 Node 工具 79 项全部通过。
+- CLI 自解释复查发现 NewBee 两通道 47 个输入入口缺少最小 JSON 示例；已补入现有 fileInput，schema 名称从实际准入定义取得，不在 Skill 固定动态选项。47 份实际展示示例均通过公开计划；CLI 276 项、公开进程 3 项通过，owner 487d4d5b-54ed-4321-9b0a-d07505299b86。workspace all-targets check 通过，owner b6a983f7-470e-42c1-a204-ddb219797237；两者源码摘要均为 4f8c1714c943a1ed7db8870a2a7486afe162f492ca078ef9934a48d037e4eea2，已退休且 handlesReaped=true。复用本批 CLI 核 115 个 Publish 文件输入均有示例、312 条动态 Skill 合同通过；36 份文档链接通过。首轮 owner 87eced44-0b0c-43ca-b186-2082faf31e42 的备份 fixture 顺序失败保留，已退休且 handlesReaped=true。
+- [CI #22 / 41329585974](https://github.com/Follen/Lychee-Dev/actions/runs/41329585974) 在 6e5316 推送后启动；发现上述示例缺口后主动取消，减少旧输入构建，不计为通过。后续修复提交需完成全套 CI/Release 和原 TGZ 验收。没有实际平台发布、账号读取、厂商 SDK 执行、全局安装或 Live。
+- `.tmp/fuploader-integration/` 的上游副本、当前客户端摘录及清点共 91 个文件、6,644,866 字节；已核实无产品/工具/测试/Skill 引用和重解析点，均未跟踪且被忽略。自动审批以 `blocked by policy` 拒绝删除，未说明具体原因；文件仍在，未换路径重试。
 
 ## 既有基线：CI与唯一包验收
 
@@ -58,7 +60,7 @@
 
 ## 下一步
 
-按 FUPLOADER 完成 workspace all-targets、动态合同、提交推送和完整 CI/Release 同包验收；复用已通过且输入未变的验证，不追加固定审计轮次。下列 Live 实机继续由用户安排。
+提交推送 NewBee 示例修复后跑完整 CI/Release，消费本轮唯一原 TGZ 做安装和 Publish 业务验收；保留清理拒绝的实际状态。复用已通过且输入未变的验证，不追加固定审计轮次。下列 Live 实机继续由用户安排。
 
 ## 最后执行：用户后续安排的Live实机
 

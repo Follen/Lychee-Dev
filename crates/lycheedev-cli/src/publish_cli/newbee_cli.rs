@@ -326,8 +326,48 @@ pub(super) fn file_input(path: &str) -> Option<Value> {
         ["wa", "media", "upload"] => WaMediaUpload::schema(),
         _ => return None,
     };
+    let mut example = match words.as_slice() {
+        ["backup", "generate"] => {
+            json!({"game_dir":"game","output_dir":"backup","game_version_id":1,"unknown_plugins":["AuthorAddon"]})
+        }
+        ["backup", "upload" | "create"] => json!({"bundle_file":"backup/backup-bundle.json"}),
+        ["backup", "rename"] => json!({"id":719,"name":"Author backup"}),
+        ["backup", "delete"] => json!({"backup_ids":[719],"confirm_delete":true}),
+        ["plugin", "create"] => {
+            json!({"name":"Author addon","mod_categories":[1],"content_origin":1,"content_format":2,"intro":"Addon introduction","description":"Addon description","public":false,"logo_file":"image.png","screenshot_files":["image.png"]})
+        }
+        ["plugin", "update"] => {
+            json!({"mod_id":719,"file":"AuthorAddon.zip","game_version_list":["REPLACE_WITH_CURRENT_GAME_VERSION"],"version":"1.0.0"})
+        }
+        ["plugin", "edit"] => json!({"id":719,"name":"Updated addon"}),
+        ["plugin", "changelog", "edit"] => {
+            json!({"file_id":720,"changelog":"Updated release notes"})
+        }
+        ["config", "create"] => {
+            json!({"cloud_id":719,"title":"Author configuration","content":"Configuration description","content_format":2,"content_origin":1,"public":false,"linked_mods":[],"ignored_unknown_mods":[],"ignored_materials":[],"ignored_fronts":[],"roleid":"","picture_files":["image.png"]})
+        }
+        ["config", "update"] => json!({"id":719,"roleid":""}),
+        ["config", "edit"] => json!({"id":719,"title":"Updated configuration"}),
+        ["wa", "create"] => {
+            json!({"game_version_id":1,"name":"Author aura","description":"Aura description","content_format":2,"category_id_list":[1],"content_origin":1,"public":false,"thumbnail_file":"image.png","wa_str":"!WA:2!REPLACE_WITH_YOUR_STRING","wa_log":"Initial version","string_mode":"single"})
+        }
+        ["wa", "update"] => {
+            json!({"id":719,"wa_str":"!WA:2!REPLACE_WITH_YOUR_STRING","wa_log":"Updated version"})
+        }
+        ["wa", "edit"] => json!({"id":719,"name":"Updated aura"}),
+        ["wa", "changelog", "edit"] => json!({"id":720,"wa_log":"Updated release notes"}),
+        ["wa", "share-code", "set"] => json!({"module_id":719}),
+        ["wa", "media", "upload"] => json!({"kind":"image","file":"image.png"}),
+        [_, "delete"] => json!({"id":719,"confirm":"DELETE"}),
+        [_, "co-author", "set"] => {
+            json!({"content_id":719,"co_authors":[{"user_id":720,"share_percent":0.5}]})
+        }
+        [_, "reference", "set"] => json!({"source_id":719,"references":[{"type":1,"id":720}]}),
+        _ => unreachable!(),
+    };
+    example["schema"] = schema["properties"]["schema"]["const"].clone();
     Some(
-        json!({"flag":"--input","description":"One UTF-8 JSON object from a file or '-' for piped stdin through EOF, at most 32 MiB. Paths resolve from the invocation directory. --plan checks local field, nested and presence admission with no credential reads, network or submission records; current remote choices and existing complete forms are validated on execution. Credentials and opaque imports never belong in argv.","schema":schema}),
+        json!({"flag":"--input","description":"One UTF-8 JSON object from a file or '-' for piped stdin through EOF, at most 32 MiB. Paths resolve from the invocation directory. Replace example IDs and game versions using the field's current option/query command, and provide your selected files/content. --plan checks local field, nested and presence admission with no credential reads, network or submission records; current remote choices and existing complete forms are validated on execution. Credentials and opaque imports never belong in argv.","schema":schema,"example":example}),
     )
 }
 
@@ -480,6 +520,51 @@ mod tests {
                 .exit_code,
             4
         );
+    }
+    #[test]
+    fn published_creator_examples_enter_public_plans_without_a_profile() {
+        let root = Fixture::new();
+        std::fs::write(root.0.join("image.png"), b"selected media").unwrap();
+        std::fs::create_dir_all(root.0.join("game/Interface/AddOns/AuthorAddon")).unwrap();
+        std::fs::write(
+            root.0
+                .join("game/Interface/AddOns/AuthorAddon/AuthorAddon.toc"),
+            b"## Interface: 120000\n",
+        )
+        .unwrap();
+        let mut definitions = crate::contract::all().iter().collect::<Vec<_>>();
+        definitions.sort_by_key(|definition| definition.path != "publish newbee backup generate");
+        for definition in definitions {
+            let Some(input) = file_input(&definition.path) else {
+                continue;
+            };
+            let doc = &input["example"];
+            std::fs::write(root.0.join("input.json"), serde_json::to_vec(doc).unwrap()).unwrap();
+            let mut args = definition.path.split_whitespace().collect::<Vec<_>>();
+            args.extend(["--input", "input.json", "--plan"]);
+            let mut call = inv(&args);
+            call.cwd = root.0.clone();
+            call.home = root.0.join("absent-home");
+            let result = crate::dispatch(&call)
+                .unwrap_or_else(|error| panic!("{}: {error:?}", definition.path))
+                .data;
+            assert_eq!(result["credential_reads"], false, "{}", definition.path);
+            assert_eq!(result["author_writes"], 0, "{}", definition.path);
+            assert!(!call.home.exists());
+            if definition.path == "publish newbee backup generate" {
+                assert!(!root.0.join("backup").exists());
+                args.pop(); // Generate only after the published plan succeeds.
+                let mut generate = inv(&args);
+                generate.cwd = root.0.clone();
+                generate.home = call.home;
+                crate::dispatch(&generate).unwrap();
+                std::fs::copy(
+                    root.0.join("backup/unknown_plug.zip"),
+                    root.0.join("AuthorAddon.zip"),
+                )
+                .unwrap();
+            }
+        }
     }
     #[test]
     fn invalid_newbee_ids_and_page_limits_fail_before_session_selection() {

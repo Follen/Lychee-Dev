@@ -12,6 +12,7 @@ is not a published-release acceptance record.
 
 ### Changed
 
+- NewBee Creator 与官方通道的文件输入提供可直接填写的 JSON 示例；schema 名称取自实际准入定义，动态 ID 与选项仍通过 CLI 查询。
 - ModUs 备份支持原生 config-backup.v2 的扫描、生成/复用、上传、创建、改名、引用预览和逐项删除；六类内容、明确角色、原对象收据和跨五分支引用完整保留，配置别名共用同一执行器。
 
 - ModUs Creator 插件支持原生 ZIP/TOC 与当前游戏版本选择，原版本更新、对象上传和完整 CDN 字节读回；主客户端图片返回可复用收据，未知提交恢复不重复上传。合并跨平台 MD5 和下载校验。
