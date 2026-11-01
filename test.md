@@ -25,7 +25,7 @@
 | [ModUs 备份生成](crates/lycheedev-publish/src/modus/backup/local/tests.rs)、[上传](crates/lycheedev-publish/src/modus/backup/upload/tests.rs)与[管理](crates/lycheedev-publish/src/modus/backup/tests.rs) | 原生 config-backup.v2、精确角色路径和 ZIP 成员、原目录与对象复用；字体去重、对象/存储/备份分开登记、旧 CDN 字节保留 pending、未知登记只读恢复；完整跨分支引用、实际 build、逐项删除及已完成项保留。只用合成文件与回环 HTTP。 |
 | [ModUs 项目](crates/lycheedev-publish/src/modus/project/tests.rs) | 原生扁平表单、动态分类、许可证/平台约束、受限项目、稀疏编辑及清空；未知创建按完整新 ID 集合读回、删除原目标恢复；图片操作未知时不把元数据当字节证明。共用现有 Mutation 与读回摘要，无 UI 步骤状态机。 |
 | [Windows RSA](crates/lycheedev-windows/src/credentials/rsa.rs) | 独立生成的合成密钥解密原生输出，核 PKCS1 随机填充、原消息和长度边界；与 AES-GCM 共用原 CNG 句柄收尾。 |
-| [公开 CLI](crates/lycheedev-cli/src/publish_cli.rs) | 输入准入、离线计划、脱敏、显式会话和错误分类；NewBee 两通道从当前命令目录取得真实展示示例，以自有文件/备份交给公开 `--plan`，核无凭据读取或账号目录创建；元数据共用全局发现检查。 |
+| [公开 CLI](crates/lycheedev-cli/src/publish_cli.rs) | 输入准入、离线计划、脱敏、显式会话和错误分类；NewBee 两通道从当前命令目录取得真实展示示例，以自有文件/备份交给公开 `--plan`，核无凭据读取或账号目录创建。现有公开搜索回归核明确选择桌面 Creator/官方通道时不混入另一路径；元数据共用全局发现检查。 |
 
 这些回归证明离线协议和真实 Rust 入口。实际厂商 SDK、账号、平台发布及游戏行为按各自验收记录，不用回环测试代替。
 

@@ -9,7 +9,7 @@
 当前基线、实施顺序、删除和保留范围统一见 [FUPLOADER.md](FUPLOADER.md)。固定原业务 204 项、官方 NewBee 38 项及恢复入口 2 项均已接入；当前 312 条命令及 93 份真实输入定义。DD、小黑盒、ModUs 完整业务的离线回归已通过。
 
 - [ ] **PUBLISH-PLATFORM｜真实环境验收。** 实际厂商 SDK、账号登录和各平台真实发布/读回未执行；离线合成 SDK、回环协议及发布包验证分别记录。按明确账号、目标和发布内容开展实际业务验收；本轮不读取用户账号、不提交真实平台写入，Live 仍留待用户安排。
-- [ ] **PUBLISH-DELIVERY｜完整交付验证。** 新 Publish 尚未完成整批 CI、Release 和正式包验收。当前离线回归与真实 SDK/账号/平台验收分别记录，复用原产物；Live 由用户安排。
+- [ ] **PUBLISH-DELIVERY｜完整交付验证。** CI #23 的 12 个阶段、Release 与原 TGZ 验证通过；本地包内 39 项检查发现 NewBee Creator 搜索混入官方通道，其余计划、打包和四平台备份场景通过。搜索修复后完成对应 CI 与原包复验；实际 SDK/账号/平台验收分别记录，Live 由用户安排。
 - [ ] **PUBLISH-CLEANUP｜专属临时副本。** `.tmp/fuploader-integration/` 的 91 个文件、6,644,866 字节已核实无产品调用；删除被自动审批以 `blocked by policy` 拒绝，原件保持原样，范围见 FUPLOADER。
 
 ## 1. 工作区恢复与材料保留

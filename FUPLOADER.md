@@ -10,7 +10,7 @@
 - 整批 Publish 实现已提交并推送为 `6e531619bb227b235815b2e7c54fbf47ac80228c`。后续自解释与交付验证仍按本文完成标准执行，当前验证事实见 handover。
 - 原业务依据为固定 [Fuploader 134cba232f5ae84109bb35d9eafe1093399edc1b](https://github.com/Follen/Fuploader/tree/134cba232f5ae84109bb35d9eafe1093399edc1b) 的代码、可执行输入合同和平台说明。已经接入的官方 NewBee 通道也纳入本次范围。
 - 当前 [命令目录](crates/lycheedev-cli/src/commands.json) 共 312 条：原 Lychee Dev 68 条，Publish 244 条。原 Fuploader 204 条叶命令已全部接入；另外已有官方 NewBee 38 条及 CurseForge 恢复入口 2 条。
-- 已完成批次的离线验证见 handover；小黑盒完整业务已通过本批离线验证；ModUs 全部 58 项已通过离线回归。新 Publish 的完整 CI、Release 同包验收、真实 SDK 与平台业务验收仍待完成。整合前的包验收保留原证明范围。
+- 已完成批次的离线验证见 handover；小黑盒和 ModUs 全部业务已通过离线回归。CI #23 的 12 个阶段及 Release 原 TGZ 验证通过；本地同包验收发现 NewBee Creator 搜索混入官方通道，修复后继续验收。实际 SDK 与平台业务验收另行记录。整合前的包验收保留原证明范围。
 
 原命令统一增加 `publish` 前缀；小黑盒 `plugin version-edit`、`plugin version-delete` 分别整合为 `publish blackbox version edit`、`publish blackbox version delete`。ModUs `config backup-edit/backup-delete` 保留别名，共用 `backup rename/delete` 的执行器和输入定义。
 

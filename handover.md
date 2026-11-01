@@ -38,7 +38,11 @@
 - 本批确认并修复下载校验根错误（6 项旧回归失败）及备份恢复忽略 CDN 字节不匹配（1 项新回归失败）；修复后上述整批复验通过，原失败 owner 24eb7ba3-2aa9-4674-9f10-b3d213ab8098、a8ed97ea-21c5-454c-8ace-d53c8f59b634 已收尾。补核备份缺失文件、改名目标已满足和确认拒绝后复用原 PUT。
 - 整批 workspace all-targets check 通过，owner ce544558-8653-4953-8387-f4a248cdf64e 已退休且 handlesReaped=true；源码摘要与上述测试相同。312 条静态/该批 CLI 动态 Skill 合同、版本 3.5.0 一致性、原生边界清单和含 FUPLOADER 的 36 份文档链接通过；受影响 Node 工具 79 项全部通过。
 - CLI 自解释复查发现 NewBee 两通道 47 个输入入口缺少最小 JSON 示例；已补入现有 fileInput，schema 名称从实际准入定义取得，不在 Skill 固定动态选项。47 份实际展示示例均通过公开计划；CLI 276 项、公开进程 3 项通过，owner 487d4d5b-54ed-4321-9b0a-d07505299b86。workspace all-targets check 通过，owner b6a983f7-470e-42c1-a204-ddb219797237；两者源码摘要均为 4f8c1714c943a1ed7db8870a2a7486afe162f492ca078ef9934a48d037e4eea2，已退休且 handlesReaped=true。复用本批 CLI 核 115 个 Publish 文件输入均有示例、312 条动态 Skill 合同通过；36 份文档链接通过。首轮 owner 87eced44-0b0c-43ca-b186-2082faf31e42 的备份 fixture 顺序失败保留，已退休且 handlesReaped=true。
-- [CI #22 / 41329585974](https://github.com/Follen/Lychee-Dev/actions/runs/41329585974) 在 6e5316 推送后启动；发现上述示例缺口后主动取消，减少旧输入构建，不计为通过。后续修复提交需完成全套 CI/Release 和原 TGZ 验收。没有实际平台发布、账号读取、厂商 SDK 执行、全局安装或 Live。
+- NewBee 示例修复已提交推送为 `d1d98f9a757ac20c7c2b91909b6e669a1927f886`。[CI #23 / 41331170082](https://github.com/Follen/Lychee-Dev/actions/runs/41331170082) 的 12 个阶段全部通过：90 个 Rust 程序完整覆盖、222 套 Lua、进程/线程回收、优化 Release、原 TGZ 内容、隔离安装/Skill、Source/Data 包内业务及候选封装。producer 为 `3bc8efb7a61f5a710122e66e4be7cfb154236ca4`，与该代码提交的 Git tree 同为 `7087481547c349bd7b5b413a3548d1aadb74914c`。首次三个任务因 GitHub Actions 内部错误中断，日志下载返回 BlobNotFound，未留下可用 Release 产物；仅重试失败任务并复用原测试程序和 Lua/addon 产物后通过。
+- 原 TGZ SHA256 为 `cead930ec0a40457fb47cda567d4138a90a413f5ea37ddf5a0777509c204659c`，源码摘要为 `4f8c1714c943a1ed7db8870a2a7486afe162f492ca078ef9934a48d037e4eea2`；候选保留于 `.tmp/fuploader-acceptance/ci-41331170082/`，11 项校验和及安装后的 73 项资源、native/Skill 身份均核对通过。没有本地重编 Release 或重打 TGZ。
+- 本地包内验收发现 `NewBee Creator WA` 被官方通道摘要中的 creator 排名挤占。首轮失败 owner 6865eb9c-a0a3-4217-bf5c-b4607cc1e618；继续完成其余场景的 owner c58b8128-4348-4855-8633-46d282922504 共 39 项检查，仅该搜索失败，五种发布计划、原插件 ZIP 复用、NewBee/DD/小黑盒/ModUs 四平台备份生成及上传计划均通过；原产物字节未变，无账号目录创建。两 owner 均已退休且 handlesReaped=true，报告在 `.tmp/fuploader-acceptance/publish-acceptance-41331170082.json` 与 `publish-review-41331170082.json`。
+- 现有搜索逻辑已按明确桌面 Creator/官方通道筛选，补入原公开搜索回归，未新增测试框架。CLI 276 项及公开进程 3 项通过，owner ef3b6af4-f21a-4811-8190-e37ee029aa01；workspace all-targets check 通过，owner 9396490b-f248-45d2-a4f1-1f1ae01eccf1；均已退休且 handlesReaped=true，源码摘要 f477fdfb65e11da35585579c7d27ce68f17d96eb90411eff35cc88310908f479。复用该 CLI 的四项中英文通道查询、312 条动态 Skill 合同、36 份文档链接均通过，待修复输入的最终 CI 与原包复验。
+- [CI #22 / 41329585974](https://github.com/Follen/Lychee-Dev/actions/runs/41329585974) 在 6e5316 推送后启动，因上述示例缺口主动取消，不计为通过。没有实际平台发布、账号读取、厂商 SDK 执行、全局安装或 Live。
 - `.tmp/fuploader-integration/` 的上游副本、当前客户端摘录及清点共 91 个文件、6,644,866 字节；已核实无产品/工具/测试/Skill 引用和重解析点，均未跟踪且被忽略。自动审批以 `blocked by policy` 拒绝删除，未说明具体原因；文件仍在，未换路径重试。
 
 ## 既有基线：CI与唯一包验收
@@ -60,7 +64,7 @@
 
 ## 下一步
 
-提交推送 NewBee 示例修复后跑完整 CI/Release，消费本轮唯一原 TGZ 做安装和 Publish 业务验收；保留清理拒绝的实际状态。复用已通过且输入未变的验证，不追加固定审计轮次。下列 Live 实机继续由用户安排。
+完成 NewBee 明确通道搜索修复的验证和提交，最终 CI/原 TGZ 绑定修复后的代码；复用已有编译缓存与各次原产物，保留先前失败及清理拒绝的实际状态。下列 Live 实机继续由用户安排。
 
 ## 最后执行：用户后续安排的Live实机
 

@@ -381,6 +381,7 @@ fn terms(query: &str) -> Vec<String> {
         ("配置", "config"),
         ("版本", "version"),
         ("官方", "official"),
+        ("桌面", "desktop"),
         ("打包", "pack"),
         ("安装", "install"),
         ("更新", "update"),
@@ -407,6 +408,20 @@ fn rank(query: &str) -> Vec<&'static Definition> {
         .into_iter()
         .filter(|platform| terms.iter().any(|term| term == platform))
         .collect();
+    let newbee_official = if platforms.contains(&"newbee") {
+        if terms.iter().any(|term| term == "official") {
+            Some(true)
+        } else if terms
+            .iter()
+            .any(|term| matches!(term.as_str(), "creator" | "desktop"))
+        {
+            Some(false)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     // Derive task vocabulary from the pure authoritative protocol constructor.
     // No independently invented Data task semantics or retired CLI aliases.
     let data_vocabulary = lycheedev_data::agent_session::schema()
@@ -421,6 +436,15 @@ fn rank(query: &str) -> Vec<&'static Definition> {
                 && !platforms
                     .iter()
                     .any(|platform| definition.path.starts_with(&format!("publish {platform} ")))
+            {
+                return None;
+            }
+            // An explicitly selected NewBee channel outranks incidental words
+            // such as "creator" in an official resource's description.
+            if definition.path.starts_with("publish newbee ")
+                && newbee_official.is_some_and(|official| {
+                    definition.path.starts_with("publish newbee official ") != official
+                })
             {
                 return None;
             }
@@ -1104,6 +1128,27 @@ mod tests {
                 .iter()
                 .any(|d| d.path == "data agent serve")
         );
+        for (query, official) in [
+            ("NewBee Creator WA", false),
+            ("新手盒子 桌面 配置", false),
+            ("NewBee official WA", true),
+            ("NewBeeBox 官方 打包", true),
+        ] {
+            let result = discover(&parse(&args(&["cli", "search", query])).unwrap())
+                .unwrap()
+                .unwrap()
+                .data;
+            let matches = result["matches"].as_array().unwrap();
+            assert!(!matches.is_empty(), "{query}");
+            assert!(
+                matches.iter().all(|row| {
+                    let command = row["command"].as_str().unwrap();
+                    command.starts_with("publish newbee ")
+                        && command.starts_with("publish newbee official ") == official
+                }),
+                "{query}: {matches:?}"
+            );
+        }
         assert!(
             discover(&parse(&args(&["cli", "search", " "])).unwrap())
                 .unwrap()
