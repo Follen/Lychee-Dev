@@ -1,16 +1,22 @@
 //! Windows-only, read-only process capabilities and directed input. No game business.
 pub mod broker;
 pub mod cancellation;
+pub mod credentials;
 pub mod data_lease;
 pub mod detached;
 pub mod filesystem;
 pub mod guarded_spawn;
+pub mod host_metadata;
 pub mod inventory;
 pub mod job;
 pub mod mailbox_input;
 pub mod memory;
+pub mod nep_signer;
 pub mod process;
+pub mod process_file_snapshot;
 pub mod random;
+mod sdk_image;
+pub mod urs_sdk;
 pub use filesystem::durable_replace;
 pub use job::{BrokerJob, JobGuard};
 pub use process::{Process, ProcessIdentity, WindowIdentity};

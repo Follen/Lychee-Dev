@@ -21,6 +21,14 @@ data, assets and live investigation, with fixed references and inspectable
 evidence. Source, data and asset work stand on their own; live work uses the
 existing addon and Lycheedev mailbox protocol v1.
 
+Author publishing is a separate Rust CLI capability for CurseForge, NewBeeBox,
+NetEase DD, Heybox and ModUs. It covers each platform's supported queries,
+plugin/configuration/WA writes, versions, media, relationships, projects and
+selective cloud backups. Current implementation gaps are listed in [todo.md](todo.md).
+The selected command's schema explains authentication, inputs, effects and recovery.
+Original artifacts are reused; uncertain writes are recovered by reading their
+original target. Publishing does not require game Live access.
+
 ## Operating Context
 
 The workbench has Run, Objects, Events, Trace, Diagnostics, Export Records,

@@ -68,12 +68,32 @@ pub fn effects(definition: &Definition) -> Value {
     let game = definition.effects.as_ref();
     let mut effects = json!({
         "readOnly": !definition.mutates,
-        "mutatesWorkspace": definition.mutates,
+        "mutatesWorkspace": game.and_then(|effects|effects.mutates_workspace).unwrap_or(definition.mutates),
         "gameProcess": game.is_some_and(|effects| effects.game_process),
         "gameInput": game.is_some_and(|effects| effects.game_input),
     });
     if let Some(game) = game.filter(|effects| !effects.game_input_when.is_empty()) {
         effects["gameInputWhen"] = json!(game.game_input_when);
+    }
+    if let Some(remote) = game {
+        if let Some(service) = &remote.remote_service {
+            effects["remoteService"] = json!(service);
+        }
+        if remote.remote_service.is_some() || remote.remote_read.is_some() {
+            effects["remoteRead"] = json!(remote.remote_read.unwrap_or(false));
+        }
+        if remote.remote_service.is_some() || remote.remote_write.is_some() {
+            effects["remoteWrite"] = json!(remote.remote_write.unwrap_or(false));
+        }
+        if let Some(value) = remote.remote_authentication {
+            effects["remoteAuthentication"] = json!(value);
+        }
+        if let Some(value) = remote.credential_store_write {
+            effects["credentialStoreWrite"] = json!(value);
+        }
+        if !remote.remote_write_when.is_empty() {
+            effects["remoteWriteWhen"] = json!(remote.remote_write_when);
+        }
     }
     effects
 }
@@ -183,6 +203,47 @@ pub fn product_matches(query: &str) -> Vec<Value> {
 mod tests {
     use super::*;
     use crate::contract;
+
+    #[test]
+    fn offline_publishing_exposes_explicit_false_effects_without_a_remote_service() {
+        for path in ["publish newbee official plugin pack"] {
+            let mut args = vec!["schema".to_owned()];
+            args.extend(path.split_whitespace().map(str::to_owned));
+            let schema = crate::dispatch(&crate::parse(&args).unwrap()).unwrap().data;
+            let mut args = path
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            args.push("--help".into());
+            let help = crate::dispatch(&crate::parse(&args).unwrap()).unwrap().data;
+            assert_eq!(help["effects"], schema["effects"]);
+            for key in [
+                "remoteRead",
+                "remoteWrite",
+                "remoteAuthentication",
+                "credentialStoreWrite",
+            ] {
+                assert_eq!(schema["effects"][key], false, "{path}: {key}");
+            }
+            assert!(schema["effects"].get("remoteService").is_none());
+        }
+        let args = "schema publish newbee backup generate"
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let existing = crate::dispatch(&crate::parse(&args).unwrap()).unwrap().data;
+        for key in [
+            "remoteRead",
+            "remoteWrite",
+            "remoteAuthentication",
+            "credentialStoreWrite",
+        ] {
+            assert!(
+                existing["effects"].get(key).is_none(),
+                "unspecified effects stay distinct from explicit false"
+            );
+        }
+    }
 
     #[test]
     fn public_result_contract_names_the_actual_success_and_error_envelope() {

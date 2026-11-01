@@ -27,6 +27,7 @@ by [release/version.json](release/version.json).
 | Live | Behavior in one verified running client through the existing addon and Lycheedev mailbox protocol v1: bounded Lua probes, verified reports, recovery and cleanup. |
 | Evidence | Fixed pins and project locks, content-addressed captures, verification, bundles and bounded cache management. |
 | Delivery | Managed addon and Skill installation, updates and removal from a release package; npm CLI update handoff. |
+| Publish | Author queries, plugin/configuration/WA publishing, media, relationships and selective cloud backups through native Rust adapters. |
 
 Source, data and asset work do not require a running game. Live work requires a
 logged-in client with the managed addon loaded.
@@ -36,6 +37,14 @@ Forever and Anniversary. Formal Forever uses product ID `forever`, official
 remote product/flavor `wowf` and client folder `_forever_`; the two Forever beta
 products are outside the current support scope. Read the installed CLI catalog
 for each target's version and interface constraints.
+
+Author publishing is being integrated under `lycheedev publish`. Discover the
+available operations with `lycheedev cli search "publish"`, then read the selected
+leaf's schema for inputs, authentication, effects, plans and recovery. Current
+adapters cover CurseForge, NewBeeBox Creator/official, DD and Heybox authentication, author publishing
+and selective backups; remaining platform
+work is listed in [todo.md](todo.md). Original artifacts are reused. The Skill
+routes the task to the CLI rather than maintaining a separate field catalog.
 
 ## Requirements
 

@@ -20,6 +20,7 @@ mod source_cli;
 mod hotfix_cli;
 #[cfg(test)]
 mod hotfix_remote_tests;
+mod publish_cli;
 mod target_remote;
 use invocation::Invocation;
 use lycheedev_core::{Outcome, Result, ToolkitError, VERSION};
@@ -132,6 +133,7 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
         "target available" => dispatch_available(inv),
         "doctor" => dispatch_doctor(inv),
         value if value.starts_with("source ") => dispatch_source(inv),
+        value if value.starts_with("publish ") => publish_cli::dispatch(inv),
         value if value.starts_with("data ") || value.starts_with("asset ") => {
             data_cli::dispatch(inv)
         }
@@ -621,7 +623,7 @@ fn render_with_context(
     Ok(())
 }
 fn data_timeout_seconds(inv: &Invocation) -> Result<Option<u64>> {
-    if contract::all().iter().any(|definition| {
+    if let Some(definition) = contract::all().iter().find(|definition| {
         definition.path == inv.command
             && definition
                 .flags
@@ -629,7 +631,16 @@ fn data_timeout_seconds(inv: &Invocation) -> Result<Option<u64>> {
                 .any(|flag| flag.name() == "--timeout-seconds")
     }) {
         Ok(Some(
-            inv.usize_flag("--timeout-seconds", 300, 1, 3600)? as u64
+            inv.usize_flag(
+                "--timeout-seconds",
+                definition
+                    .defaults
+                    .get("--timeout-seconds")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(300) as usize,
+                1,
+                3600,
+            )? as u64,
         ))
     } else {
         Ok(None)
@@ -1062,6 +1073,27 @@ fn normal_exit_code(code: i32) -> std::result::Result<std::process::ExitCode, i3
 fn main() -> std::process::ExitCode {
     let mut data_profile = data_phase_profile::Profile::from_env();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args
+        .first()
+        .is_some_and(|value| value == "--publish-dd-channel-helper")
+    {
+        let result = lycheedev_publish::dd::channel_helper_entry(&args);
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args
+        .first()
+        .is_some_and(|value| value == "--publish-dd-task-owner")
+    {
+        let result = lycheedev_publish::dd::task::entry(&args);
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args
+        .first()
+        .is_some_and(|value| value == "--publish-dd-native-worker")
+    {
+        let result = lycheedev_publish::dd::worker::entry(&args);
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
     if args
         .first()
         .is_some_and(|value| value == "--data-agent-worker")

@@ -23,7 +23,7 @@ const repository = resolve(import.meta.dirname ?? fileURLToPath(new URL('.', imp
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const RECORD_SCHEMA = 'lycheedev.ci-test-programs.v1';
 export const TEST_SHARDS = Object.freeze({
-  'data-delivery': Object.freeze(['lycheedev-data', 'lycheedev-delivery', 'lycheedev-binding-contracts']),
+  'data-delivery': Object.freeze(['lycheedev-data', 'lycheedev-delivery', 'lycheedev-binding-contracts', 'lycheedev-publish']),
   'source-runtime': Object.freeze(['lycheedev-source', 'lycheedev-live', 'lycheedev-cli', 'lycheedev-core', 'lycheedev-windows', 'lycheedev-emmy-adapter']),
 });
 const CARGO_ARGS = Object.freeze(['test', '--locked', '--offline', '--workspace', '--all-targets', '--no-run', '--message-format=json-render-diagnostics']);

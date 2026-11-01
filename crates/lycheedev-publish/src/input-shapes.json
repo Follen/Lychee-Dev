@@ -1,0 +1,4379 @@
+[
+  {
+    "provider": "newbee",
+    "resource": "plugin",
+    "action": "create",
+    "name": "lycheedev.publish.v1.newbee.plugin.create",
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "mod_categories": {
+        "type": "array",
+        "required": true,
+        "nonempty": true,
+        "max_items": 5
+      },
+      "content_origin": {
+        "type": "integer",
+        "required": true
+      },
+      "content_format": {
+        "type": "integer",
+        "required": true
+      },
+      "intro": {
+        "type": "string",
+        "required": true
+      },
+      "description": {
+        "type": "string",
+        "required": true
+      },
+      "logo": {
+        "type": "string"
+      },
+      "logo_file": {
+        "type": "string",
+        "local_file": true
+      },
+      "screenshots": {
+        "type": "array"
+      },
+      "screenshot_files": {
+        "type": "array"
+      },
+      "public": {
+        "type": "boolean",
+        "required": true
+      },
+      "submit_for_review": {
+        "type": "boolean"
+      },
+      "subscribe_plan_level": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      },
+      "co_authors": {
+        "type": "array"
+      },
+      "references": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "plugin",
+    "action": "update",
+    "name": "lycheedev.publish.v1.newbee.plugin.update",
+    "fields": {
+      "mod_id": {
+        "type": "integer",
+        "required": true
+      },
+      "version": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "game_version_list": {
+        "type": "array",
+        "required": true,
+        "nonempty": true
+      },
+      "file": {
+        "type": "string",
+        "required": true,
+        "local_file": true
+      },
+      "changelog": {
+        "type": "string"
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "plugin",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.newbee.plugin.edit",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true,
+        "nonempty": true
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true
+      },
+      "mod_categories": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 5
+      },
+      "content_origin": {
+        "type": "integer"
+      },
+      "content_format": {
+        "type": "integer"
+      },
+      "intro": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "logo": {
+        "type": "string"
+      },
+      "logo_file": {
+        "type": "string",
+        "local_file": true
+      },
+      "screenshots": {
+        "type": "array"
+      },
+      "screenshot_files": {
+        "type": "array"
+      },
+      "public": {
+        "type": "boolean"
+      },
+      "submit_for_review": {
+        "type": "boolean"
+      },
+      "subscribe_plan_level": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      },
+      "co_authors": {
+        "type": "array"
+      },
+      "references": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "plugin-changelog",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.newbee.plugin-changelog.edit",
+    "fields": {
+      "file_id": {
+        "type": "integer",
+        "required": true
+      },
+      "changelog": {
+        "type": "string",
+        "required": true,
+        "nullable": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "config",
+    "action": "create",
+    "name": "lycheedev.publish.v1.newbee.config.create",
+    "fields": {
+      "title": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "content": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "content_format": {
+        "type": "integer",
+        "required": true
+      },
+      "intro": {
+        "type": "string"
+      },
+      "picture_urls": {
+        "type": "array"
+      },
+      "picture_files": {
+        "type": "array"
+      },
+      "content_origin": {
+        "type": "integer",
+        "required": true
+      },
+      "public": {
+        "type": "boolean",
+        "required": true
+      },
+      "submit_for_review": {
+        "type": "boolean"
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      },
+      "subscribe_plan_level": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "price": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "time_range": {
+        "type": "string"
+      },
+      "co_authors": {
+        "type": "array"
+      },
+      "references": {
+        "type": "array"
+      },
+      "cloud_id": {
+        "type": "integer",
+        "required": true
+      },
+      "linked_mods": {
+        "type": "array",
+        "required": true
+      },
+      "ignored_unknown_mods": {
+        "type": "array",
+        "required": true
+      },
+      "ignored_materials": {
+        "type": "array",
+        "required": true
+      },
+      "ignored_fronts": {
+        "type": "array",
+        "required": true
+      },
+      "roleid": {
+        "type": "string",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "config",
+    "action": "update",
+    "name": "lycheedev.publish.v1.newbee.config.update",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true,
+        "nonempty": true
+      },
+      "cloud_id": {
+        "type": "integer"
+      },
+      "linked_mods": {
+        "type": "array"
+      },
+      "ignored_unknown_mods": {
+        "type": "array"
+      },
+      "ignored_materials": {
+        "type": "array"
+      },
+      "ignored_fronts": {
+        "type": "array"
+      },
+      "roleid": {
+        "type": "string"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "config",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.newbee.config.edit",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true,
+        "nonempty": true
+      },
+      "title": {
+        "type": "string",
+        "nonempty": true
+      },
+      "content": {
+        "type": "string",
+        "nonempty": true
+      },
+      "content_format": {
+        "type": "integer"
+      },
+      "intro": {
+        "type": "string"
+      },
+      "picture_urls": {
+        "type": "array"
+      },
+      "picture_files": {
+        "type": "array"
+      },
+      "content_origin": {
+        "type": "integer"
+      },
+      "public": {
+        "type": "boolean"
+      },
+      "submit_for_review": {
+        "type": "boolean"
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      },
+      "subscribe_plan_level": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "price": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "time_range": {
+        "type": "string"
+      },
+      "co_authors": {
+        "type": "array"
+      },
+      "references": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa",
+    "action": "create",
+    "name": "lycheedev.publish.v1.newbee.wa.create",
+    "fields": {
+      "game_version_id": {
+        "type": "integer",
+        "required": true
+      },
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "intro": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "content_format": {
+        "type": "integer",
+        "required": true
+      },
+      "thumbnail": {
+        "type": "string"
+      },
+      "thumbnail_file": {
+        "type": "string",
+        "local_file": true
+      },
+      "images": {
+        "type": "array"
+      },
+      "image_files": {
+        "type": "array"
+      },
+      "category_id_list": {
+        "type": "array",
+        "required": true,
+        "nonempty": true,
+        "max_items": 5
+      },
+      "content_origin": {
+        "type": "integer",
+        "required": true
+      },
+      "subscribe_plan_level": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "price": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "time_range": {
+        "type": "string"
+      },
+      "public": {
+        "type": "boolean",
+        "required": true
+      },
+      "submit_for_review": {
+        "type": "boolean"
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      },
+      "attachments": {
+        "type": "array"
+      },
+      "co_authors": {
+        "type": "array"
+      },
+      "references": {
+        "type": "array"
+      },
+      "wa_str": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "wa_str_titles": {
+        "type": "array"
+      },
+      "wa_log": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "string_mode": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "single",
+          "collection"
+        ]
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa",
+    "action": "update",
+    "name": "lycheedev.publish.v1.newbee.wa.update",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true
+      },
+      "version": {
+        "type": "string",
+        "nonempty": true
+      },
+      "wa_str": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "wa_str_titles": {
+        "type": "array"
+      },
+      "wa_log": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.newbee.wa.edit",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true,
+        "nonempty": true
+      },
+      "game_version_id": {
+        "type": "integer"
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true
+      },
+      "intro": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string",
+        "nonempty": true
+      },
+      "content_format": {
+        "type": "integer"
+      },
+      "thumbnail": {
+        "type": "string"
+      },
+      "thumbnail_file": {
+        "type": "string",
+        "local_file": true
+      },
+      "images": {
+        "type": "array"
+      },
+      "image_files": {
+        "type": "array"
+      },
+      "category_id_list": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 5
+      },
+      "content_origin": {
+        "type": "integer"
+      },
+      "subscribe_plan_level": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "price": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "time_range": {
+        "type": "string"
+      },
+      "public": {
+        "type": "boolean"
+      },
+      "submit_for_review": {
+        "type": "boolean"
+      },
+      "link_to_channel": {
+        "type": "boolean"
+      },
+      "attachments": {
+        "type": "array"
+      },
+      "co_authors": {
+        "type": "array"
+      },
+      "references": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa-media",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.newbee.wa-media.upload",
+    "fields": {
+      "file": {
+        "type": "string",
+        "required": true,
+        "local_file": true
+      },
+      "kind": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "image",
+          "attachment"
+        ]
+      },
+      "install_type": {
+        "type": "integer"
+      },
+      "install_path": {
+        "type": "string"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa-changelog",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.newbee.wa-changelog.edit",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true
+      },
+      "wa_id": {
+        "type": "integer"
+      },
+      "wa_log": {
+        "type": "string",
+        "required": true,
+        "nullable": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "plugin-co-author",
+    "action": "set",
+    "name": "lycheedev.publish.v1.newbee.plugin-co-author.set",
+    "fields": {
+      "content_id": {
+        "type": "integer",
+        "required": true
+      },
+      "co_authors": {
+        "type": "array",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "plugin-reference",
+    "action": "set",
+    "name": "lycheedev.publish.v1.newbee.plugin-reference.set",
+    "fields": {
+      "source_id": {
+        "type": "integer",
+        "required": true
+      },
+      "references": {
+        "type": "array",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "config-co-author",
+    "action": "set",
+    "name": "lycheedev.publish.v1.newbee.config-co-author.set",
+    "fields": {
+      "content_id": {
+        "type": "integer",
+        "required": true
+      },
+      "co_authors": {
+        "type": "array",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "config-reference",
+    "action": "set",
+    "name": "lycheedev.publish.v1.newbee.config-reference.set",
+    "fields": {
+      "source_id": {
+        "type": "integer",
+        "required": true
+      },
+      "references": {
+        "type": "array",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa-co-author",
+    "action": "set",
+    "name": "lycheedev.publish.v1.newbee.wa-co-author.set",
+    "fields": {
+      "content_id": {
+        "type": "integer",
+        "required": true
+      },
+      "co_authors": {
+        "type": "array",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa-reference",
+    "action": "set",
+    "name": "lycheedev.publish.v1.newbee.wa-reference.set",
+    "fields": {
+      "source_id": {
+        "type": "integer",
+        "required": true
+      },
+      "references": {
+        "type": "array",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa-share-code",
+    "action": "set",
+    "name": "lycheedev.publish.v1.newbee.wa-share-code.set",
+    "fields": {
+      "module_id": {
+        "type": "integer",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "plugin",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.newbee.plugin.delete",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true
+      },
+      "confirm": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "DELETE"
+        ]
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "config",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.newbee.config.delete",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true
+      },
+      "confirm": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "DELETE"
+        ]
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "wa",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.newbee.wa.delete",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true
+      },
+      "confirm": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "DELETE"
+        ]
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "plugin",
+    "action": "create",
+    "name": "lycheedev.publish.v1.dd.plugin.create",
+    "fields": {
+      "game_type": {
+        "type": "integer",
+        "required": true
+      },
+      "scope": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "public",
+          "private"
+        ]
+      },
+      "addon_type": {
+        "type": "integer",
+        "required": true,
+        "choices": [
+          0,
+          1
+        ]
+      },
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 80
+      },
+      "description": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 80
+      },
+      "logo": {
+        "type": "string"
+      },
+      "logo_file": {
+        "type": "string",
+        "local_file": true
+      },
+      "detail_imgs": {
+        "type": "array",
+        "max_items": 8
+      },
+      "detail_img_files": {
+        "type": "array",
+        "max_items": 8
+      },
+      "primary_category_id": {
+        "type": "integer",
+        "required": true
+      },
+      "second_category_ids": {
+        "type": "array"
+      },
+      "html_desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "share_code_life_type": {
+        "type": "string"
+      },
+      "need_buy": {
+        "type": "boolean",
+        "required": true
+      },
+      "price_fen": {
+        "type": "integer"
+      },
+      "buy_life_type": {
+        "type": "string"
+      },
+      "jump_room": {
+        "type": "boolean",
+        "required": true
+      },
+      "room_id": {
+        "type": "string"
+      },
+      "channel_id": {
+        "type": "string"
+      },
+      "channel_type": {
+        "type": "string"
+      },
+      "sync_room": {
+        "type": "boolean"
+      },
+      "creation_statement": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "original",
+          "chinesize",
+          "renovate",
+          "second"
+        ]
+      },
+      "with_associate": {
+        "type": "boolean",
+        "required": true
+      },
+      "associated_acts": {
+        "type": "array"
+      },
+      "need_anchor_vip": {
+        "type": "boolean",
+        "required": true
+      },
+      "vip_levels": {
+        "type": "array"
+      },
+      "game_versions": {
+        "type": "array",
+        "required": true,
+        "nonempty": true
+      },
+      "detail_url": {
+        "type": "string"
+      },
+      "file": {
+        "type": "string",
+        "local_file": true
+      },
+      "release_type": {
+        "type": "integer",
+        "required": true,
+        "choices": [
+          1,
+          2,
+          3
+        ]
+      },
+      "version": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 80
+      },
+      "update_desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 1000
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "plugin",
+    "action": "update",
+    "name": "lycheedev.publish.v1.dd.plugin.update",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "game_versions": {
+        "type": "array",
+        "required": true,
+        "nonempty": true
+      },
+      "detail_url": {
+        "type": "string"
+      },
+      "file": {
+        "type": "string",
+        "local_file": true
+      },
+      "release_type": {
+        "type": "integer",
+        "choices": [
+          1,
+          2,
+          3
+        ]
+      },
+      "version": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 80
+      },
+      "update_desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 1000
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "plugin",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.dd.plugin.edit",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "scope": {
+        "type": "string",
+        "choices": [
+          "public",
+          "private"
+        ]
+      },
+      "share_code_life_type": {
+        "type": "string"
+      },
+      "need_buy": {
+        "type": "boolean"
+      },
+      "price_fen": {
+        "type": "integer"
+      },
+      "buy_life_type": {
+        "type": "string"
+      },
+      "jump_room": {
+        "type": "boolean"
+      },
+      "room_id": {
+        "type": "string"
+      },
+      "channel_id": {
+        "type": "string"
+      },
+      "channel_type": {
+        "type": "string"
+      },
+      "sync_room": {
+        "type": "boolean"
+      },
+      "creation_statement": {
+        "type": "string",
+        "choices": [
+          "original",
+          "chinesize",
+          "renovate",
+          "second"
+        ]
+      },
+      "with_associate": {
+        "type": "boolean"
+      },
+      "associated_acts": {
+        "type": "array"
+      },
+      "need_anchor_vip": {
+        "type": "boolean"
+      },
+      "vip_levels": {
+        "type": "array"
+      },
+      "description": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 80
+      },
+      "logo": {
+        "type": "string"
+      },
+      "logo_file": {
+        "type": "string",
+        "local_file": true
+      },
+      "html_desc": {
+        "type": "string",
+        "nonempty": true
+      },
+      "update_desc": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 1000
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "config",
+    "action": "create",
+    "name": "lycheedev.publish.v1.dd.config.create",
+    "fields": {
+      "scope": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "public",
+          "private"
+        ]
+      },
+      "title": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 40
+      },
+      "brief_desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 50
+      },
+      "desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "display_imgs": {
+        "type": "array",
+        "max_items": 8
+      },
+      "display_img_files": {
+        "type": "array",
+        "max_items": 8
+      },
+      "share_code_life_type": {
+        "type": "string"
+      },
+      "need_buy": {
+        "type": "boolean",
+        "required": true
+      },
+      "price_fen": {
+        "type": "integer"
+      },
+      "buy_life_type": {
+        "type": "string"
+      },
+      "jump_room": {
+        "type": "boolean",
+        "required": true
+      },
+      "room_id": {
+        "type": "string"
+      },
+      "channel_id": {
+        "type": "string"
+      },
+      "channel_type": {
+        "type": "string"
+      },
+      "sync_room": {
+        "type": "boolean"
+      },
+      "creation_statement": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "original",
+          "chinesize",
+          "renovate",
+          "second"
+        ]
+      },
+      "with_associate": {
+        "type": "boolean",
+        "required": true
+      },
+      "associated_acts": {
+        "type": "array"
+      },
+      "need_anchor_vip": {
+        "type": "boolean",
+        "required": true
+      },
+      "vip_levels": {
+        "type": "array"
+      },
+      "backup_sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "update_desc": {
+        "type": "string",
+        "max_length": 1000
+      },
+      "known_addon_ids": {
+        "type": "array",
+        "required": true
+      },
+      "known_addon_update_ids": {
+        "type": "array"
+      },
+      "unknown_addon_ids": {
+        "type": "array",
+        "required": true
+      },
+      "unknown_addon_update_ids": {
+        "type": "array"
+      },
+      "wtf_role_ids": {
+        "type": "array",
+        "required": true
+      },
+      "material_names": {
+        "type": "array",
+        "required": true
+      },
+      "material_update_names": {
+        "type": "array"
+      },
+      "font_names": {
+        "type": "array",
+        "required": true
+      },
+      "font_update_names": {
+        "type": "array"
+      },
+      "known_wa_ids": {
+        "type": "array",
+        "required": true
+      },
+      "known_wa_update_ids": {
+        "type": "array"
+      },
+      "unknown_wa_ids": {
+        "type": "array",
+        "required": true
+      },
+      "unknown_wa_update_ids": {
+        "type": "array"
+      },
+      "retail_ui_config": {
+        "type": "object",
+        "nullable": true,
+        "description": "safe selector object: edit_mode_selectors, default_edit_mode_selector, cool_down_selectors, enable_dd_setup_wizard"
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "config",
+    "action": "update",
+    "name": "lycheedev.publish.v1.dd.config.update",
+    "fields": {
+      "share_sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "backup_sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "update_desc": {
+        "type": "string",
+        "required": true,
+        "max_length": 1000
+      },
+      "known_addon_ids": {
+        "type": "array"
+      },
+      "known_addon_update_ids": {
+        "type": "array"
+      },
+      "unknown_addon_ids": {
+        "type": "array"
+      },
+      "unknown_addon_update_ids": {
+        "type": "array"
+      },
+      "wtf_role_ids": {
+        "type": "array"
+      },
+      "material_names": {
+        "type": "array"
+      },
+      "material_update_names": {
+        "type": "array"
+      },
+      "font_names": {
+        "type": "array"
+      },
+      "font_update_names": {
+        "type": "array"
+      },
+      "known_wa_ids": {
+        "type": "array"
+      },
+      "known_wa_update_ids": {
+        "type": "array"
+      },
+      "unknown_wa_ids": {
+        "type": "array"
+      },
+      "unknown_wa_update_ids": {
+        "type": "array"
+      },
+      "retail_ui_config": {
+        "type": "object",
+        "nullable": true,
+        "description": "safe selector object: edit_mode_selectors, default_edit_mode_selector, cool_down_selectors, enable_dd_setup_wizard"
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "config",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.dd.config.edit",
+    "fields": {
+      "share_sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "scope": {
+        "type": "string",
+        "choices": [
+          "public",
+          "private"
+        ]
+      },
+      "title": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 40
+      },
+      "brief_desc": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 50
+      },
+      "desc": {
+        "type": "string",
+        "nonempty": true
+      },
+      "display_imgs": {
+        "type": "array",
+        "max_items": 8
+      },
+      "display_img_files": {
+        "type": "array",
+        "max_items": 8
+      },
+      "share_code_life_type": {
+        "type": "string"
+      },
+      "need_buy": {
+        "type": "boolean"
+      },
+      "price_fen": {
+        "type": "integer"
+      },
+      "buy_life_type": {
+        "type": "string"
+      },
+      "jump_room": {
+        "type": "boolean"
+      },
+      "room_id": {
+        "type": "string"
+      },
+      "channel_id": {
+        "type": "string"
+      },
+      "channel_type": {
+        "type": "string"
+      },
+      "sync_room": {
+        "type": "boolean"
+      },
+      "creation_statement": {
+        "type": "string",
+        "choices": [
+          "original",
+          "chinesize",
+          "renovate",
+          "second"
+        ]
+      },
+      "with_associate": {
+        "type": "boolean"
+      },
+      "associated_acts": {
+        "type": "array"
+      },
+      "need_anchor_vip": {
+        "type": "boolean"
+      },
+      "vip_levels": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "wa",
+    "action": "create",
+    "name": "lycheedev.publish.v1.dd.wa.create",
+    "fields": {
+      "game_type": {
+        "type": "integer",
+        "required": true
+      },
+      "scope": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "public",
+          "private"
+        ]
+      },
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 40
+      },
+      "game_version": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "brief_desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 50
+      },
+      "display_imgs": {
+        "type": "array",
+        "max_items": 8
+      },
+      "display_img_files": {
+        "type": "array",
+        "max_items": 8
+      },
+      "category_ids": {
+        "type": "array",
+        "required": true,
+        "nonempty": true,
+        "max_items": 5
+      },
+      "desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "share_code_life_type": {
+        "type": "string"
+      },
+      "need_buy": {
+        "type": "boolean",
+        "required": true
+      },
+      "price_fen": {
+        "type": "integer"
+      },
+      "buy_life_type": {
+        "type": "string"
+      },
+      "jump_room": {
+        "type": "boolean",
+        "required": true
+      },
+      "room_id": {
+        "type": "string"
+      },
+      "channel_id": {
+        "type": "string"
+      },
+      "channel_type": {
+        "type": "string"
+      },
+      "sync_room": {
+        "type": "boolean"
+      },
+      "creation_statement": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "original",
+          "chinesize",
+          "renovate",
+          "second"
+        ]
+      },
+      "with_associate": {
+        "type": "boolean",
+        "required": true
+      },
+      "associated_acts": {
+        "type": "array"
+      },
+      "need_anchor_vip": {
+        "type": "boolean",
+        "required": true
+      },
+      "vip_levels": {
+        "type": "array"
+      },
+      "content": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "update_desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 1000
+      },
+      "version": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 80
+      },
+      "with_file": {
+        "type": "boolean",
+        "required": true
+      },
+      "file": {
+        "type": "string",
+        "local_file": true
+      },
+      "file_install_path": {
+        "type": "string",
+        "choices": [
+          "",
+          "Interface",
+          "Interface/Addons"
+        ]
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "wa",
+    "action": "update",
+    "name": "lycheedev.publish.v1.dd.wa.update",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "content": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "update_desc": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 1000
+      },
+      "version": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 80
+      },
+      "with_file": {
+        "type": "boolean",
+        "required": true
+      },
+      "file": {
+        "type": "string",
+        "local_file": true
+      },
+      "file_install_path": {
+        "type": "string",
+        "choices": [
+          "",
+          "Interface",
+          "Interface/Addons"
+        ]
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "wa",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.dd.wa.edit",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "game_type": {
+        "type": "integer"
+      },
+      "scope": {
+        "type": "string",
+        "choices": [
+          "public",
+          "private"
+        ]
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 40
+      },
+      "game_version": {
+        "type": "string",
+        "nonempty": true
+      },
+      "brief_desc": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 50
+      },
+      "display_imgs": {
+        "type": "array",
+        "max_items": 8
+      },
+      "display_img_files": {
+        "type": "array",
+        "max_items": 8
+      },
+      "category_ids": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 5
+      },
+      "desc": {
+        "type": "string",
+        "nonempty": true
+      },
+      "share_code_life_type": {
+        "type": "string"
+      },
+      "need_buy": {
+        "type": "boolean"
+      },
+      "price_fen": {
+        "type": "integer"
+      },
+      "buy_life_type": {
+        "type": "string"
+      },
+      "jump_room": {
+        "type": "boolean"
+      },
+      "room_id": {
+        "type": "string"
+      },
+      "channel_id": {
+        "type": "string"
+      },
+      "channel_type": {
+        "type": "string"
+      },
+      "sync_room": {
+        "type": "boolean"
+      },
+      "creation_statement": {
+        "type": "string",
+        "choices": [
+          "original",
+          "chinesize",
+          "renovate",
+          "second"
+        ]
+      },
+      "with_associate": {
+        "type": "boolean"
+      },
+      "associated_acts": {
+        "type": "array"
+      },
+      "need_anchor_vip": {
+        "type": "boolean"
+      },
+      "vip_levels": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "plugin",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.dd.plugin.delete",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "config",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.dd.config.delete",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "wa",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.dd.wa.delete",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "curseforge",
+    "resource": "plugin",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.curseforge.plugin.upload",
+    "fields": {
+      "project_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "file": {
+        "type": "string",
+        "required": true,
+        "local_file": true
+      },
+      "changelog": {
+        "type": "string",
+        "required": true
+      },
+      "changelog_type": {
+        "type": "string",
+        "choices": [
+          "text",
+          "html",
+          "markdown"
+        ]
+      },
+      "display_name": {
+        "type": "string",
+        "nonempty": true
+      },
+      "game_versions": {
+        "type": "array",
+        "nonempty": true
+      },
+      "game_version_names": {
+        "type": "array"
+      },
+      "release_type": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "alpha",
+          "beta",
+          "release"
+        ]
+      },
+      "parent_file_id": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "relations": {
+        "type": "object"
+      },
+      "is_marked_for_manual_release": {
+        "type": "boolean"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "backup",
+    "action": "generate",
+    "name": "lycheedev.publish.v1.newbee.backup.generate",
+    "fields": {
+      "game_dir": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "game_version_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "output_dir": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "known_plugins": {
+        "type": "array"
+      },
+      "unknown_plugins": {
+        "type": "array"
+      },
+      "materials": {
+        "type": "array"
+      },
+      "fonts": {
+        "type": "array"
+      },
+      "wtf_accounts": {
+        "type": "array",
+        "description": "[{account,include_common,roles:[{server,name}]}]; exact role choices"
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "backup",
+    "action": "create",
+    "name": "lycheedev.publish.v1.newbee.backup.create",
+    "fields": {
+      "game_dir": {
+        "type": "string",
+        "nonempty": true
+      },
+      "game_version_id": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "output_dir": {
+        "type": "string",
+        "nonempty": true
+      },
+      "known_plugins": {
+        "type": "array"
+      },
+      "unknown_plugins": {
+        "type": "array"
+      },
+      "materials": {
+        "type": "array"
+      },
+      "fonts": {
+        "type": "array"
+      },
+      "wtf_accounts": {
+        "type": "array",
+        "description": "[{account,include_common,roles:[{server,name}]}]; exact role choices"
+      },
+      "bundle_file": {
+        "type": "string",
+        "local_file": true
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 200
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "backup",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.newbee.backup.upload",
+    "fields": {
+      "bundle_file": {
+        "type": "string",
+        "required": true,
+        "local_file": true
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 200
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "backup",
+    "action": "rename",
+    "name": "lycheedev.publish.v1.newbee.backup.rename",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 200
+      }
+    }
+  },
+  {
+    "provider": "newbee",
+    "resource": "backup",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.newbee.backup.delete",
+    "fields": {
+      "backup_ids": {
+        "type": "array",
+        "required": true,
+        "nonempty": true,
+        "max_items": 1000
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "backup",
+    "action": "rename",
+    "name": "lycheedev.publish.v1.dd.backup.rename",
+    "fields": {
+      "sn": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 14
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "backup",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.dd.backup.delete",
+    "fields": {
+      "backup_ids": {
+        "type": "array",
+        "required": true,
+        "nonempty": true,
+        "max_items": 1000
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "backup",
+    "action": "generate",
+    "name": "lycheedev.publish.v1.dd.backup.generate",
+    "fields": {
+      "game_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": true
+      },
+      "game_type": {
+        "type": "integer",
+        "minimum": 1,
+        "required": true
+      },
+      "output_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": true
+      },
+      "addon_names": {
+        "type": "array"
+      },
+      "unknown_addons": {
+        "type": "array"
+      },
+      "materials": {
+        "type": "array"
+      },
+      "fonts": {
+        "type": "array"
+      },
+      "include_wtf_root": {
+        "type": "boolean"
+      },
+      "wtf_accounts": {
+        "type": "array",
+        "description": "Explicit account, include_common and roles [{server,name}] selections."
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "backup",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.dd.backup.upload",
+    "fields": {
+      "bundle_file": {
+        "type": "string",
+        "nonempty": true,
+        "local_file": true,
+        "required": true
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 14
+      }
+    }
+  },
+  {
+    "provider": "dd",
+    "resource": "backup",
+    "action": "create",
+    "name": "lycheedev.publish.v1.dd.backup.create",
+    "fields": {
+      "game_dir": {
+        "type": "string",
+        "nonempty": true
+      },
+      "game_type": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "output_dir": {
+        "type": "string",
+        "nonempty": true
+      },
+      "addon_names": {
+        "type": "array"
+      },
+      "unknown_addons": {
+        "type": "array"
+      },
+      "materials": {
+        "type": "array"
+      },
+      "fonts": {
+        "type": "array"
+      },
+      "include_wtf_root": {
+        "type": "boolean"
+      },
+      "wtf_accounts": {
+        "type": "array",
+        "description": "Explicit account, include_common and roles [{server,name}] selections."
+      },
+      "bundle_file": {
+        "type": "string",
+        "nonempty": true,
+        "local_file": true
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 14
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "session",
+    "action": "login-start",
+    "name": "lycheedev.publish.v1.blackbox.session.login-start",
+    "fields": {
+      "method": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "sms",
+          "wechat"
+        ],
+        "description": "Explicit login method. SMS requires phone; WeChat rejects phone."
+      },
+      "phone": {
+        "type": "string",
+        "description": "Mainland China mobile number; SMS only. Never printed or stored in plaintext."
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "session",
+    "action": "login-submit",
+    "name": "lycheedev.publish.v1.blackbox.session.login-submit",
+    "fields": {
+      "login_id": {
+        "type": "string",
+        "required": true,
+        "description": "Original opaque login_id from login-start; expires after five minutes."
+      },
+      "code": {
+        "type": "string",
+        "required": true,
+        "description": "4..8 digits from the requested SMS. One submission; unknown results continue with login-status."
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "session",
+    "action": "renew",
+    "name": "lycheedev.publish.v1.blackbox.session.renew",
+    "fields": {}
+  },
+  {
+    "provider": "blackbox",
+    "resource": "session",
+    "action": "forget",
+    "name": "lycheedev.publish.v1.blackbox.session.forget",
+    "fields": {
+      "confirm_forget": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ],
+        "description": "Remove the selected CLI login and pending QR; does not log out remotely or select another saved account."
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "plugin",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.blackbox.plugin.edit",
+    "fields": {
+      "id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "name": {
+        "type": "string"
+      },
+      "logo_url": {
+        "type": "string"
+      },
+      "category_ids": {
+        "type": "array"
+      },
+      "type": {
+        "type": "integer",
+        "required": false,
+        "minimum": 1,
+        "choices": [
+          1,
+          9
+        ]
+      },
+      "desc": {
+        "type": "string"
+      },
+      "official": {
+        "type": "string"
+      },
+      "official_url": {
+        "type": "string"
+      },
+      "core_folders": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "plugin",
+    "action": "update",
+    "name": "lycheedev.publish.v1.blackbox.plugin.update",
+    "fields": {
+      "module_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "type": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1,
+        "choices": [
+          1,
+          2,
+          3
+        ]
+      },
+      "game_versions": {
+        "type": "array",
+        "required": true,
+        "nonempty": true
+      },
+      "file": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "local_file": true
+      },
+      "file_url": {
+        "type": "string",
+        "required": false,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "version",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.blackbox.version.edit",
+    "fields": {
+      "module_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "version_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "name": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "type": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1,
+        "choices": [
+          1,
+          2,
+          3
+        ]
+      },
+      "game_versions": {
+        "type": "array",
+        "required": true,
+        "nonempty": true
+      },
+      "file": {
+        "type": "string",
+        "required": false,
+        "nonempty": true,
+        "local_file": true
+      },
+      "file_url": {
+        "type": "string",
+        "required": false,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "version",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.blackbox.version.delete",
+    "fields": {
+      "module_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      },
+      "version_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "config",
+    "action": "create",
+    "name": "lycheedev.publish.v1.blackbox.config.create",
+    "fields": {
+      "backup_id": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "configuration": {
+        "type": "object",
+        "required": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "config",
+    "action": "update",
+    "name": "lycheedev.publish.v1.blackbox.config.update",
+    "fields": {
+      "share_id": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "backup_id": {
+        "type": "string",
+        "required": false,
+        "nonempty": true
+      },
+      "configuration": {
+        "type": "object",
+        "required": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "config",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.blackbox.config.edit",
+    "fields": {
+      "share_id": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "backup_id": {
+        "type": "string",
+        "required": false,
+        "nonempty": true
+      },
+      "configuration": {
+        "type": "object",
+        "required": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "config",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.blackbox.config.delete",
+    "fields": {
+      "share_id": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "wa",
+    "action": "create",
+    "name": "lycheedev.publish.v1.blackbox.wa.create",
+    "fields": {
+      "scope": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "choices": [
+          "public"
+        ]
+      },
+      "configuration": {
+        "type": "object",
+        "required": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "wa",
+    "action": "update",
+    "name": "lycheedev.publish.v1.blackbox.wa.update",
+    "fields": {
+      "slug": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 256
+      },
+      "scope": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "choices": [
+          "public"
+        ]
+      },
+      "configuration": {
+        "type": "object",
+        "required": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "wa",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.blackbox.wa.edit",
+    "fields": {
+      "slug": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 256
+      },
+      "scope": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "choices": [
+          "public"
+        ]
+      },
+      "configuration": {
+        "type": "object",
+        "required": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "wa",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.blackbox.wa.delete",
+    "fields": {
+      "slug": {
+        "type": "string",
+        "required": true,
+        "nonempty": true,
+        "max_length": 256
+      },
+      "strappid": {
+        "type": "string",
+        "required": true,
+        "nonempty": true
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "backup",
+    "action": "generate",
+    "name": "lycheedev.publish.v1.blackbox.backup.generate",
+    "fields": {
+      "game_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": true
+      },
+      "output_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": true
+      },
+      "strappid": {
+        "type": "string",
+        "nonempty": true,
+        "required": true
+      },
+      "unknown_addons": {
+        "type": "array",
+        "required": true
+      },
+      "materials": {
+        "type": "array",
+        "required": true
+      },
+      "fonts": {
+        "type": "array",
+        "required": true
+      },
+      "wtf_accounts": {
+        "type": "array",
+        "required": true
+      },
+      "known_addons": {
+        "type": "array"
+      },
+      "strategies": {
+        "type": "array"
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "backup",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.blackbox.backup.upload",
+    "fields": {
+      "bundle_file": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "local_file": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "backup",
+    "action": "create",
+    "name": "lycheedev.publish.v1.blackbox.backup.create",
+    "fields": {
+      "game_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "output_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "strappid": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "unknown_addons": {
+        "type": "array",
+        "required": false
+      },
+      "materials": {
+        "type": "array",
+        "required": false
+      },
+      "fonts": {
+        "type": "array",
+        "required": false
+      },
+      "wtf_accounts": {
+        "type": "array",
+        "required": false
+      },
+      "known_addons": {
+        "type": "array",
+        "required": false
+      },
+      "strategies": {
+        "type": "array",
+        "required": false
+      },
+      "bundle_file": {
+        "type": "string",
+        "nonempty": true,
+        "required": false,
+        "local_file": true
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "backup",
+    "action": "rename",
+    "name": "lycheedev.publish.v1.blackbox.backup.rename",
+    "fields": {
+      "backup_id": {
+        "type": "string",
+        "nonempty": true,
+        "required": true
+      },
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "max_length": 200
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "backup",
+    "action": "delete-preview",
+    "name": "lycheedev.publish.v1.blackbox.backup.delete-preview",
+    "fields": {
+      "backup_id": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "backup_ids": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 1000
+      },
+      "name_contains": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "name_equals": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "created_before": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "created_after": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  {
+    "provider": "blackbox",
+    "resource": "backup",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.blackbox.backup.delete",
+    "fields": {
+      "backup_id": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "backup_ids": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 1000
+      },
+      "name_contains": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "name_equals": {
+        "type": "string",
+        "nonempty": true,
+        "required": false
+      },
+      "created_before": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "created_after": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "confirm_delete": {
+        "type": "boolean",
+        "required": true,
+        "choices": [
+          true
+        ]
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "project",
+    "action": "create",
+    "name": "lycheedev.publish.v1.modus.project.create",
+    "fields": {
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 120,
+        "required": true
+      },
+      "alt_name": {
+        "type": "string",
+        "max_length": 120
+      },
+      "summary": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 500,
+        "required": true
+      },
+      "categories": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 5,
+        "required": true
+      },
+      "license": {
+        "type": "object",
+        "nonempty": true,
+        "required": true
+      },
+      "repo_url": {
+        "type": "string",
+        "max_length": 500,
+        "description": "Blank clears on edit."
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled Creator tier; null clears. BigFoot requires no tier."
+      },
+      "publish_platforms": {
+        "type": "array",
+        "nonempty": true,
+        "required": true
+      },
+      "logo_base64": {
+        "type": "string",
+        "nonempty": true,
+        "description": "Optional single project logo; sent as the official logo.webp image. Gallery changes use edit image_ops."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "project",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.modus.project.edit",
+    "fields": {
+      "name": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 120
+      },
+      "alt_name": {
+        "type": "string",
+        "max_length": 120
+      },
+      "summary": {
+        "type": "string",
+        "nonempty": true,
+        "max_length": 500
+      },
+      "categories": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 5
+      },
+      "license": {
+        "type": "object",
+        "nonempty": true
+      },
+      "repo_url": {
+        "type": "string",
+        "max_length": 500,
+        "description": "Blank clears on edit."
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled Creator tier; null clears. BigFoot requires no tier."
+      },
+      "publish_platforms": {
+        "type": "array",
+        "nonempty": true
+      },
+      "project_id": {
+        "type": "integer",
+        "minimum": 1,
+        "required": true
+      },
+      "description": {
+        "type": "string",
+        "nullable": true,
+        "max_length": 100000,
+        "description": "HTML. Null/blank clears; omission preserves."
+      },
+      "required_dependencies": {
+        "type": "string",
+        "nullable": true,
+        "max_length": 4000,
+        "description": "Official dependency selection. Null/blank clears; query candidates with project dependencies."
+      },
+      "images": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Resulting official image count, required with image_ops."
+      },
+      "image_ops": {
+        "type": "array",
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "project",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.modus.project.delete",
+    "fields": {
+      "project_id": {
+        "type": "integer",
+        "minimum": 200000000,
+        "required": true
+      },
+      "confirm": {
+        "type": "string",
+        "choices": [
+          "DELETE"
+        ],
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "config",
+    "action": "create",
+    "name": "lycheedev.publish.v1.modus.config.create",
+    "fields": {
+      "addons_id": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "Config: backup knownAddons.projectids. WA: matching wa-support-addons ID.",
+        "required": true
+      },
+      "content": {
+        "type": "string",
+        "description": "Editor HTML or its official Base64 encoding; transmitted unchanged.",
+        "nonempty": true,
+        "required": true
+      },
+      "content_text": {
+        "type": "string",
+        "description": "Plain text, more than 20 trimmed characters. Omission derives the official text projection from content; update reconstructs missing current contentText.",
+        "nonempty": true
+      },
+      "image_url": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..10 comma-delimited image references returned by media upload.",
+        "nonempty": true,
+        "required": true
+      },
+      "is_paid": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "is_public": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "Create default 1; omission on update preserves."
+      },
+      "price": {
+        "type": "number",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "share_type": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "tags": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..3 unique comma-delimited IDs from options config-tags/wa-tags.",
+        "nonempty": true,
+        "required": true
+      },
+      "title": {
+        "type": "string",
+        "max_length": 120,
+        "description": "At least 6 trimmed characters.",
+        "nonempty": true,
+        "required": true
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled author tier, or enabled unfinished season ID when sub_type=1. null removes the tier from the rebuilt form; omission preserves."
+      },
+      "sub_type": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "0 author tier; 1 season subscription for the selected build. Create default 0."
+      },
+      "platform": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "1 ModUs; 3 ModUs + BigFoot. Supply together with identical synchronization_type; BigFoot requires no tier."
+      },
+      "synchronization_type": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "Same selection as platform; omission preserves on update."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      },
+      "backup_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Own backup in this build; inspect backup list/get.",
+        "required": true
+      },
+      "account_name": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Selected backup WTF account; empty when exclude_wtf=1."
+      },
+      "role_name": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Role from the selected backup account; required when it has roles."
+      },
+      "exclude_wtf": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "1 excludes WTF and clears account/role; 0 requires an account.",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "config",
+    "action": "update",
+    "name": "lycheedev.publish.v1.modus.config.update",
+    "fields": {
+      "addons_id": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "Config: backup knownAddons.projectids. WA: matching wa-support-addons ID."
+      },
+      "content": {
+        "type": "string",
+        "description": "Editor HTML or its official Base64 encoding; transmitted unchanged.",
+        "nonempty": true
+      },
+      "content_text": {
+        "type": "string",
+        "description": "Plain text, more than 20 trimmed characters. Omission derives the official text projection from content; update reconstructs missing current contentText.",
+        "nonempty": true
+      },
+      "image_url": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..10 comma-delimited image references returned by media upload.",
+        "nonempty": true
+      },
+      "is_paid": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "is_public": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "Create default 1; omission on update preserves."
+      },
+      "price": {
+        "type": "number",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "share_type": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "tags": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..3 unique comma-delimited IDs from options config-tags/wa-tags.",
+        "nonempty": true
+      },
+      "title": {
+        "type": "string",
+        "max_length": 120,
+        "description": "At least 6 trimmed characters.",
+        "nonempty": true
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled author tier, or enabled unfinished season ID when sub_type=1. null removes the tier from the rebuilt form; omission preserves."
+      },
+      "sub_type": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "0 author tier; 1 season subscription for the selected build. Create default 0."
+      },
+      "platform": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "1 ModUs; 3 ModUs + BigFoot. Supply together with identical synchronization_type; BigFoot requires no tier."
+      },
+      "synchronization_type": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "Same selection as platform; omission preserves on update."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      },
+      "backup_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Own backup in this build; inspect backup list/get."
+      },
+      "account_name": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Selected backup WTF account; empty when exclude_wtf=1."
+      },
+      "role_name": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Role from the selected backup account; required when it has roles."
+      },
+      "exclude_wtf": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "1 excludes WTF and clears account/role; 0 requires an account."
+      },
+      "share_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "config",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.modus.config.edit",
+    "fields": {
+      "addons_id": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "Config: backup knownAddons.projectids. WA: matching wa-support-addons ID."
+      },
+      "content": {
+        "type": "string",
+        "description": "Editor HTML or its official Base64 encoding; transmitted unchanged.",
+        "nonempty": true
+      },
+      "content_text": {
+        "type": "string",
+        "description": "Plain text, more than 20 trimmed characters. Omission derives the official text projection from content; update reconstructs missing current contentText.",
+        "nonempty": true
+      },
+      "image_url": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..10 comma-delimited image references returned by media upload.",
+        "nonempty": true
+      },
+      "is_paid": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "is_public": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "Create default 1; omission on update preserves."
+      },
+      "price": {
+        "type": "number",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "share_type": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "tags": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..3 unique comma-delimited IDs from options config-tags/wa-tags.",
+        "nonempty": true
+      },
+      "title": {
+        "type": "string",
+        "max_length": 120,
+        "description": "At least 6 trimmed characters.",
+        "nonempty": true
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled author tier, or enabled unfinished season ID when sub_type=1. null removes the tier from the rebuilt form; omission preserves."
+      },
+      "sub_type": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "0 author tier; 1 season subscription for the selected build. Create default 0."
+      },
+      "platform": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "1 ModUs; 3 ModUs + BigFoot. Supply together with identical synchronization_type; BigFoot requires no tier."
+      },
+      "synchronization_type": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "Same selection as platform; omission preserves on update."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      },
+      "backup_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Own backup in this build; inspect backup list/get."
+      },
+      "account_name": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Selected backup WTF account; empty when exclude_wtf=1."
+      },
+      "role_name": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Role from the selected backup account; required when it has roles."
+      },
+      "exclude_wtf": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "1 excludes WTF and clears account/role; 0 requires an account."
+      },
+      "share_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "config",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.modus.config.delete",
+    "fields": {
+      "share_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      },
+      "confirm": {
+        "type": "string",
+        "choices": [
+          "DELETE"
+        ],
+        "required": true
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "wa",
+    "action": "create",
+    "name": "lycheedev.publish.v1.modus.wa.create",
+    "fields": {
+      "addons_id": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "Matching ID from options wa-support-addons.",
+        "nonempty": true,
+        "required": true
+      },
+      "content": {
+        "type": "string",
+        "description": "Editor HTML or its official Base64 encoding; transmitted unchanged.",
+        "nonempty": true,
+        "required": true
+      },
+      "content_text": {
+        "type": "string",
+        "description": "Plain text, more than 20 trimmed characters. Omission derives the official text projection from content; update reconstructs missing current contentText.",
+        "nonempty": true
+      },
+      "image_url": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..10 comma-delimited image references returned by media upload.",
+        "nonempty": true,
+        "required": true
+      },
+      "is_paid": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "is_public": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "Create default 1; omission on update preserves."
+      },
+      "price": {
+        "type": "number",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "share_type": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "tags": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..3 unique comma-delimited IDs from options config-tags/wa-tags.",
+        "nonempty": true,
+        "required": true
+      },
+      "title": {
+        "type": "string",
+        "max_length": 120,
+        "description": "At least 6 trimmed characters.",
+        "nonempty": true,
+        "required": true
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled author tier, or enabled unfinished season ID when sub_type=1. null removes the tier from the rebuilt form; omission preserves."
+      },
+      "sub_type": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "0 author tier; 1 season subscription for the selected build. Create default 0."
+      },
+      "platform": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "1 ModUs; 3 ModUs + BigFoot. Supply together with identical synchronization_type; BigFoot requires no tier."
+      },
+      "synchronization_type": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "Same selection as platform; omission preserves on update."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      },
+      "code_text": {
+        "type": "string",
+        "description": "WA/import text; not included in ordinary results or operation records.",
+        "nonempty": true,
+        "required": true
+      },
+      "file_path": {
+        "type": "string",
+        "description": "Official main form requires the empty string.",
+        "choices": [
+          ""
+        ]
+      },
+      "support_addon": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Exact name from options wa-support-addons, paired with addons_id.",
+        "nonempty": true,
+        "required": true
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Displayed version label.",
+        "nonempty": true,
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "wa",
+    "action": "update",
+    "name": "lycheedev.publish.v1.modus.wa.update",
+    "fields": {
+      "addons_id": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "Matching ID from options wa-support-addons.",
+        "nonempty": true
+      },
+      "content": {
+        "type": "string",
+        "description": "Editor HTML or its official Base64 encoding; transmitted unchanged.",
+        "nonempty": true
+      },
+      "content_text": {
+        "type": "string",
+        "description": "Plain text, more than 20 trimmed characters. Omission derives the official text projection from content; update reconstructs missing current contentText.",
+        "nonempty": true
+      },
+      "image_url": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..10 comma-delimited image references returned by media upload.",
+        "nonempty": true
+      },
+      "is_paid": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "is_public": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "Create default 1; omission on update preserves."
+      },
+      "price": {
+        "type": "number",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "share_type": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "tags": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..3 unique comma-delimited IDs from options config-tags/wa-tags.",
+        "nonempty": true
+      },
+      "title": {
+        "type": "string",
+        "max_length": 120,
+        "description": "At least 6 trimmed characters.",
+        "nonempty": true
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled author tier, or enabled unfinished season ID when sub_type=1. null removes the tier from the rebuilt form; omission preserves."
+      },
+      "sub_type": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "0 author tier; 1 season subscription for the selected build. Create default 0."
+      },
+      "platform": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "1 ModUs; 3 ModUs + BigFoot. Supply together with identical synchronization_type; BigFoot requires no tier."
+      },
+      "synchronization_type": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "Same selection as platform; omission preserves on update."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      },
+      "code_text": {
+        "type": "string",
+        "description": "WA/import text; not included in ordinary results or operation records.",
+        "nonempty": true
+      },
+      "file_path": {
+        "type": "string",
+        "description": "Official main form requires the empty string.",
+        "choices": [
+          ""
+        ]
+      },
+      "support_addon": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Exact name from options wa-support-addons, paired with addons_id.",
+        "nonempty": true
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Displayed version label.",
+        "nonempty": true
+      },
+      "import_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "wa",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.modus.wa.edit",
+    "fields": {
+      "addons_id": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "Matching ID from options wa-support-addons.",
+        "nonempty": true
+      },
+      "content": {
+        "type": "string",
+        "description": "Editor HTML or its official Base64 encoding; transmitted unchanged.",
+        "nonempty": true
+      },
+      "content_text": {
+        "type": "string",
+        "description": "Plain text, more than 20 trimmed characters. Omission derives the official text projection from content; update reconstructs missing current contentText.",
+        "nonempty": true
+      },
+      "image_url": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..10 comma-delimited image references returned by media upload.",
+        "nonempty": true
+      },
+      "is_paid": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "is_public": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "Create default 1; omission on update preserves."
+      },
+      "price": {
+        "type": "number",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "share_type": {
+        "type": "integer",
+        "choices": [
+          0
+        ],
+        "description": "Current main form requires 0."
+      },
+      "tags": {
+        "type": "string",
+        "max_length": 1000,
+        "description": "1..3 unique comma-delimited IDs from options config-tags/wa-tags.",
+        "nonempty": true
+      },
+      "title": {
+        "type": "string",
+        "max_length": 120,
+        "description": "At least 6 trimmed characters.",
+        "nonempty": true
+      },
+      "required_tier_id": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 1,
+        "description": "Current enabled author tier, or enabled unfinished season ID when sub_type=1. null removes the tier from the rebuilt form; omission preserves."
+      },
+      "sub_type": {
+        "type": "integer",
+        "choices": [
+          0,
+          1
+        ],
+        "description": "0 author tier; 1 season subscription for the selected build. Create default 0."
+      },
+      "platform": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "1 ModUs; 3 ModUs + BigFoot. Supply together with identical synchronization_type; BigFoot requires no tier."
+      },
+      "synchronization_type": {
+        "type": "integer",
+        "choices": [
+          1,
+          3
+        ],
+        "description": "Same selection as platform; omission preserves on update."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      },
+      "code_text": {
+        "type": "string",
+        "description": "WA/import text; not included in ordinary results or operation records.",
+        "nonempty": true
+      },
+      "file_path": {
+        "type": "string",
+        "description": "Official main form requires the empty string.",
+        "choices": [
+          ""
+        ]
+      },
+      "support_addon": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Exact name from options wa-support-addons, paired with addons_id.",
+        "nonempty": true
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Displayed version label.",
+        "nonempty": true
+      },
+      "import_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "wa",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.modus.wa.delete",
+    "fields": {
+      "import_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      },
+      "confirm": {
+        "type": "string",
+        "choices": [
+          "DELETE"
+        ],
+        "required": true
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "wa",
+    "action": "version-publish",
+    "name": "lycheedev.publish.v1.modus.wa.version-publish",
+    "fields": {
+      "import_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "New version label, trimmed before submission.",
+        "nonempty": true,
+        "required": true
+      },
+      "code_text": {
+        "type": "string",
+        "description": "New import text, trimmed before submission.",
+        "nonempty": true,
+        "required": true
+      },
+      "changelog": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "Optional change text; blank omits it."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "wa",
+    "action": "version-delete",
+    "name": "lycheedev.publish.v1.modus.wa.version-delete",
+    "fields": {
+      "version_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Exact ID from the matching list/get command; opaque strings and integers retain their identity.",
+        "required": true
+      },
+      "import_id": {
+        "type": "identifier",
+        "nonempty": true,
+        "description": "Optional parent from wa list/get. Recommended when the parent is not in the current author list; its versionList must contain version_id."
+      },
+      "confirm": {
+        "type": "string",
+        "choices": [
+          "DELETE"
+        ],
+        "required": true
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Build ID from publish modus builds. Omission uses the main client selection for a new request; recovery retains the original build."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "plugin",
+    "action": "create",
+    "name": "lycheedev.publish.v1.modus.plugin.create",
+    "fields": {
+      "project_id": {
+        "type": "integer",
+        "minimum": 200000000,
+        "required": true,
+        "description": "Unrestricted own Creator project from project list/get."
+      },
+      "file_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Update/edit/delete uses the original file ID. Create/upload may use an explicitly reserved, unused ID."
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Displayed release label; omission preserves on update.",
+        "nonempty": true
+      },
+      "type": {
+        "type": "string",
+        "max_length": 40,
+        "description": "Creator release type; query plugin get for the original value.",
+        "nonempty": true
+      },
+      "supported_game_versions": {
+        "type": "array",
+        "nonempty": true
+      },
+      "md5": {
+        "type": "string",
+        "max_length": 32,
+        "description": "Optional asserted MD5; must match the selected ZIP."
+      },
+      "zip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 209715200,
+        "description": "Optional asserted compressed byte size."
+      },
+      "unzip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 5000000000,
+        "description": "Optional asserted uncompressed byte size."
+      },
+      "path": {
+        "type": "string",
+        "max_length": 500,
+        "description": "Optional package location submitted verbatim. With a ZIP, omission derives modus/wow/addons/<project>/files/<file>.zip. Automatic readback supports only credential-free HTTPS cdn.modus.cool paths; other saved origins remain pending manual verification."
+      },
+      "toc_version": {
+        "type": "string",
+        "max_length": 80,
+        "description": "Interface union must match the ZIP. Unknown mappings fail; no client branch is inferred."
+      },
+      "changelog": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "HTML preserved; blank/null clears on update. Omission preserves.",
+        "nullable": true
+      },
+      "file": {
+        "type": "string",
+        "description": "Addon ZIP, at most 200 MiB compressed and 5 GB uncompressed. Held by SHA256; TOCs and ZIP bytes are read before credentials.",
+        "local_file": true,
+        "nonempty": true,
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "plugin",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.modus.plugin.upload",
+    "fields": {
+      "project_id": {
+        "type": "integer",
+        "minimum": 200000000,
+        "required": true,
+        "description": "Unrestricted own Creator project from project list/get."
+      },
+      "file_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Update/edit/delete uses the original file ID. Create/upload may use an explicitly reserved, unused ID."
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Displayed release label; omission preserves on update.",
+        "nonempty": true
+      },
+      "type": {
+        "type": "string",
+        "max_length": 40,
+        "description": "Creator release type; query plugin get for the original value.",
+        "nonempty": true
+      },
+      "supported_game_versions": {
+        "type": "array",
+        "nonempty": true
+      },
+      "md5": {
+        "type": "string",
+        "max_length": 32,
+        "description": "Optional asserted MD5; must match the selected ZIP."
+      },
+      "zip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 209715200,
+        "description": "Optional asserted compressed byte size."
+      },
+      "unzip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 5000000000,
+        "description": "Optional asserted uncompressed byte size."
+      },
+      "path": {
+        "type": "string",
+        "max_length": 500,
+        "description": "Optional package location submitted verbatim. With a ZIP, omission derives modus/wow/addons/<project>/files/<file>.zip. Automatic readback supports only credential-free HTTPS cdn.modus.cool paths; other saved origins remain pending manual verification."
+      },
+      "toc_version": {
+        "type": "string",
+        "max_length": 80,
+        "description": "Interface union must match the ZIP. Unknown mappings fail; no client branch is inferred."
+      },
+      "changelog": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "HTML preserved; blank/null clears on update. Omission preserves.",
+        "nullable": true
+      },
+      "file": {
+        "type": "string",
+        "description": "Addon ZIP, at most 200 MiB compressed and 5 GB uncompressed. Held by SHA256; TOCs and ZIP bytes are read before credentials.",
+        "local_file": true,
+        "nonempty": true,
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "plugin",
+    "action": "update",
+    "name": "lycheedev.publish.v1.modus.plugin.update",
+    "fields": {
+      "project_id": {
+        "type": "integer",
+        "minimum": 200000000,
+        "required": true,
+        "description": "Unrestricted own Creator project from project list/get."
+      },
+      "file_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Update/edit/delete uses the original file ID. Create/upload may use an explicitly reserved, unused ID.",
+        "required": true
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Displayed release label; omission preserves on update.",
+        "nonempty": true
+      },
+      "type": {
+        "type": "string",
+        "max_length": 40,
+        "description": "Creator release type; query plugin get for the original value.",
+        "nonempty": true
+      },
+      "supported_game_versions": {
+        "type": "array",
+        "nonempty": true
+      },
+      "md5": {
+        "type": "string",
+        "max_length": 32,
+        "description": "Optional asserted MD5; must match the selected ZIP."
+      },
+      "zip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 209715200,
+        "description": "Optional asserted compressed byte size."
+      },
+      "unzip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 5000000000,
+        "description": "Optional asserted uncompressed byte size."
+      },
+      "path": {
+        "type": "string",
+        "max_length": 500,
+        "description": "Optional package location submitted verbatim. With a ZIP, omission derives modus/wow/addons/<project>/files/<file>.zip. Automatic readback supports only credential-free HTTPS cdn.modus.cool paths; other saved origins remain pending manual verification."
+      },
+      "toc_version": {
+        "type": "string",
+        "max_length": 80,
+        "description": "Interface union must match the ZIP. Unknown mappings fail; no client branch is inferred."
+      },
+      "changelog": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "HTML preserved; blank/null clears on update. Omission preserves.",
+        "nullable": true
+      },
+      "file": {
+        "type": "string",
+        "description": "Addon ZIP, at most 200 MiB compressed and 5 GB uncompressed. Held by SHA256; TOCs and ZIP bytes are read before credentials.",
+        "local_file": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "plugin",
+    "action": "edit",
+    "name": "lycheedev.publish.v1.modus.plugin.edit",
+    "fields": {
+      "project_id": {
+        "type": "integer",
+        "minimum": 200000000,
+        "required": true,
+        "description": "Unrestricted own Creator project from project list/get."
+      },
+      "file_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Update/edit/delete uses the original file ID. Create/upload may use an explicitly reserved, unused ID.",
+        "required": true
+      },
+      "version": {
+        "type": "string",
+        "max_length": 120,
+        "description": "Displayed release label; omission preserves on update.",
+        "nonempty": true
+      },
+      "type": {
+        "type": "string",
+        "max_length": 40,
+        "description": "Creator release type; query plugin get for the original value.",
+        "nonempty": true
+      },
+      "supported_game_versions": {
+        "type": "array",
+        "nonempty": true
+      },
+      "md5": {
+        "type": "string",
+        "max_length": 32,
+        "description": "Optional asserted MD5; must match the selected ZIP."
+      },
+      "zip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 209715200,
+        "description": "Optional asserted compressed byte size."
+      },
+      "unzip_size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 5000000000,
+        "description": "Optional asserted uncompressed byte size."
+      },
+      "path": {
+        "type": "string",
+        "max_length": 500,
+        "description": "Optional package location submitted verbatim. With a ZIP, omission derives modus/wow/addons/<project>/files/<file>.zip. Automatic readback supports only credential-free HTTPS cdn.modus.cool paths; other saved origins remain pending manual verification."
+      },
+      "toc_version": {
+        "type": "string",
+        "max_length": 80,
+        "description": "Interface union must match the ZIP. Unknown mappings fail; no client branch is inferred."
+      },
+      "changelog": {
+        "type": "string",
+        "max_length": 10000,
+        "description": "HTML preserved; blank/null clears on update. Omission preserves.",
+        "nullable": true
+      },
+      "file": {
+        "type": "string",
+        "description": "Addon ZIP, at most 200 MiB compressed and 5 GB uncompressed. Held by SHA256; TOCs and ZIP bytes are read before credentials.",
+        "local_file": true,
+        "nonempty": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "plugin",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.modus.plugin.delete",
+    "fields": {
+      "project_id": {
+        "type": "integer",
+        "minimum": 200000000,
+        "required": true,
+        "description": "Unrestricted own Creator project from project list/get."
+      },
+      "file_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Update/edit/delete uses the original file ID. Create/upload may use an explicitly reserved, unused ID.",
+        "required": true
+      },
+      "confirm": {
+        "type": "string",
+        "choices": [
+          "DELETE"
+        ],
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "media",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.modus.media.upload",
+    "fields": {
+      "file": {
+        "type": "string",
+        "description": "Local image, at most 200 MiB; original SHA256 and receipt allow reuse.",
+        "nonempty": true,
+        "local_file": true,
+        "required": true
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "backup",
+    "action": "scan",
+    "name": "lycheedev.publish.v1.modus.backup.scan",
+    "fields": {
+      "game_root": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "description": "Selected game branch containing Interface/AddOns; local files only, no game process."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "ModUs build 0..4 from publish modus builds. Cloud mutations follow the current main selection when omitted; upload always retains manifest source.gameId. Plan does not read client state."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "backup",
+    "action": "generate",
+    "name": "lycheedev.publish.v1.modus.backup.generate",
+    "fields": {
+      "game_root": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "description": "Selected game branch containing Interface/AddOns; local files only, no game process."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "ModUs build 0..4 from publish modus builds. Cloud mutations follow the current main selection when omitted; upload always retains manifest source.gameId. Plan does not read client state."
+      },
+      "output_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "description": "Output outside game_root. Empty on first generation; an existing matching completed manifest is reused."
+      },
+      "backup_name": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "max_length": 80,
+        "description": "Human backup name; leading/trailing whitespace is removed."
+      },
+      "addon_names": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Selected Interface/AddOns directory names; defaults to empty."
+      },
+      "font_names": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Selected .ttf/.otf filenames in Fonts; defaults to empty."
+      },
+      "material_names": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Selected Interface child names except AddOns; defaults to empty."
+      },
+      "roles": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Exact account/server/role triples from scan; defaults to empty. Only selected roles, account SavedVariables and optional Config.wtf are copied."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "backup",
+    "action": "create",
+    "name": "lycheedev.publish.v1.modus.backup.create",
+    "fields": {
+      "game_root": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "description": "Selected game branch containing Interface/AddOns; local files only, no game process."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "ModUs build 0..4 from publish modus builds. Cloud mutations follow the current main selection when omitted; upload always retains manifest source.gameId. Plan does not read client state."
+      },
+      "output_dir": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "description": "Output outside game_root. Empty on first generation; an existing matching completed manifest is reused."
+      },
+      "backup_name": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "max_length": 80,
+        "description": "Human backup name; leading/trailing whitespace is removed."
+      },
+      "addon_names": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Selected Interface/AddOns directory names; defaults to empty."
+      },
+      "font_names": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Selected .ttf/.otf filenames in Fonts; defaults to empty."
+      },
+      "material_names": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Selected Interface child names except AddOns; defaults to empty."
+      },
+      "roles": {
+        "type": "array",
+        "max_items": 1000,
+        "description": "Exact account/server/role triples from scan; defaults to empty. Only selected roles, account SavedVariables and optional Config.wtf are copied."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "backup",
+    "action": "upload",
+    "name": "lycheedev.publish.v1.modus.backup.upload",
+    "fields": {
+      "manifest_file": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "description": "Explicit native config-backup.v2 manifest from backup generate or the current main client; original files/ZIPs and object receipts are reused.",
+        "local_file": true
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "Optional assertion matching manifest source.gameId; original manifest build remains fixed."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "backup",
+    "action": "rename",
+    "name": "lycheedev.publish.v1.modus.backup.rename",
+    "fields": {
+      "backup_id": {
+        "type": "integer",
+        "required": true,
+        "minimum": 1,
+        "description": "Exact account-global backup ID from backup list."
+      },
+      "backup_name": {
+        "type": "string",
+        "nonempty": true,
+        "required": true,
+        "max_length": 80,
+        "description": "Replacement name; nonblank."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "ModUs build 0..4 from publish modus builds. Cloud mutations follow the current main selection when omitted; upload always retains manifest source.gameId. Plan does not read client state."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "backup",
+    "action": "delete-preview",
+    "name": "lycheedev.publish.v1.modus.backup.delete-preview",
+    "fields": {
+      "backup_ids": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 1000,
+        "description": "Unique positive integer IDs from backup list; all selected IDs must belong to server_type."
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "ModUs build 0..4 from publish modus builds. Cloud mutations follow the current main selection when omitted; upload always retains manifest source.gameId. Plan does not read client state."
+      },
+      "name_contains": {
+        "type": "string",
+        "nonempty": true,
+        "description": "Case-sensitive substring filter."
+      },
+      "name_equals": {
+        "type": "string",
+        "nonempty": true,
+        "description": "Case-sensitive exact name filter."
+      },
+      "created_before": {
+        "type": "string",
+        "nonempty": true,
+        "description": "Strict upper bound, ISO 8601. Missing timezone means UTC."
+      },
+      "created_after": {
+        "type": "string",
+        "nonempty": true,
+        "description": "Strict lower bound, ISO 8601. Missing timezone means UTC."
+      }
+    }
+  },
+  {
+    "provider": "modus",
+    "resource": "backup",
+    "action": "delete",
+    "name": "lycheedev.publish.v1.modus.backup.delete",
+    "fields": {
+      "backup_ids": {
+        "type": "array",
+        "nonempty": true,
+        "max_items": 1000,
+        "description": "Unique positive integer IDs from backup list; all selected IDs must belong to server_type.",
+        "required": true
+      },
+      "server_type": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4,
+        "description": "ModUs build 0..4 from publish modus builds. Cloud mutations follow the current main selection when omitted; upload always retains manifest source.gameId. Plan does not read client state."
+      },
+      "confirm": {
+        "type": "string",
+        "required": true,
+        "choices": [
+          "DELETE"
+        ],
+        "description": "Explicit deletion intent. References are checked across all five ModUs builds before deletion."
+      }
+    }
+  }
+]

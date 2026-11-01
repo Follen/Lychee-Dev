@@ -1,11 +1,11 @@
 import test from 'node:test';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-import {mkdtempSync,readFileSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {ownedSpawnSync,auxiliaryRequest} from './rust-owned-process.mjs';
 
-function fixture(t){const directory=mkdtempSync(join(process.cwd(),'.tmp/rust-process-test-'));t.diagnostic(`Preserved process evidence: ${directory}`);return {cwd:process.cwd(),env:process.env,evidence:directory,timeout:15000,orphanMs:200};}
+function fixture(t){const directory=mkdtempSync(join(process.cwd(),'.tmp/rust-process-test-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));return {cwd:process.cwd(),env:process.env,evidence:directory,timeout:15000,orphanMs:200};}
 test('Windows Job preserves binary output and exact argv; all handles and tree are reaped',{skip:process.platform!=='win32'},t=>{
   const options=fixture(t),args=['a b','quoted"value','trailing slash \\','中文'];
   const result=ownedSpawnSync(process.execPath,['-e','process.stdout.write(Buffer.from([0,255,128]));process.stderr.write(JSON.stringify(process.argv.slice(1)));',...args],options);

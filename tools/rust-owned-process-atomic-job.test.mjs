@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {createHash, randomUUID} from 'node:crypto';
 import {join} from 'node:path';
@@ -13,7 +13,7 @@ const source = readFileSync(wrapper, 'utf8');
 function fixture(t, label, {legacyName, v2 = false} = {}) {
   const evidence = join(process.cwd(), '.tmp', `atomic-job-${label}-${randomUUID()}`);
   mkdirSync(evidence, {recursive: true});
-  t.diagnostic(`Preserved atomic Job evidence: ${evidence}`);
+  t.after(() => rmSync(evidence, {recursive: true, force: true}));
   const id = randomUUID(), base = join(evidence, `process-${id}`);
   const path = legacyName ? join(evidence, legacyName) : base + '.request.json';
   const marker = join(evidence, 'root-ran');

@@ -5,10 +5,10 @@
 ## 分支、范围与状态
 
 - 当前工作树`.worktrees/Rust-refactor`，本地分支`Rust-refactor`跟踪`origin/rust-refactor`；main3.2.7已同步。远端按用户选择保留原名及[draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)，推送使用`git push origin HEAD:refs/heads/rust-refactor`。产品代码提交为`66aa8f5e0bb57cf3b974b5a48b27dca36e6b7c8d`，开发版本3.5.0/beta；latest继续3.2.7。
-- 本轮死代码、冗余测试、CLI/Skill和文档审计，以及正式Forever非Live实现与包验收均已完成。最后两侧只读闭包复审未发现新确认缺陷；两个仅供测试读取预算/数量的薄getter保留为可收窄候选，没有增加另一套执行器。
+- 既有死代码、冗余测试、CLI/Skill、文档审计与正式Forever非Live基线已验证完成。用户已要求严格执行 [Fuploader 整合文档](FUPLOADER.md)；当前从现有发布能力收拢开始，随后依次补 DD 备份、小黑盒、ModUs 和同包验收。以下旧CI/包验收只覆盖原基线，不计为新Publish业务通过。
 - 正式Forever规范ID/Source family为`forever`，官方远端/flavor为`wowf`，目录`_forever_`，可执行文件`Wow.exe`；当前支持六产品。两个Beta退出当前目标准入，历史PIN/CAP/raw和恢复身份保留。
 - 未合并、未发布、未改npm标签、未全局安装Skill/npm。游戏进程读取、输入、真实部署和Live实机测试继续留待用户安排；本次正式Forever只读游戏文件。
-- 所有工作者已完成；Root负责文档、集成和唯一native队列，当前队列空闲。未新增工作树或PR；PowerShell临时ModuleAnalysisCache已清理。
+- 所有工作者已完成；Root负责文档、集成和唯一native队列，单一native队列由Root串行使用。未新增工作树或PR；PowerShell临时ModuleAnalysisCache已清理。
 
 ## 八项审计：发现、修复与验证
 
@@ -23,7 +23,23 @@
 | CI与覆盖真实性 | 四项guarded-spawn绑定封存helper并拒零执行；八个空成功child helper改显式ignored和必需角色。测试、Release各配置只生产一次。 | 完整CI12个job成功、89程序覆盖完整、222套Lua通过；原TGZ的17个非Live验收控制器全部通过、输入稳定、进程回收。 |
 | 文档、Skill与工作区 | Skill references由20收敛11；11份Markdown按设计/用途/待办/事实分工更新，移除陈旧状态；闲置工作树累计清理51份、保留2份，当前分支和目录统一改名Rust-refactor。 | 静态/动态Skill、版本、链接和包装合同通过；改名后27份产物/报告哈希及原包CLI启动验证通过，恢复材料原字节保留。 |
 
-## 最终CI与唯一包验收
+## 当前：Publish 收敛与清理
+
+- 按 [FUPLOADER.md](FUPLOADER.md) 执行，Root 单人负责 Publish、CLI 及对应测试/文档，复用当前分支与唯一 native 队列。DD 备份四项、小黑盒全部 36 项已通过离线回归；ModUs 全部 58 项也已通过离线回归；剩余完整 CI/Release 同包验收与专属材料收尾。没有 Source/Data/Live 范围扩展。
+- 固定原业务依据为 [Fuploader 134cba2](https://github.com/Follen/Fuploader/tree/134cba232f5ae84109bb35d9eafe1093399edc1b)。目录共 312 条：原有 68、CurseForge 6、NewBee Creator 64、官方通道 38、DD 42、小黑盒 36、ModUs 58。原 204 条业务全部有对应路径；两条小黑盒版本命令改名映射见 FUPLOADER，当前真实输入合同 93 份。
+- 已删 50 份未接执行器的占位合同、冗余默认字段、6 个重复元数据测试及未使用 ZIP 扩展。普通修改仅保存一份 active.json；未知提交恢复、上传收据和原产物复用保留。
+- 两批清理删除 142,651 个临时文件，其中 14,277 个 JSONL，回收 5,066,772,334 字节。内容包括旧 CI/目录测试残留、19 份临时黑盒脚本、重复日志、1,303 份已结束 owner 目录及旧聊天记录副本。原业务清点和上游脚本/说明保留；当前 .tmp 余 186 个 JSONL，属于保留的测试证据、Live 或恢复资料。两组进程测试已改为结束时删除自己的临时目录。
+- 清理误删了 CLEAN-07 原保留清单的三组 scratch/evidence：包验收临时安装目录 `1a569dc5-8b2c-401c-8af7-1f7c602f71d5`、`b81e60f4-aa96-4af4-a03c-1769ffc08a51`，以及日志校验异常目录 `cd6b6abc-e255-479e-870e-b09e902e2a63`。当前工作区及主 checkout 未找到原副本，未重建或改写旧证据。原包验收索引直接引用的 30 个文件仍在且 SHA256 全部一致；15 个 evidence 输入、10 个未收尾 owner、旧树 recovery 和 Live 项目保留。日志异常仍未解决。
+- DD 备份五类 ZIP 保留原生目录和明确选择；原 SN、完成组件及未知提交保存在同一任务。测试 owner 为 8d975308-1992-4202-825b-7139b1889e17，check owner 为 33346a65-f7cd-4acd-8155-4ee20e28e209，均通过并已收尾。
+- 小黑盒认证、完整分页、插件版本、配置/WA 编辑、备份及删除均接入实际执行路径。配置保留省略字段和角色/布局，WA 明确公开语义；插件/COS 和备份按原对象恢复，丢失上传或提交响应不重放，批量删除保留已完成项目。备份只有明确选择的账号/角色，原 bundle 重用；读回说明元数据与归档字节各自范围。
+- 十二项写入先前完整测试 owner 57497f67-afeb-4d8b-b6e4-0cc91ce0069c 已通过。认证阶段发现加密文件读后未复位、参数 arity 和效果元数据错误，已修并复验；原失败 owner 6c23f7ba-1715-4675-b65a-acdbd05c3c6c、8db9aa2b-d938-4275-a245-866dd80490d2 保留失败，handlesReaped=true。Windows 四项原生凭据测试通过；中文登录/微信发现已补入现有词表。
+- native 缓存加 2 GiB 预留曾超出默认 50 GiB；两处旧 Publish 增量缓存删除被自动审核拒绝，没有删除。最近一批现有缓存约 51 GiB，加 2 GiB 预留超出单次 52 GiB；改用 runner 已有单次 54 GiB 配置，仓库默认和构建目录不变。
+- 当前整批离线验证：CLI 275、公开集成 3、Publish 338 全部通过，5 个 helper ignored；测试 owner 330008b2-7e9a-4ea8-8dc3-948c1461b6a6 已退休且 handlesReaped=true，源码摘要 9b5fe390e9f7d1438e562f9677d5bca43a4dfaf6c828ab93550ae551a15ace1b。主客户端/Creator 身份、完整表单、ZIP/TOC、插件/WA 版本、媒体、原生六分区备份、精确角色、字体复用、跨五分支引用、原对象/批次恢复均有真实 Rust 路径回归；复用测试生产的 CLI。
+- 本批确认并修复下载校验根错误（6 项旧回归失败）及备份恢复忽略 CDN 字节不匹配（1 项新回归失败）；修复后上述整批复验通过，原失败 owner 24eb7ba3-2aa9-4674-9f10-b3d213ab8098、a8ed97ea-21c5-454c-8ace-d53c8f59b634 已收尾。补核备份缺失文件、改名目标已满足和确认拒绝后复用原 PUT。
+- 当前 workspace all-targets check 通过，owner ce544558-8653-4953-8387-f4a248cdf64e 已退休且 handlesReaped=true；源码摘要与上述测试相同。312 条静态/本批 CLI 动态 Skill 合同、版本 3.5.0 一致性、原生边界清单和含 FUPLOADER 的 36 份文档链接通过；受影响 Node 工具 79 项全部通过。下一步集中提交推送并执行整批 CI/Release 同包验收。
+- 新 Publish 尚未提交、推送或运行完整 CI/Release 同包验收；没有实际平台发布、账号读取、厂商 SDK 执行、全局安装或 Live。下方旧 CI/原包验收只覆盖整合前基线。
+
+## 既有基线：CI与唯一包验收
 
 - [CI #21 / 41209679482](https://github.com/Follen/Lychee-Dev/actions/runs/41209679482)：十二个job全部成功，含静态检查、固定Lua/addon ZIP、两组完整Rust测试、优化Release、隔离npm/Skill、同TGZ内容/业务及候选封存。producer为PR合并快照`b8601d89bc111216342b51bd507362ac707e185a`，与代码分支66aa的Git tree相同。
 - 源码摘要`0b4c32ea233c0f242951292f5e856489ec79e38f94a51ca77ee9ea72005a9a5f`；原TGZ SHA256为`f798106c1bd877ec27c1e24951e68cb91c75fa1907e9fd1e8c608d721c6bd861`。候选11项SHA256SUMS逐项核对；本地消费原包，未重建CLI/luac或重打TGZ。
@@ -36,13 +52,13 @@
 
 - 原53份工作树累计用git worktree remove清理51份；当前仅主checkout `main`与`.worktrees/Rust-refactor`。本次移除旧`rust-refactor`、`pr14-agent-e85-first-check`和`pr14-fc001-offline`，三份均无独立改动或未合入提交；当前分支与目录已改名，原HEAD和PR保留。
 - 旧树的6个未收尾owner、原fence/lease、日志及历史静态分析/Live本地输入集中保留于`.tmp/worktree-rename/recovery/`：17,390个文件、5,047,854,509字节逐项核对原哈希。旧owner状态和原始路径未改写；这些是历史资料，没有导入当前owner注册表。清单与路径映射见`.tmp/worktree-rename/preservation.json`，清理/改名结果及迁移复核在同目录。
-- 用户追加脚本清理授权后，固定清单脚本已删除70个目标：58个已结束且可重建scratch、11份退役程序副本（rust-audit-next八份、rust327-audit三份）及一个ModuleAnalysisCache文件，合计19,254,546,378字节；磁盘可用空间增加约19.28GB。原报告、build记录和封存日志保留；rust327-audit内仍复用的Lua与suspended-fixture保留。
-- 另28个scratch保留：15个evidence输入、2个被当前包验收引用的目录、10个active/interrupted且回收未确认的owner，以及1个封存日志校验异常目录。临时材料清理清单、结果和复核在`.tmp/cleanup-clean07/`；本次路径改名后，原TGZ、native、17份验收报告、build-16记录、Lua和源码摘要均按原哈希复核通过。只运行原包CLI version启动检查，成功且进程回收，未重建或重打包；历史报告保留旧绝对路径，读取时使用清单中的新旧Root映射。
+- 用户追加脚本清理授权后，固定清单脚本曾删除70个目标：58个已结束且可重建scratch、11份退役程序副本（rust-audit-next八份、rust327-audit三份）及一个ModuleAnalysisCache文件，合计19,254,546,378字节；磁盘可用空间增加约19.28GB。当前验收报告、build-16、仍引用的日志及 rust327-audit 内复用的 Lua 与 suspended-fixture 保留；本轮追加删除见上节。
+- CLEAN-07 原保留28个scratch，现存25个：15个evidence输入和10个active/interrupted且回收未确认的owner。误删的另外3项见上节；`.tmp/cleanup-clean07/` 是当时的清单与复核，不代表当前目录齐全。此前改名已按原哈希复核原TGZ、native、17份验收报告、build-16、Lua和源码摘要，并运行原包CLI version启动检查，未重建或重打包；历史报告保留旧绝对路径，读取时使用新旧Root映射。
 - REG-01旧准备错误5未再复现、原因未定；恢复`4747c1ed-d561-4984-8ffc-e4f8e7ef2f8b`和`de770010-ea9c-40fa-a48e-27141a6e0d64`保留。旧CI与旧包结果只作输入/方法基线。
 
 ## 下一步
 
-由用户安排下列Live实机。重新接入时使用当前验收包和新鲜身份；后续变更按实际风险补验，复用已通过产物。
+按 FUPLOADER 完成 workspace all-targets、动态合同、提交推送和完整 CI/Release 同包验收；复用已通过且输入未变的验证，不追加固定审计轮次。下列 Live 实机继续由用户安排。
 
 ## 最后执行：用户后续安排的Live实机
 

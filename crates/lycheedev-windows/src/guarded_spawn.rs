@@ -505,6 +505,22 @@ pub fn spawn_suspended_job_guarded(
 ) -> Result<(Child, JobGuard), StartupFailure> {
     spawn_optional_limit_with_probe_until(command, None, deadline, None, cancel, |_, _, _| Ok(()))
 }
+/// Inherited limits, with one caller-owned absolute startup retirement boundary.
+pub fn spawn_suspended_job_guarded_until(
+    command: Command,
+    deadline: Instant,
+    retirement_deadline: Instant,
+    cancel: impl FnMut() -> bool,
+) -> Result<(Child, JobGuard), StartupFailure> {
+    spawn_optional_limit_with_probe_until(
+        command,
+        None,
+        deadline,
+        Some(retirement_deadline),
+        cancel,
+        |_, _, _| Ok(()),
+    )
+}
 /// Same suspended/assigned launch, but all failure retirement uses this existing
 /// absolute boundary. An unfinished child is returned as owned pending custody.
 pub fn spawn_suspended_guarded_until(

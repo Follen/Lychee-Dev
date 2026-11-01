@@ -25,7 +25,7 @@ export function synchronizeVersion(root, write = false) {
   }
   if (existsSync(join(root, 'Cargo.toml'))) {
     target('Cargo.toml', text => replaceOne(text, /(\[workspace\.package\][\s\S]*?\nversion\s*=\s*)"[^"\n]*"/g, `$1"${version}"`, 'Cargo.toml'));
-    const names = ['cli', 'core', 'source', 'emmy-adapter', 'binding-contracts', 'data', 'live', 'delivery', 'windows'].map(name => `lycheedev-${name}`);
+    const names = ['cli', 'core', 'source', 'emmy-adapter', 'binding-contracts', 'data', 'live', 'delivery', 'windows', 'publish'].map(name => `lycheedev-${name}`);
     const synchronizeLock = (text, expectedNames, path) => {
       const seen = [];
       const result = text.replace(/\[\[package\]\]\n[\s\S]*?(?=\n\[\[package\]\]|$)/g, block => {

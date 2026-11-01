@@ -145,18 +145,27 @@ fn command_path_before_error(args: &[String], tree: &Command) -> (String, usize)
             break;
         }
         if token.starts_with('-') {
-            let (name, attached) = token.split_once('=').map_or((token.as_str(), false), |(name, _)| (name, true));
+            let (name, attached) = token
+                .split_once('=')
+                .map_or((token.as_str(), false), |(name, _)| (name, true));
             let option = current.get_arguments().find(|arg| {
-                name.strip_prefix("--").is_some_and(|name| arg.get_long() == Some(name))
+                name.strip_prefix("--")
+                    .is_some_and(|name| arg.get_long() == Some(name))
                     || name.strip_prefix('-').is_some_and(|name| {
                         name.chars().count() == 1 && arg.get_short() == name.chars().next()
                     })
             });
             let Some(option) = option else { break };
-            index += if option.get_action().takes_values() && !attached { 2 } else { 1 };
+            index += if option.get_action().takes_values() && !attached {
+                2
+            } else {
+                1
+            };
             continue;
         }
-        let Some(child) = current.find_subcommand(token) else { break };
+        let Some(child) = current.find_subcommand(token) else {
+            break;
+        };
         path.push(child.get_name());
         current = child;
         index += 1;
@@ -164,18 +173,31 @@ fn command_path_before_error(args: &[String], tree: &Command) -> (String, usize)
     (path.join(" "), index.min(args.len()))
 }
 fn annotate_argument_error(error: &mut ToolkitError, definition: &Definition) {
-    let mut accepted = definition.flags.iter().map(|flag| flag.name()).collect::<Vec<_>>();
+    let mut accepted = definition
+        .flags
+        .iter()
+        .map(|flag| flag.name())
+        .collect::<Vec<_>>();
     accepted.extend(["--help", "-h"]);
     let usage = std::iter::once(format!("lycheedev {}", definition.path))
         .chain(definition.arguments.iter().cloned())
         .chain(std::iter::once("[OPTIONS]".into()))
         .collect::<Vec<_>>()
         .join(" ");
-    let details = error.details.as_object_mut().expect("parser failure details");
+    let details = error
+        .details
+        .as_object_mut()
+        .expect("parser failure details");
     details.insert("command".into(), json!(definition.path));
     details.insert("usage".into(), json!(usage));
-    details.insert("schemaCommand".into(), json!(format!("lycheedev schema {}", definition.path)));
-    details.insert("helpCommand".into(), json!(format!("lycheedev {} --help", definition.path)));
+    details.insert(
+        "schemaCommand".into(),
+        json!(format!("lycheedev schema {}", definition.path)),
+    );
+    details.insert(
+        "helpCommand".into(),
+        json!(format!("lycheedev {} --help", definition.path)),
+    );
     details.insert("acceptedFlags".into(), json!(accepted));
     details.insert("arguments".into(), json!(definition.arguments));
     details.insert("requiredFlags".into(), json!(definition.required));
@@ -188,20 +210,34 @@ fn parse_error(error: clap::Error, args: &[String], tree: &Command) -> ToolkitEr
     let query = if invalid_command.is_some() {
         // Retain compound misspellings, but never rank an option value as a
         // command. The prefix and first unmatched token come from the same tree.
-        std::iter::once(path.as_str()).chain(args[unmatched..].iter()
-            .take_while(|word| !word.starts_with('-')).take(8).map(String::as_str))
-            .filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ")
+        std::iter::once(path.as_str())
+            .chain(
+                args[unmatched..]
+                    .iter()
+                    .take_while(|word| !word.starts_with('-'))
+                    .take(8)
+                    .map(String::as_str),
+            )
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
-        args.iter().filter(|s| !s.starts_with('-')).take(8)
-            .map(String::as_str).collect::<Vec<_>>().join(" ")
+        args.iter()
+            .filter(|s| !s.starts_with('-'))
+            .take(8)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" ")
     };
     let mut failure = ToolkitError::arguments("invalid command arguments");
     // Do not call clap's print/exit APIs. Existing envelopes own both streams.
     failure.details = json!({"parser":"clap","kind":format!("{:?}",error.kind()),
-        "diagnostic":error.to_string().chars().take(2048).collect::<String>(),
+        "diagnostic":if path=="publish"||path.starts_with("publish ") {"Invalid publishing arguments; inspect accepted flags with --help or schema.".into()} else {error.to_string().chars().take(2048).collect::<String>()},
         "suggestions":[],"discovery":DISCOVERY});
     if invalid_command.is_none()
-        && let Some(definition) = contract::all().iter().find(|definition| definition.path == path)
+        && let Some(definition) = contract::all()
+            .iter()
+            .find(|definition| definition.path == path)
     {
         annotate_argument_error(&mut failure, definition);
     } else {
@@ -212,7 +248,9 @@ fn parse_error(error: clap::Error, args: &[String], tree: &Command) -> ToolkitEr
 pub fn parse(args: &[String]) -> Result<Invocation> {
     let mut tree = parser();
     let matches = tree
-        .try_get_matches_from_mut(std::iter::once("lycheedev".to_owned()).chain(args.iter().cloned()))
+        .try_get_matches_from_mut(
+            std::iter::once("lycheedev".to_owned()).chain(args.iter().cloned()),
+        )
         .map_err(|error| parse_error(error, args, &tree))?;
     let (command, matched) = leaf(&matches);
     let definition = contract::all().iter().find(|d| d.path == command);
@@ -328,9 +366,29 @@ fn terms(query: &str) -> Vec<String> {
         ("导航", "navigate"),
         ("源码", "source"),
         ("插件", "addon"),
+        ("插件", "plugin"),
+        ("新手盒子", "newbee"),
+        ("newbeebox", "newbee"),
+        ("网易", "dd"),
+        ("小黑盒", "blackbox"),
+        ("heybox", "blackbox"),
+        ("发布", "publish"),
+        ("上传", "upload"),
+        ("创建", "create"),
+        ("编辑", "edit"),
+        ("删除", "delete"),
+        ("备份", "backup"),
+        ("配置", "config"),
+        ("版本", "version"),
+        ("官方", "official"),
+        ("打包", "pack"),
         ("安装", "install"),
         ("更新", "update"),
         ("会话", "session"),
+        ("登录", "login"),
+        ("微信", "wechat"),
+        ("短信", "sms"),
+        ("续期", "renew"),
         ("结构", "schema"),
         ("热修", "hotfix"),
     ] {
@@ -345,6 +403,10 @@ fn terms(query: &str) -> Vec<String> {
 fn rank(query: &str) -> Vec<&'static Definition> {
     let query = query.trim().to_lowercase();
     let terms = terms(&query);
+    let platforms: Vec<_> = ["newbee", "dd", "curseforge", "blackbox", "modus"]
+        .into_iter()
+        .filter(|platform| terms.iter().any(|term| term == platform))
+        .collect();
     // Derive task vocabulary from the pure authoritative protocol constructor.
     // No independently invented Data task semantics or retired CLI aliases.
     let data_vocabulary = lycheedev_data::agent_session::schema()
@@ -353,6 +415,15 @@ fn rank(query: &str) -> Vec<&'static Definition> {
     let mut ranked: Vec<_> = contract::all()
         .iter()
         .filter_map(|definition| {
+            // A named publishing platform scopes discovery to that platform.
+            // No matching executor means no match, not another platform or Live.
+            if !platforms.is_empty()
+                && !platforms
+                    .iter()
+                    .any(|platform| definition.path.starts_with(&format!("publish {platform} ")))
+            {
+                return None;
+            }
             let summary = if matches!(
                 definition.path.as_str(),
                 "data agent serve" | "data agent schema"
@@ -441,7 +512,14 @@ fn input_schema(definition: &Definition) -> Value {
         "validation":"CLI token shape and option contracts; constraints and handler-specific semantic requirements remain authoritative"})
 }
 fn file_input(path: &str) -> Option<Value> {
+    if let Some(input) = crate::publish_cli::file_input(path) {
+        return Some(input);
+    }
     match path {
+        "publish curseforge plugin upload" => Some(json!({"flag":"--input",
+            "description":"One UTF-8 JSON object, from a file or '-' for stdin through EOF; at most 32 MiB. Relative upload paths resolve from the invocation directory. Credentials belong in the CurseForge profile or process environment, never this document or argv.",
+            "schema":lycheedev_publish::curseforge::Upload::schema(),
+            "example":{"schema":"lycheedev.publish.v1.curseforge.plugin.upload","project_id":123,"file":"AuthorAddon.zip","changelog":"Describe this version","release_type":"beta","game_version_names":["REPLACE_WITH_CURRENT_VERSION_NAME"]}})),
         "source batch" => Some(json!({"flag":"--file",
             "description":"UTF-8 JSON file containing the typed batch requests below. Every item shares the selected fixed source and environment, while retaining its own cursor and coverage.",
             "schema":lycheedev_source::batch::schema()})),
@@ -565,10 +643,14 @@ mod tests {
     #[test]
     fn source_batch_public_file_schema_examples_enter_strict_typed_admission() {
         let public = discover(&parse(&args(&["schema", "source", "batch"])).unwrap())
-            .unwrap().unwrap().data;
+            .unwrap()
+            .unwrap()
+            .data;
         assert_eq!(public["fileInput"]["flag"], "--file");
         let help = discover(&parse(&args(&["source", "batch", "--help"])).unwrap())
-            .unwrap().unwrap().data;
+            .unwrap()
+            .unwrap()
+            .data;
         assert_eq!(help["fileInput"], public["fileInput"]);
         let schema = &public["fileInput"]["schema"];
         for (kind, field, default, minimum, maximum) in [
@@ -592,9 +674,13 @@ mod tests {
         ] {
             let reference = schema.pointer(pointer).and_then(Value::as_str).unwrap();
             assert!(reference.starts_with("#/"), "{reference}");
-            assert!(schema.pointer(&reference[1..]).is_some(), "unresolved {reference}");
+            assert!(
+                schema.pointer(&reference[1..]).is_some(),
+                "unresolved {reference}"
+            );
         }
-        let examples = schema["examples"].as_array()
+        let examples = schema["examples"]
+            .as_array()
             .expect("source batch must publish complete JSON file examples");
         assert!(!examples.is_empty());
         for example in examples {
@@ -602,25 +688,52 @@ mod tests {
         }
         let mut input = examples[0].clone();
         let items = input["requests"].as_array_mut().unwrap();
-        assert_eq!(items.len(), 3, "the minimal example must cover query, refs and context");
+        assert_eq!(
+            items.len(),
+            3,
+            "the minimal example must cover query, refs and context"
+        );
         for (kind, fields) in [
             ("query", json!({"text":"SchemaQuery"})),
             ("refs", json!({"symbol":"SchemaRefs"})),
             ("context", json!({"symbolId":"SYM-schema-context"})),
         ] {
-            let item = items.iter_mut().find(|item| item.get(kind).is_some()).unwrap();
+            let item = items
+                .iter_mut()
+                .find(|item| item.get(kind).is_some())
+                .unwrap();
             item[kind] = fields;
         }
         let parsed = lycheedev_source::batch::parse(&serde_json::to_vec(&input).unwrap()).unwrap();
-        let query = parsed.requests.iter().find_map(|item| item.query.as_ref()).unwrap();
+        let query = parsed
+            .requests
+            .iter()
+            .find_map(|item| item.query.as_ref())
+            .unwrap();
         assert_eq!(query.text, "SchemaQuery");
         assert_eq!(query.limit, 10);
-        let refs = parsed.requests.iter().find_map(|item| item.refs.as_ref()).unwrap();
+        let refs = parsed
+            .requests
+            .iter()
+            .find_map(|item| item.refs.as_ref())
+            .unwrap();
         assert_eq!(refs.symbol, "SchemaRefs");
         assert_eq!(refs.limit, 25);
-        let context = parsed.requests.iter().find_map(|item| item.context.as_ref()).unwrap();
+        let context = parsed
+            .requests
+            .iter()
+            .find_map(|item| item.context.as_ref())
+            .unwrap();
         assert_eq!(context.symbol_id, "SYM-schema-context");
-        assert_eq!((context.limit, context.max_bytes, context.max_lines, context.depth), (25, 16384, 80, 0));
+        assert_eq!(
+            (
+                context.limit,
+                context.max_bytes,
+                context.max_lines,
+                context.depth
+            ),
+            (25, 16384, 80, 0)
+        );
         for (kind, field, values) in [
             ("query", "limit", vec![0, -1, 201]),
             ("refs", "limit", vec![0, -1, 201]),
@@ -631,28 +744,46 @@ mod tests {
         ] {
             for value in values {
                 let mut invalid = input.clone();
-                let item = invalid["requests"].as_array_mut().unwrap().iter_mut()
-                    .find(|item| item.get(kind).is_some()).unwrap();
+                let item = invalid["requests"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|item| item.get(kind).is_some())
+                    .unwrap();
                 item[kind][field] = json!(value);
-                assert!(lycheedev_source::batch::parse(&serde_json::to_vec(&invalid).unwrap()).is_err(), "{kind}.{field}={value}");
+                assert!(
+                    lycheedev_source::batch::parse(&serde_json::to_vec(&invalid).unwrap()).is_err(),
+                    "{kind}.{field}={value}"
+                );
             }
         }
         for kind in ["query", "refs", "context"] {
             let mut invalid = input.clone();
-            let item = invalid["requests"].as_array_mut().unwrap().iter_mut()
-                .find(|item| item.get(kind).is_some()).unwrap();
+            let item = invalid["requests"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|item| item.get(kind).is_some())
+                .unwrap();
             item[kind]["unknown"] = json!(true);
-            assert!(lycheedev_source::batch::parse(&serde_json::to_vec(&invalid).unwrap()).is_err(), "{kind} unknown field");
+            assert!(
+                lycheedev_source::batch::parse(&serde_json::to_vec(&invalid).unwrap()).is_err(),
+                "{kind} unknown field"
+            );
         }
     }
 
     #[test]
     fn source_matrix_public_file_schema_examples_enter_real_config_admission() {
         let public = discover(&parse(&args(&["schema", "source", "validate"])).unwrap())
-            .unwrap().unwrap().data;
+            .unwrap()
+            .unwrap()
+            .data;
         assert_eq!(public["fileInput"]["flag"], "--matrix");
         let help = discover(&parse(&args(&["source", "validate", "--help"])).unwrap())
-            .unwrap().unwrap().data;
+            .unwrap()
+            .unwrap()
+            .data;
         assert_eq!(help["fileInput"], public["fileInput"]);
         let schema = &public["fileInput"]["schema"];
         assert_eq!(schema["properties"]["targets"]["minItems"], 1);
@@ -662,7 +793,9 @@ mod tests {
         assert!(!examples.is_empty());
         struct Directory(std::path::PathBuf);
         impl Drop for Directory {
-            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
         }
         let directory = Directory(std::env::temp_dir().join(format!(
             "lycheedev-source-file-schema-{}-{}", std::process::id(),
@@ -675,7 +808,9 @@ mod tests {
             std::fs::write(&file, serde_json::to_vec(input).unwrap()).unwrap();
             lycheedev_source::matrix::read_config(&file, &control)
         };
-        for example in examples { read(example).unwrap(); }
+        for example in examples {
+            read(example).unwrap();
+        }
         let mut input = examples[0].clone();
         input["path"] = json!("relative-addon");
         input["targets"] = json!([{"id":"schema-client","toc":"Main.toc","product":"classic","ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]);
@@ -685,28 +820,46 @@ mod tests {
         assert_eq!(config.targets[0].toc, "Main.toc");
         assert_eq!(config.targets[0].product, "classic");
         assert_eq!(config.targets[0].reference, "a".repeat(40));
-        assert!(config.targets[0].source.is_empty(), "omitted source retains the owning resolver's wow-ui-source default");
+        assert!(
+            config.targets[0].source.is_empty(),
+            "omitted source retains the owning resolver's wow-ui-source default"
+        );
         let mut default_path = input.clone();
         default_path.as_object_mut().unwrap().remove("path");
         assert_eq!(read(&default_path).unwrap().1, directory.0);
         for field in ["id", "toc", "product", "ref"] {
             let mut missing = input.clone();
             missing["targets"][0].as_object_mut().unwrap().remove(field);
-            assert_eq!(read(&missing).unwrap_err().code, "codebase.invalid_matrix_config", "{field}");
+            assert_eq!(
+                read(&missing).unwrap_err().code,
+                "codebase.invalid_matrix_config",
+                "{field}"
+            );
         }
         for count in [0, 32, 33] {
             let mut bounded = input.clone();
-            bounded["targets"] = json!((0..count).map(|index| {
-                let mut target = input["targets"][0].clone();
-                target["id"] = json!(format!("client-{index}")); target
-            }).collect::<Vec<_>>());
+            bounded["targets"] = json!(
+                (0..count)
+                    .map(|index| {
+                        let mut target = input["targets"][0].clone();
+                        target["id"] = json!(format!("client-{index}"));
+                        target
+                    })
+                    .collect::<Vec<_>>()
+            );
             assert_eq!(read(&bounded).is_ok(), count == 32, "target count {count}");
         }
         for nested in [false, true] {
             let mut unknown = input.clone();
-            if nested { unknown["targets"][0]["unknown"] = json!(true); }
-            else { unknown["unknown"] = json!(true); }
-            assert_eq!(read(&unknown).unwrap_err().code, "codebase.invalid_matrix_config");
+            if nested {
+                unknown["targets"][0]["unknown"] = json!(true);
+            } else {
+                unknown["unknown"] = json!(true);
+            }
+            assert_eq!(
+                read(&unknown).unwrap_err().code,
+                "codebase.invalid_matrix_config"
+            );
         }
     }
 
@@ -791,38 +944,72 @@ mod tests {
     }
     #[test]
     fn serve_schema_and_help_describe_agent_frames_while_metadata_keeps_cli_framing() {
-        let home = std::env::temp_dir().join(format!("agent-framing-unused-{}-{}",
-            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        for words in [args(&["schema", "data", "agent", "serve"]),
-            args(&["data", "agent", "serve", "--help"])] {
+        let home = std::env::temp_dir().join(format!(
+            "agent-framing-unused-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for words in [
+            args(&["schema", "data", "agent", "serve"]),
+            args(&["data", "agent", "serve", "--help"]),
+        ] {
             let mut inv = parse(&words).unwrap();
             inv.home = home.clone();
             let outcome = discover(&inv).unwrap().unwrap();
             let result = &outcome.data["result"];
             assert!(result.get("envelope").is_none());
-            assert!(result.get("responseSchema").is_none(), "embed the protocol schema only once");
+            assert!(
+                result.get("responseSchema").is_none(),
+                "embed the protocol schema only once"
+            );
             assert!(result.get("resultSchemas").is_none());
             assert_eq!(result["protocol"], "lycheedev.data-agent.v1");
-            assert_eq!(result["jsonl"], json!({"beginFrame":"absent","endFrame":"absent","responseId":"matches request id"}));
+            assert_eq!(
+                result["jsonl"],
+                json!({"beginFrame":"absent","endFrame":"absent","responseId":"matches request id"})
+            );
             let frame_pointer = result["responseSchemaPointer"].as_str().unwrap();
             assert_eq!(frame_pointer, "/protocol/responseSchema");
             let frames = &outcome.data.pointer(frame_pointer).unwrap()["$defs"];
-            assert_eq!(frames["SuccessFrame"]["properties"]["protocol"]["const"], "lycheedev.data-agent.v1");
+            assert_eq!(
+                frames["SuccessFrame"]["properties"]["protocol"]["const"],
+                "lycheedev.data-agent.v1"
+            );
             assert_eq!(frames["TerminalDiagnostic"]["x-stream"], "stderr");
-            assert_eq!(frames["TerminalDiagnostic"]["required"], json!(["protocol", "ok", "error"]));
-            let payloads = outcome.data.pointer(result["resultSchemasPointer"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                frames["TerminalDiagnostic"]["required"],
+                json!(["protocol", "ok", "error"])
+            );
+            let payloads = outcome
+                .data
+                .pointer(result["resultSchemasPointer"].as_str().unwrap())
+                .unwrap();
             assert_eq!(payloads["close"]["properties"]["closed"]["const"], true);
-            assert!(result["notes"].as_str().unwrap().contains("process status independently"));
+            assert!(
+                result["notes"]
+                    .as_str()
+                    .unwrap()
+                    .contains("process status independently")
+            );
             // The metadata operation itself still uses the normal CLI renderer.
             let mut stdout = Vec::new();
             crate::render(&mut stdout, "jsonl", &Ok(outcome)).unwrap();
-            let frames: Vec<Value> = String::from_utf8(stdout).unwrap().lines()
-                .map(|line| serde_json::from_str(line).unwrap()).collect();
+            let frames: Vec<Value> = String::from_utf8(stdout)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
             assert_eq!(frames.first().unwrap()["type"], "begin");
             assert_eq!(frames.last().unwrap()["type"], "end");
         }
-        let schema_command = discover(&parse(&args(&["schema", "data", "agent", "schema"])).unwrap())
-            .unwrap().unwrap().data;
+        let schema_command =
+            discover(&parse(&args(&["schema", "data", "agent", "schema"])).unwrap())
+                .unwrap()
+                .unwrap()
+                .data;
         assert_eq!(schema_command["result"]["schema"], "lycheedev.result.v1");
         assert_eq!(schema_command["result"]["jsonl"]["endFrame"], "required");
         assert!(!home.exists());
@@ -832,10 +1019,16 @@ mod tests {
         for (path, required) in [
             ("data hotfix", vec!["--source"]),
             ("live probe put", vec!["--name", "--file"]),
-            ("live execute", vec!["--session", "--request", "--budget-seconds"]),
+            (
+                "live execute",
+                vec!["--session", "--request", "--budget-seconds"],
+            ),
             ("live bugs", vec!["--session", "--request"]),
             ("live reload", vec!["--session", "--request"]),
-            ("live reload fallback", vec!["--installation", "--pid", "--request"]),
+            (
+                "live reload fallback",
+                vec!["--installation", "--pid", "--request"],
+            ),
             ("asset inspect", vec!["--file-id"]),
             ("asset search", vec!["--listfile"]),
             ("asset export", vec!["--file-id", "--output"]),
@@ -851,11 +1044,26 @@ mod tests {
             let schema = discover(&parse(&words).unwrap()).unwrap().unwrap().data;
             assert_eq!(schema["input"]["requiredFlags"], json!(required), "{path}");
             for flag in schema["input"]["flags"].as_array().unwrap() {
-                assert_eq!(flag["required"], required.contains(&flag["name"].as_str().unwrap()), "{path}: {flag}");
+                assert_eq!(
+                    flag["required"],
+                    required.contains(&flag["name"].as_str().unwrap()),
+                    "{path}: {flag}"
+                );
             }
         }
-        for path in ["source validate", "source inspect", "source refs", "source context", "target resolve", "doctor"] {
-            assert_eq!(exact_schema(path).unwrap()["input"]["requiredFlags"], json!([]), "{path}");
+        for path in [
+            "source validate",
+            "source inspect",
+            "source refs",
+            "source context",
+            "target resolve",
+            "doctor",
+        ] {
+            assert_eq!(
+                exact_schema(path).unwrap()["input"]["requiredFlags"],
+                json!([]),
+                "{path}"
+            );
         }
     }
     #[test]
@@ -875,6 +1083,22 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(rank("zzzzzznotacapability").is_empty());
+        for (query, prefix, action) in [
+            ("新手盒子 发布 插件", "publish newbee ", " plugin "),
+            ("网易 备份", "publish dd ", " backup "),
+            (
+                "NewBeeBox 官方 打包",
+                "publish newbee ",
+                "official plugin pack",
+            ),
+            ("CurseForge 上传", "publish curseforge ", "plugin upload"),
+            ("小黑盒 登录", "publish blackbox ", "session login"),
+            ("小黑盒 微信", "publish blackbox ", "session login"),
+        ] {
+            let found = rank(query);
+            assert!(found[0].path.contains(action), "{query}: {}", found[0].path);
+            assert!(found.iter().all(|d| d.path.starts_with(prefix)));
+        }
         assert!(
             rank("查询法术")
                 .iter()
@@ -999,8 +1223,10 @@ mod tests {
                 assert_eq!(inv.command, path, "{command}");
                 assert!(!inv.flag_bool("--help"), "{path} needs a business example");
                 for required in &definition.required {
-                    assert!(inv.flag(required).is_some_and(|value| !value.is_empty()),
-                        "{path} example omits {required}: {command}");
+                    assert!(
+                        inv.flag(required).is_some_and(|value| !value.is_empty()),
+                        "{path} example omits {required}: {command}"
+                    );
                 }
             }
         }
@@ -1047,12 +1273,17 @@ mod tests {
             "lycheedev-argument-discovery-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         assert!(!home.exists());
         let words = vec![
-            "--home".into(), home.to_string_lossy().into_owned(),
-            "version".into(), "--timeout-seconds".into(), "1".into(),
+            "--home".into(),
+            home.to_string_lossy().into_owned(),
+            "version".into(),
+            "--timeout-seconds".into(),
+            "1".into(),
         ];
         let error = parse(&words).unwrap_err();
         assert_eq!(error.code, "command.invalid_arguments");
@@ -1060,7 +1291,10 @@ mod tests {
         let details = &error.details;
         assert_eq!(details["command"], "version");
         assert_eq!(details["usage"], "lycheedev version [OPTIONS]");
-        assert_eq!(details["acceptedFlags"], json!(["--home", "--format", "--help", "-h"]));
+        assert_eq!(
+            details["acceptedFlags"],
+            json!(["--home", "--format", "--help", "-h"])
+        );
         assert_eq!(details["arguments"], json!([]));
         assert_eq!(details["schemaCommand"], "lycheedev schema version");
         assert_eq!(details["helpCommand"], "lycheedev version --help");
@@ -1072,13 +1306,21 @@ mod tests {
         assert_eq!(envelope["ok"], false);
         // Follow both returned metadata corrections in the same absent home.
         for key in ["schemaCommand", "helpCommand"] {
-            let correction = details[key].as_str().unwrap().split_whitespace()
-                .skip(1).map(str::to_owned).collect::<Vec<_>>();
+            let correction = details[key]
+                .as_str()
+                .unwrap()
+                .split_whitespace()
+                .skip(1)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
             let mut parsed = parse(&correction);
             parsed.as_mut().unwrap().home = home.clone();
-            let guard = crate::install_invocation_control(&mut parsed, |_| -> std::result::Result<(), String> {
-                panic!("argument correction installed a business console/worker owner")
-            });
+            let guard = crate::install_invocation_control(
+                &mut parsed,
+                |_| -> std::result::Result<(), String> {
+                    panic!("argument correction installed a business console/worker owner")
+                },
+            );
             assert!(guard.is_none());
             let result = discover(&parsed.unwrap()).unwrap().unwrap();
             assert_eq!(result.data["command"], "version");
@@ -1088,15 +1330,25 @@ mod tests {
     #[test]
     fn missing_values_and_positionals_keep_the_recognized_leaf_contract() {
         for (words, command, argument) in [
-            (vec!["source", "query", "Needle", "--limit"], "source query", "<term>"),
+            (
+                vec!["source", "query", "Needle", "--limit"],
+                "source query",
+                "<term>",
+            ),
             (vec!["target", "show"], "target show", "<name-or-pin-id>"),
         ] {
             let error = parse(&args(&words)).unwrap_err();
             assert_eq!(error.exit_code, 2);
             assert_eq!(error.details["command"], command);
             assert_eq!(error.details["arguments"], json!([argument]));
-            assert_eq!(error.details["schemaCommand"], format!("lycheedev schema {command}"));
-            assert_eq!(error.details["helpCommand"], format!("lycheedev {command} --help"));
+            assert_eq!(
+                error.details["schemaCommand"],
+                format!("lycheedev schema {command}")
+            );
+            assert_eq!(
+                error.details["helpCommand"],
+                format!("lycheedev {command} --help")
+            );
             assert_eq!(error.details["suggestions"], json!([]));
         }
         let error = parse(&args(&["data", "agent", "serve", "--format", "json"])).unwrap_err();
@@ -1107,54 +1359,107 @@ mod tests {
     #[test]
     fn public_required_source_and_project_flags_enter_typed_admission() {
         for (command, required, values) in [
-            ("source sync", vec!["--source", "--product"], vec!["wow-ui-source", "retail"]),
+            (
+                "source sync",
+                vec!["--source", "--product"],
+                vec!["wow-ui-source", "retail"],
+            ),
             ("project init", vec!["--product"], vec!["retail"]),
             ("project lock", vec!["--snapshot"], vec!["PIN-fixed"]),
         ] {
             let mut schema_words = vec!["schema".to_owned()];
             schema_words.extend(command.split_whitespace().map(str::to_owned));
-            let schema = discover(&parse(&schema_words).unwrap()).unwrap().unwrap().data;
+            let schema = discover(&parse(&schema_words).unwrap())
+                .unwrap()
+                .unwrap()
+                .data;
             assert_eq!(schema["input"]["requiredFlags"], json!(required));
             for flag in &required {
-                assert_eq!(schema["input"]["flags"].as_array().unwrap().iter()
-                    .find(|row| row["name"] == *flag).unwrap()["required"], true);
+                assert_eq!(
+                    schema["input"]["flags"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|row| row["name"] == *flag)
+                        .unwrap()["required"],
+                    true
+                );
             }
-            let mut words = command.split_whitespace().map(str::to_owned).collect::<Vec<_>>();
-            for (flag, value) in required.iter().zip(&values) { words.extend([flag.to_string(), value.to_string()]); }
+            let mut words = command
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            for (flag, value) in required.iter().zip(&values) {
+                words.extend([flag.to_string(), value.to_string()]);
+            }
             let inv = parse(&words).unwrap();
             match command {
-                "source sync" => assert!(matches!(crate::source_cli::admit(&inv).unwrap(), crate::source_cli::SourceCommand::Ordinary(_))),
-                "project init" => assert!(matches!(crate::core_workspace_cli::admit_project(&inv).unwrap(),
-                    lycheedev_core::selection::ProjectRequest::Init { product, path } if product=="retail" && path==std::path::PathBuf::from("."))),
-                "project lock" => assert!(matches!(crate::core_workspace_cli::admit_project(&inv).unwrap(),
-                    lycheedev_core::selection::ProjectRequest::Lock { snapshot, path:None } if snapshot=="PIN-fixed")),
+                "source sync" => assert!(matches!(
+                    crate::source_cli::admit(&inv).unwrap(),
+                    crate::source_cli::SourceCommand::Ordinary(_)
+                )),
+                "project init" => assert!(
+                    matches!(crate::core_workspace_cli::admit_project(&inv).unwrap(),
+                    lycheedev_core::selection::ProjectRequest::Init { product, path } if product=="retail" && path==std::path::PathBuf::from("."))
+                ),
+                "project lock" => assert!(
+                    matches!(crate::core_workspace_cli::admit_project(&inv).unwrap(),
+                    lycheedev_core::selection::ProjectRequest::Lock { snapshot, path:None } if snapshot=="PIN-fixed")
+                ),
                 _ => unreachable!(),
             }
             for missing in &required {
                 let mut omitted = words.clone();
-                let at = omitted.iter().position(|word| word.as_str()==*missing).unwrap();
-                omitted.drain(at..at+2);
+                let at = omitted
+                    .iter()
+                    .position(|word| word.as_str() == *missing)
+                    .unwrap();
+                omitted.drain(at..at + 2);
                 let inv = parse(&omitted).unwrap();
-                let error = if command=="source sync" { crate::source_cli::admit(&inv).err().unwrap() }
-                    else { crate::core_workspace_cli::admit_project(&inv).unwrap_err() };
-                assert_eq!((error.code.as_str(),error.exit_code),("command.invalid_arguments",2));
-                assert!(error.message.contains(missing), "{command}: {}", error.message);
+                let error = if command == "source sync" {
+                    crate::source_cli::admit(&inv).err().unwrap()
+                } else {
+                    crate::core_workspace_cli::admit_project(&inv).unwrap_err()
+                };
+                assert_eq!(
+                    (error.code.as_str(), error.exit_code),
+                    ("command.invalid_arguments", 2)
+                );
+                assert!(
+                    error.message.contains(missing),
+                    "{command}: {}",
+                    error.message
+                );
             }
         }
     }
     #[test]
     fn public_update_discovery_uses_compiled_channel_authority_without_io() {
-        let authority: Value = serde_json::from_str(include_str!("../../../release/npm-channel.json")).unwrap();
-        let home = std::env::temp_dir().join(format!("lycheedev-update-discovery-{}-{}",
-            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let authority: Value =
+            serde_json::from_str(include_str!("../../../release/npm-channel.json")).unwrap();
+        let home = std::env::temp_dir().join(format!(
+            "lycheedev-update-discovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         assert!(!home.exists());
         let mut results = Vec::new();
-        for words in [vec!["schema", "update"], vec!["update", "--help"], vec!["describe"]] {
+        for words in [
+            vec!["schema", "update"],
+            vec!["update", "--help"],
+            vec!["describe"],
+        ] {
             let mut inv = parse(&args(&words));
             inv.as_mut().unwrap().home = home.clone();
-            let guard = crate::install_invocation_control(&mut inv, |_| -> std::result::Result<(), String> {
-                panic!("update discovery installed business cancellation/worker owner")
-            });
+            let guard = crate::install_invocation_control(
+                &mut inv,
+                |_| -> std::result::Result<(), String> {
+                    panic!("update discovery installed business cancellation/worker owner")
+                },
+            );
             assert!(guard.is_none());
             results.push(crate::dispatch(&inv.unwrap()).unwrap().data);
         }
@@ -1162,8 +1467,14 @@ mod tests {
         assert_eq!(policy["schema"], "lycheedev.update-policy.v1");
         assert_eq!(policy["version"], crate::VERSION);
         assert_eq!(policy["npmChannel"], authority);
-        assert_eq!(policy["registrySelector"], format!("lycheedev@{}", authority["distTag"].as_str().unwrap()));
-        assert_eq!(policy["selectors"], json!({"version":false,"channel":false}));
+        assert_eq!(
+            policy["registrySelector"],
+            format!("lycheedev@{}", authority["distTag"].as_str().unwrap())
+        );
+        assert_eq!(
+            policy["selectors"],
+            json!({"version":false,"channel":false})
+        );
         for mode in ["registry", "plan", "release"] {
             assert!(!policy["modes"][mode].as_str().unwrap().is_empty());
         }
@@ -1173,7 +1484,10 @@ mod tests {
     }
     #[test]
     fn misspelled_commands_keep_search_without_inventing_a_parsed_leaf() {
-        for words in [vec!["versoin"], vec!["--home", "not-a-command-but-an-option-value", "versoin"]] {
+        for words in [
+            vec!["versoin"],
+            vec!["--home", "not-a-command-but-an-option-value", "versoin"],
+        ] {
             let error = parse(&args(&words)).unwrap_err();
             assert_eq!(error.code, "command.invalid_arguments");
             assert_eq!(error.exit_code, 2);
@@ -1184,7 +1498,10 @@ mod tests {
         assert_eq!(error.details["suggestions"][0]["command"], "source sync");
         assert!(error.details["command"].is_null());
         let error = parse(&args(&["--timeout-seconds", "1", "version"])).unwrap_err();
-        assert!(error.details["command"].is_null(), "a later token was never parsed as a command");
+        assert!(
+            error.details["command"].is_null(),
+            "a later token was never parsed as a command"
+        );
         assert!(error.details["schemaCommand"].is_null());
     }
     #[test]

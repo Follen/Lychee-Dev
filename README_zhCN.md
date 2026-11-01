@@ -25,6 +25,7 @@ Lychee Dev 是面向开发者与 Agent 的魔兽世界调查工具：Rust 原生
 | 实机 | 通过现有插件与 Lycheedev mailbox protocol v1，在单个已验证客户端上执行有界 Lua 探针、读取已验证报告、恢复并收尾。 |
 | 证据 | 固定 pin 与项目锁、内容寻址 capture、校验、打包与有界缓存管理。 |
 | 交付 | 从发布包受管安装、更新和移除插件与 Skill；npm CLI 更新交接。 |
+| 作者发布 | Rust 平台适配器提供作者查询、插件/配置/WA 发布、媒体、关系和选择性云备份。 |
 
 源码、数据与资源工作不需要运行游戏；实机工作需要一个已登录且加载受管插件的客户端。
 
@@ -32,6 +33,11 @@ Lychee Dev 是面向开发者与 Agent 的魔兽世界调查工具：Rust 原生
 正式 Forever 的产品 ID 为 `forever`，官方远端产品/flavor 为 `wowf`，客户端目录为
 `_forever_`；两个 Forever Beta 不在当前支持范围。各目标的版本与 Interface 约束读取
 已安装 CLI 的产品目录。
+
+作者发布正在整合到 `lycheedev publish`。先用 `lycheedev cli search "publish"`
+发现可用命令，再读对应 schema 中的输入、认证、效果、计划和恢复说明。当前已有
+CurseForge、NewBeeBox Creator/官方通道、DD、小黑盒，以及身份分开的 ModUs 主客户端/Creator；包含各平台支持的作者业务和选择性备份。当前交付与真实平台验收见 [todo.md](todo.md)。
+上传复用原产物；Skill 只引导调用 CLI，不另外维护字段表。
 
 ## 环境要求
 

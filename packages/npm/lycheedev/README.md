@@ -22,6 +22,7 @@
 | Live | Use the existing in-game `/dev` workbench or bounded Lua probes through Lycheedev mailbox protocol v1, with verified reports, recovery and explicit cleanup. |
 | Evidence | Fixed project references, content-addressed captures, verification and bounded cache management. |
 | Delivery | Managed addon and Skill installation, update and removal, plus npm CLI update handoff. |
+| Publish | Native CurseForge uploads/recovery and NewBeeBox Creator publishing/backups; official NCC-token queries, media, creation/edits, file/text updates, addon packaging/versions, project initialization/sync and WA/configuration exports. DD retained sessions, resource reads, channel choices, selective backup scan/generation/upload/creation, reference-safe deletion and full plugin/configuration/WA creation/updates/edits. Heybox SMS/WeChat authentication, author queries/writes and selective backups; separate ModUs main-client/Creator identities, projects, releases, configuration/WA, media and native selective backups with receipt reuse and reference-aware deletion. |
 
 Windows amd64 and Node.js **≥22.14.0** are required. The CLI is a native Rust
 executable. The Node launcher verifies the packaged `release.json` binary record,

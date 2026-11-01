@@ -12,6 +12,31 @@ is not a published-release acceptance record.
 
 ### Changed
 
+- ModUs 备份支持原生 config-backup.v2 的扫描、生成/复用、上传、创建、改名、引用预览和逐项删除；六类内容、明确角色、原对象收据和跨五分支引用完整保留，配置别名共用同一执行器。
+
+- ModUs Creator 插件支持原生 ZIP/TOC 与当前游戏版本选择，原版本更新、对象上传和完整 CDN 字节读回；主客户端图片返回可复用收据，未知提交恢复不重复上传。合并跨平台 MD5 和下载校验。
+- ModUs 接入分开的主客户端/Creator 身份、完整查询与项目操作；配置和 WA 更新保留省略字段，正文文本由 CLI 还原，校验备份/角色和订阅关联，历史版本在原父级读回；未知写入按原 build 恢复。
+- Integrate native author publishing under `publish`: CurseForge queries/uploads,
+  NewBeeBox Creator and official publishing/backups/projects, and DD sessions,
+  resource publishing and selective backup scan/generation/upload/creation,
+  rename and deletion. Remaining work is in todo.md.
+- Command discovery and nested schemas explain inputs, effects, local plans and
+  recovery. The existing Skill adds a short publishing route.
+- Chinese platform names and publishing terms select the relevant provider's
+  commands. DD backups reuse their original bundle and task session; uncertain
+  uploads retain the original backup identity without replaying object writes.
+- Add explicit Heybox SMS/WeChat login, original-account renewal and Workshop
+  queries. Encrypted login state survives separate CLI calls; consumed login
+  exchanges recover through reads. Lists preserve incomplete coverage and WA
+  reads verify the selected author and version.
+- Integrate Heybox plugin/version, configuration and public WA writes, plus
+  native selective backup bundles, COS upload and reference-aware cloud management.
+  Omitted fields retain original values; completed artifacts and per-item results
+  survive recovery. Metadata and archive-byte verification remain distinct.
+- Reuse original uploads and recover uncertain writes by fresh reads. Ordinary
+  author mutations keep one atomic current receipt, without duplicate archives.
+
+
 - The native CLI is implemented in Rust. A single command catalog
   (`crates/lycheedev-cli/src/commands.json`) drives parsing, `--help`, `describe`,
   `schema`, `cli search`, examples and execution, so discovery and behavior share

@@ -17,6 +17,7 @@ lycheedev-source.workspace = true
 lycheedev-data.workspace = true
 lycheedev-live.workspace = true
 lycheedev-delivery.workspace = true
+lycheedev-publish.workspace = true
 lycheedev-windows.workspace = true
 serde.workspace = true
 serde_json.workspace = true

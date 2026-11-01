@@ -244,8 +244,8 @@ test('named shard execution records its exact plan and record identity; pure agg
   const summary = f.aggregate();
   assert.equal(summary.schema, 'lycheedev.ci-test-run.v1'); assert.equal(summary.state, 'passed'); assert.equal(summary.handlesReaped, true);
   assert.equal(summary.commit, f.record.commit); assert.equal(summary.sourceTree, f.record.sourceTree); assert.equal(summary.testRecordSHA256, digest);
-  assert.deepEqual(summary.coverage, {complete: true, expectedPrograms: 9, observedPrograms: 9, shards: 2});
-  assert.equal(summary.programs, 9); assert.equal(summary.attempted, 9); assert.equal(summary.passed, 9); assert.equal(summary.failed, 0);
+  assert.deepEqual(summary.coverage, {complete: true, expectedPrograms: f.record.programs.length, observedPrograms: f.record.programs.length, shards: 2});
+  assert.equal(summary.programs, f.record.programs.length); assert.equal(summary.attempted, f.record.programs.length); assert.equal(summary.passed, f.record.programs.length); assert.equal(summary.failed, 0);
   assert.deepEqual(new Set(summary.results.map(row => row.executable)), new Set(f.record.programs.map(row => row.path)));
   for (const group of summary.shardReports) {
     assert.equal(group.sha256, createHash('sha256').update(readFileSync(join(f.directory, group.path))).digest('hex'));
@@ -316,7 +316,7 @@ test('full-record coverage rejects a newly added package omitted from both fixed
   const digest = createHash('sha256').update(readFileSync(f.recordPath)).digest('hex');
   for (let i = 0; i < f.reports.length; i++) updateShard(f, i, report => {report.testRecordSHA256 = digest;});
   assert.throws(() => f.aggregate(), /aggregate_coverage_incomplete/);
-  assert.deepEqual(JSON.parse(readFileSync(f.output)).coverage, {complete: false, expectedPrograms: 10, observedPrograms: 9, shards: 2});
+  assert.deepEqual(JSON.parse(readFileSync(f.output)).coverage, {complete: false, expectedPrograms: f.record.programs.length, observedPrograms: f.record.programs.length - 1, shards: 2});
 });
 
 test('named shard refuses filters and test-list arguments before launching anything', () => {
@@ -332,7 +332,7 @@ test('default local run keeps shard all and captures an incomplete launch failur
   const f = shardFixture(), path = join(f.directory, 'default.json'); rmSync(f.record.programs[0].path);
   assert.throws(() => runTestPrograms({root: f.directory, recordPath: f.recordPath, reportPath: path, executor() {assert.fail('missing executable must never launch');}}), /program_missing/);
   const report = JSON.parse(readFileSync(path)); assert.equal(report.shard, 'all'); assert.equal(report.state, 'failed');
-  assert.equal(report.plannedPrograms.length, 9); assert.equal(report.attempted, 0); assert.equal(report.passed, 0);
+  assert.equal(report.plannedPrograms.length, f.record.programs.length); assert.equal(report.attempted, 0); assert.equal(report.passed, 0);
 });
 
 test('formal bridge with passed false is a business failure even when its process was reaped', () => {

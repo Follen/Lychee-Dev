@@ -1,4 +1,4 @@
-//! Same-logon-only local named pipes. No source framing, leases or business here.
+//! Local named pipes scoped to one logon, or explicitly to one account for UAC.
 use crate::Result;
 // Windows SDK winnt.h, SE_GROUP_LOGON_ID (not an account-SID attribute).
 const LOGON_ID_GROUP: u32 = 0xc0000000;
@@ -98,12 +98,43 @@ pub struct BrokerScope {
     sddl: String,
 }
 impl BrokerScope {
+    pub fn for_dd_task(home: &Path) -> Result<Self> {
+        Self::for_kind(home, "publish-dd-task")
+    }
+    pub fn for_dd_worker(home: &Path, nonce: &str) -> Result<Self> {
+        if nonce.len() != 32
+            || !nonce
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err("broker.invalid_worker_identity".into());
+        }
+        Self::for_kind(home, &format!("publish-dd-{nonce}"))
+    }
+    /// One-shot same-account scope permits filtered/elevated tokens. Existing
+    /// Source and DD task/worker scopes retain their original logon isolation.
+    pub fn for_dd_channel(home: &Path, nonce: &str) -> Result<Self> {
+        if nonce.len() != 32
+            || !nonce
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err("broker.invalid_channel_identity".into());
+        }
+        Self::with_sid(
+            home,
+            &format!("publish-dd-channel-{nonce}"),
+            crate::process::elevation::current_user_sid()?,
+        )
+    }
     pub fn for_native_source(home: &Path) -> Result<Self> {
         Self::for_kind(home, "native-source")
     }
     fn for_kind(home: &Path, kind: &str) -> Result<Self> {
+        Self::with_sid(home, kind, logon_sid()?)
+    }
+    fn with_sid(home: &Path, kind: &str, sid: String) -> Result<Self> {
         let home = std::fs::canonicalize(home).map_err(|e| e.to_string())?;
-        let sid = logon_sid()?;
         let identity = home
             .to_string_lossy()
             .trim_start_matches("\\\\?\\")
@@ -479,7 +510,7 @@ impl BrokerStream {
                 FILE_SHARE_MODE(0),
                 None,
                 OPEN_EXISTING,
-                FILE_FLAG_OVERLAPPED,
+                FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
                 None,
             )
             .map_err(connection_error)?
@@ -826,6 +857,67 @@ mod tests {
         drop(server);
         drop(listener);
         assert!(BrokerListener::bind(&scope).is_ok());
+    }
+    #[test]
+    fn account_scoped_channel_pipe_limits_the_client_token_to_identification() {
+        let home = std::env::temp_dir();
+        let nonce = crate::random::token().unwrap();
+        let scope = BrokerScope::for_dd_channel(&home, &nonce).unwrap();
+        let user_sid = crate::process::elevation::current_user_sid().unwrap();
+        assert_eq!(scope.sddl, format!("D:P(A;;GA;;;{user_sid})"));
+        let mut listener = BrokerListener::bind(&scope).unwrap();
+        let client_scope = scope.clone();
+        let client = std::thread::spawn(move || {
+            let mut stream = BrokerStream::connect_with_control(
+                &client_scope,
+                Instant::now() + Duration::from_secs(3),
+                ready(),
+            )
+            .unwrap();
+            stream.write_all(b"x").unwrap();
+            let mut reply = [0];
+            stream.read_exact(&mut reply).unwrap();
+            assert_eq!(reply, [b'y']);
+            stream.close().unwrap();
+        });
+        let mut server = listener
+            .accept_with_control(Instant::now() + Duration::from_secs(3), ready())
+            .unwrap();
+        let mut request = [0];
+        server.read_exact(&mut request).unwrap();
+        struct Revert;
+        impl Drop for Revert {
+            fn drop(&mut self) {
+                let _ = unsafe { RevertToSelf() };
+            }
+        }
+        // SAFETY: only this owned, authenticated local test pipe is impersonated;
+        // the scope guard always restores the test thread, including on panic.
+        unsafe { ImpersonateNamedPipeClient(server.handle.0) }.unwrap();
+        let restore = Revert;
+        let mut raw = HANDLE::default();
+        unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &mut raw) }.unwrap();
+        let token = Handle(raw);
+        let mut level = SECURITY_IMPERSONATION_LEVEL::default();
+        let mut needed = 0;
+        unsafe {
+            GetTokenInformation(
+                token.0,
+                TokenImpersonationLevel,
+                Some((&mut level as *mut SECURITY_IMPERSONATION_LEVEL).cast()),
+                std::mem::size_of_val(&level) as u32,
+                &mut needed,
+            )
+        }
+        .unwrap();
+        token.close().unwrap();
+        unsafe { RevertToSelf() }.unwrap();
+        std::mem::forget(restore);
+        assert_eq!(level, SecurityIdentification);
+        server.write_all(b"y").unwrap();
+        server.close().unwrap();
+        listener.close().unwrap();
+        client.join().unwrap();
     }
     #[test]
     fn sequential_accept_eof_and_clone_drop_leave_owner_listener_live() {

@@ -4,6 +4,31 @@
 
 本批已完成旧实现测试、冻结对账套件和旧文档账本的删除（见 handover）；下表只列当前工作树存在的测试入口。**“保留”表示用途属于当前产品，不表示当前工作树已全部编译或通过**；实际运行结果只记在 handover。
 
+作者发布的必要回归留在 Rust 模块及公开 CLI 测试中。临时黑盒脚本、逐轮日志和重复的元数据快照测试已移除；帮助/schema 同源由现有 CLI 与 Skill 合同检查负责。
+
+| 范围 | 保留的业务验证 |
+| --- | --- |
+| [CurseForge](crates/lycheedev-publish/src/curseforge/tests.rs) | 完整分页、动态版本、原 ZIP 上传、凭据分离、未知结果按原文件恢复。 |
+| [NewBee Creator](crates/lycheedev-publish/src/newbee.rs) | 完整表单、省略/清空、账号隔离、版本/媒体/关系及只读恢复；普通修改只留一份当前收据。 |
+| [NewBee 备份](crates/lycheedev-publish/src/newbee/backup_bundle/tests.rs) | 明确角色选择、ZIP/字体成员和原字节、产物复用、完整引用保护、部分成功保留。 |
+| [官方 NewBee](crates/lycheedev-publish/src/newbee_official/tests.rs) | 独立认证、资源/版本/文本/媒体、原生工程与打包、明确覆盖和原请求恢复；各业务子模块保留相应回归。 |
+| [DD 会话](crates/lycheedev-publish/src/dd/task/tests.rs) | 原会话复用、取消与进程收尾、未知写入不重放；CC/HTTP 用回环，Windows 边界用合成文件及自有进程。 |
+| [DD 发布](crates/lycheedev-publish/src/dd/plugin/tests.rs) | 插件/WA/配置完整表单、精确版本、角色和布局、原文件上传、字段读回及丢响应恢复。 |
+| [DD 备份管理](crates/lycheedev-publish/src/dd/backup/cloud/tests.rs) | 全客户端引用分页、精确 SN、改名、逐项删除保护和部分批次恢复。 |
+| [DD 备份归档](crates/lycheedev-publish/src/dd/backup/bundle/tests.rs)与[上传](crates/lycheedev-publish/src/dd/backup/upload/tests.rs) | 五类原生 ZIP 成员/字节与显式角色选择、原产物复用、篡改和越界选择拒绝；独立 HTTP 预期核原字节 PUT、服务端去重、丢失完成响应的只读恢复及未知 PUT 不重放。云端读回仅证明选择元数据，不等于远端 ZIP 字节验证。 |
+| [小黑盒认证](crates/lycheedev-publish/src/blackbox/auth/tests.rs)与[读取](crates/lycheedev-publish/src/blackbox/tests.rs) | 原生短信加密、真实 DPAPI 跨调用保存/恢复、微信 QR 与固定回调、丢失交换响应不重放、原账号续期；固定独立签名预期、完整分页/partial、WA 作者与原版本及正文脱敏。仅用合成账号和回环 HTTP。 |
+| [小黑盒写入](crates/lycheedev-publish/src/blackbox/write/tests.rs)与[COS](crates/lycheedev-publish/src/blackbox/cos.rs) | 配置绑定原备份与角色、完整字段保留/清空、Unicode 标题限制；WA 公开语义和原内容读回；版本 ZIP 原字节、签名独立预期、元数据/规范归档地址范围，丢失 PUT/提交响应的原目标恢复。 |
+| [小黑盒备份归档](crates/lycheedev-publish/src/blackbox/backup/bundle/tests.rs)、[上传](crates/lycheedev-publish/src/blackbox/backup/upload/tests.rs)与[管理](crates/lycheedev-publish/src/blackbox/backup/tests.rs) | 原生目录和明确账号/角色、遥测排除、原 bundle 复用、重算摘要仍拒未选角色；原分配和组件上传、丢失 PUT/save 响应恢复、服务端容量限制；完整引用保护及批次成功项目保留。 |
+| [ModUs 认证](crates/lycheedev-publish/src/modus/auth/tests.rs)、[当前数据库读取](crates/lycheedev-publish/src/modus/leveldb/tests.rs)与[查询](crates/lycheedev-publish/src/modus/tests.rs) | Creator DPAPI 与主客户端固定来源分别读取；MANIFEST 活跃表、序号/墓碑、Snappy/分片和损坏不回退；完整分页、单页范围、关联父项目、筛选 0/false、订阅与公开选项及内容脱敏。只用合成目录和回环 HTTP。 |
+| [ModUs 插件版本/ZIP](crates/lycheedev-publish/src/modus/plugin/tests.rs)与[媒体](crates/lycheedev-publish/src/modus/media.rs) | TOC 分支与官方动态选择、原文件 ID、元数据和 CDN 完整字节分别读回；未知写入不重发，确认拒绝保留已完成阶段，媒体收据与字节证明分开。共享 MD5 与下载校验同时保留小黑盒/DD 回归。 |
+| [ModUs 配置/WA](crates/lycheedev-publish/src/modus/main_write/tests.rs)与[正文转换](crates/lycheedev-publish/src/modus/plaintext.rs) | 主客户端完整表单、默认值和省略保留；HTML/Base64 文本投影、实体与嵌入内容；备份 build/插件/账号/角色、动态套餐；未知提交固定原 build 恢复、历史版本父级与删除读回。只用合成输入与回环 HTTP。 |
+| [ModUs 备份生成](crates/lycheedev-publish/src/modus/backup/local/tests.rs)、[上传](crates/lycheedev-publish/src/modus/backup/upload/tests.rs)与[管理](crates/lycheedev-publish/src/modus/backup/tests.rs) | 原生 config-backup.v2、精确角色路径和 ZIP 成员、原目录与对象复用；字体去重、对象/存储/备份分开登记、旧 CDN 字节保留 pending、未知登记只读恢复；完整跨分支引用、实际 build、逐项删除及已完成项保留。只用合成文件与回环 HTTP。 |
+| [ModUs 项目](crates/lycheedev-publish/src/modus/project/tests.rs) | 原生扁平表单、动态分类、许可证/平台约束、受限项目、稀疏编辑及清空；未知创建按完整新 ID 集合读回、删除原目标恢复；图片操作未知时不把元数据当字节证明。共用现有 Mutation 与读回摘要，无 UI 步骤状态机。 |
+| [Windows RSA](crates/lycheedev-windows/src/credentials/rsa.rs) | 独立生成的合成密钥解密原生输出，核 PKCS1 随机填充、原消息和长度边界；与 AES-GCM 共用原 CNG 句柄收尾。 |
+| [公开 CLI](crates/lycheedev-cli/src/publish_cli.rs) | 输入准入、离线计划、脱敏、显式会话和错误分类；元数据共用全局发现检查。 |
+
+这些回归证明离线协议和真实 Rust 入口。实际厂商 SDK、账号、平台发布及游戏行为按各自验收记录，不用回环测试代替。
+
 ## 1. 取舍与证明范围
 
 | 标记 | 含义 |
@@ -21,14 +46,15 @@
 
 | 模块 | 用途与主要分组 | 能证明的范围 |
 | --- | --- | --- |
-| [CLI](crates/lycheedev-cli/src/) | contract/agent_cli/discovery：解析、发现、schema/help/describe、产品称呼及commands.json声明的游戏进程/输入效应，包含统一doctor的--fix条件与--hard-reset依赖；data_agent/transport：帧、取消通道与保留提交事实的标准流输出；formal_live：原连接与输入编排；init/project/target/doctor：工作区、选择与诊断。 | 入口合同与应用编排；mock 不证明原生进程、游戏或已安装包。 |
+| [Publish](crates/lycheedev-publish/src/) | 严格JSON保重复键/私有marker边界；CurseForge完整上传协议核明确拒绝/未连接可纠正、不确定不重放、真实验证来源。NewBee核两类会话、三类完整表单、明确ID恢复、跨请求复用、精确role/layout、关系/媒体/版本/日志与完整列表删除；备份核显式选择、未选角色/.bak排除、空目录、ZIP/target/字体绑定与持锁、篡改/链接/CRC拒绝、原字节隔离PUT、收据复用、丢响应恢复、创建与改名分别保留、名称/UTC过滤及完整引用重查。 | 原生回环HTTP真实字节与固定业务预期。独立ASAR及真实Node合成SDK facade核固定模块提取、所选字体快照、结果协议、秘密隔离和原索引复用；不执行真实官方N-API或读取用户凭据。其余平台继续补齐；真实账号/官方客户端和发布另验。 |
+| [CLI](crates/lycheedev-cli/src/) | contract/agent_cli/discovery：解析、发现、schema/help/describe、产品称呼、游戏/远端/凭据效果、doctor修复依赖；publish_cli：完整嵌套/条件字段、当前选项说明及本地计划的秘密隔离/无会话准入；data_agent/transport：帧、取消通道与保留提交事实的标准流输出；formal_live：原连接与输入编排；init/project/target/doctor：工作区、选择与诊断。 | 入口合同与应用编排；mock 不证明原生进程、游戏或已安装包。开发CLI黑盒另核生产解析与实际标准输出；Release同包另验。 |
 | [Core](crates/lycheedev-core/src/) | 身份/选择、control（不可变 deadline + TrackedCancellation 世系）、公共精确 JSON、存储发布、CAP/依赖、缓存与 Data 计量、当前 Mailbox 数据合同。进程回归用自有根进程与无stdio后代核同一Job、原期限及checked回收；不以根退出代替后代回收。私有预声明发布复用已认证摘要的回归覆盖新发、复用、同长损坏正文、长度与maximum。 | 共享机制；旧 schema 迁移、historical reader 与旧工作区布局断言已删除。 |
 | [Data](crates/lycheedev-data/src/) | Agent Session/Engine/DataFusion、generation、元数据/DBD、CASC/BLTE/WDC、Hotfix、assets、keys、remote 与资源占用。HTTP body/gzip/取消/收费测试直接走正式collect_admitted，不保留仅测试消费的两层异步包装。 | 当前查询、输入和生命周期；旧 local_query/relational/navigate/migration-oracle 测试随旧实现删除；旧 Engine 固定快照/provider 资格层（engine/source、snapshot_cache、provider Fixed*）及内部测试已随旧实现退役，当前路径为 source_demand/session_engine/pull_provider/provider::runtime。 |
 | [Source](crates/lycheedev-source/src/) | 原始字节与 Facts/Index、编码告警（N11 已覆盖）、TOC/XML、catalog/environment、luac、native 会话、查询/引用/关系/差异、固定源码与缓存。XML Facts覆盖Script与handler的声明、关系、实体换行原始位置及冷/热缓存一致性。 | 当前源码调查；不保留 LuaLS、旧 evaluator/JSON cache 合同。 |
 | [Emmy adapter](crates/lycheedev-emmy-adapter/src/) | config/projection/session 与上下文适配；selected initializer回归覆盖参数/回调数量、返回控制流，以及Lua非尾标量、尾多返回、括号、DocTuple、开放必需前缀、Union包、Never和环境API返回槽。返回type/count与signature复用同一包形状规则，保留nominal carrier。 | 自有适配合同与实际比较的coverage归属；不替代实际 Release Source 任务，也不修改上游语义引擎。 |
 | [Live](crates/lycheedev-live/src/) | mailbox（含 lookup 读路径）、passive、probe、runtime_root/runtime_binding 与 SessionOwner 恢复。 | 当前协议、读取和状态；合成内存不证明实际客户端 layout。 |
 | [Delivery](crates/lycheedev-delivery/src/) | 获取、受管 addon/槽事务、安装更新、移除与 npm 交接。release/checked_close_tests将当前release/npm-channel.json原字节送入release与update两条入口，核相同渠道合同、其他合法preserveLatest、畸形字段及原runtime/tag/version负例。 | 当前交付事务；CLI 冻结安装/更新选择与 launcher 环境，库测试直接构造 RequestContext/Request；原维护租约与恢复仍在 Delivery。 |
-| [Windows](crates/lycheedev-windows/src/) | 进程、Job、IPC、文件、内存、取消和输入句柄。 | 操作系统边界；不把这些测试计为游戏验证。 |
+| [Windows](crates/lycheedev-windows/src/) | 进程、Job、IPC、文件、内存、取消和输入句柄；当前用户Known Folder解析、合成秘密的DPAPI往返/entropy隔离及原生输出释放。 | 操作系统边界；凭据测试不读取真实凭据，不把这些测试计为游戏验证。 |
 
 Data新增业务见[navigation_business_tests.rs](crates/lycheedev-data/src/agent_session/navigation_business_tests.rs)：经Session执行并核自动CAP的完整法术闭包/光环/召唤、遭遇树、生物显示与资源、浮点字段；用真正partial表与完整空表区分unavailable和not_found。旧SQL前端测试的有效数值断言迁到[typed plan](crates/lycheedev-data/src/engine/plan/tests.rs)及[值边界](crates/lycheedev-data/src/engine/values.rs)，覆盖精确SUM/AVG、负零、除零、分组、双分区状态合并、Decimal schema、HashJoin和COUNT，不保留仅SQL消费的planner胶水或引擎选型对照。
 

@@ -1,5 +1,8 @@
 use crate::Result;
+pub mod bound_memory;
+pub mod elevation;
 mod lifetime;
+pub mod metadata;
 pub use lifetime::{ProcessLifetime, observe_lifetime};
 mod runtime_module;
 pub use runtime_module::{

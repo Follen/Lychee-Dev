@@ -8,7 +8,7 @@ pub struct Definition {
     pub mutates: bool,
     /// Possible game interaction, including any option required to send input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effects: Option<GameEffects>,
+    pub effects: Option<CommandEffects>,
     pub arguments: Vec<String>,
     pub flags: Vec<Flag>,
     /// Flags that are always required for this command.
@@ -41,11 +41,25 @@ pub struct Definition {
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GameEffects {
+pub struct CommandEffects {
     pub game_process: bool,
     pub game_input: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub game_input_when: BTreeMap<String, bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutates_workspace: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_service: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_read: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_write: Option<bool>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub remote_write_when: BTreeMap<String, bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_authentication: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_store_write: Option<bool>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(transparent)]
@@ -61,15 +75,30 @@ impl Flag {
         match self.name() {
             "--allow-partial" | "--cdn" | "--data" | "--data-derived" | "--dry-run" | "--fix"
             | "--hard-reset" | "--flow" | "--fresh" | "--include-removed" | "--latest"
-            | "--offline" | "--overwrite" | "--plan" | "--remote"
-            | "--replace" | "--resume" | "--scan" | "--semantic" | "--session-reuse"
-            | "--static-only" | "--uncommitted" => false,
+            | "--offline" | "--overwrite" | "--plan" | "--remote" | "--replace" | "--resume"
+            | "--scan" | "--semantic" | "--session-reuse" | "--static-only" | "--uncommitted"
+            | "--paid" | "--free" | "--replied" | "--unreplied" | "--link" => false,
             "--after-index"
+            | "--author-id"
             | "--budget-seconds"
             | "--build"
             | "--cache-max-bytes"
             | "--channels"
             | "--character"
+            | "--client"
+            | "--directories"
+            | "--project-ids"
+            | "--keys"
+            | "--server-type"
+            | "--page-size"
+            | "--share-type"
+            | "--order-by"
+            | "--mine"
+            | "--is-public"
+            | "--is-paid"
+            | "--tags"
+            | "--support-addon"
+            | "--import-id"
             | "--content-variant"
             | "--count"
             | "--cursor"
@@ -88,6 +117,24 @@ impl Flag {
             | "--home"
             | "--ids"
             | "--installation"
+            | "--input"
+            | "--id"
+            | "--backup-id"
+            | "--login-id"
+            | "--module-id"
+            | "--share-id"
+            | "--slug"
+            | "--strappid"
+            | "--game-version-id"
+            | "--game-type"
+            | "--game-dir"
+            | "--name-contains"
+            | "--name-equals"
+            | "--created-before"
+            | "--created-after"
+            | "--keyword"
+            | "--offset"
+            | "--size"
             | "--key-file"
             | "--limit"
             | "--line"
@@ -105,6 +152,7 @@ impl Flag {
             | "--mode"
             | "--name"
             | "--output"
+            | "--operation"
             | "--page"
             | "--path"
             | "--pid"
@@ -112,11 +160,16 @@ impl Flag {
             | "--probe"
             | "--product"
             | "--project"
+            | "--project-id"
             | "--push"
             | "--query"
             | "--raidbots"
             | "--realm"
             | "--record"
+            | "--recover-sn"
+            | "--recover-backup-id"
+            | "--recover-file-id"
+            | "--recover-key"
             | "--ref"
             | "--region"
             | "--region-id"
@@ -126,6 +179,7 @@ impl Flag {
             | "--search"
             | "--session"
             | "--snapshot"
+            | "--sn"
             | "--source"
             | "--status"
             | "--symbol"

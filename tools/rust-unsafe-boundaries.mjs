@@ -5,7 +5,7 @@ import {lstatSync, readFileSync, readdirSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const SAFE_CRATES = ['cli', 'core', 'data', 'delivery', 'emmy-adapter', 'binding-contracts', 'live', 'source'];
+const SAFE_CRATES = ['cli', 'core', 'data', 'delivery', 'emmy-adapter', 'binding-contracts', 'live', 'source', 'publish'];
 const WINDOWS_FIXTURES = new Set([
   'crates/lycheedev-cli/tests/support/data_agent_cpu.rs',
   'crates/lycheedev-source/tests/native_quota_peer.rs',

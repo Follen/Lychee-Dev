@@ -4,9 +4,16 @@
 
 这里只保留未完成事项；完成项移出，当前验证事实见handover。新增缺口先核当前正式路径和既有能力，再确定实现与验证范围。
 
+## 原生作者发布的剩余业务
+
+当前基线、实施顺序、删除和保留范围统一见 [FUPLOADER.md](FUPLOADER.md)。固定原业务 204 项、官方 NewBee 38 项及恢复入口 2 项均已接入；当前 312 条命令及 93 份真实输入定义。DD、小黑盒、ModUs 完整业务的离线回归已通过。
+
+- [ ] **PUBLISH-PLATFORM｜真实环境验收。** 实际厂商 SDK、账号登录和各平台真实发布/读回未执行；离线合成 SDK、回环协议及发布包验证分别记录。按明确账号、目标和发布内容开展实际业务验收；本轮不读取用户账号、不提交真实平台写入，Live 仍留待用户安排。
+- [ ] **PUBLISH-DELIVERY｜完整交付验证。** 新 Publish 尚未完成整批 CI、Release 和正式包验收。当前离线回归与真实 SDK/账号/平台验收分别记录，复用原产物；Live 由用户安排。
+
 ## 1. 工作区恢复与材料保留
 
-- [ ] **CLEAN-07｜未完成恢复与日志差异。** 已累计清理51份闲置工作树，仅保留main和当前Rust-refactor；另删除58个已结束的可重建scratch、11份退役程序副本及ModuleAnalysisCache。当前目录仍保留10个active/interrupted且回收未确认的owner与1个封存日志校验异常目录，待按原身份和证据核实。三份已移除旧树中的6个未收尾owner及原prepared fence/lease等资料集中保留在`.tmp/worktree-rename/recovery/`，状态未改写。15个evidence输入、2个被当前验收引用的目录、当前CI包、build-16、Lua、活动项目/CAP及固定输入继续保留。
+- [ ] **CLEAN-07｜未完成恢复与证据缺失。** 当前仅保留 main 和 Rust-refactor 工作树；10 个 active/interrupted 且回收未确认的 owner 仍待核实。三份旧树中的 6 个未收尾 owner 及原 prepared fence/lease 保留在 `.tmp/worktree-rename/recovery/`，状态未改写。此次清理误删了旧清单中两处包验收临时安装目录及一处封存日志校验异常目录，当前工作区未找到原副本，具体 ID 见 handover；日志异常未解决。15 个 evidence 输入、当前 CI 包及直接引用的验收报告、build-16、Lua、活动项目/CAP 和固定输入仍保留。
 
 ## 2. 当前路径测试与交付
 

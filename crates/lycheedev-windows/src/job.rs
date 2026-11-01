@@ -66,17 +66,26 @@ impl BrokerJob {
         if !(1 << 20..=4usize << 30).contains(&max_commit_bytes) {
             return Err("job.commit_budget_invalid".into());
         }
+        Self::own_current(Some(max_commit_bytes))
+    }
+    /// Own descendants without adding a new memory ceiling to inherited limits.
+    pub fn own_current_process_inherited() -> crate::Result<Self> {
+        Self::own_current(None)
+    }
+    fn own_current(max_commit_bytes: Option<usize>) -> crate::Result<Self> {
         unsafe {
             let handle = CreateJobObjectW(None, None).map_err(|e| e.to_string())?;
             let mut guard = Self {
                 handle,
-                limit: max_commit_bytes,
+                limit: max_commit_bytes.unwrap_or(0),
                 armed: false,
             };
             let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags =
-                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_JOB_MEMORY;
-            info.JobMemoryLimit = max_commit_bytes;
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if let Some(limit) = max_commit_bytes {
+                info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+                info.JobMemoryLimit = limit;
+            }
             let started = (|| -> crate::Result<()> {
                 SetInformationJobObject(
                     handle,
@@ -116,7 +125,11 @@ impl BrokerJob {
         }
         unsafe {
             let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_JOB_MEMORY;
+            info.BasicLimitInformation.LimitFlags = if self.limit == 0 {
+                JOB_OBJECT_LIMIT(0)
+            } else {
+                JOB_OBJECT_LIMIT_JOB_MEMORY
+            };
             info.JobMemoryLimit = self.limit;
             SetInformationJobObject(
                 self.handle,
