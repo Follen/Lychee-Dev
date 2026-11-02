@@ -14,12 +14,14 @@ an empty list does not mean Forever is unsupported. `target available --region
 rows and error separately; a successful listing can contain a failed product.
 `totalRows` counts matching verified rows before the output bound; `truncated`
 means the displayed list is incomplete. A reused-slot product/build mismatch
-requires updating verified product metadata, not treating another beta as Forever.
+is an installation/CLI identity issue; preserve the requested product and metadata.
 Use region/locale from the request or established project context, not the language
-of the conversation. Use `forever-asia-beta` or `forever-cn-beta` for their separate
-publication endpoints; legacy `forever` retains the Asia endpoint remotely and
-is ambiguous locally when both clients exist. Do not substitute launcher keys
-for product names. Resolve a matching target
+of the conversation. [Forever / 无限服](../SKILL.md#forever-product-vocabulary)
+means formal `forever`, whose remote product and installation flavor are `wowf`.
+Verify that the installed CLI supports this mapping before resolution; an older
+`forever` alias routed to a beta endpoint is a different target. Preserve historical
+pins and resolve a separate formal target. Do not substitute launcher keys
+for CLI product names. Resolve a matching target
 when no fixed data pin exists. Ask only for identity choices still ambiguous.
 
 Prepare a local target from a game root or selected client directory. When the

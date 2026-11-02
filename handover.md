@@ -1,4 +1,19 @@
-更新日期：2026-10-30，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
+更新日期：2026-11-02，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
+
+## 当前整改：Skill Forever 产品词汇
+
+- 用户要求核对隔壁Rust对无限服/Forever的定义并整改Skill。沿用main，主代理修改`skills/lycheedev/SKILL.md`与Data调查、Data目标、Source准备三个reference。用户随后明确要求将main现有改动提交，包含本节文案与STARTUP-ACTOR-WAIT。
+- 对照Rust当前DESIGN与Skill，统一无限服/国服无限服为正式`forever`，官方产品/flavor为`wowf`、目录`_forever_`、程序`Wow.exe`、版本系列`1.60.1.*`、Interface`16001`。移除新调查选择两个Beta及旧亚洲端点的引导，保留历史PIN/CAP/恢复身份；明确当前CLI若仍仅映射Beta，报告能力缺口而不换目标。
+- Skill格式、83命令/228引用合同、生成命令表一致性与77个相对链接检查通过。与启动修复一同纳入本次本地提交；未推送、发布或更新本机受管Skill，Rust工作树未修改。
+- 用户已暂停整改计划，要求提交后等待新指令。Data/Source两项只读子Agent审计已停止；Cobra、CLI自解释、Skill精简、Fuploader整合与正式Forever全链接入均未开始实现。生成命令表继续忠实反映现有CLI。
+
+## 当前修复：STARTUP-ACTOR-WAIT
+
+- 用户报告刚登录显示`Lychee Dev: actor_unavailable`并要求修复。沿用main，由主代理修改Runtime启动状态分类、相关Lua回归及文档；用户现已授权提交main当前改动，未要求推送或发布。
+- 已用实际Runtime与Platform复现：ADDON_LOADED时角色信息为空会打印错误，PLAYER_LOGIN后启动成功。只读doctor确认当时两个Retail窗口均已ready、3.2.7安装正常、无连接占用；未发送输入或创建连接。
+- 已实现5行启动分类调整：仅将ADDON_LOADED且尚未登录时的actor_unavailable记录为loading、不打印错误，继续已有PLAYER_LOGIN重试；无新增事件、定时器或重试框架。登录后仍缺少角色信息和其他启动失败继续报告。
+- 回归先在原代码上复现误报，修复后覆盖登录恢复、登录后持续失败、已登录加载及其他错误不被隐藏。build/vet、版本检查、Lua5.1必需的tests/addon（六类客户端fixture）和tests/protocol整包通过。提交前补跑Lua5.1必需完整Go套件：`go test -p=2 -parallel=4 -count=1 -timeout=0 ./...`退出0，32个测试包全部通过；本轮未发布、安装或新增实机验收。
+- 实现、文档及验证已完成，纳入本次本地提交；没有本轮临时文件或活动连接。首次登录实机验收保留在todo.md，提交后等待用户新指令。
 
 ## 当前交付：3.2.7 与 RECEIVER-BINDING-SET
 

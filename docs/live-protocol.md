@@ -99,6 +99,8 @@ submitted/uncertain继续读取原回执，不因键盘活动而暂停读取或�
 最小启动核先于工作台和业务模块加载，拥有命名空间、启动事件、正式绑定和独立诊断。
 后续模块初始化失败时，BootstrapMailbox 仍可读取，手动重载键仍可用。
 启动核不执行探针，不将启动成功视为业务输入许可。注册结束后不保留空闲计时器或 OnUpdate。
+ADDON_LOADED阶段尚未登录时，actor_unavailable保持loading且不打印错误，沿用PLAYER_LOGIN
+重试；登录后仍缺少角色信息或其他启动失败按原有错误路径报告。
 
 BootstrapMailbox 的 `bootstrap` 字段使用二进制记录 kind=6，包含 schema、bootstrap
 标识、release、phase（loading/ready/failed）、reason 与绑定注册快照。

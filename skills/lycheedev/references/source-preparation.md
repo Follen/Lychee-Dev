@@ -9,7 +9,7 @@ not list tags; missing version text there does not mean the release is absent.
 Read the repository's own track map: do not apply a game product to every addon
 repository. A source track is not proof of installation compatibility.
 
-For `wow-ui-source`, the seven delivery products map to these Git branches:
+For `wow-ui-source`, the current product vocabulary maps to these Git branches:
 
 | Product | Branch |
 | --- | --- |
@@ -17,14 +17,15 @@ For `wow-ui-source`, the seven delivery products map to these Git branches:
 | `classic` | `classic` |
 | `classic-era` | `classic_era` |
 | `titan` | `classic_titan` |
-| `forever-asia-beta`, `forever-cn-beta` | `forever` |
+| `forever` (Forever / 无限服) | `forever` |
 | `anniversary` | `classic_anniversary` |
 
-The beta folder `_classic_beta_` does not imply the old Git branch `classic_beta`.
-The legacy family-wide `forever` source pin can accompany either beta's Data
-pin; regional source pins retain their exact delivery identity. Data build
-configurations and client runtime verification remain separate even when the
-UI source commit is shared.
+The `forever` Source branch is shared with historical beta evidence; its name
+does not establish formal `wowf` Data or runtime identity. Keep historical pins
+unchanged and select the exact source revision for the requested build. Follow
+the [formal product identity](../SKILL.md#forever-product-vocabulary) for new
+Data or Live targets; a shared UI source commit does not make builds or delivery
+configurations interchangeable.
 
 Initialize a new Toolkit home with `lycheedev init` before syncing; an empty
 directory alone is not a workspace. Reuse an initialized `--home` when available.

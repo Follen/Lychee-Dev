@@ -49,6 +49,22 @@ edited skill does not mean the installed CLI, loaded addon or agent context
 was updated. Do not silently upgrade, invent flags or use retired wowdoc/wowdata/
 Python entrypoints to make a documented example work.
 
+## Forever product vocabulary
+
+`Forever`, `无限服` and `国服无限服` name the formal product `forever`.
+Its Source family is `forever`; its official remote product and installation
+flavor are `wowf`, with client folder `_forever_` and executable `Wow.exe`.
+The version series is `1.60.1.*`; TOC Interface `16001` is a separate identifier.
+Read the full build from the selected source or client metadata.
+
+`forever-asia-beta` and `forever-cn-beta` are retired targets. Keep historical
+PINs, CAPs and recovery records under their original identities; a shared Source
+family or an old pin named `forever` does not establish formal `wowf` data.
+For new Data or Live work, verify that the installed CLI maps the formal product
+to `wowf`. A CLI exposing only the old beta mappings has a capability gap for
+that target: preserve the requested product and report the gap, without routing
+to a beta endpoint or silently upgrading. Region and locale remain separate choices.
+
 ## Keep the target and scope fixed
 
 Reuse explicit inputs or a matching project pin. An explicit `--snapshot` wins;

@@ -27,10 +27,10 @@ remaining identity choice. Do not overwrite the project lock for an investigatio
 
 No matching pin? Read [data-targets.md](data-targets.md). `target list` lists saved
 names, not supported products. Use the exact product from `target available` or
-command help. Select `forever-asia-beta` and `forever-cn-beta` separately; equal
-build numbers do not make their configurations interchangeable. The legacy
-`forever` name is a family selector locally and retains the Asia publishing
-endpoint remotely. Folder names and conversation language do not establish identity.
+command help, checking that its mapping matches the requested product.
+For Forever / 无限服, follow the [formal product identity](../SKILL.md#forever-product-vocabulary):
+`forever` uses `wowf`; the retired beta targets do not answer a new formal-product
+request. Folder names and conversation language do not establish identity.
 Choose the requested local installation or CDN source, then retain that source
 and pin throughout the query. Different delivery configurations require separate,
 labeled pins; they are not interchangeable evidence.

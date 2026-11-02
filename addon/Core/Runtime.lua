@@ -45,6 +45,11 @@ loader:SetScript("OnEvent",function(self,event,name)
     else ok,started,reason=true,nil,"startup_module_unavailable" end
     if not ok then started,reason=nil,"startup_exception" end
     if started then phase,failure="ready",""
+    elseif reason=="actor_unavailable" and event=="ADDON_LOADED" and IsLoggedIn()==false then
+        -- Character identity is not available yet during normal addon loading.
+        -- Keep the existing PLAYER_LOGIN retry without reporting an error.
+        phase,failure="loading",reason
+        ns.Startup.ready,ns.Startup.reason=false,reason
     else
         phase,failure="failed",reason or "startup_failed"
         ns.Startup.ready,ns.Startup.reason=false,failure
