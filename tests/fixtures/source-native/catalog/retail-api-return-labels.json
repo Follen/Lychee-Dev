@@ -1,0 +1,30 @@
+{
+  "schema": "lycheedev.retail-api-return-label-fixture.v1",
+  "repository": "wow-ui-source",
+  "commit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+  "archiveSHA256": "d4d6e468636d6205d94b912fd96ac469b66ae606e6422d7e3849afbff7a376df",
+  "ciFailure": {
+    "commit": "e38851d",
+    "run": 38650383333,
+    "job": 116148400586,
+    "owner": "8fb3107b-9c03-4151-be43-1061a32a04b5",
+    "materialSHA256": "da260620baad9ba0a3fcb62a2bc4fa3b204fc773b4f468505e158b138c97d63f",
+    "definitionsSHA256": "d64e1ac44c331632213377251cd78cb26ff1c72113dd8a273df4e2eb51c8372f",
+    "generatedLine": 20911,
+    "generatedText": "---@return number in"
+  },
+  "documents": [
+    {
+      "path": "Interface/AddOns/Blizzard_APIDocumentationGenerated/ConnectionDocumentation.lua",
+      "bytes": 1854,
+      "sha256": "cbb83867e5463171b5b6649a8da7ed415b6b5af12647b751656fd93e13ea0436",
+      "text": "local Connection =\n{\n\tName = \"ConnectionScript\",\n\tType = \"System\",\n\tEnvironment = \"All\",\n\n\tFunctions =\n\t{\n\t\t{\n\t\t\tName = \"CancelLogout\",\n\t\t\tType = \"Function\",\n\t\t},\n\t\t{\n\t\t\tName = \"ForceLogout\",\n\t\t\tType = \"Function\",\n\t\t},\n\t\t{\n\t\t\tName = \"ForceQuit\",\n\t\t\tType = \"Function\",\n\t\t},\n\t\t{\n\t\t\tName = \"GetNativeRealmID\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"nativeRealmID\", Type = \"number\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"GetNetIpTypes\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"ipTypes\", Type = \"ConnectionIptype\", Nilable = false, StrideIndex = 1 },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"GetNetStats\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"in\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"out\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"latencyList\", Type = \"number\", Nilable = false, StrideIndex = 1 },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"GetProtocolTypes\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"protocolTypes\", Type = \"ConnectionProtocol\", Nilable = false, StrideIndex = 1 },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"GetRealmID\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"realmID\", Type = \"number\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"GetRealmName\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"realmName\", Type = \"cstring\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"IsOnTournamentRealm\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"result\", Type = \"bool\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"Logout\",\n\t\t\tType = \"Function\",\n\t\t},\n\t\t{\n\t\t\tName = \"Quit\",\n\t\t\tType = \"Function\",\n\t\t},\n\t\t{\n\t\t\tName = \"SelectedRealmName\",\n\t\t\tType = \"Function\",\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"selectedRealmName\", Type = \"cstring\", Nilable = false },\n\t\t\t},\n\t\t},\n\t},\n\n\tEvents =\n\t{\n\t},\n\n\tTables =\n\t{\n\t},\n\tPredicates =\n\t{\n\t},\n};\n\nAPIDocumentation:AddDocumentationTable(Connection);"
+    },
+    {
+      "path": "Interface/AddOns/Blizzard_APIDocumentationGenerated/UITimerDocumentation.lua",
+      "bytes": 1454,
+      "sha256": "72b5d79e91b3d8185cff68e5a6cd91498cb3aecd8ea6809a84e4d0edc805bc4c",
+      "text": "local UITimer =\n{\n\tName = \"UITimer\",\n\tType = \"System\",\n\tNamespace = \"C_Timer\",\n\tEnvironment = \"All\",\n\n\tFunctions =\n\t{\n\t\t{\n\t\t\tName = \"After\",\n\t\t\tType = \"Function\",\n\t\t\tSecretArguments = \"AllowedWhenUntainted\",\n\n\t\t\tArguments =\n\t\t\t{\n\t\t\t\t{ Name = \"seconds\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"callback\", Type = \"TimerCallback\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"NewTicker\",\n\t\t\tType = \"Function\",\n\t\t\tSecretArguments = \"AllowedWhenUntainted\",\n\n\t\t\tArguments =\n\t\t\t{\n\t\t\t\t{ Name = \"seconds\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"callback\", Type = \"TickerCallback\", Nilable = false },\n\t\t\t\t{ Name = \"iterations\", Type = \"number\", Nilable = true },\n\t\t\t},\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"cbObject\", Type = \"TickerCallback\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"NewTimer\",\n\t\t\tType = \"Function\",\n\t\t\tSecretArguments = \"AllowedWhenUntainted\",\n\n\t\t\tArguments =\n\t\t\t{\n\t\t\t\t{ Name = \"seconds\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"callback\", Type = \"TickerCallback\", Nilable = false },\n\t\t\t},\n\n\t\t\tReturns =\n\t\t\t{\n\t\t\t\t{ Name = \"cbObject\", Type = \"TickerCallback\", Nilable = false },\n\t\t\t},\n\t\t},\n\t},\n\n\tEvents =\n\t{\n\t},\n\n\tTables =\n\t{\n\t\t{\n\t\t\tName = \"TickerCallback\",\n\t\t\tType = \"CallbackType\",\n\n\t\t\tArguments =\n\t\t\t{\n\t\t\t\t{ Name = \"cb\", Type = \"TimerCallback\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"TimerCallback\",\n\t\t\tType = \"CallbackType\",\n\t\t},\n\t},\n\tPredicates =\n\t{\n\t},\n};\n\nAPIDocumentation:AddDocumentationTable(UITimer);"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "schema": "lycheedev.source-full-corpus-oracle.v1",
+  "repository": "wow-ui-source",
+  "url": "https://github.com/Gethe/wow-ui-source.git",
+  "product": "retail",
+  "branchLabel": "live",
+  "commit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+  "archiveSHA256": "d4d6e468636d6205d94b912fd96ac469b66ae606e6422d7e3849afbff7a376df",
+  "allFiles": 4049,
+  "allBytes": 32665129,
+  "allPathSHA256SizeDigest": "0d494848efa73819814f7e3bfdae2d547ae60761160614ddc05102377b404406",
+  "documents": 4036,
+  "documentBytes": 32269051,
+  "documentPathSHA256SizeDigest": "88d68f2c4bdb352245cbcb53cd41ec906b294e2ea599ee6374e00be169be7928",
+  "counts": {
+    ".lua": 2551,
+    ".xml": 1091,
+    ".toc": 394
+  },
+  "anchors": [
+    {
+      "symbol": "GetActionButtonForID",
+      "path": "Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua",
+      "line": 97,
+      "count": 12,
+      "text": "function GetActionButtonForID(id)\n\tif OverrideActionBar and OverrideActionBar:IsShown() then\n\t\tif id > NUM_OVERRIDE_BUTTONS then\n\t\t\treturn;\n\t\tend\n\n\t\treturn _G[\"OverrideActionBarButton\"..id];\n\tend\n\n\treturn _G[\"ActionButton\"..id];\nend\n\n",
+      "totalLines": 1960,
+      "sha256": "54fb5625a5e8aa343cbbc0be805b23e2b3b329011e792448e6b732a4bebd8cba",
+      "declarationLine": "function GetActionButtonForID(id)"
+    },
+    {
+      "symbol": "CooldownFrame_Set",
+      "path": "Interface/AddOns/Blizzard_FrameXMLUtil/Cooldown.lua",
+      "line": 2,
+      "count": 12,
+      "text": "function CooldownFrame_Set(self, start, duration, enable, forceShowDrawEdge, modRate)\n\tif enable and enable ~= 0 and start > 0 and duration > 0 then\n\t\tself:SetDrawEdge(not not forceShowDrawEdge);\n\t\tself:SetCooldown(start, duration, modRate);\n\telse\n\t\tCooldownFrame_Clear(self);\n\tend\nend\n\nfunction CooldownFrame_Clear(self)\n\tself:Clear();\nend\n",
+      "totalLines": 19,
+      "sha256": "54cf16c0f847385e1965f4ba64363dcf76e7413ba015e1c7b79acf859918d538",
+      "declarationLine": "function CooldownFrame_Set(self, start, duration, enable, forceShowDrawEdge, modRate)"
+    },
+    {
+      "symbol": "C_Timer.After",
+      "path": "Interface/AddOns/Blizzard_APIDocumentationGenerated/UITimerDocumentation.lua",
+      "line": 11,
+      "queryLine": 10,
+      "queryCoordinateBasis": "Fixed Go 3.2.0 generated API declarations begin at the table constructor; Name is the next line. See internal/codebase/analysis_test.go TestAnalyzeDocumentGeneratedAPIASTMetadata at commit 3057a9666ab078270b63c7f06de748069b0d1f4b.",
+      "count": 12,
+      "text": "\t\t\tName = \"After\",\n\t\t\tType = \"Function\",\n\t\t\tSecretArguments = \"AllowedWhenUntainted\",\n\n\t\t\tArguments =\n\t\t\t{\n\t\t\t\t{ Name = \"seconds\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"callback\", Type = \"TimerCallback\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n\t\t\tName = \"NewTicker\",\n",
+      "totalLines": 81,
+      "sha256": "72b5d79e91b3d8185cff68e5a6cd91498cb3aecd8ea6809a84e4d0edc805bc4c",
+      "declarationLine": "\t\t\tName = \"After\","
+    }
+  ],
+  "staticCall": {
+    "source": "ActionButtonDown",
+    "target": "GetActionButtonForID",
+    "kind": "call",
+    "path": "Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua",
+    "line": 141,
+    "text": "\tlocal button = GetActionButtonForID(id);",
+    "callerLine": 136,
+    "callerText": "function ActionButtonDown(id)"
+  },
+  "chineseQuery": {
+    "text": "冷却",
+    "expectedMatches": 0,
+    "basis": "No Han characters occur in any Lua/XML/TOC file of this exact archive. Literal UTF-8 no-result behavior only; not natural-language retrieval."
+  }
+}

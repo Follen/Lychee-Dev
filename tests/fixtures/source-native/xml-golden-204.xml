@@ -1,0 +1,3 @@
+﻿<Ui>
+<Frame name="Probe" mixin="B"><Scripts><OnEvent>local x=&quot;🙂&quot;;&#10;self:Run(event, ...)
+<![CDATA[self:Run("x")]]></OnEvent><PreClick>self:Run(button)</PreClick></Scripts></Frame></Ui>

@@ -1,0 +1,140 @@
+--- a/vendor/schannel-0.1.29/src/tls_stream.rs
++++ b/vendor/schannel-0.1.29/src/tls_stream.rs
+@@ -25,6 +25,7 @@
+ /// A builder type for `TlsStream`s.
+ pub struct Builder {
+     domain: Option<Vec<u16>>,
++    verification_name: Option<Vec<u16>>,
+     use_sni: bool,
+     accept_invalid_hostnames: bool,
+     verify_callback: Option<Arc<dyn Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
+@@ -36,6 +37,7 @@
+     fn default() -> Builder {
+         Builder {
+             domain: None,
++            verification_name: None,
+             use_sni: true,
+             accept_invalid_hostnames: false,
+             verify_callback: None,
+@@ -54,9 +56,19 @@
+     /// Sets the domain associated with connections created with this `Builder`.
+     ///
+     /// The domain will be used for Server Name Indication as well as
+-    /// certificate validation.
++    /// certificate validation, unless `verification_name` is set.
+     pub fn domain(&mut self, domain: &str) -> &mut Builder {
+         self.domain = Some(domain.encode_utf16().chain(Some(0)).collect());
++        self
++    }
++
++    /// Overrides only the name passed to the existing certificate policy.
++    ///
++    /// The default is the `domain` name. This does not change SNI, trust roots,
++    /// chain validation, hostname-check policy, or verification callbacks.
++    /// The override also applies when the stream validates renegotiation.
++    pub fn verification_name(&mut self, name: &str) -> &mut Builder {
++        self.verification_name = Some(name.encode_utf16().chain(Some(0)).collect());
+         self
+     }
+ 
+@@ -180,6 +192,7 @@
+             context: ctxt,
+             cert_store: self.cert_store.clone(),
+             domain: self.domain.clone(),
++            verification_name: self.verification_name.clone(),
+             use_sni: self.use_sni,
+             accept_invalid_hostnames: self.accept_invalid_hostnames,
+             verify_callback: self.verify_callback.clone(),
+@@ -224,6 +237,7 @@
+     context: SecurityContext,
+     cert_store: Option<CertStore>,
+     domain: Option<Vec<u16>>,
++    verification_name: Option<Vec<u16>>,
+     use_sni: bool,
+     accept_invalid_hostnames: bool,
+     verify_callback: Option<Arc<dyn Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
+@@ -729,8 +743,8 @@
+             let mut extra_para: Cryptography::HTTPSPolicyCallbackData = mem::zeroed();
+             extra_para.Anonymous.cbSize = mem::size_of_val(&extra_para) as u32;
+             extra_para.dwAuthType = Cryptography::AUTHTYPE_SERVER;
+-            match self.domain {
+-                Some(ref mut domain) if !self.accept_invalid_hostnames => {
++            match self.verification_name.as_mut().or(self.domain.as_mut()) {
++                Some(domain) if !self.accept_invalid_hostnames => {
+                     extra_para.pwszServerName = domain.as_mut_ptr();
+                 }
+                 _ => {}
+--- a/vendor/native-tls-0.2.18/src/imp/schannel.rs
++++ b/vendor/native-tls-0.2.18/src/imp/schannel.rs
+@@ -248,6 +248,7 @@
+     min_protocol: Option<crate::Protocol>,
+     max_protocol: Option<crate::Protocol>,
+     use_sni: bool,
++    verification_name: Option<String>,
+     accept_invalid_hostnames: bool,
+     accept_invalid_certs: bool,
+     disable_built_in_roots: bool,
+@@ -269,6 +270,7 @@
+             min_protocol: builder.min_protocol,
+             max_protocol: builder.max_protocol,
+             use_sni: builder.use_sni,
++            verification_name: builder.verification_name.clone(),
+             accept_invalid_hostnames: builder.accept_invalid_hostnames,
+             accept_invalid_certs: builder.accept_invalid_certs,
+             disable_built_in_roots: builder.disable_built_in_roots,
+@@ -293,6 +295,9 @@
+             .domain(domain)
+             .use_sni(self.use_sni)
+             .accept_invalid_hostnames(self.accept_invalid_hostnames);
++        if let Some(name) = &self.verification_name {
++            builder.verification_name(name);
++        }
+         if self.accept_invalid_certs {
+             builder.verify_callback(|_| Ok(()));
+         } else if self.disable_built_in_roots {
+--- a/vendor/native-tls-0.2.18/src/lib.rs
++++ b/vendor/native-tls-0.2.18/src/lib.rs
+@@ -350,12 +350,25 @@
+     accept_invalid_certs: bool,
+     accept_invalid_hostnames: bool,
+     use_sni: bool,
++    #[cfg(target_os = "windows")]
++    verification_name: Option<String>,
+     disable_built_in_roots: bool,
+     #[cfg(feature = "alpn")]
+     alpn: Vec<Box<str>>,
+ }
+ 
+ impl TlsConnectorBuilder {
++    /// Sets a distinct Windows certificate-policy name without changing SNI.
++    ///
++    /// By default, `connect` uses its domain for both names. This overrides only
++    /// the name supplied to Schannel's existing certificate verification policy;
++    /// roots, chain validation and invalid-hostname settings remain unchanged.
++    #[cfg(target_os = "windows")]
++    pub fn verification_name(&mut self, name: &str) -> &mut TlsConnectorBuilder {
++        self.verification_name = Some(name.to_owned());
++        self
++    }
++
+     /// Sets the identity to be used for client certificate authentication.
+     pub fn identity(&mut self, identity: Identity) -> &mut TlsConnectorBuilder {
+         self.identity = Some(identity);
+@@ -491,6 +504,8 @@
+             max_protocol: None,
+             root_certificates: vec![],
+             use_sni: true,
++            #[cfg(target_os = "windows")]
++            verification_name: None,
+             accept_invalid_certs: false,
+             accept_invalid_hostnames: false,
+             disable_built_in_roots: false,
+@@ -502,7 +517,7 @@
+     /// Initiates a TLS handshake.
+     ///
+     /// The provided domain will be used for both SNI and certificate hostname
+-    /// validation.
++    /// validation, unless the Windows builder has set `verification_name`.
+     ///
+     /// If the socket is nonblocking and a `WouldBlock` error is returned during
+     /// the handshake, a `HandshakeError::WouldBlock` error will be returned

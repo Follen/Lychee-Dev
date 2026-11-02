@@ -1,137 +1,425 @@
-// Structural pin for the release pipelines (regression ARC/CI): the job graph,
-// needs edges, hosted-runner scope and platform scope of the workflow
-// files are asserted literally. A YAML/Actions mistake that changes the shape
-// fails here before any runner burns minutes. Line-based on purpose: these
-// files are hand-maintained and every load-bearing line is a single constant.
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+// CI graph and artifact contracts; these checks do not run native builds.
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TEST_SHARDS } from './ci-test-programs.mjs';
 
-import { resolve } from 'node:path';
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-const release = readFileSync(join(repository, '.github/workflows/toolkit-release.yml'), 'utf8');
-const ci = readFileSync(join(repository, '.github/workflows/toolkit-ci.yml'), 'utf8');
-
-test('version-bound next publication checks latest before and after without moving it', () => {
-  const before=release.indexOf('--phase before --view channel-before.json');
-  const publish=release.indexOf('npm publish "./out/lycheedev-$PUBLISH_VERSION.tgz"');
-  const after=release.indexOf('--phase after --view channel-after.json');
-  assert.ok(before>0&&before<publish&&publish<after);
-  assert.match(release,/npm view lycheedev dist-tags --json > channel-before\.json/);
-  assert.match(release,/npm view lycheedev dist-tags --json > channel-after\.json/);
-  assert.doesNotMatch(release,/npm dist-tag (?:add|rm)/);
-  assert.match(release,/if \[ "\$PUBLISH_DIST_TAG" = next \]; then latest_args\+=\(--latest=false\); fi/);
-  assert.match(release,/gh release create "v\$PUBLISH_VERSION" "\$\{latest_args\[@\]\}"/);
-});
-
-function jobsOf(text) {
-  const jobs = {};
-  let current = null;
-  let section = '';
-  for (const line of text.split('\n')) {
-    const sectionKey = line.match(/^([a-zA-Z]+):$/);
-    if (sectionKey) { section = sectionKey[1]; current = null; continue; }
-    const job = section === 'jobs' && line.match(/^  ([a-zA-Z][a-zA-Z0-9_-]*):$/);
-    if (job) { current = job[1]; jobs[current] = { steps: 0, usesJob: false }; continue; }
-    if (!current) continue;
-    if (line === '    steps:') jobs[current].steps += 1;
-    if (new RegExp(`^    uses: \\./\\.github/workflows/`).test(line)) jobs[current].usesJob = true;
+const directory = join(repository, '.github/workflows');
+const read = name => readFileSync(join(directory, name), 'utf8').replaceAll('\r\n', '\n');
+const ci = read('ci.yml'), release = read('release.yml'), workflows = [ci, release];
+const toolchain = JSON.parse(readFileSync(join(repository, 'release/tools/rust.json')));
+const clean = text => text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+function jobBodies(text) {
+  const section = text.slice(text.indexOf('\njobs:\n') + '\njobs:\n'.length), jobs = new Map();
+  for (const match of section.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:\n|$(?![\s\S]))/gm)) jobs.set(match[1], clean(match[2]));
+  assert(jobs.size, 'workflow must declare jobs'); return jobs;
+}
+const jobs = jobBodies(ci);
+const needs = body => (/^    needs:\s*\[([^\]]*)\]/m.exec(body)?.[1] ?? '').split(',').map(name => name.trim()).filter(Boolean);
+const steps = body => body.split(/^      - /m).slice(1);
+const commands = body => body.replace(/`\n\s*/g, ' ');
+function oneStep(body, pattern) {
+  const matches = steps(body).filter(step => pattern.test(step)); assert.equal(matches.length, 1, String(pattern)); return matches[0];
+}
+function action(body, kind, artifact) {
+  const escaped = artifact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return oneStep(body, new RegExp(`actions/${kind}-artifact@[\\s\\S]*?^          name: ${escaped}$`, 'm'));
+}
+function requireNeeds(job, dependencies) {
+  assert.deepEqual(needs(jobs.get(job)).sort(), [...dependencies].sort(), `${job} dependency graph`);
+}
+function directDependencies(map) {
+  for (const [name, body] of map) for (const [, dependency] of body.matchAll(/needs\.([\w-]+)\.(?:outputs|result)\b/g)) {
+    assert(needs(body).includes(dependency), `${name} reads ${dependency} without a direct needs dependency`);
   }
-  return jobs;
+}
+function verifiedBefore(body, manifest, required, command) {
+  const text = commands(body), verify = `ci-artifacts.mjs verify --manifest ${manifest} --require ${required}`;
+  assert(text.indexOf(verify) >= 0 && text.indexOf(verify) < text.indexOf(command), `${verify} must precede ${command}`);
+}
+function rustShards(body) {
+  const values = /^        shard:\s*\[([^\]]+)\]/m.exec(body)?.[1];
+  assert(values, 'Rust matrix must declare its named shard axis');
+  return values.split(',').map(value => value.trim().replace(/^(['"])(.*)\1$/, '$2'));
+}
+function workspacePackages() {
+  const manifest = readFileSync(join(repository, 'Cargo.toml'), 'utf8');
+  const members = /^members\s*=\s*\[([^\]]+)\]/m.exec(manifest)?.[1]; assert(members);
+  return [...members.matchAll(/"([^"]+)"/g)].map(([, path]) => {
+    const name = /^name\s*=\s*"([^"]+)"/m.exec(readFileSync(join(repository, path, 'Cargo.toml'), 'utf8'))?.[1];
+    assert(name, path); return name;
+  }).sort();
 }
 
-test('release pipeline job graph: identity -> ci/cgo -> assemble -> smoke -> seal -> gate -> publish', () => {
-  const jobs = jobsOf(release);
-  assert.deepEqual(Object.keys(jobs), [
-    'identity', 'ci', 'verify-cgo', 'assemble', 'platform-smoke',
-    'seal', 'release-gate', 'publish', 'release-complete',
-  ]);
-  for (const [name, job] of Object.entries(jobs)) {
-    if (name === 'ci') assert.ok(job.usesJob, 'ci must call the shared workflow');
-    else assert.ok(job.steps === 1, `job ${name} must have exactly one steps key, found ${job.steps}`);
-  }
-  assert.match(release, /  release-gate:\n[\s\S]*?needs: \[identity, ci, seal\]/);
-  assert.match(release, /  publish:\n[\s\S]*?needs: \[identity, release-gate\]/);
-  assert.match(release, /  seal:\n[\s\S]*?needs: \[identity, assemble, platform-smoke\]/);
-  assert.match(release, /  ci:\n\s+name:[^\n]+\n\s+needs: \[identity\]/);
-  assert.match(release, /  verify-cgo:\n\s+name:[^\n]+\n\s+needs: \[identity\]/);
-  assert.match(release.slice(0, release.indexOf('  ci:')), /node tools\/release.mjs verify-source-inputs/);
-});
+function checkPartition(groups, expected) {
+  const packages = Object.values(groups).flat();
+  assert.equal(new Set(packages).size, packages.length, 'a workspace package appears in multiple Rust shards');
+  assert.deepEqual([...packages].sort(), [...expected].sort(), 'Rust shards must cover every workspace package exactly once');
+}
 
-test('release has no interactive desktop job or desktop evidence gate', () => {
-  assert.equal(existsSync(join(repository, '.github/workflows/toolkit-desktop.yml')), false);
-  assert.doesNotMatch(release, /^  desktop:$/m);
-  assert.doesNotMatch(release, /self-hosted|desktop-evidence|verify-desktop-evidence/);
-});
-
-test('release publishes the sealed tarball via OIDC with no token fallback', () => {
-  assert.match(release, /npm publish "\.\/out\/lycheedev-\$PUBLISH_VERSION\.tgz" --access public --tag "\$PUBLISH_DIST_TAG"/);
-  const publishCode = release
-    .slice(release.indexOf('  publish:'), release.indexOf('  release-complete:'))
-    .split('\n')
-    .filter(line => !line.trim().startsWith('#'))
-    .join('\n');
-  assert.doesNotMatch(publishCode, /authToken|NODE_AUTH_TOKEN\s*[=:]|NPM_TOKEN\s*[=:]/);
-  assert.match(release, /environment: npm/);
-  assert.match(release, /id-token: write/);
-  assert.match(publishCode, /contents: write/);
-  assert.match(publishCode, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(publishCode, /for attempt in \$\(seq 1 60\)/);
-  assert.match(publishCode, /\[ "\$visible" = true \]/);
-});
-
-test('windows amd64 is the only shipped platform', () => {
-  for (const [name, text] of [['toolkit-release.yml', release], ['toolkit-ci.yml', ci]]) {
-    assert.doesNotMatch(text, /darwin|macos-|ubuntu-24\.04-arm|linux-arm64|linux-amd64/, `${name} references removed platforms`);
-  }
-  assert.match(release, /SMOKE_TARGET: windows-amd64/);
-  assert.doesNotMatch(release, /for target in windows-amd64 linux-amd64/);
-});
-
-test('manual dry-run writes release identity outside the checkout', () => {
-  assert.match(release, /fs\.writeFileSync\(require\('path'\)\.join\(process\.env\.RUNNER_TEMP, 'identity\.json'\)/);
-  assert.doesNotMatch(release, /fs\.writeFileSync\('identity\.json'/);
-});
-
-test('ci gate: required windows jobs aggregate strictly and stay callable', () => {
-  assert.match(ci, /workflow_call:/);
-  assert.deepEqual(Object.keys(jobsOf(ci)), ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race', 'ci-required']);
-  for (const job of ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race', 'ci-required']) {
-    assert.match(ci, new RegExp(`^  ${job}:$`, 'm'), `missing required job ${job}`);
-  }
-  assert.doesNotMatch(ci, /^  cross-platform-contract:$/m);
-  for (const job of ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race']) {
-    assert.match(ci, new RegExp(`^      - ${job}$`, 'm'), `ci-required must need ${job}`);
-  }
-  assert.doesNotMatch(ci, /      - cross-platform-contract/);
-});
-
-test('every windows job normalizes TMP before any test runs', () => {
-  for (const [name, text, skip] of [
-    ['toolkit-ci.yml', ci, ['ci-required']],
-    ['toolkit-release.yml', release, ['ci']],
-  ]) {
-    const jobs = jobsOf(text);
-    for (const job of Object.keys(jobs)) {
-      if ((skip ?? []).includes(job) || jobs[job].usesJob) continue;
-      const body = text.slice(text.indexOf(`  ${job}:\n`));
-      assert.match(body, /Normalize TMP to the long runner temp path/, `job ${job} in ${name} lacks TMP normalization`);
+test('only current workflows, immutable actions and read-only release permissions remain', () => {
+  assert.deepEqual(readdirSync(directory).sort(), ['ci.yml', 'release.yml']);
+  for (const text of workflows) {
+    for (const [, reference] of clean(text).matchAll(/\buses: (\S+)/g)) if (!reference.startsWith('./')) assert.match(reference, /@[a-f0-9]{40}$/);
+    assert.match(text, /contents: read/);
+    assert.doesNotMatch(clean(text), /npm publish|gh release|id-token: write|NODE_AUTH_TOKEN|NPM_TOKEN|setup-go|go-version|CGO_ENABLED|\bgo (?:build|test|vet|run|mod)\b|tests\/rust-parity/);
+    for (const body of jobBodies(text).values()) {
+      assert.doesNotMatch(body, /continue-on-error/);
+      if (body.includes('uses: ./.github/workflows/')) continue;
+      assert.match(body, /runs-on: windows-2025/);
+      assert.match(body, /TMP=\$RUNNER_TEMP/); assert.match(body, /TEMP=\$RUNNER_TEMP/);
     }
   }
 });
 
-test('PR CI prepares pinned integration inputs before its single measured suite and rejects missing passes', () => {
-  const contract = ci.slice(ci.indexOf('  windows-contract:\n'), ci.indexOf('  windows-process:\n'));
-  const prepare = contract.indexOf('node tools/ci-inputs.mjs prepare');
-  const suite = contract.indexOf("$command = @('test', '-json'");
-  const verify = contract.indexOf('node tools/ci-inputs.mjs verify --events $events');
-  assert.ok(prepare > 0 && prepare < suite && suite < verify);
-  assert.equal((contract.match(/-coverprofile=\$profile/g) ?? []).length, 1);
-  assert.match(contract, /\$coverageExit = \$LASTEXITCODE/);
-  assert.match(contract, /\$LASTEXITCODE -ne 0 -or \$coverageExit -ne 0 -or \$testExit -ne 0/);
-  assert.match(contract, /name: windows-integration-inputs/);
-  assert.match(contract, /required-integrations\.json/);
+test('PR triggers and documentation classification preserve the complete native path', () => {
+  assert.match(ci, /push:\n\s+branches: \[main\]/);
+  for (const event of ['pull_request', 'workflow_dispatch', 'workflow_call']) assert.match(ci, new RegExp(`^  ${event}:`, 'm'));
+  const body = jobs.get('static');
+  for (const command of ['ci-changes.mjs --github-output', 'ci-docs.mjs check', 'version.mjs --check', 'skill-contract.mjs', 'lua-tool-supply.mjs verify']) assert(body.includes(command));
+  assert.match(body, /native: \$\{\{ steps.changes.outputs.native \}\}/);
+  assert.doesNotMatch(body, /node tools\/(?:rust-build|luac)\.mjs|cargo (?:build|test|check)/);
+  for (const [name, body] of jobs) if (!['static', 'ci-required'].includes(name)) assert.match(body, /^    if: needs.static.outputs.native == 'true'$/m, name);
+});
+
+test('addon and Rust validation do not wait for optimized Release', () => {
+  assert.deepEqual([...jobs.keys()].sort(), ['static', 'prepare-resources', 'build-test-programs', 'build-release-native', 'build-release', 'validate-rust', 'validate-addon', 'validate-package', 'audit-package', 'release-ready', 'ci-required'].sort());
+  requireNeeds('prepare-resources', ['static']);
+  for (const job of ['build-test-programs', 'build-release-native', 'validate-addon']) requireNeeds(job, ['static', 'prepare-resources']);
+  requireNeeds('validate-rust', ['static', 'build-test-programs', 'prepare-resources']);
+  requireNeeds('build-release', ['static', 'build-release-native', 'prepare-resources']);
+  requireNeeds('validate-package', ['static', 'build-release', 'build-test-programs']);
+  requireNeeds('audit-package', ['static', 'build-release']);
+  for (const text of workflows) directDependencies(jobBodies(text));
+  const broken = new Map(jobs); broken.set('validate-addon', jobs.get('validate-addon').replace('needs: [static, ', 'needs: ['));
+  assert.throws(() => directDependencies(broken), /validate-addon reads static/);
+});
+
+test('fixed tools are imported once and the addon ZIP is produced once', () => {
+  const body = jobs.get('prepare-resources');
+  assert.equal((ci.match(/node tools\/lua-tool-supply\.mjs import\b/g) ?? []).length, 1);
+  assert.equal((ci.match(/node tools\/addon-package\.mjs build\b/g) ?? []).length, 1);
+  assert.match(body, /lua-tool-supply.mjs import \.tmp\/ci\/build-release/);
+  assert.match(body, /addon-package.mjs build --out \.tmp\/ci\/build-release\/addon/);
+  for (const component of ['luac', 'lua51', 'addon-zip']) assert.match(body, new RegExp(`--component ${component}=`));
+  assert.match(body, /ci-artifacts.mjs seal --out \.tmp\/ci\/build-release\/resources-manifest.json/);
+  assert.doesNotMatch(body, /actions\/cache|cargo |rust-cargo.mjs|rust-build.mjs|ci-test-programs.mjs/);
+  assert.doesNotMatch(ci, /node tools\/(?:luac|rust-formal-lua)\.mjs build/);
+});
+
+test('native configurations compile once with timing and explicit cached build identity', () => {
+  for (const [name, command] of [['build-test-programs', 'ci-test-programs.mjs build'], ['build-release-native', 'rust-build.mjs']]) {
+    const body = jobs.get(name), compile = oneStep(body, /id: compile/);
+    assert.equal((ci.match(new RegExp(`node tools/${command.replaceAll('.', '\\.')}`, 'g')) ?? []).length, 1);
+    assert.match(compile, /--jobs 2\b/); assert.match(compile, /--timings\b/);
+    assert.match(compile, /CARGO_LOG: cargo::compiler::fingerprint=info/);
+    assert.match(compile, /LYCHEEDEV_BUILD_COMMIT: \$\{\{ github.sha \}\}/);
+    assert.match(compile, /LYCHEEDEV_BUILD_DIRTY: 'false'/);
+    assert(body.includes('python third_party/emmy/prepare.py --download'));
+    assert(body.indexOf('python third_party/emmy/prepare.py --download') < body.indexOf(`node tools/${command}`));
+    assert.match(body, /rust-cargo.mjs --owner \S+ -- fetch --locked/);
+  }
+  assert.match(jobs.get('build-test-programs'), /ci-test-programs.mjs build \.tmp\/ci\/build-test/);
+  const native = jobs.get('build-release-native');
+  assert.match(native, /rust-build.mjs \.tmp\/ci\/build-release\/cli release --one-shot/);
+  assert.match(native, /rust-dependencies.mjs \.tmp\/ci\/build-release\/cli\/license-closure/);
+  assert.doesNotMatch(native, /rust-package-smoke.mjs|rust-skill.mjs|addon-package.mjs/);
+});
+
+test('download and compilation caches have distinct identities and success rules', () => {
+  const keys = [];
+  for (const [name, profile] of [['build-test-programs', 'test'], ['build-release-native', 'release']]) {
+    const body = jobs.get(name), dependencies = oneStep(body, /id: cargo-deps/), target = oneStep(body, /id: cargo-target/);
+    for (const restore of [dependencies, target]) {
+      assert.match(restore, /actions\/cache\/restore@/); assert(body.indexOf(restore) < body.indexOf('node tools/rust-cargo.mjs'));
+    }
+    assert.match(dependencies, /hashFiles\('Cargo.lock'\)/); assert.match(dependencies, /~\/\.cargo\/registry\/cache/);
+    assert.doesNotMatch(dependencies, /path: target|\.tmp\/ci|credentials/);
+    assert.match(target, /path: target/); assert.match(target, /restore-keys:/);
+    const key = /^          key: (.*)$/m.exec(target)?.[1]; keys.push(key);
+    assert(key.includes(`windows2025-${profile}-`) && key.includes('github.sha'));
+    for (const input of ['Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json']) assert(key.includes(input));
+    const save = oneStep(body, /actions\/cache\/save@[\s\S]*path: target/);
+    assert.match(save, /if: always\(\) && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'/);
+    assert.match(save, /key: \$\{\{ steps.cargo-target.outputs.cache-primary-key \}\}/);
+  }
+  assert.notEqual(keys[0], keys[1]);
+  for (const [name, body] of jobs) if (!['build-test-programs', 'build-release-native'].includes(name)) assert.doesNotMatch(body, /actions\/cache\//, name);
+});
+
+test('assembly verifies preserved native and resource inputs before producing the unique TGZ', () => {
+  const body = jobs.get('build-release');
+  for (const artifact of ['ci-build-release-native', 'ci-resources']) assert.match(action(body, 'download', artifact), /path: \.tmp\/ci\/build-release/);
+  verifiedBefore(body, '.tmp/ci/build-release/native-manifest.json', 'cli-release', 'node tools/rust-skill.mjs');
+  verifiedBefore(body, '.tmp/ci/build-release/resources-manifest.json', 'luac,lua51,addon-zip', 'node tools/rust-package-smoke.mjs produce');
+  const produce = oneStep(body, /node tools\/rust-package-smoke.mjs produce\b/);
+  assert.equal((ci.match(/node tools\/rust-package-smoke.mjs produce\b/g) ?? []).length, 1);
+  assert.match(produce, /--artifact \.tmp\/ci\/build-release\/cli\/artifact.json --profile release/);
+  assert.match(produce, /--dependency-closure \.tmp\/ci\/build-release\/cli\/license-closure/);
+  for (const kind of ['cli-release', 'luac', 'lua51', 'addon-zip', 'skill', 'npm-package']) assert.match(body, new RegExp(`--component ${kind}=`));
+});
+
+test('validation verifies the producer manifests before execution', () => {
+  const rust = jobs.get('validate-rust'), addon = jobs.get('validate-addon'), pkg = jobs.get('validate-package');
+  assert.match(action(rust, 'download', 'ci-build-test'), /path: \.tmp\/ci\/build-test/);
+  for (const body of [rust, addon]) assert.match(action(body, 'download', 'ci-resources'), /path: \.tmp\/ci\/build-release/);
+  verifiedBefore(rust, '.tmp/ci/build-test/build-manifest.json', 'test-programs', 'ci-test-programs.mjs run');
+  verifiedBefore(rust, '.tmp/ci/build-release/resources-manifest.json', 'lua51', 'ci-test-programs.mjs run');
+  assert.match(rust, /--formal-lua \.tmp\/ci\/build-release\/lua51\/build-report.json/);
+  verifiedBefore(addon, '.tmp/ci/build-release/resources-manifest.json', 'lua51,addon-zip', 'tests/addon/run-all.mjs');
+  assert.match(addon, /addon-package.mjs verify --zip/);
+  assert.match(action(pkg, 'download', 'ci-build-release'), /path: \.tmp\/ci\/build-release/);
+  verifiedBefore(pkg, '.tmp/ci/build-release/build-manifest.json', 'cli-release,luac,skill,npm-package', 'rust-package-smoke.mjs validate');
+  assert.match(pkg, /skill-contract.mjs --skill-root \S+ --bin \.tmp\/ci\/build-release\/cli\/lycheedev.exe/);
+});
+
+test('Rust shard artifacts remain distinct after merging and aggregation precedes candidate sealing', () => {
+  const rust = jobs.get('validate-rust'), ready = jobs.get('release-ready'), shards = rustShards(rust);
+  assert.match(rust, /^      fail-fast: false$/m, 'one failed shard must not cancel the other runner');
+  const run = commands(oneStep(rust, /ci-test-programs.mjs run .*--shard /));
+  const record = /ci-test-programs.mjs run (\S+)/.exec(run)?.[1]; assert(record);
+  assert.match(run, /--shard \$\{\{ matrix.shard \}\}/);
+  assert.doesNotMatch(run, /--package\b|--target\b/, 'named groups cannot be narrowed in the workflow');
+  const reportTemplate = /--report (.+?) --formal-lua/.exec(run)?.[1]; assert(reportTemplate);
+  const upload = action(rust, 'upload', 'ci-validate-rust-${{ matrix.shard }}');
+  const artifactTemplate = /^          name: (.+)$/m.exec(upload)?.[1];
+  const uploadRoot = /^          path: (.+)$/m.exec(upload)?.[1]; assert(uploadRoot);
+  assert.match(upload, /^        if: always\(\)$/m);
+  const download = oneStep(ready, /actions\/download-artifact@[\s\S]*pattern: ci-validate-rust-\*/);
+  assert.match(download, /^          merge-multiple: true$/m);
+  const downloadRoot = /^          path: (.+)$/m.exec(download)?.[1]; assert(downloadRoot);
+  const reports = shards.map(shard => {
+    const expand = value => value.replaceAll('${{ matrix.shard }}', shard);
+    const report = expand(reportTemplate), pathInArtifact = relative(resolve(repository, expand(uploadRoot)), resolve(repository, report));
+    assert.equal(pathInArtifact, join(shard, 'report.json'), 'upload must retain each shard directory instead of flattening report.json');
+    return resolve(repository, downloadRoot, pathInArtifact);
+  });
+  assert.equal(new Set(shards.map(shard => artifactTemplate.replaceAll('${{ matrix.shard }}', shard))).size, shards.length);
+  const aggregateStep = oneStep(ready, /ci-test-programs.mjs aggregate /), aggregate = commands(aggregateStep);
+  assert.equal(/ci-test-programs.mjs aggregate (\S+)/.exec(aggregate)?.[1], record, 'aggregate the same sealed record that each runner consumed');
+  const shardReports = [...aggregate.matchAll(/--shard-report (\S+)/g)].map(([, path]) => resolve(repository, path));
+  assert.deepEqual(shardReports.sort(), reports.sort(), 'aggregate must consume all and only the produced shard reports');
+  assert.match(aggregateStep, /if \(\$LASTEXITCODE -ne 0\) \{ throw /);
+  const candidateStep = oneStep(ready, /ci-release.mjs candidate/), candidate = commands(candidateStep);
+  assert(ready.indexOf(aggregateStep) < ready.indexOf(candidateStep));
+  const unified = /--report (\S+)/.exec(aggregate)?.[1]; assert(unified);
+  assert.equal(/--report rust=(\S+)/.exec(candidate)?.[1], unified);
+  assert(needs(ready).includes('validate-rust'), 'candidate remains gated on success of the complete matrix');
+});
+
+test('file-symlink boundaries execute explicitly on their owning Windows runners without a rebuild', () => {
+  const rust = jobs.get('validate-rust');
+  for (const [shard, pkg, target, filter, source, report] of [
+    ['data-delivery', 'lycheedev-delivery', 'slot_maintenance', 'linked_static_slot_member_is_rejected_without_following_it', 'crates/lycheedev-delivery/tests/slot_maintenance.rs', 'symlink-slot'],
+    ['source-runtime', 'lycheedev-live', 'lycheedev_live', 'mailbox::admission::tests::mailbox_admission_redirected_claim_file_fails', 'crates/lycheedev-live/src/mailbox/admission_tests.rs', 'symlink-claim'],
+  ]) {
+    assert(TEST_SHARDS[shard].includes(pkg));
+    const step = oneStep(rust, new RegExp(`--target ${target} --arguments `));
+    assert.match(step, new RegExp(`^        if: matrix.shard == '${shard}'$`, 'm'));
+    assert(step.includes(`ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package ${pkg} --target ${target}`));
+    assert(step.includes(`--arguments '${filter},--ignored,--exact,--nocapture,--test-threads=1'`));
+    assert(step.includes(`--report .tmp/ci/validate-rust/\${{ matrix.shard }}/${report}.json`));
+    assert.match(step, /if \(\$LASTEXITCODE -ne 0\) \{ throw /);
+    assert.doesNotMatch(step, /continue-on-error|rust-build|rust-cargo|cargo (?:test|build)/);
+    const name = filter.split('::').at(-1);
+    assert.match(readFileSync(join(repository, source), 'utf8'), new RegExp(`fn ${name}\\(`), 'an exact libtest filter must name an existing test');
+  }
+});
+
+test('guarded process regressions consume the sealed helper and execute every existing case', () => {
+  const step=oneStep(jobs.get('validate-rust'),/--target lycheedev_windows --arguments/);
+  assert.match(step,/if: matrix.shard == 'source-runtime'/);
+  assert.match(step,/\$record\.support/);
+  assert.match(step,/\$helpers\.Count -ne 1/);
+  assert.match(step,/Get-FileHash -LiteralPath \$helper -Algorithm SHA256/);
+  for(const name of ['HELPER','HELPER_SHA256','FIXTURE_ROOT']) assert(step.includes(`$env:LYCHEEDEV_SUSPENDED_${name} =`));
+  assert(step.includes("--arguments 'guarded_spawn::tests::,--ignored,--nocapture,--test-threads=1'"));
+  assert(step.includes('test result: ok\\. 4 passed; 0 failed;'));
+  assert.match(step,/if \(\$LASTEXITCODE -ne 0\) \{ throw /);
+  assert.doesNotMatch(step,/continue-on-error|rust-build|rust-cargo|cargo (?:test|build)/);
+  const source=readFileSync(join(repository,'crates/lycheedev-windows/src/guarded_spawn_tests.rs'),'utf8');
+  const names=[...source.matchAll(/#\[test\]\s*#\[ignore[^\n]*\]\s*fn (\w+)\(/g)].map(match=>match[1]);
+  assert.deepEqual(names,[
+    'real_child_cannot_run_before_resume_and_stdio_descendant_are_owned',
+    'cancelled_or_injected_prepare_failure_never_resumes_and_reaps_original_child',
+    'primary_thread_close_failure_after_resume_cannot_return_success',
+    'primary_thread_close_failure_preserves_prepare_error_and_retirement',
+  ]);
+  assert.match(readFileSync(join(repository,'crates/lycheedev-windows/src/guarded_spawn.rs'),'utf8'),/#\[path = "guarded_spawn_tests\.rs"\]\s*mod tests;/);
+});
+
+test('the workflow uses the shared Rust partition and every workspace package belongs to exactly one runner', () => {
+  const shards = rustShards(jobs.get('validate-rust'));
+  assert.deepEqual([...shards].sort(), Object.keys(TEST_SHARDS).sort());
+  assert.equal(new Set(shards).size, shards.length, 'matrix must not schedule a named group twice');
+  assert.equal(shards.length, 2, 'the measured split uses two independent runners');
+  assert(Object.isFrozen(TEST_SHARDS));
+  for (const packages of Object.values(TEST_SHARDS)) assert(Object.isFrozen(packages) && packages.length > 0);
+  const expected = workspacePackages();
+  checkPartition(TEST_SHARDS, expected);
+  const missing = structuredClone(TEST_SHARDS); missing[shards[0]].pop();
+  assert.throws(() => checkPartition(missing, expected), /cover every workspace package/);
+  const overlapping = structuredClone(TEST_SHARDS); overlapping[shards[1]].push(overlapping[shards[0]][0]);
+  assert.throws(() => checkPartition(overlapping, expected), /appears in multiple Rust shards/);
+  assert.doesNotMatch(jobs.get('validate-rust'), /^\s+packages:/m, 'workflow must not duplicate the package partition');
+});
+
+test('package install and business checks consume the producer TGZ and precompiled seed', () => {
+  const body = jobs.get('validate-package');
+  assert.match(body, /rust-package-smoke.mjs validate \.tmp\/ci\/validate-package\/npm --package-report \.tmp\/ci\/build-release\/npm-package\/report.json/);
+  assert.match(action(body, 'download', 'ci-build-test'), /path: \.tmp\/ci\/build-test/);
+  verifiedBefore(body, '.tmp/ci/build-test/build-manifest.json', 'test-programs', 'ci-package-business.mjs');
+  assert.match(body, /ci-package-business.mjs --npm-report \.tmp\/ci\/validate-package\/npm\/report.json --test-record \.tmp\/ci\/build-test\/test-programs.json --out \.tmp\/ci\/validate-package\/business/);
+  const upload = action(body, 'upload', 'ci-validate-package');
+  assert.match(upload, /\.tmp\/ci\/validate-package\/npm\/report.json/); assert.match(upload, /\.tmp\/ci\/validate-package\/business/);
+  assert.doesNotMatch(upload, /^\s+\.tmp\/ci\/validate-package\/?\s*$/m, 'upload reports rather than another node_modules tree');
+});
+
+test('independent audit and release candidate share producer and validation identities', () => {
+  const audit = jobs.get('audit-package'), ready = jobs.get('release-ready');
+  action(audit, 'download', 'ci-build-release');
+  assert.match(audit, /Get-Content \$producer \| ConvertFrom-Json/);
+  assert.match(audit, /Join-Path \(Split-Path \$producer\) \$report.tgz/);
+  assert.match(audit, /release.mjs audit-tgz --tgz \$tgz --version \$report.packageVersion --commit \$report.commit/);
+  for (const name of ['build-test-programs', 'build-release', 'validate-rust', 'validate-addon', 'validate-package', 'audit-package']) assert(needs(ready).includes(name));
+  for (const artifact of ['ci-build-test', 'ci-build-release', 'ci-validate-addon', 'ci-validate-package', 'ci-audit-package']) action(ready, 'download', artifact);
+  const candidate = commands(oneStep(ready, /ci-release.mjs candidate/));
+  assert.match(candidate, /--build-manifest \.tmp\/ci\/build-release\/build-manifest.json/);
+  assert.match(candidate, /--test-manifest \.tmp\/ci\/build-test\/build-manifest.json/);
+  assert.match(candidate, /--npm-report \.tmp\/ci\/validate-package\/npm\/report.json/);
+  for (const report of ['rust', 'addon-lua', 'addon-zip', 'skill', 'package-audit', 'package-business']) assert.match(candidate, new RegExp(`--report ${report}=`));
+  action(ready, 'upload', 'ci-release-candidate');
+});
+
+test('consumers never compile, resolve dependencies, rebuild Lua or reproduce packages', () => {
+  const forbidden = /rust-build.mjs|rust-dependencies.mjs|\bbuildRust\b|cargo (?:build|test|check|clippy|run|fetch|metadata)\b|rust-cargo.mjs|(?:luac|rust-formal-lua).mjs build|npm pack\b/;
+  for (const name of ['build-release', 'validate-rust', 'validate-addon', 'validate-package', 'audit-package', 'release-ready']) {
+    const body = jobs.get(name); assert.doesNotMatch(body, forbidden, name);
+    if (name !== 'build-release') assert.doesNotMatch(body, /rust-package-smoke.mjs produce|addon-package.mjs build|lua-tool-supply.mjs import/);
+  }
+  assert.match(release, /uses: \.\/\.github\/workflows\/ci.yml/);
+  assert.match(release, /ci-release.mjs seal --candidate \.tmp\/ci\/release-candidate --identity \S+ --out \.tmp\/ci\/release-sealed/);
+  assert.doesNotMatch(clean(release), forbidden);
+});
+
+test('finished outputs and reports survive failures without hiding job failures', () => {
+  for (const [name, artifact] of [['prepare-resources', 'ci-resources'], ['build-test-programs', 'ci-build-test'], ['build-release-native', 'ci-build-release-native'], ['build-release', 'ci-build-release'], ['validate-rust', 'ci-validate-rust-${{ matrix.shard }}'], ['validate-addon', 'ci-validate-addon'], ['validate-package', 'ci-validate-package'], ['audit-package', 'ci-audit-package']]) {
+    const upload = action(jobs.get(name), 'upload', artifact);
+    assert.match(upload, /^        if: always\(\)$/m, name); assert.doesNotMatch(upload, /overwrite:/);
+  }
+  for (const text of workflows) for (const body of jobBodies(text).values()) for (const step of steps(body).filter(step => step.includes('actions/upload-artifact@'))) assert.match(step, /if-no-files-found: error/);
+});
+
+test('failed or cancelled native compilation uploads owned evidence even when no artifact directory was produced', () => {
+  for (const name of ['build-test-programs', 'build-release-native']) {
+    const body = jobs.get(name), diagnostics = oneStep(body, /actions\/upload-artifact@[\s\S]*path: \.tmp\/rust-disk\/evidence/);
+    assert.match(diagnostics, /^        if: failure\(\) \|\| cancelled\(\)$/m);
+    assert.match(diagnostics, /if-no-files-found: error/);
+    assert.doesNotMatch(diagnostics, /steps\.compile\.outcome|cache-hit|continue-on-error|overwrite:/);
+    assert(body.indexOf(diagnostics) > body.indexOf('id: compile'));
+  }
+});
+
+test('the npm version probe and exported Node execution path refer to the same installed CLI', { skip: process.platform !== 'win32' }, () => {
+  const literal = value => `'${value.replaceAll("'", "''")}'`, script = [], expected = [];
+  const npmCli = 'C:\\global npm\\node_modules\\npm\\bin\\npm-cli.js';
+  for (const job of ['build-release', 'validate-package']) {
+    const body = jobs.get(job), step = oneStep(body, /npm install --global npm@/);
+    const version = /npm install --global npm@(\d+\.\d+\.\d+)/.exec(step)?.[1]; assert(version);
+    const pin = step.split('        run: |\n')[1].split('\n').map(line => line.startsWith('          ') ? line.slice(10) : line).join('\n');
+    assert(body.indexOf(step) < body.indexOf('node tools/rust-package-smoke.mjs'));
+    for (const fixture of [{name: 'pinned', version, install: 0, root: 0, probe: 0, accepted: true},
+      {name: 'bundled-drift', version: '0.0.0', install: 0, root: 0, probe: 0, accepted: false},
+      {name: 'install-failed', version, install: 1, root: 0, probe: 0, accepted: false},
+      {name: 'root-failed', version, install: 0, root: 1, probe: 0, accepted: false},
+      {name: 'probe-failed', version, install: 0, root: 0, probe: 1, accepted: false}]) {
+      // Execute the actual workflow block with commands replaced by pure
+      // functions. No npm installation, product process or output file runs.
+      script.push(`$script:emitted='';$env:GITHUB_ENV='mock-output';
+function npm { if($args[0] -eq 'install'){$global:LASTEXITCODE=${fixture.install};return};if($args[0] -eq 'root'){$global:LASTEXITCODE=${fixture.root};return 'C:\\global npm\\node_modules'};throw 'unexpected npm invocation' }
+function node { if($args[0] -cne ${literal(npmCli)} -or $args[1] -ne '--version'){throw 'version probe used another npm CLI'};$global:LASTEXITCODE=${fixture.probe};return ${literal(fixture.version)} }
+function Out-File { param([Parameter(ValueFromPipeline=$true)]$InputObject,[string]$FilePath,[string]$Encoding,[switch]$Append) process{$script:emitted=$InputObject} }
+$accepted=$true;try{${pin}}catch{$accepted=$false};[Console]::Out.WriteLine((${literal(`${job}:${fixture.name}:`)}+$accepted+':'+$script:emitted))`);
+      expected.push(`${job}:${fixture.name}:${fixture.accepted ? 'True:npm_execpath=' + npmCli : 'False:'}`);
+    }
+  }
+  const bootstrap = '& ([ScriptBlock]::Create([Console]::In.ReadToEnd()))';
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(bootstrap, 'utf16le').toString('base64')], {input: script.join('\n'), encoding: 'utf8', windowsHide: true, shell: false, timeout: 10000});
+  assert.equal(result.error, undefined); assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), expected);
+  const wrapper = readFileSync(join(repository, 'tools/rust-package-smoke.mjs'), 'utf8');
+  assert.match(wrapper, /const npm = \(args, cwd\) => run\(process\.execPath, \[process\.env\.npm_execpath \|\|/);
+});
+
+test('Node and Rust setup commands agree with the declared fixed toolchains', () => {
+  const node = /^  NODE_VERSION: '([^']+)'$/m.exec(ci)?.[1];
+  assert.match(node, /^\d+\.\d+\.\d+$/);
+  for (const text of workflows) {
+    assert.equal(/^  NODE_VERSION: '([^']+)'$/m.exec(text)?.[1], node);
+    for (const [, version] of text.matchAll(/node-version: '([^']+)'/g)) assert.equal(version, node);
+    for (const [, version] of text.matchAll(/^\s+rustup (?:toolchain install|override set) (\S+)/gm)) assert.equal(version, toolchain.rustc);
+  }
+});
+
+test('actual PowerShell toolchain checks accept multiline output and reject drift or command failure', { skip: process.platform !== 'win32' }, () => {
+  const version = toolchain.rustc, checked = [...jobs].filter(([, body]) => body.includes('$version = rustc -Vv'));
+  assert.deepEqual(checked.map(([name]) => name).sort(), ['static', 'build-test-programs', 'build-release-native'].sort());
+  const staticJob = jobs.get('static');
+  const install = staticJob.indexOf(`rustup toolchain install ${version} --profile minimal`);
+  const select = staticJob.indexOf(`rustup override set ${version}`), tests = staticJob.indexOf('node --test');
+  assert(install >= 0 && select > install && tests > select);
+  assert.match(staticJob, /Get-Command cargo -CommandType Application/); assert.match(staticJob, /Get-FileHash -LiteralPath \$cargo -Algorithm SHA256/);
+  const literal = value => `'${value.replaceAll("'", "''")}'`, script = [], expected = [];
+  const lines = ['rustc example', 'host: x86_64-pc-windows-msvc', `release: ${version}`, 'LLVM version: example'];
+  const cases = [{ lines, exit: 0, rejected: false }, { lines, exit: 1, rejected: true },
+    ...[version + '1', version + '-nightly', '1.98.0'].map(other => ({ lines: [...lines.filter(line => !line.startsWith('release:')), `release: ${other}`], exit: 0, rejected: true })),
+    { lines: ['note: release: ' + version], exit: 0, rejected: true }, { lines: [], exit: 0, rejected: true }];
+  for (const [job, body] of checked) {
+    const condition = /^\s*if \(\$LASTEXITCODE[^\n]*\$version[^\n]*\) \{ throw [^\n]*\}$/m.exec(body)?.[0].trim(); assert(condition, job);
+    for (const [i, fixture] of cases.entries()) {
+      script.push(`$version=@(${fixture.lines.map(literal).join(',')});$LASTEXITCODE=${fixture.exit};$rejected=$false;try{${condition}}catch{$rejected=$true};[Console]::Out.WriteLine((${literal(`${job}:${i}:`)}+$rejected))`);
+      expected.push(`${job}:${i}:${fixture.rejected ? 'True' : 'False'}`);
+    }
+  }
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script.join('\n'), 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 10000 });
+  assert.equal(result.error, undefined); assert.equal(result.status, 0, result.stderr); assert.deepEqual(result.stdout.trim().split(/\r?\n/), expected);
+});
+
+test('required aggregations observe every job and reject failures, cancellation and skips', () => {
+  for (const [text, aggregator] of [[ci, 'ci-required'], [release, 'release-required']]) {
+    const map = jobBodies(text), body = map.get(aggregator), required = [...map.keys()].filter(name => name !== aggregator);
+    assert.deepEqual(needs(body).sort(), required.sort()); assert.match(body, /^    if: always\(\)$/m);
+    for (const name of required) assert(body.includes(`needs.${name}.result`), `${aggregator} must observe ${name}`);
+    assert.match(body, /-ne 'success'/); assert.match(body, /throw /);
+  }
+  const body = jobs.get('ci-required');
+  for (const job of [...jobs.keys()].filter(name => !['static', 'ci-required'].includes(name))) assert.match(body, new RegExp(`'${job}' = \\$env:`));
+  assert.match(body, /NATIVE: \$\{\{ needs.static.outputs.native \}\}/);
+  assert(body.indexOf("if ($env:STATIC_RESULT -ne 'success')") < body.indexOf("if ($env:NATIVE -ne 'true')"));
+  assert.match(body, /if \(\$entry.Value -ne 'success'\)/);
+});
+
+test('actual required-job PowerShell accepts only complete native success or successful documentation checks', { skip: process.platform !== 'win32' }, () => {
+  const body = jobs.get('ci-required');
+  const step = oneStep(body, /STATIC_RESULT: \$\{\{ needs.static.result \}\}/);
+  const script = step.split('        run: |\n')[1].split('\n').map(line => line.startsWith('          ') ? line.slice(10) : line).join('\n');
+  const mappings = [...step.matchAll(/^          ([A-Z_]+): \$\{\{ needs\.([\w-]+)\.result \}\}$/gm)];
+  assert.equal(mappings.length, needs(body).length);
+  const success = Object.fromEntries(mappings.map(([, variable]) => [variable, 'success']));
+  const cases = [{ name: 'complete', env: success, native: 'true', accepted: true },
+    ...mappings.map(([, variable, job]) => ({ name: job, env: { ...success, [variable]: 'failure' }, native: 'true', accepted: false })),
+    ...['cancelled', 'skipped'].map(result => ({ name: result, env: { ...success, RELEASE_READY_RESULT: result }, native: 'true', accepted: false })),
+    { name: 'docs', env: { ...Object.fromEntries(mappings.map(([, variable]) => [variable, 'skipped'])), STATIC_RESULT: 'success' }, native: 'false', accepted: true },
+    { name: 'docs-static-failure', env: { ...success, STATIC_RESULT: 'failure' }, native: 'false', accepted: false }];
+  for (const fixture of cases) {
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+      env: { ...process.env, ...fixture.env, NATIVE: fixture.native }, encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000,
+    });
+    assert.equal(result.error, undefined, fixture.name);
+    assert.equal(result.status === 0, fixture.accepted, `${fixture.name}: ${result.stderr}`);
+  }
 });

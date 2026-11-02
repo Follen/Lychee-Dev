@@ -1,7 +1,9 @@
-// Thin launcher for the lycheedev CLI. It only locates the installed CLI and
+// Thin launcher for the installed lycheedev CLI. It only locates the CLI and
 // forwards argv, stdio and the exit code; every capability lives in the native
-// binary distributed by the npm package or the native archives. This script
-// never implements, retries or interprets toolkit work.
+// binary. The npm package exposes the same entry as
+// `packages/npm/lycheedev/bin/lycheedev.mjs`; this launcher adds PATH and npm
+// global-prefix discovery for a Skill installed outside the npm directory.
+// It never implements, retries or interprets toolkit work.
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, join } from 'node:path';

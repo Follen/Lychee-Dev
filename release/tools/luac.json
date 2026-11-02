@@ -1,0 +1,39 @@
+{
+  "schema": "lycheedev.luac-build.v1",
+  "runtime": {
+    "schema": "lycheedev.luac-runtime.v1",
+    "version": "5.1.5",
+    "platform": "windows-amd64",
+    "executable": "luac.exe",
+    "sha256": "5aa1605bfea56e6c2961c6b4b0f845a699b43f9b3666dd64f50289c3952d441b",
+    "bytes": 491008,
+    "license": "LICENSE",
+    "licenseSHA256": "ee5e3e82af1e1b543c4f216e399d7c8cfee797711913f349e385101c4ae60a79"
+  },
+  "source": {
+    "url": "https://www.lua.org/ftp/lua-5.1.5.tar.gz",
+    "sha256": "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
+    "archive": "lua-5.1.5.tar.gz",
+    "bytes": 221213
+  },
+  "toolchain": {
+    "family": "msvc",
+    "version": "14.51.36231",
+    "sdkVersion": "10.0.26100.0"
+  },
+  "arguments": [
+    "/Bv",
+    "/O2",
+    "/MT",
+    "/Brepro",
+    "/TC",
+    "/link",
+    "/Brepro",
+    "/INCREMENTAL:NO",
+    "/OPT:REF",
+    "/OPT:ICF"
+  ],
+  "imports": [
+    "kernel32.dll"
+  ]
+}

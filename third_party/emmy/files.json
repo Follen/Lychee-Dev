@@ -1,0 +1,4242 @@
+[
+  {
+    "path": ".clippy.toml",
+    "bytes": 169,
+    "sha256": "b576a2ea50561bbc02e5480449fc900b2d6bbc75afef05066ae0e320d2006f57"
+  },
+  {
+    "path": ".github/workflows/build.yml",
+    "bytes": 5014,
+    "sha256": "05af45827bf1bbddc6144fa7d1ddee43f58f7c70c9f1e707c132b72aff6d3044"
+  },
+  {
+    "path": ".github/workflows/deepseek_review.yml",
+    "bytes": 485,
+    "sha256": "964d7526e3e4f368cd448f644084c8cdf6fcc9b7a006d98655fea1c1c28c6b16"
+  },
+  {
+    "path": ".github/workflows/test.yml",
+    "bytes": 2174,
+    "sha256": "f7468497a218f979c6e6f652d839157717cc03641b7843d5fb72d1a55a663815"
+  },
+  {
+    "path": ".github/workflows/upload_crates.yml",
+    "bytes": 558,
+    "sha256": "a8933b5f2b9108a61a539f1e17516743b68fd2cb9c01ed6f0975dd4c8dc2797e"
+  },
+  {
+    "path": ".gitignore",
+    "bytes": 67,
+    "sha256": "152540c89f9966742a91da5984737eeb7fcd42ae62f4526487e3277fd30a11ea"
+  },
+  {
+    "path": ".luafmt.toml",
+    "bytes": 261,
+    "sha256": "1918f98a5fd102c4f5353142f9aff970165508f987450bf3954cad389d48943d"
+  },
+  {
+    "path": ".pre-commit-config.yaml",
+    "bytes": 1555,
+    "sha256": "93ed43d86395ca4e60298d84efce92c91d53550ca4a6efd1f95e9ca6cddfb37b"
+  },
+  {
+    "path": ".prettierignore",
+    "bytes": 210,
+    "sha256": "7ad7d133072adee3294416a4feac645398292da08e7d336044205587c24d332b"
+  },
+  {
+    "path": ".prettierrc",
+    "bytes": 47,
+    "sha256": "c9396af8dd02064188ba41407fb182d2e8fdc3103a1f5f3ea4d1ec703e29bafd"
+  },
+  {
+    "path": ".vscode/launch.json",
+    "bytes": 999,
+    "sha256": "eddfa5c268ccbb6e54a9bac6bd4424c0129eee46ea1b4e37db59401841f6babe"
+  },
+  {
+    "path": ".vscode/settings.json",
+    "bytes": 248,
+    "sha256": "11dd2fe7a78a945fbc185aafd46fcb180b37369541818eba2f42f224146f158b"
+  },
+  {
+    "path": "CHANGELOG.md",
+    "bytes": 47906,
+    "sha256": "7bab47f2580edaee3bc73a07b26104cbccf210587f9ff611e407e11e66650297"
+  },
+  {
+    "path": "CONTRIBUTING.md",
+    "bytes": 4919,
+    "sha256": "9765c71d24cfd92bd1acec68faad049c54ff47e8f7eae5dc26fdf8da49a1a9e1"
+  },
+  {
+    "path": "Cargo.lock",
+    "bytes": 71036,
+    "sha256": "8dca2cddb8bb2375674fdbd2716453bec82a45015db6be8ea762d3f56d40c6d9"
+  },
+  {
+    "path": "Cargo.toml",
+    "bytes": 4008,
+    "sha256": "300ad2fe8efa7c08aa98f9f76b5e0c9ac75382eb4d3c2ae442d0fc3a9a21ff9d"
+  },
+  {
+    "path": "LICENSE",
+    "bytes": 1068,
+    "sha256": "7f8fd5ae0962c6757a8980592c264c8bce5004aa9f369084db761874b8969ff8"
+  },
+  {
+    "path": "README.md",
+    "bytes": 11719,
+    "sha256": "17f3e5527b454678189b021147f4ba6b0d8f9e396cac229216ace0f7a11ab537"
+  },
+  {
+    "path": "crates/emmylua_check/Cargo.toml",
+    "bytes": 919,
+    "sha256": "1f837298d5c1071db712fc1575176708d625682692643d5766b6ceb448878ac8"
+  },
+  {
+    "path": "crates/emmylua_check/README.md",
+    "bytes": 5147,
+    "sha256": "0da997d52127795e430d3ff026f835e3c27926f9629ec08ce5743e3eaf8b70f0"
+  },
+  {
+    "path": "crates/emmylua_check/src/bin/bench_file.rs",
+    "bytes": 2123,
+    "sha256": "3d240fce933291f620c74d8f8b6fc3e6f3ef85cec43919dd918a80fc099f18ca"
+  },
+  {
+    "path": "crates/emmylua_check/src/bin/emmylua_check.rs",
+    "bytes": 320,
+    "sha256": "849794d166cbaeee104edb5859fa9817cdc6e42a4d2ba73b9fa7f67f807924c2"
+  },
+  {
+    "path": "crates/emmylua_check/src/cmd_args.rs",
+    "bytes": 3366,
+    "sha256": "84aa02db4819ed2cfc4f17d296965f8b8a7edecb3e1dc212da18fdcabf873805"
+  },
+  {
+    "path": "crates/emmylua_check/src/init.rs",
+    "bytes": 4296,
+    "sha256": "2ecc357320e5e1cf3ac97b9b9927c737810616c1da45fa75b02f97dc2191a263"
+  },
+  {
+    "path": "crates/emmylua_check/src/lib.rs",
+    "bytes": 4089,
+    "sha256": "a3cf3e53313807dcfbe434a1c32bea5c431721e8325b949b56df7cd6a24a2c2f"
+  },
+  {
+    "path": "crates/emmylua_check/src/output/github_output_writer.rs",
+    "bytes": 2439,
+    "sha256": "634318997bf9c47fcc472d19230ae849375279bf91b615bf220b43fbeb1336fa"
+  },
+  {
+    "path": "crates/emmylua_check/src/output/json_output_writer.rs",
+    "bytes": 2253,
+    "sha256": "6272c251cd62691f450eb796557c1b71336c9a4f102d80b7302f953251642fab"
+  },
+  {
+    "path": "crates/emmylua_check/src/output/mod.rs",
+    "bytes": 3219,
+    "sha256": "4f4deb4d867a980f47009ca86dfe8eaca91844a8e0bdb7071347bc511e162a07"
+  },
+  {
+    "path": "crates/emmylua_check/src/output/sarif_output_writer.rs",
+    "bytes": 4906,
+    "sha256": "58019424c1e2a0c5952b6a888443c3adbb790d9f396eeb5b8069c143c4578fcd"
+  },
+  {
+    "path": "crates/emmylua_check/src/output/text_output_writer.rs",
+    "bytes": 778,
+    "sha256": "6b6976238deb4a63fc76a148c36c62552c4219b4db4eba72998bafaef7ca78a8"
+  },
+  {
+    "path": "crates/emmylua_check/src/terminal_display/display.rs",
+    "bytes": 13507,
+    "sha256": "97d910e5891cd4cf602bccd0cda2f05d48bafb81a5512493dfa81d01761fcf53"
+  },
+  {
+    "path": "crates/emmylua_check/src/terminal_display/mod.rs",
+    "bytes": 48,
+    "sha256": "8776d3a6d28ead33efab27d3781f85a9ab3b1c4106f4afae825dd3faf5c02bb0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/Cargo.toml",
+    "bytes": 1373,
+    "sha256": "a46735a63d8248e16b7a9d34f68f5e6f338c2cbbca0d0e53f95416270cbb31bb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/README.md",
+    "bytes": 194,
+    "sha256": "1dee3bc9b9755658c9ce569c4239af3159a45d9717c454c5a3423fe7afa2e883"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/locales/codestyle.yml",
+    "bytes": 1519,
+    "sha256": "08158178c8b1e6b781ce315cb781ca4e0dd4397800d8a90d41e24245097c8c3a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/locales/lint.yml",
+    "bytes": 18550,
+    "sha256": "64d6250b2b8749bbfe567053d1e5a8f69f547e73ca63775ef14547f2d4bed065"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/schema.json",
+    "bytes": 33667,
+    "sha256": "405d5036c5865c020a72a513348fa84c8cddeda0f401dc0ec5d4bed3964cba90"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/bit.lua",
+    "bytes": 1449,
+    "sha256": "e038ddd7176cbf62c10f32d64e68557b75c5221dd7ca509b869615d6533147a9"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/bit32.lua",
+    "bytes": 4278,
+    "sha256": "b28aeae00ce8809ba589a238960f70961f1f6652c5c8f3f62c46dd4beac6ded4"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/builtin.lua",
+    "bytes": 8542,
+    "sha256": "9b1a57e2562e143bfcf154a77ece1b97ebeb9f27c02c291354fcd59571e3c768"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/coroutine.lua",
+    "bytes": 3988,
+    "sha256": "f819cfe9392df96f0a9464408c0e5101e23f220c950c9dedd7a5c9aae2b1670b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/debug.lua",
+    "bytes": 13498,
+    "sha256": "f8341c00710d952487f754cdc5b5f8485658a497a645bb8c437f4c32b9747e5c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/ffi.lua",
+    "bytes": 2719,
+    "sha256": "cb768c7fe9411e36ca73c8c354c5f8943326805ceef25712aae830c941c9e355"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/global.lua",
+    "bytes": 21283,
+    "sha256": "1a5117af498e3e23d497ac6c36b21750c6abf9ed5f017f7963c92ad9bf40f722"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/io.lua",
+    "bytes": 10451,
+    "sha256": "83a3973088bfad9f3f25a4b98dfa21681a8ba453342243f1261abc478aa9e253"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/jit.lua",
+    "bytes": 1105,
+    "sha256": "d95ebbf45ec91dc95846ffb26dac68b1ed71e68ca2636aa96636f83f95e9bf1e"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/jit/profile.lua",
+    "bytes": 412,
+    "sha256": "89b8e0368c4cbf7e13fbd9ccef2acc67284d65d8319ee8eafe8fe0414b0297c1"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/jit/util.lua",
+    "bytes": 2140,
+    "sha256": "644405038c0b8747586c0e25594661fa18f070fa5894b08e96c747e71eba3193"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/math.lua",
+    "bytes": 7825,
+    "sha256": "b6c245816a9d30dba1963a6901f7e6b71a27b840beb9ec567ac4e21d8987f594"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/os.lua",
+    "bytes": 9570,
+    "sha256": "84a4201493910aef00fb501fc6179023ed644ab86b2dd7bbf7197eceb251c60f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/package.lua",
+    "bytes": 8028,
+    "sha256": "a2e1df541f47c28275465bea5def0376f4fe0fe7b96fff11a44d27ac854bc25f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/string.lua",
+    "bytes": 13415,
+    "sha256": "54d7def098c3278472f8e23b7d206c0be26211e4e9e03f01ace3b25e9285d896"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/string/buffer.lua",
+    "bytes": 18461,
+    "sha256": "194e8512c66ae1ec4391cadb45e5b868c52d85295f3f1cb5a8bbe839cf5bd1cc"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/table.lua",
+    "bytes": 6480,
+    "sha256": "b938c4ada46da9727dc396c26eae140cb3e9551e41b2d4781e71c8dcfdd7c9cd"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/table/clear.lua",
+    "bytes": 880,
+    "sha256": "838d97ad27ffaf88ac0fd566e96b9ffeab7bec4b0db8b3786d47e6a90c2b25ed"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/table/new.lua",
+    "bytes": 723,
+    "sha256": "4d03b66b1f97d820070566159e0e74aa1b7012b428e59b633f1bec7a143dfa3e"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/resources/std/utf8.lua",
+    "bytes": 3858,
+    "sha256": "3fd177dcf9399ebc268fccb69bef4c2bcd15a9e2a8dcb5716396fc1e903e8663"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/builtin.rs",
+    "bytes": 1114,
+    "sha256": "31e256f43686c7ef20b1a84e0ea119a6ea5a9cba42be1e3d855eaa6dd774e726"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/access_invisible.rs",
+    "bytes": 5469,
+    "sha256": "f751a294a2f1710a127a8d09c65f89e37b32dfa414c45f17c1bfe1a29f3ec5fb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/analyze_error.rs",
+    "bytes": 7869,
+    "sha256": "ad08964c56a67bce19ca37ce6892b1b32c9fd347cdfbb2e677617d6f34937633"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/assign_type_mismatch.rs",
+    "bytes": 42364,
+    "sha256": "9dfcae4b7fa78d38e6d19407285c36b836f8e6c347bafd485b974d54470969b5"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/attribute_check.rs",
+    "bytes": 10841,
+    "sha256": "2d1070758070143e49c8a9a2339ac5a95c694657e21917d5872623a9f504d51f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/await_in_sync.rs",
+    "bytes": 12589,
+    "sha256": "1442c6f0dacd7659eec1cb5825db9832120a0193e6929e7f506d766fa0955758"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/call_non_callable.rs",
+    "bytes": 4469,
+    "sha256": "a9fb4886bb4f8bfdc895e8ea6e29a85b6cf90e8ce5b3dc014f253f0c5f99d741"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/cast_type_mismatch.rs",
+    "bytes": 4379,
+    "sha256": "83981edc62ed4f8e411365648b3ae0973071659c9753ae40349292fb835982ba"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/check_export.rs",
+    "bytes": 7996,
+    "sha256": "664e0148c718034f902a2198157f0279bcc9f638cdf9c080f8e30d5750aca6b7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/check_field.rs",
+    "bytes": 20511,
+    "sha256": "b89917c3953e8dfeb2caf3e0377a22ade8b9fdea279687529876b1b4c9f143f6"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/check_return_count.rs",
+    "bytes": 29355,
+    "sha256": "4b2daa70b08843345346f9c319b7d7719d95340181bfc5820af2722d83ea5ed3"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/circle_doc_class.rs",
+    "bytes": 2694,
+    "sha256": "22c0e4e4de30b34a17178a5c3f9037f01c472470a00c59c4bb4a2b1d75b9a58f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/code_style/invert_if.rs",
+    "bytes": 4528,
+    "sha256": "910e17468e3a48732302b24cd9fb8aa1e275dd72a4da3fa3b39b3a9a31b20aa6"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/code_style/mod.rs",
+    "bytes": 210,
+    "sha256": "d18f23b80ad3447554ddedb676dc817eb4d8d99f3a4b87c934cb1356194099e9"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/code_style/non_literal_expressions_in_assert.rs",
+    "bytes": 2300,
+    "sha256": "8af261a7d7977052b5f46dc5f414de7d98cb90e31c8ba9a674cba7841e9a1382"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/code_style/preferred_local_alias.rs",
+    "bytes": 11064,
+    "sha256": "12d80b9b81c74726b5a6f8e252ab9841ec8ed1b123e31500abd4d515e42afa91"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/deprecated.rs",
+    "bytes": 5341,
+    "sha256": "1ee73bc918e6e1af012548bdc0804bc8cd6721dfcbea3e5514b0ba94c4edea32"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/discard_returns.rs",
+    "bytes": 2285,
+    "sha256": "928a7fd211a42b138a06bb608876ff90bf266a9b413d9771dc99c7ae56ff4c83"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/duplicate_field.rs",
+    "bytes": 7307,
+    "sha256": "8bc48fb5d94c84d20bd1ee36ef3231038e8470991ce319be979f2ce757bd0e7c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/duplicate_index.rs",
+    "bytes": 1682,
+    "sha256": "51efa4ddb85d14292df1efa42195cdb1afb9fe5101fe6cd9df0aa33db8949982"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/duplicate_require.rs",
+    "bytes": 2191,
+    "sha256": "ef81e46fc73e53e5b3d2a31c6ca0a5d303c3139041170fbc6c714a6d4807ae84"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/duplicate_type.rs",
+    "bytes": 5617,
+    "sha256": "f3a895b927a60741950b10fd9417fb23a980d839ffbacb552566a66e27c92520"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/enum_value_mismatch.rs",
+    "bytes": 5061,
+    "sha256": "06c27b6dbccefbf9b8ff0a7b665c48ea95ae80a4d3c141f2090549af41f63935"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/generic_constraint_mismatch.rs",
+    "bytes": 39353,
+    "sha256": "61e535964053966b9c83145fae162ea9e93e4919f7680c954e4bfe5be9cd4370"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/global_non_module.rs",
+    "bytes": 2890,
+    "sha256": "59d6df43599ef7cf6ac8d81394c4dbab99ae343aa5502a189610ebf3c8008833"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/incomplete_signature_doc.rs",
+    "bytes": 5777,
+    "sha256": "c202c7045bfbd8d8384bfc0ea5a3671df4442bd42acb6c1fa6bf806d1cd17be2"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/local_const_reassign.rs",
+    "bytes": 2830,
+    "sha256": "5815bffacfed6ea674e1d6eb7667a16d18caa5e90e8a6e25a2bf5f2d8d4a8f0a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/mod.rs",
+    "bytes": 10995,
+    "sha256": "bc61d24e35f16fbbbfef4d545b59ae1a13067e324fdcdab6381fcae27a86f0c1"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/need_check_nil.rs",
+    "bytes": 7830,
+    "sha256": "cb6a0e8386abb93eac74c6e0e75ba788cdfbda629cad6568b4d3dc5a8c93caa7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/param_count.rs",
+    "bytes": 34064,
+    "sha256": "078e1d358283f75db48c377907af2dba3dc66582f88ff21d53fa1a58b489a007"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/param_type_check.rs",
+    "bytes": 56167,
+    "sha256": "a1f0deeeeed8f44d6d5ed546e7dae200e4b832d297d38d549e4f4d467254d670"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/readonly.rs",
+    "bytes": 4233,
+    "sha256": "1d0212ccd15e7b06beeb1362bb0c40c8b4a85048438ea610f64c384a2e262ec3"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/redefined_local.rs",
+    "bytes": 5106,
+    "sha256": "2367748cd0eef01c2c84bc3672a7059740c8418e537b7e952410dfe1b0bf381a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/require_module_visibility.rs",
+    "bytes": 2540,
+    "sha256": "c8456e4e48aa2b221110cd41a9ed75e0e020ad5e85eed07d6beacfc80d3618f3"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/return_type_mismatch.rs",
+    "bytes": 13344,
+    "sha256": "ebefd9f7a6a04e50d53992a76a9d0ca961592bfe2222bc2634c3390c0968e693"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/syntax_error.rs",
+    "bytes": 9318,
+    "sha256": "9e041c0442bf2eeb8157d39977670de4a4185f780f835413f8eef763bec86e89"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/type_access_modifier.rs",
+    "bytes": 3584,
+    "sha256": "b9524f91229100708bbd854260aadb071c7da002db4a812b5a7908c23c3fe047"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/unbalanced_assignments.rs",
+    "bytes": 1943,
+    "sha256": "becf49d12fe895fca80b82ebfbe996d837ad5f7662ac900f95a564f5d236f29e"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/undefined_doc_param.rs",
+    "bytes": 1128,
+    "sha256": "d3eb230b4c7d610b59777d3f0e8d352b4116f95af6e333be6757f058b14ef45a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/undefined_field.rs",
+    "bytes": 26954,
+    "sha256": "0b7df5bd032867b9552678fe2b1e20dda29954cd017eaddb0a832001aace12db"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/undefined_global.rs",
+    "bytes": 2166,
+    "sha256": "b3075551033b921d00ca41cee7c854438746f3dc0d6feca9a2b5aa2e5f0bf1fb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/unknown_doc_tag.rs",
+    "bytes": 1600,
+    "sha256": "c0922154eb4f47ba6ca67d3a0e9be0378fd052ee8961ccd120b8cdec49e519a2"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/unnecessary_assert.rs",
+    "bytes": 3291,
+    "sha256": "de846f43bd784b8c19b576ffe1c2c53e431711003edf9db15a9e37dec4ec06bc"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/unnecessary_if.rs",
+    "bytes": 1797,
+    "sha256": "609478533ca40ed2205245a57224aad34a6b9d878a8d72e61b5a9b33d4938529"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/unresolved_require.rs",
+    "bytes": 1832,
+    "sha256": "2bc5c170988d12454b9b96d979533e4c136b10ddbcba93ac19a1ce9854794d18"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/checker/unused.rs",
+    "bytes": 1460,
+    "sha256": "0a24f92f4d0e9a313586adada55a3f65d801b7db0d78dae131d78a4e5ff734af"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/config.rs",
+    "bytes": 4685,
+    "sha256": "b8442069f934aa612aa41c482370b65b283e41d50a4d7cde6f60ca64cf370813"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/diagnostic_code.rs",
+    "bytes": 5566,
+    "sha256": "2f63d26588eed968278b6de4739d2d99798789bf15f2ea6dc5304978f9507f8a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/lua_diagnostic.rs",
+    "bytes": 2106,
+    "sha256": "285b80cb8b8f9b240e1494e4f347e28f26fd65af603973d56c5c9d5f1f1a1798"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/mod.rs",
+    "bytes": 871,
+    "sha256": "38363b5c9f83b1765cf1c3c2b155e2c1498a454dbca71c7e10c4929db2f06e60"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/access_invisible_test.rs",
+    "bytes": 2703,
+    "sha256": "1167933fb0e409a6ff1b2128cb2744af8bae4580450838ef3aa1f4ea419606a7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/analyze_error_test.rs",
+    "bytes": 3480,
+    "sha256": "c9ddc76b918ee1e3b84238389bafb24e8e241d2304abe474dc1c167d814673a7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/assign_type_mismatch_test.rs",
+    "bytes": 36291,
+    "sha256": "249942e7d7934e7da771191b098f94343c402344b0e0cff43cb1857c89feb980"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/attribute_check_test.rs",
+    "bytes": 2723,
+    "sha256": "94979f2966ab3ed46b4619f89763c5202e63c6981477370fba623722156cd4eb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/await_in_sync_test.rs",
+    "bytes": 3497,
+    "sha256": "634877196c4c4bf0b5eb7f2189ce7cf05c6abccb841e69d287f2c56a30e3d7b0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/call_non_callable_test.rs",
+    "bytes": 5512,
+    "sha256": "7b8cae5da157ded044e342f545526d8bb1452bac97021d966fb11fc87cf59fb9"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/cast_type_mismatch_test.rs",
+    "bytes": 6613,
+    "sha256": "fc7af85620e6eedebedb12f1521f467335b5bcc3de3a9c041888111a5c3efd6e"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/check_export_test.rs",
+    "bytes": 3299,
+    "sha256": "dddbe4eea28d928d643f2c9faa230cb068d23a6b72ddb1df7bb8e03b72143bdd"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/check_return_count_test.rs",
+    "bytes": 23760,
+    "sha256": "8603ef94a4a164480fb333dd357d66d3f903514fd807b4f9aa3c67698ff9137a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/circle_doc_class_test.rs",
+    "bytes": 1572,
+    "sha256": "915a0d0b9185d732134855cc63b9cebef8407b67c6147c0e164bc0a5f3400cd7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/code_style/mod.rs",
+    "bytes": 152,
+    "sha256": "66d9f6a3ae2d3cfaf02dfb21e75ae8a67ea660b9cec3ae8dcc3bfadb3881feb5"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/code_style/non_literal_expressions_in_assert_test.rs",
+    "bytes": 1536,
+    "sha256": "570750af6707e63f0700b6248202ec8bfe4c1249ab74e3b4fa58ec26ce6d0fc4"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/code_style/preferred_local_alias_test.rs",
+    "bytes": 682,
+    "sha256": "db607f4888357d369403bbd8a45f365672bb4b9d145dd5a839938353b34d4d07"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/code_style_test.rs",
+    "bytes": 2993,
+    "sha256": "8d1464285dd57c0026ef0b39d297ca40a018f0fb0d6b908514c7efd6ebf7e8f1"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/deprecated_test.rs",
+    "bytes": 2736,
+    "sha256": "895cda55922398545b9de82e5c4793d0f9574a607a8d6fca6128746c116e3044"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/disable_line_test.rs",
+    "bytes": 3164,
+    "sha256": "2e34ae1c45d6d96a6934c6c09199a1a635edd3c65c7fe9b028d244644f0ce96d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/duplicate_field_test.rs",
+    "bytes": 4363,
+    "sha256": "cb1f267c13460480272e9b64706bb59622a4df0ed39c3a886baf4f817e0cfc5a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/duplicate_index_test.rs",
+    "bytes": 625,
+    "sha256": "eb2183c76f6e11d56545cf403e25c86d88e157ef8ee148bf42fed3e1c9b159f1"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/duplicate_require_test.rs",
+    "bytes": 563,
+    "sha256": "310e2aafb134512e4e1b5acacdb503fa0a0c33ff11572d754454e5ca11ac53fc"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/duplicate_type_test.rs",
+    "bytes": 1724,
+    "sha256": "0249c77a0ab32b8a9275e2b43e6d0e1d3a97e4fbf65604814d3a4d199431e392"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/enum_value_mismatch_test.rs",
+    "bytes": 3441,
+    "sha256": "d828b051b6f0adef521086225d0deda3ced382c96d50442867cf5888f6e1ab57"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/generic_constraint_mismatch_test.rs",
+    "bytes": 22024,
+    "sha256": "b1bae8478fa301e4dd1de5e9d5196b099258035f316f9c099bb44c599e4ad21d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/global_in_non_module_test.rs",
+    "bytes": 856,
+    "sha256": "3fc6bc00562db4c485acf0aa3f7eacef2fe9dde6ab310fa856f1eead81f8a535"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/incomplete_signature_doc_test.rs",
+    "bytes": 4797,
+    "sha256": "b224bccc6fa016e0043471ed113f631ae79858e67b6c0dbcf2a4b6cd7a63f7f4"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/inject_field_test.rs",
+    "bytes": 6731,
+    "sha256": "d0335118d95e4a7806fda718e600dff19a2ac155ea095598657b8ca8fafdbf5a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/local_const_reassign_test.rs",
+    "bytes": 2002,
+    "sha256": "77b6e86336c3c00384f4119f6f6216d4fcf22255e5302f27a2c46d8d2b438fcd"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/misc_checker_test.rs",
+    "bytes": 15144,
+    "sha256": "50e0cb0b19af2c7782da5e07d8cdc386d0a6869a7c8d50857b024f7759b59f88"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/missing_fields_test.rs",
+    "bytes": 8262,
+    "sha256": "633dbc5af4b6c92c5fb0a66953677b6e2610453360f7c5b3d792b32d1e1dce28"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/missing_parameter_test.rs",
+    "bytes": 8859,
+    "sha256": "b623d1398c58606fb0f752b0419962a7ee09a516a087f2600424fe1c33763438"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/mod.rs",
+    "bytes": 5487,
+    "sha256": "cee076b791b1bab8d1470d0e9124662489720cff6e0f851b8406ac55300a8390"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/need_check_nil_test.rs",
+    "bytes": 3981,
+    "sha256": "345bc70d565e6237d43bdecb6d63e3acc88689f9598263b498851904aa670041"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/param_count_test.rs",
+    "bytes": 6421,
+    "sha256": "e5bb3d633a6406b495508440526970cd76e61ba779d2ffc878c23908a3bc60bf"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/param_type_check_test.rs",
+    "bytes": 51413,
+    "sha256": "9246d32194c5ac3bd760161f61bbb08c4b085f6601302243dc4f21bff94d709a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/readonly_test.rs",
+    "bytes": 437,
+    "sha256": "1e1d10bdfa82fbfac077831a693dd94e8fbf0f4d6bf4b85d8d324d86420f7b33"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/redefined_local_test.rs",
+    "bytes": 848,
+    "sha256": "077dadf41f46ca953cb9eed8bfaa7a407595e8397dafa5d6788757de707dd8bf"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/redundant_parameter_test.rs",
+    "bytes": 6211,
+    "sha256": "a6bcb5f987e54b9ebd86a8f01fbe0829e9669d8dec08eea5915ee020f231427d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/require_module_visibility_test.rs",
+    "bytes": 2908,
+    "sha256": "b26e96c72181ea32c8a056e62473ceb4a0d80b162cd4d1a9d695e82fb3c1ff69"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/return_type_mismatch_test.rs",
+    "bytes": 22166,
+    "sha256": "adafad2713d93b230e394973bff4aef1f575c039a4531c193da06444fded0446"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/syntax_error_test.rs",
+    "bytes": 1263,
+    "sha256": "40bab83c4084ac46d8ecea9caeaccf46eb23e75a3e304c40174cd19f7457b533"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/type_access_modifier_test.rs",
+    "bytes": 4041,
+    "sha256": "6e204a0f8f4a4763532fa4c34537b130d25bc79136f12192b2169e20dcc14e6b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/type_mismatch_test.rs",
+    "bytes": 6797,
+    "sha256": "e14f2c1f785a38b46141ec0a281156a4d979510380f14597e24aafc505e72c95"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/unbalanced_assignments_test.rs",
+    "bytes": 1200,
+    "sha256": "d1926f012378b41a64ed44894dc512115b4f53c5230d1d41ff12488291a24061"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/undefined_doc_param_test.rs",
+    "bytes": 673,
+    "sha256": "f135f81b496c166dfbac76a0e11e7dbf11553e47961b1f9f0fc0971ffb4803c8"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/undefined_field_test.rs",
+    "bytes": 30170,
+    "sha256": "76f0853a97af88991da339efbde59dc7cdc3ab2e92d1a50ce9f9ff3de0f86b7f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/undefined_global_test.rs",
+    "bytes": 2508,
+    "sha256": "5a7a113c385df04c0b693b4526eb2c4152705122f9ebd70c118f8b266443b87a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/unknown_doc_tag_test.rs",
+    "bytes": 1301,
+    "sha256": "54201f4342ade8fb37dde964d9a2cb556b3fa2ca08c51ca589352a8ef7b261d3"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/unnecessary_assert_test.rs",
+    "bytes": 2949,
+    "sha256": "fc1befe5c9f5f263b83fcc6f27309a628f1fba0dbd914c804d3ce16c0bb0bf0a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/unnecessary_if_test.rs",
+    "bytes": 826,
+    "sha256": "d77eccfc3103e5ffe1fa0c3b229e8cdc09af0a0095d31bbed9a330875d82d819"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/unresolved_require_test.rs",
+    "bytes": 2169,
+    "sha256": "b4b742bb001f9864df886ac3ebbfd0c0f13c97b35bdaaa81feb2075dd4a5d75f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/check/test/unused_test.rs",
+    "bytes": 1725,
+    "sha256": "acf78f01f7977114f48ccf9d4b7e63166994823c48ec8739027772401d3aee92"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/config_loader.rs",
+    "bytes": 4026,
+    "sha256": "f9cfb88b611d3ba3680c4b5d7e612cdaea48a532aa2a2ff4e3915b5be10479a7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/code_action.rs",
+    "bytes": 518,
+    "sha256": "cee6d4258817732bef696db9795d42552efbf9b088b1e49a9209cfb2b771f639"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/codelen.rs",
+    "bytes": 498,
+    "sha256": "220aac84f17b904738518e8e7843e7303d127f7ff59d244acd40b8c056bd5831"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/completion.rs",
+    "bytes": 3154,
+    "sha256": "0477987cdf70db1a26d7e8fe55b49c98aba7589a84806cd4ec159fc73823afc2"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/diagnostics.rs",
+    "bytes": 2498,
+    "sha256": "e6236a731c26ab380e967884e250d117a50cbb6e16c0c376e39949aff70a45e3"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/doc.rs",
+    "bytes": 1218,
+    "sha256": "39b8ff9f1c1e4960fa28af604422175aad14a8bd8d491f462e69160c29439881"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/document_color.rs",
+    "bytes": 569,
+    "sha256": "b85bf961e6aa6d4d7896b8b00a3b48cece8226579912aa788dc867b5d529fbd6"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/hover.rs",
+    "bytes": 793,
+    "sha256": "797452e0486c144245aa3d5c280e29e5c0c1d2af2a39ae2c1f7b4e4cb6a06175"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/inlayhint.rs",
+    "bytes": 2405,
+    "sha256": "8208dcaaa532ab2a98f2f14b2b036e3a9e53e6d6a7143725b16dc635e7484448"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/inline_values.rs",
+    "bytes": 521,
+    "sha256": "809321893f32ece34c38446a50575e7ba685d3c6a99de968ef0673bdc88dc631"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/mod.rs",
+    "bytes": 1103,
+    "sha256": "c09df3539210fed2704c77fd4ef3f6437d6d9c26f0928d905acb876c13a98d0c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/references.rs",
+    "bytes": 1045,
+    "sha256": "e2f2a3c9c779ad9b20b0e02d2372c55843001692b8189ee22d21f076ec8718fb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/reformat.rs",
+    "bytes": 1131,
+    "sha256": "00c87b375e2dcc6a7cef1eb2fd84644e2bbc5156a9673c9cfa8cc05c20690319"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/resource.rs",
+    "bytes": 248,
+    "sha256": "127eb6d219b860760ee1887cced2cf8d216a53f5fdbc7041f27add5ef5d395d6"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/runtime.rs",
+    "bytes": 8319,
+    "sha256": "ff632f7e3758890c8b53c1b9d195445e13785122f22969867ead80ec6e30a130"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/semantictoken.rs",
+    "bytes": 773,
+    "sha256": "4914150f6b59e9dfaefc713ef544dfe970378992e128c7d9ad870d6c0f5f7ccf"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/signature.rs",
+    "bytes": 499,
+    "sha256": "925a8398454ec35bddb217fea35d8adf4c3c845bfeb86b5b80d395143d30b148"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/strict.rs",
+    "bytes": 1174,
+    "sha256": "fa5eb6bdd294527608d53125c2460f5fa3f297af1e345486c1c138a22e35fe1e"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/configs/workspace.rs",
+    "bytes": 3842,
+    "sha256": "28564ba307c2daf68639c78bd0fa461417323b3516c2716877a4676c3c08398d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/flatten_config/mod.rs",
+    "bytes": 1632,
+    "sha256": "e5b1e8bf283ff021ec7d78605339d945273d988d9639d88f99c490bd087af540"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/flatten_config/test.rs",
+    "bytes": 861,
+    "sha256": "6ab1e0e71d160528b62127681f43d73b632e2bc7764bdf175a903c2b76d59efe"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/lua_loader/mod.rs",
+    "bytes": 1833,
+    "sha256": "01531f5dc727fd007093c6aea91fc25c1b1a8c24a2d9f6b23230b7b0b2bd0789"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/mod.rs",
+    "bytes": 5481,
+    "sha256": "3d01fd1830335620eb1a80dff40c128b6eab34457565c695056029fde06f8189"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/config/pre_process.rs",
+    "bytes": 6062,
+    "sha256": "297c9b21e9ddfc967f2e8b84e4edbd6aab7891f28d1c563e649e27db6c8a7fb6"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/lib.rs",
+    "bytes": 9263,
+    "sha256": "97edfd5683e9c8b12956b083f39b64e359542fc543ef9313431af496b46d1308"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/locale/mod.rs",
+    "bytes": 583,
+    "sha256": "97b64afcded72595309fe954525e22d5166bebc27f240b30cc4c25f087a4b592"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/resources/best_resource_path.rs",
+    "bytes": 1417,
+    "sha256": "e4fd0d9328c77398a7ea9d6735120f4543b00a6046cc3963c5e648556ac19f23"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/resources/mod.rs",
+    "bytes": 5887,
+    "sha256": "4e0d91a28a99ceb900018db8632ed4274d72d1cf4e4a265f01ae357bd9050ced"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/async_state.rs",
+    "bytes": 106,
+    "sha256": "823870c35a701660fab4a031d63f1e5ca8bde292c5821f8aeadc28a50177d51c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/builtin_attribute.rs",
+    "bytes": 12840,
+    "sha256": "2444dd244f1dce4ac187163490efc8f9b50c6695f5488061de2de12686d1891f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/decl.rs",
+    "bytes": 2949,
+    "sha256": "7f31af2f6e0f6d55bb21ccf27e9097ef833685d91ad4dc8622bcc8c336a6a9b5"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/generic_param.rs",
+    "bytes": 1110,
+    "sha256": "9fc3c78370979d19908c653f8f09ec854bdf60cbb9b20beb8579064ec5defd19"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/identity.rs",
+    "bytes": 3731,
+    "sha256": "04b518e11c3db6535af537b78cb26ac8c59c44957180bf563bc62a636cc8f25b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/basic_union.rs",
+    "bytes": 4798,
+    "sha256": "9da2b35f7203f11b79b52b27ddc9381f20afe808e4db050580e90daefd2cea01"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/generic_param.rs",
+    "bytes": 668,
+    "sha256": "55cecab5d9691db85b9192b73e6c3aaf0252071404194b640871c374e7bc5e1f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/mod.rs",
+    "bytes": 215,
+    "sha256": "53350679a7a8cffa20eb1af8b8b6673fa542dc307369c9882d1fa762b5773b90"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/type_decl.rs",
+    "bytes": 7288,
+    "sha256": "8c09415660e3050d6a94b7cc7d51ec9d379b9a241cfdd37be4556290a6c24c1c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/type_visit_trait.rs",
+    "bytes": 127,
+    "sha256": "ed0d2f18d6631a2662668ee5ed8794c1ed1d88412dbd89cdeb56ab2aeec37b41"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/complex.rs",
+    "bytes": 27856,
+    "sha256": "291abbc4662e1db40f16c85616343533d326781b0b879ad8ca6ff326c85c8483"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/lua_type.rs",
+    "bytes": 7679,
+    "sha256": "77ba7c74061af82006e99f9d0c4d5671d3dd1bac939e6297e7fcedfa30eee9e4"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/mod.rs",
+    "bytes": 140,
+    "sha256": "0702ff7a8c0e1f8fe57a01e859d3b5a1df26d5c511a23c1b92773095d3be9805"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/predicates.rs",
+    "bytes": 10089,
+    "sha256": "d8184f2b972d38c449e339714c13c24c7fc50eeb733ce320a6f00f88966e7121"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/test.rs",
+    "bytes": 1770,
+    "sha256": "c0478b056ab7c4d39d3778286ec8ac32b1d132518030b8c2ab576a8e55a8fee1"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/traverse.rs",
+    "bytes": 7761,
+    "sha256": "3291a23631d1993f9243436ba75e56148d39b7e9bac355551cbe20eab2cad723"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/member.rs",
+    "bytes": 2401,
+    "sha256": "7f4a61f79c798264afac093da3d151bddda94f2186e43209bd5bcf04ba6e9cdd"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/member_key.rs",
+    "bytes": 3275,
+    "sha256": "b0d30d52eca54ea5b1b7f09c92be42d330106f9fb8fedf0c275365e7c60ab9b9"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/mod.rs",
+    "bytes": 1558,
+    "sha256": "4882030989442a840de138d1b2cba07bb19f374665f1ffdea42a9a042c1ae082"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/module_export.rs",
+    "bytes": 516,
+    "sha256": "34a7e806fe47e1c15900ec1d840ca99eda000133f37a3ae0a669dcb229b103ad"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/module_info.rs",
+    "bytes": 2522,
+    "sha256": "a78284f7096ad19081d77a1eceba0d162fa13b401e55b7ecb8c28f53f0319701"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/module_visibility.rs",
+    "bytes": 1042,
+    "sha256": "924af0d8eca10edfc94f528fe9dc761a1b701a0009eb71d626f07749598fea33"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/name_use.rs",
+    "bytes": 269,
+    "sha256": "85f357c8dd2355ceb8d7bc8632cc0b7b0c815b273c2b175327cb041b8f1371a1"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/operator.rs",
+    "bytes": 554,
+    "sha256": "61a28d52aa3e3c2743b84ece4ffd80ce1e438e0ddff5e4968bed4a8fd9485ce2"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/render_level.rs",
+    "bytes": 1761,
+    "sha256": "b28f1b9559055015e01713c4ca3c8915327c361ac4231d7568ae13da062ee5b0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/scope.rs",
+    "bytes": 572,
+    "sha256": "7e5734f737e952dfe6123b6ffb17654dc6f97b773d8c11a5883ebd4ea4f4f0d0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/semantic_id.rs",
+    "bytes": 3093,
+    "sha256": "e15e53fa77b8742bacee4797a0797305ded0e6068c415456576722a1c70cf6ea"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/signature.rs",
+    "bytes": 7783,
+    "sha256": "eff135d539b57d2142e406da1fd8be4ee1f233d2371679699563ca95fe2afff8"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/type_def.rs",
+    "bytes": 3458,
+    "sha256": "587cc9388ebf9984d63af4cf3eb3929971410a05b7b10a96fb02e7a3c6c27a21"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/def/workspace_id.rs",
+    "bytes": 1609,
+    "sha256": "6962b9a90793b9fb66649c9388b3335cacec910f829a1f8d382aa483d3fcbcf8"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/exports.rs",
+    "bytes": 14122,
+    "sha256": "57f8969c5a5fd3fe0e592629559c3b3e3c3ee5f319fb05f36bd0a67790596550"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/facade.rs",
+    "bytes": 31120,
+    "sha256": "7c4ee0d03b4e298eb5be0fd77ca1e0b47be6ab09e0b99cdf7bd1d4b56f124732"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/facts.rs",
+    "bytes": 112547,
+    "sha256": "8085cec57652e1791d031f0cc3cec18ae2065b5bad05fc8c1ab57a1b1aca253f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/bind_binary_expr.rs",
+    "bytes": 1028,
+    "sha256": "0e79b657d520a5adc78b8fac53d79f040333f35eca3de1c9e9dad6154edcf2eb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/binder.rs",
+    "bytes": 7540,
+    "sha256": "b816153e0d1a66da9f393a79e54e905f0072f0b0d3fa2d144a5279c0e4fd4a68"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/comment.rs",
+    "bytes": 2304,
+    "sha256": "d8436fa19d4aaf9a347582ac6ce6d0b36b3870e439c299241442aa88d4e01f49"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/engine.rs",
+    "bytes": 52197,
+    "sha256": "57e8d8632f585abfe1f9c54ef76fec7d5172a6a24b78e53ebac5b87fe92497b4"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/exprs.rs",
+    "bytes": 393,
+    "sha256": "6f30270b78afc8cb971ae050ccb75af21ea361962b077ce2e4a616446a98c129"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/flow_node.rs",
+    "bytes": 4929,
+    "sha256": "17871a0b758439ab1247bfae90d9cc87b402a699ab26f324f1fafd2203c7c3dc"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/flow_tree.rs",
+    "bytes": 22989,
+    "sha256": "0020398cc579a961635f28979aba398be5e698f3c4801d412ff402e92094746f"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/mod.rs",
+    "bytes": 1918,
+    "sha256": "94b468e27e95ebb6907a6f33d9bbf9e75d3c0a6759668765dad507f77c8f4719"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/flow/stats.rs",
+    "bytes": 6922,
+    "sha256": "f01dee0255e41bc285d1c0f12ce52971e8445d4bf4b8e5d0c6b38bffddfbd187"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/index/members.rs",
+    "bytes": 12410,
+    "sha256": "51020a7cf90adfad1e7a1b6cea594f70afea813a625ee042503d0b3d78700a10"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/index/mod.rs",
+    "bytes": 970,
+    "sha256": "dec98cce0b6927fccbde1c2c1e198157f77afe1d7e8a4ac3cd7d3d8d7a39700b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/index/references.rs",
+    "bytes": 10733,
+    "sha256": "9bd8475f938cdd2fec742746611ad1c3fb111590037d6085b2a2765b2aefb267"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/index/types.rs",
+    "bytes": 9016,
+    "sha256": "a288c1566753bccee27ff3b117e3c2ac84fac4deba794c538f5dbc3d9db5bb1e"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/inputs.rs",
+    "bytes": 1480,
+    "sha256": "877940bd4cc82e7b3cff43d96982705d9b659ba6bdb2f7346898565caa72ac9b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/mod.rs",
+    "bytes": 32830,
+    "sha256": "89abf259b50338cf1eaabb5417ad29788a85e4d8df4dd0e0b9e939cf04ffb883"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/fix_tests.rs",
+    "bytes": 5186,
+    "sha256": "a285267a3e96e7e070cb337c00d55adc48b4a1983d5df1fa18257838cae416f0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/mod.rs",
+    "bytes": 172,
+    "sha256": "10c9b11267ee37e2463e331fab2c1d2ef4bf23071d957835c44d15687a140758"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p0_tests.rs",
+    "bytes": 11548,
+    "sha256": "95097cd7ed70011ff898dca6e00e56d09d314d4b45a03ebc83017a78c7bd1271"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p10_tests.rs",
+    "bytes": 14215,
+    "sha256": "cda1b42f340d7f1c411c3374f918a6d4be9542c5687feb349d57e5796dd6df98"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p1_tests.rs",
+    "bytes": 6021,
+    "sha256": "0d83d22be978c80879e49824a236566acfe77d9804865389a3edb3cf3d6da371"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p2_tests.rs",
+    "bytes": 2634,
+    "sha256": "3ca22e8ef63ba96d9dbed3a26a88af2d611b3a5ae2fca3a87b819dff7706cb75"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p3_tests.rs",
+    "bytes": 5663,
+    "sha256": "7806db51f001108a460eb57c9472969556de23917230b638eb0694bf9a2f228a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p4_5_tests.rs",
+    "bytes": 5994,
+    "sha256": "22d515bb5b20315e728d2494552e8c22a28f876b8f060e8e10b68d14a7b86cf7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p4_tests.rs",
+    "bytes": 3810,
+    "sha256": "a90c9862d3057db8ae066ef689710dd8b75748b1af536ab938c7be2d9ce3be3c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p5_tests.rs",
+    "bytes": 6438,
+    "sha256": "64948ecc7cde0da210569921efbfa8edf86f1dc0b7dcfb436171565460d1c32b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p6_tests.rs",
+    "bytes": 7353,
+    "sha256": "dfc6afdf5c370351767e8f74fa41f466a757493c031934b44954746da6e37fde"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p7_tests.rs",
+    "bytes": 11140,
+    "sha256": "92c7fc3d085b8f1c49f899c352a2d8479eb824d8ca72d2e7d4aa2fa876a8282b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/p9_tests.rs",
+    "bytes": 1519,
+    "sha256": "52d5dc5f50efbaf2f42ab4b4f374034ef2e3560a21375177b198397b0e6402c1"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/query.rs",
+    "bytes": 126100,
+    "sha256": "32414f7a54f7e61cc232d835a4a9c3a94c0b57bfdfeb6d1ce7ddddba9f05f776"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/tests.rs",
+    "bytes": 68152,
+    "sha256": "eedd0b98e2e08036326de83b9f0b69a800c21b928d90d97fdd6b13d1e0ad2f62"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/types.rs",
+    "bytes": 8258,
+    "sha256": "e87c54fe5bec9f94e7dd2730d62f38bd77ef14842ceadb9dab8bf4b7aaee05a3"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_db/update.rs",
+    "bytes": 29833,
+    "sha256": "2e33ce2f012d6f5cde021abeb79421d97683f1166d51da86e4e73a5424aa805c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/access.rs",
+    "bytes": 53912,
+    "sha256": "c883bc94f0510259209286fceeac339e33fc95231906449249feee8b7d7eae02"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/cache.rs",
+    "bytes": 2628,
+    "sha256": "6e46af302f6f6571e8f17f8bfc2f84211b80f77f4233e168d2e829163581772e"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/doc_types.rs",
+    "bytes": 35290,
+    "sha256": "922a508a7f662b455ecd049767eb643b12e545fa8eca1748c466a517ef244605"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/flow.rs",
+    "bytes": 205309,
+    "sha256": "9e5b5a8bb3f343618e7d734b8dc5f61f618ae67b51d2578bb4bd8cf8dc86edb7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/callable.rs",
+    "bytes": 6848,
+    "sha256": "073c228007bc8b59bbd59366f95d3a43b7d5b7fe39efd71c5865ad602524baaf"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/function_solver.rs",
+    "bytes": 9446,
+    "sha256": "8fa6d068d69cb54d1bf2553ac48ce592c94f54b9833431eac5264e79ad32747d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/and_or_test.rs",
+    "bytes": 3178,
+    "sha256": "f53a455106d235695a58161440a69266cac21daaf9636cb5556ae7efb5454624"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/annotation_test.rs",
+    "bytes": 8960,
+    "sha256": "2625cb6e9ec8cb5ee19ee30d3b2492dc370e528380fda18464da2b0928f4f1ba"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/array_test.rs",
+    "bytes": 1536,
+    "sha256": "944151c38a6fe4aa602430e9f2630947d1509c6c1cc100696414984e40a0ed2b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/attribute_test.rs",
+    "bytes": 6426,
+    "sha256": "56e61aa0c1ef17e16275688a1a66f71cc4ae62b01c1153c9ef44647ad621c08a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/callable_return_infer_test.rs",
+    "bytes": 12970,
+    "sha256": "0c0f67751f11b11b3cd927354b4a19417c5b80a705bba52cbe3f6c44cb8fb2d7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/closure_generic.rs",
+    "bytes": 2018,
+    "sha256": "3de44e017f5bc3733f53b3f994dbdf5aaa4bdf1b3aa21b53383940d4ed5facc3"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/closure_param_infer_test.rs",
+    "bytes": 13252,
+    "sha256": "59717663d24e03e30d8d49bee4adc39c3040356212ae4f243aa5de47c8980e48"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/closure_return_test.rs",
+    "bytes": 8188,
+    "sha256": "7b6629e65f7e9c38b633984d3e231114b73bb31788c1803478900289bf5a01aa"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/decl_test.rs",
+    "bytes": 4478,
+    "sha256": "cabb78b475a5cdbc248e1809592c70f35c99d9a7dc9ce16b55d0d94b6932a333"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/diagnostic_disable_test.rs",
+    "bytes": 399,
+    "sha256": "32c4e68291a469228a36f7bca025b9e24b73fe58ea9807d0687a121ce80bb665"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/flow.rs",
+    "bytes": 109907,
+    "sha256": "0ec364f04cc4f80e9e870f1c633541cca845ba788b6f861a3424e77acfe9b411"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/for_range_var_infer_test.rs",
+    "bytes": 6822,
+    "sha256": "1fd0d7cbfbbb011444fa12c9b810158a4bca0a43d87ecbe1f0991556900adda0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/generic_infer_test.rs",
+    "bytes": 9879,
+    "sha256": "2166fbbd5f215a1197af0594967e818aadf083e455c1c82adcb11845b89a18bb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/generic_test.rs",
+    "bytes": 53839,
+    "sha256": "539a6b9d9526cbda12caac0a41948150ad503526c1572c1a8ae44f0128513c66"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/infer_str_tpl_test.rs",
+    "bytes": 526,
+    "sha256": "6d6c78999a5f3ffff5e07028b72ec99e8f10ae34109eb0e991c3af0d3eb0361d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/inherit_type.rs",
+    "bytes": 521,
+    "sha256": "40c622d9ea65e0be292dc725925a6572e86868725fe342aaca9a8048e9801ead"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/mathlib_test.rs",
+    "bytes": 1730,
+    "sha256": "fb1549e61edd47d5df0e306b66cea067c27d3ffd44dc8cca2ae86bc83f1d7aba"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/member_infer_test.rs",
+    "bytes": 12524,
+    "sha256": "acfa0a0fec111c14d02f71f656e935b287df79bd0f1a59c5c68ad8dd53cc8cf7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/metatable_test.rs",
+    "bytes": 2591,
+    "sha256": "9c4cdb3947f5c7ce6fdfc44d951095bfd2d5b6c4fdfca4ba63e396e383b4b313"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/mod.rs",
+    "bytes": 1033,
+    "sha256": "89859af035c19718d5c7ac6ab1783a5ef8cff8635c4b1485bcf809043be25362"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/module_test.rs",
+    "bytes": 4567,
+    "sha256": "27cfc24942afe199dee561ecbdaba399538a3434fea5206a45e328eae0339b74"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/multi_return.rs",
+    "bytes": 2634,
+    "sha256": "040c30db28887f90ba407214f9e571ffa0df6c186b11fd9b24ede34ea9b05b40"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/out_of_order.rs",
+    "bytes": 1562,
+    "sha256": "ea410b91f4f0b1a62ae47f6845982f93d6342bad54bb06f398c5c0a43357deb5"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/overload_field.rs",
+    "bytes": 1381,
+    "sha256": "cd14bc3773d23094bd215bc95979b6c18703531a03914b774a7ab2131a9ccbc0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/overload_test.rs",
+    "bytes": 1617,
+    "sha256": "8756ea7cc301bb4fb2d433efe85dfc7fe465b54c7252192e44e11c379b9d3bcc"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/pcall_test.rs",
+    "bytes": 11749,
+    "sha256": "b32240f7361dc2e59042fe3fbf17b724cc345a6068ad8dbd0e173047fd683323"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/return_overload_flow_test.rs",
+    "bytes": 34660,
+    "sha256": "50aef8ff9a8e9b3fe4596e03adda2d868b0e4e90b29410c209cad29035105229"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/return_overload_generic_test.rs",
+    "bytes": 6534,
+    "sha256": "e1cbd9b0a8217c0d8af713266e9167a572f3ff43a9936ea73897da778137aeac"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/return_unwrap_test.rs",
+    "bytes": 2078,
+    "sha256": "325a08892c0ad66d91285be58053405abd65543ef9726723a0684c5a8d0263c7"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/semantic_generic_test.rs",
+    "bytes": 11301,
+    "sha256": "df5037b29dd6ac010e63c99f00a8a6f3515d2eb2285881dbc218f0d78a5898f6"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/semantic_infer_test.rs",
+    "bytes": 6078,
+    "sha256": "2b3b23a4410b918a81e87cfccdab0a02cedc115d9372b94770041dec31156020"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/static_cal_cmp.rs",
+    "bytes": 1565,
+    "sha256": "8971e7477daec233d79bc7592cf7c579ce620247221dc518b81a1895f1ee9227"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/syntax_error_test.rs",
+    "bytes": 334,
+    "sha256": "aa65f3a77c762642c11aba2450d0e18d544be5290c09c2d81a8340d9b8c18366"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/tuple_test.rs",
+    "bytes": 1810,
+    "sha256": "9d5bd3a92bdfd1460822542ca52ad1b25dcf01c1a4ce316efb2665e5890d872d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/type_check_test.rs",
+    "bytes": 1754,
+    "sha256": "bc7407692b51b150c534163fd8a152bb6561c607117ba9beda1e8915d49556f0"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/legacy_tests/unpack_test.rs",
+    "bytes": 4243,
+    "sha256": "03709571938c807d017ec637059af6a00b54d2939ce0c5401fa346c8ef0b03bc"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/mod.rs",
+    "bytes": 7441,
+    "sha256": "b2027a2299cd1f03587c2a170ad61138561d19cf22c409a4506b07e8deac68d4"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/overload.rs",
+    "bytes": 33542,
+    "sha256": "0475ac8de55dcd4b9bf5698e356468409cfaf344aee263becd64d34d06053b09"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/test.rs",
+    "bytes": 46198,
+    "sha256": "c2b5c1879fa0fc8b7355675f9e51f0ceef7e893d7b8ac242fe916d28ee926998"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/unify.rs",
+    "bytes": 15432,
+    "sha256": "4ace7a41826d52b2a0326b9fcecd9db538b050ad202b350ca0f9a3fea660889b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/infer/vm.rs",
+    "bytes": 215580,
+    "sha256": "464fdbcebd554c89d19319b166de73c9da4fabe1bd13f4d9e7fd74540f333bdb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/legacy_visibility_tests.rs",
+    "bytes": 2903,
+    "sha256": "ec91db2ecc1413eae2093449bb6a52f40bc3ba1c4642edf3e5d9792918d599b8"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/member.rs",
+    "bytes": 50272,
+    "sha256": "f9545b0371a47589030e503034b5765024e2421a817486f1d38aac472d82fd57"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/mod.rs",
+    "bytes": 6468,
+    "sha256": "90a8da48fe631728b290b318c6f528837b73d8fe581d568f4d82a2d8a93b6ca8"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/prelude.rs",
+    "bytes": 1869,
+    "sha256": "326b9f2c9cf366cfef69d80c5e70156d9358e0a579aa2a71cd41793e7c3a4cdd"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/render/mod.rs",
+    "bytes": 32585,
+    "sha256": "d1d2f7b02ed82c3e0df03dcb65c71ec3342f5cabbfb676c8fb914d608fd602b8"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/signature.rs",
+    "bytes": 41346,
+    "sha256": "5113b809ef79607cf9c844a84286f1355354da3b02eb4962a7cb457e5ce95a64"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/assign.rs",
+    "bytes": 10380,
+    "sha256": "7c7938dc18bf32f9b6c306ba7355baf4f3b79a4937f5c749497ffb9fed629480"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/complex_type.rs",
+    "bytes": 7484,
+    "sha256": "8a15c6c2f9df8177c3f57c016958ce9c5ae74fbbd24f88237150f9bd2f36565c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/context.rs",
+    "bytes": 3342,
+    "sha256": "f13e72b864c5fba44186de70b2d77a9dbc7384d14757b0473e59ae39b1289ef4"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/fail_reason.rs",
+    "bytes": 423,
+    "sha256": "656ac3cce2ee3a194abcdef0332b867b2265cf11c92aa70ac4ea2ad2841454e2"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/func_type.rs",
+    "bytes": 6240,
+    "sha256": "6dbdecccaf00c614fe154e8bd9fa46a9fc920d60428411d166d1406a09d79418"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/generic_type.rs",
+    "bytes": 6308,
+    "sha256": "beac4a6ade38c88d1916e50f0a165546ce674ecb7c24313cc15cb760d6db334b"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/guard.rs",
+    "bytes": 707,
+    "sha256": "664f08158d5ddd879c41a41d92f1c5bfec51d75b8425a2a2b6ac5913b514b21a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/legacy_tests.rs",
+    "bytes": 10929,
+    "sha256": "79a02b0fa4d6a7eb00e96cde9fe19111521793fabf34730a82404f1cae812fca"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/mod.rs",
+    "bytes": 18719,
+    "sha256": "1bb2a0043d365d2e341f5c95cfe55cd4931b737315ec5331101c1919b4b27738"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/ref_type.rs",
+    "bytes": 9067,
+    "sha256": "b77a502587a10b22d0b60418f34ae9d20d6d05ecc4efc06fb99531da867b8b89"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/simple_type.rs",
+    "bytes": 12591,
+    "sha256": "d78d204ecb076b33de73cd2a42141a6102e481f24ceb624aae4d2a74a14ca927"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/sub_type.rs",
+    "bytes": 2069,
+    "sha256": "05a7855d11b9126f58d687cb6456fb799addb4408bd749ea8645e328033f015a"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_check/test.rs",
+    "bytes": 7695,
+    "sha256": "f8390269aeec52e0fb360d4c825185a15a417e38824daf0fd091d17219973334"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/type_eval.rs",
+    "bytes": 69923,
+    "sha256": "731b44f456293bb67b7299274a6eaccbf9b49ecbb25203842144fc14c89d4caf"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/semantic_model/types.rs",
+    "bytes": 61262,
+    "sha256": "229a8fdfb0231a2786ce74a8740e222e4aa7079f164171ece2e9653e19f67e2d"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/test_lib/mod.rs",
+    "bytes": 7621,
+    "sha256": "d05a2738781e618abb090428d5a180d97962a0224fe0561d20ee63227fab729c"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/vfs/collect_workspace_files.rs",
+    "bytes": 26293,
+    "sha256": "b968d8b0438b5fbd62504fd04fab6afb6fa1abad1503e5e7dd04b33c61dec172"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/vfs/document.rs",
+    "bytes": 8380,
+    "sha256": "601a06add88f1d71e51e7d130a7c20c1a64a1d25ccc0ac6b142e61a204f39b93"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/vfs/file_id.rs",
+    "bytes": 2520,
+    "sha256": "23a8b670f766cb889e0e4df158afeefa5b4f00d895ffd89211bd1a5be6584fb9"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/vfs/file_uri_handler.rs",
+    "bytes": 4950,
+    "sha256": "d73e519874ad00232f3d12d5f5e5f0ea752b5bb9d97fc0231de4c03f98160e72"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/vfs/loader.rs",
+    "bytes": 3094,
+    "sha256": "179027c988dbefcd3c9529d9c16cad0035e5f2be909e257a366a666957fa64cb"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/vfs/mod.rs",
+    "bytes": 8264,
+    "sha256": "63052fd57c64d4adedb0aac9ba988eaf85402b4f07a77eed7f8d204977f93443"
+  },
+  {
+    "path": "crates/emmylua_code_analysis/src/vfs/virtual_url.rs",
+    "bytes": 727,
+    "sha256": "607fd0510ecba4aab7431a43bfbb0f8b131a1427366e8e2771ae1e55881d0fd6"
+  },
+  {
+    "path": "crates/emmylua_diagnostic_macro/Cargo.toml",
+    "bytes": 465,
+    "sha256": "469a988b65978c824c3b93b13b68b06aa72945e8d39c357c87c23a1a2e983b7e"
+  },
+  {
+    "path": "crates/emmylua_diagnostic_macro/README.md",
+    "bytes": 211,
+    "sha256": "6dfec81526d83140b0abd4ddf646c14be4d464fdcb80daf0889adf6c9a8bc84b"
+  },
+  {
+    "path": "crates/emmylua_diagnostic_macro/src/lib.rs",
+    "bytes": 3440,
+    "sha256": "6250ab44db28abd79aab1b7cbfd0c1a4f80f32cd9d7dd8ebc853b317fcde9022"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/Cargo.toml",
+    "bytes": 1037,
+    "sha256": "fde3b4873ae03000d39fd89301755bcd4157c5df0a7dd19ec962225ba8f3ae58"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/README.md",
+    "bytes": 4481,
+    "sha256": "5b398611536f7094fcfe4b062a1d458e42511126981e57171a3fee3da8cf7131"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/bin/emmylua_doc_cli.rs",
+    "bytes": 254,
+    "sha256": "a5fd47a31924542bfe45b6bcefe0a8b416829d02dda6d87b1d76baa61706681f"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/cmd_args.rs",
+    "bytes": 2321,
+    "sha256": "0bc08ab45cd96d9f7adde34245ddf06872b093fbcdfb7f95fb063c6bb6a089b3"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/common.rs",
+    "bytes": 889,
+    "sha256": "1f6f254597d15febbfd8407e82c8fadfcc150b90d1a449d2ecae0e6a74095315"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/doc_model.rs",
+    "bytes": 36227,
+    "sha256": "09c3cec04ed237deb8378dd61f470db4dd2065d9d784337f9e5afa4cf02b9eea"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/html_generator/generators.rs",
+    "bytes": 9003,
+    "sha256": "1ff7b284364fbf1fd0a66dbe6baf900b62e44a15fd1e137fe2f8ab7e323b3aee"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/html_generator/html_type.rs",
+    "bytes": 11624,
+    "sha256": "c70cf9d98b752a3d965e0f9c18e8be22c20fa8ad1efe95ec6ca18d199ba657d8"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/html_generator/init.rs",
+    "bytes": 1860,
+    "sha256": "be707f8834254dfce2d16c3a421209eeb6266c93af2c755971635c96354fb035"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/html_generator/markdown.rs",
+    "bytes": 10973,
+    "sha256": "886ef34515430d74dc5966d8bbe9cd526d333e3f621db53468df7243906af834"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/html_generator/mod.rs",
+    "bytes": 16156,
+    "sha256": "b41af702367587b1d0f4f4a52d08c031fa8353deb3de4d9f826be57a605b9301"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/html_generator/render.rs",
+    "bytes": 452,
+    "sha256": "ad15f9ea45b31e1781170b6e2c6a2ae1aff0f05743fb314081a44b2eead8c15f"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/html_generator/types.rs",
+    "bytes": 6584,
+    "sha256": "6e9c6347e616ca0cb86af3eefe5441cfc93bd21d683fb1183b262fcb74b0fcd7"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/init.rs",
+    "bytes": 4002,
+    "sha256": "e9d3c010cad899b2a03cb4b45b8535f44801f1fefecbed31946a2e6519bbc1ef"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/json_generator/export.rs",
+    "bytes": 7657,
+    "sha256": "e50a6e4174212569941cb088152b7ce4dd33c9e0349b2c956fd28852e69c76fe"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/json_generator/json_types.rs",
+    "bytes": 3685,
+    "sha256": "482cb5b464921de02b93c8e19f2920e4f56795f375bb3e5f8daee2efd7373c40"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/json_generator/mod.rs",
+    "bytes": 1573,
+    "sha256": "79c885ded354d4bb384f31a332d67d2f4d06f18680990ceccb81fe2441a5cc27"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/lib.rs",
+    "bytes": 1605,
+    "sha256": "df56d22389edab6e30e995a420461e86505f22dc1e8c0a767f233d2d8b77a677"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/generator/global_gen.rs",
+    "bytes": 2972,
+    "sha256": "dea8e796d4d06fe11bfd421d9ab8f399ad1debe911bd21832a8d5d4fe5e99ba8"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/generator/index_gen.rs",
+    "bytes": 1442,
+    "sha256": "34d3b28b211cedfaa1169f610120597dbabaadb9719e511215e3d272d285fb74"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/generator/mod.rs",
+    "bytes": 501,
+    "sha256": "ca77443a05d103e87de6b5cc2824d6bc45cd25e582dd50d7cf4f4acf4c377928"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/generator/mod_gen.rs",
+    "bytes": 1681,
+    "sha256": "259bec68f430b999bdd27c9ef42789c10d06abe2081afd1e0353a1e419b45aa1"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/generator/typ_gen.rs",
+    "bytes": 7851,
+    "sha256": "a008f3cfbd9f9ceed4ce91c4f38a13710e94de508a493a3c853dc290813c451d"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/init_tl.rs",
+    "bytes": 1604,
+    "sha256": "1bcf2dabba173443c1780325e099311afe7f2aff46da9f691907f6ceb01ba005"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/markdown_types.rs",
+    "bytes": 1009,
+    "sha256": "22cbf6785867fe42ef8a88e1c25ed87e1fc3546fff5cef110085a97241a3e674"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/mixin_copy.rs",
+    "bytes": 706,
+    "sha256": "04d4bcb61d8c9c7d51c361eaa16537cd7bd275606aa1b266aa2176b21c80fca8"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/mod.rs",
+    "bytes": 3012,
+    "sha256": "66c817246a43637d54c627759d4abb98f5b0840be62e88f1eb13e516a4abfdf6"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/src/markdown_generator/render.rs",
+    "bytes": 2656,
+    "sha256": "d555e3b6df488bd73dbfc635e0eea2fa82be3914fa15517656c7fd96302de55d"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/html/base.html",
+    "bytes": 4064,
+    "sha256": "4bc02eaab8dd930e62f2d7d4c6487ae0462804df6cdacd43e775761eb3e8321b"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/html/index.html",
+    "bytes": 1359,
+    "sha256": "3cb18cb9872ffaed3c49dcbe70793be1f3956f23a589878751ff763701258a88"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/html/item.html",
+    "bytes": 2559,
+    "sha256": "7c42ab47edf4fe700773cd33cd3b7f93305d6184098442b728e5866292f58539"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/html/macros.html",
+    "bytes": 2997,
+    "sha256": "77a788fe0678a1d587e475271043149ac7cbe6cb070dd0fc47297fce0c26f0b3"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/index_template.tl",
+    "bytes": 354,
+    "sha256": "8f511b243cfc492f704da4603d5ccd324664c54bb1a07e71d3cca11728644f6a"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/lua_alias_template.tl",
+    "bytes": 225,
+    "sha256": "8fe4db3659edb682e647431cb81ea318253a50b6f25e1e12e53509fe5829a226"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/lua_enum_template.tl",
+    "bytes": 633,
+    "sha256": "05ee4efaa667d55f8974e580ac1faf238f3509d1cc147ecb834ba55f35495b34"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/lua_global_template.tl",
+    "bytes": 1240,
+    "sha256": "c1900aafac456ee6672013473d5398788c92ef5236120d67b635aaf56dea18ac"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/lua_global_template_simple.tl",
+    "bytes": 158,
+    "sha256": "09b515b9cc75213932d474bf2fc5a65915bb563155937e3a089c0acedc80034d"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/lua_module_template.tl",
+    "bytes": 1240,
+    "sha256": "c1900aafac456ee6672013473d5398788c92ef5236120d67b635aaf56dea18ac"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/lua_type_template.tl",
+    "bytes": 1367,
+    "sha256": "ad6c3ef429bd459bdd5fbc7ffa453d6b3e8ab1bc8ccc9f0443ee3528384120d7"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/mkdocs_template.tl",
+    "bytes": 858,
+    "sha256": "0d7c3ab456550b980395c5276cbd661ae0fb16df15dea79799f01d2a31a43db0"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/favicon.svg",
+    "bytes": 260,
+    "sha256": "477e6ba509a1202edaeaef802550bb5a557cf5327a1b4d6c8bbc153495aeb59d"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/Fira-LICENSE.txt",
+    "bytes": 4461,
+    "sha256": "05ab6dbd6220dbcd2f2eb0fcb528dc92d45fef2570dcaeaf92340d5a4914e034"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/FiraSans-Italic-81dc35de.woff2",
+    "bytes": 136300,
+    "sha256": "81dc35dee062c92d212935b4ab24000d77cf98cfae9ed6f7822ff0492e10f33e"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/FiraSans-Medium-e1aa3f0a.woff2",
+    "bytes": 132780,
+    "sha256": "e1aa3f0abca6fd9f7b868c56ab3ec0e0db21222ef50e84fabbf21963c10dd704"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/FiraSans-MediumItalic-ccf7e434.woff2",
+    "bytes": 140588,
+    "sha256": "ccf7e4341622a40bbc9956fa8b71de24c6583a19290329b2efbfc48dd02482e2"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/FiraSans-Regular-0fe48ade.woff2",
+    "bytes": 129188,
+    "sha256": "0fe48aded097c2a11942a70bfef48510abf875a8e800f43d4007dce8d2a3aebe"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceCodePro-It-fc8b9304.ttf.woff2",
+    "bytes": 44896,
+    "sha256": "fc8b9304b4a16c347424e5b17834253eb2c9bf3aab0de4a5df7cd33389f8fca2"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceCodePro-LICENSE.txt",
+    "bytes": 4570,
+    "sha256": "67f54ca75bed5827c712f2d87a168c6e97d56fbd2312eea5de510adda74aaedd"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceCodePro-Regular-8badfe75.ttf.woff2",
+    "bytes": 52228,
+    "sha256": "8badfe75c98da1e8315a52619f177def4618350f7b3e496baf5b8894da2c2ac0"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceCodePro-Semibold-aa29a496.ttf.woff2",
+    "bytes": 52348,
+    "sha256": "aa29a496301cce84cd8ee55226860f3becff33b0526356732bd14353ce69b32e"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceSerif4-Bold-6d4fd4c0.ttf.woff2",
+    "bytes": 81540,
+    "sha256": "6d4fd4c0f08798a478fe34aafea9bf5cfa1cbc6ae4b834193febaee74254d10c"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceSerif4-It-ca3b17ed.ttf.woff2",
+    "bytes": 59716,
+    "sha256": "ca3b17ed1e3e668ffd9e03385cfd46e1b095df783de53710d25d41241496026b"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceSerif4-LICENSE.md",
+    "bytes": 4727,
+    "sha256": "a2cfd9d558b7f03a7e2f70f5d6a10ca7126a6e9b48b5a4d235e04abf9a2a06e6"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceSerif4-Regular-6b053e98.ttf.woff2",
+    "bytes": 76260,
+    "sha256": "6b053e98f0838afe81f3e784727be4583a7c13bb42f198dc5202ecffee0aaee0"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/fonts/SourceSerif4-Semibold-457a13ac.ttf.woff2",
+    "bytes": 80732,
+    "sha256": "457a13ac92e977d82e376038a2daac7fdb5433610910bf5787bdf6c1c3781865"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/main.js",
+    "bytes": 15512,
+    "sha256": "91bf6da5dea85a4c5fbade17ebb3e3cf2a55f2280c2e0160d187f18aae9959b7"
+  },
+  {
+    "path": "crates/emmylua_doc_cli/template/static/rustdoc.css",
+    "bytes": 31456,
+    "sha256": "ed306dc46da3c0dd00045900396cf8c8acab9c840e8a88d36cb6ab201d7953f8"
+  },
+  {
+    "path": "crates/emmylua_formatter/Cargo.toml",
+    "bytes": 963,
+    "sha256": "6370a3448a261eceeb6073cca5f46742e728e53b96994945d5c043fa18a8b394"
+  },
+  {
+    "path": "crates/emmylua_formatter/README.md",
+    "bytes": 7402,
+    "sha256": "2beda68f8738136da999a4f91ad238b7c323a77aa69da94ce1c4a87bdc481eea"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/bin/luafmt.rs",
+    "bytes": 12578,
+    "sha256": "acafff3d743a53a492eb2bb13aa72275ddc0a01dd3a6d4c11795a3dcc8af78e1"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/cmd_args.rs",
+    "bytes": 6598,
+    "sha256": "464d8ce429faeea09e74ad7fe1329ef23efe52eb16bffd6b3ace64347aaa2285"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/config/mod.rs",
+    "bytes": 18329,
+    "sha256": "494b0b9728feed32a29cc8ece9a4112d5285b716e652aff5a6244217fb1aba10"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/diff/color.rs",
+    "bytes": 2132,
+    "sha256": "16009cbb643808d897ee22fda4a8f9469b0f246dd67ab8fcf2f34087433a2ded"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/diff/mod.rs",
+    "bytes": 378,
+    "sha256": "97623473f9f5f03c4c6a58f0fc05a39f8ad47b7c64b0941f2c06cc5dcb902dde"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/diff/sha1.rs",
+    "bytes": 3080,
+    "sha256": "ea98896859b2eb11f00724f64ceb829470285b57d4a41a60acc5d889327254d9"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/diff/test.rs",
+    "bytes": 5450,
+    "sha256": "cd5aefbd40caf53f2885a5c66750af2c687a4090c609c328c762bd7f2fcb4161"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/diff/unified.rs",
+    "bytes": 4458,
+    "sha256": "1636690c2294a574bbd392774763c106994a6e312327e8022c47ba40a20dbff7"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/expr.rs",
+    "bytes": 128584,
+    "sha256": "a42691747fbb829420613bc327090edd1fdbbfcdbad4f454d2423655f9be560a"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/layout/mod.rs",
+    "bytes": 19757,
+    "sha256": "668ef849826ad0c24ba831c50ba97ae8ad4e14b340590319df8669b91f4aae1c"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/layout/test.rs",
+    "bytes": 9597,
+    "sha256": "82a49905d8116fbe5d230fc63dd3d80f5bf1a93c3db28e33ffb410e5a206d56d"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/layout/tree.rs",
+    "bytes": 3205,
+    "sha256": "e357d0a78495b55e77e2b2d67ca5cd9e2fc652628ba64314b9aca35391ced690"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/mod.rs",
+    "bytes": 732,
+    "sha256": "b4c3aec1adf8d189a36466171889f69bbd474e5bdd380955975d87cddb337b77"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/model.rs",
+    "bytes": 7362,
+    "sha256": "70f8699a1241376c1a0e8aa1943c94ea24ca8e08e3f2b0c3cfc36e426ea6457e"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/range_format/mod.rs",
+    "bytes": 14581,
+    "sha256": "9f3da89477fa6afe60d8e9182115e9c1159f06ae642d5e386edfbb289f5869e5"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/range_format/test.rs",
+    "bytes": 8999,
+    "sha256": "e0d0dc394d80ebfee075069367f3cb6a476bb7023bf2eefc7897b3a1918e9c32"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/render/comments.rs",
+    "bytes": 8216,
+    "sha256": "abe76400a2d9a68fac6e7173e760aeb8799c08c91b2fe726d8181bde08371928"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/render/comments_ast.rs",
+    "bytes": 28105,
+    "sha256": "658b1793ee33977732b855dc56290f846474ae717db87b9170d8d26f91229f44"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/render/control.rs",
+    "bytes": 54683,
+    "sha256": "4038e3c0947e8ce10582b151820b199d189d121a0e9d96dd340a1a926b518265"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/render/helpers.rs",
+    "bytes": 10534,
+    "sha256": "fcfcbe6ff61da30b3569e2a4760e2e4efdbb869d77fc318ea2eb38600f956450"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/render/mod.rs",
+    "bytes": 16108,
+    "sha256": "fa0020345411cdc8df6df4fb92f8f0a1dbdce25f317980bb0450ff06211bb98f"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/render/statements.rs",
+    "bytes": 33724,
+    "sha256": "4c47f9990122a6c039787bbd4551d14cb437aac565de6990a3e442d14968f453"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/render/test.rs",
+    "bytes": 2207,
+    "sha256": "78284613b6bdb8f86412ef1ddd91d05d50a4f2ba33b851096a0fb33b7c2bad8c"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/sequence.rs",
+    "bytes": 16864,
+    "sha256": "0bb658de5c468f0dd7bde8583eea99f360e8fe8cf7183f8e557b827bda30d39e"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/spacing.rs",
+    "bytes": 19130,
+    "sha256": "3b44434aca2e1448ecf86588470fa777c5679deaf783fbc45dac231f4bfc19f8"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/test.rs",
+    "bytes": 6171,
+    "sha256": "d9bacfc7ae50e2b8d2024e35edf6b2f50bde9167dab4208a3c12dcb8fdf608b2"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/formatter/trivia.rs",
+    "bytes": 3386,
+    "sha256": "fccc6b63d16c90681d211a1b2d311c31c792d029ee06e87cf2b65a52da97dc96"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/ir/builder.rs",
+    "bytes": 2749,
+    "sha256": "2965d79346d3677d8665338ea65213470b1cb8f10fdd8e609a23b1c2d4fa2624"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/ir/doc_ir.rs",
+    "bytes": 8043,
+    "sha256": "1bcdbf617662a68fee7dce71ec60cd1f634b52942ec3f0c3027f1bcde5e449e9"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/ir/mod.rs",
+    "bytes": 65,
+    "sha256": "3a42bd241ed356fe5a71f61b214f514d00fe7814a05971fec212ed83b4450292"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/lib.rs",
+    "bytes": 4198,
+    "sha256": "5502697c632bf0b6e3d14b1ada90b3d08bb81be2552782eace842593743a689d"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/printer/mod.rs",
+    "bytes": 32695,
+    "sha256": "9a40d1d201f0d1b3b63c9a5113ff9719bc569081ced461ebe10b62c38c5f76ab"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/printer/test.rs",
+    "bytes": 2407,
+    "sha256": "d2d7c9d402a62d5844ba8311fb1511ca9ed2178314abf0bdefbe5255a795844d"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/breaking_tests.rs",
+    "bytes": 8045,
+    "sha256": "cb963942d5afaaf8ac24dd261f3e3329924c80cf51aa0ba48fd56b0740cfb8de"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/comment_tests.rs",
+    "bytes": 54375,
+    "sha256": "3d658be9c7cabc3d49f089cdeaab99f792745da1e3a0b3e3c7165d98a9152320"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/config_tests.rs",
+    "bytes": 22701,
+    "sha256": "89b9fef6bdaf0b253e2a928a244a1c24d95e1898d662dabf09cd83486dd4a0d9"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/expression_tests.rs",
+    "bytes": 34958,
+    "sha256": "11254796c797b66dda8f8035dc3ff47cc1141e20b1871c603d245abe20adda23"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/misc_tests.rs",
+    "bytes": 18890,
+    "sha256": "eb7b3246bddf2947e4c5d753e7e787564f4eacd3b212ce66350880ecccfc08da"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/mod.rs",
+    "bytes": 133,
+    "sha256": "f1baee72c5e32bda4e97022e1fe85ea59a82c62490e06a4ac45d009bdf5a3096"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/statement_tests.rs",
+    "bytes": 45809,
+    "sha256": "98d64919869c11c5befe5757d3a0525203abd5c07543b8ed8dd95e8a0a3cd70f"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/test/test_helper.rs",
+    "bytes": 1897,
+    "sha256": "5334e78127babec8b50be48f3ef22c5c31a9c4ec209c88ee1bb786653edb1a87"
+  },
+  {
+    "path": "crates/emmylua_formatter/src/workspace.rs",
+    "bytes": 23336,
+    "sha256": "28fa7890ded7ce58d998f072d6ba0ce1b7103c061c9b250636429e85eb1c5939"
+  },
+  {
+    "path": "crates/emmylua_ls/Cargo.toml",
+    "bytes": 1353,
+    "sha256": "ca3fb1f881db08f698f3e44a1cc686a386f80d680f828a4297e8604d496f0029"
+  },
+  {
+    "path": "crates/emmylua_ls/README.md",
+    "bytes": 240,
+    "sha256": "b070605c4c4db55ef20c5c7836010c07cad6f9d968c81f6bd6cbe565724f7c29"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/action/zh_CN.yaml",
+    "bytes": 605,
+    "sha256": "0900ea0f9e3315ffd73b4183a6e4ee097d49a2640382feb3992675fbf8f95d07"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/keywords/en.yaml",
+    "bytes": 3787,
+    "sha256": "b14a32cf067ec2dcf2e011e73937dea3089573a114fcca1ad51b3c0f0b626b74"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/keywords/zh_CN.yaml",
+    "bytes": 3498,
+    "sha256": "68471e2cdd0ff41f460e3898d73ed934d1d1601457c0fc8759ef48df3fe3cc97"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/keywords/zh_HK.yaml",
+    "bytes": 3797,
+    "sha256": "d8653473677d1ffe39797622889dc9cd893b81cb84000772ec98f2c9e28e4d19"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/misc.yaml",
+    "bytes": 1862,
+    "sha256": "a5c155df83bffb40f02fe34d856386ebb8972dd8e46769313132387b0bfd7b78"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/tags/en.yaml",
+    "bytes": 5004,
+    "sha256": "4e5ec8d4c89c607e4b0813b9b3f8253e814a1e275a35efa708ae59f1a900d84e"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/tags/zh_CN.yaml",
+    "bytes": 4681,
+    "sha256": "db72fc942687a5db01e1c701a3862e30c182d00e800b574625d6da36a4d8bc00"
+  },
+  {
+    "path": "crates/emmylua_ls/locales/tags/zh_HK.yaml",
+    "bytes": 4684,
+    "sha256": "4394ba2d7b6f7a4e122048212d6c17fe06ee3502ce9634fda7173cec4564618c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/bin/emmylua_ls.rs",
+    "bytes": 313,
+    "sha256": "42f5a36c512fbfae8a9e975946786145d12f564e59c2cdc35d579280f4065552"
+  },
+  {
+    "path": "crates/emmylua_ls/src/cmd_args.rs",
+    "bytes": 4750,
+    "sha256": "5f4f9c0dbd2629120bc8660b3464ad34ac819c23a4980cc90062e294cbf42d08"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/analysis_state.rs",
+    "bytes": 4992,
+    "sha256": "74a349cad5e500bc98bb48f95301ae9db10ba31463d858b99b6eaebe05b62865"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/client.rs",
+    "bytes": 5976,
+    "sha256": "722cf7607505681ca513cb87bdba29aef71cb5dd1b55fab5daca29c78a6bfb3c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/client_id.rs",
+    "bytes": 2032,
+    "sha256": "0b3a1e8dab5f48145f2d7fe0e63d6c6d1edfd19ed3973dba2240b9f53744710b"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/diagnostic_service.rs",
+    "bytes": 13683,
+    "sha256": "ea910dbdaca255dc389a59d9fbda43522d2cbd0e8c9eab9a12d57c5db3559284"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/lsp_features.rs",
+    "bytes": 2148,
+    "sha256": "957611dc9870bd6aabb8de3540b4bc2d8e1a1bbd846d44f7bf7c364544f35af4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/mod.rs",
+    "bytes": 4893,
+    "sha256": "bf2a7dd0cc3a98b7fc752487f8dd5fa7949c16978635ca49af8f2b329f8c9687"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/pull_cache.rs",
+    "bytes": 1143,
+    "sha256": "3df063a00d91866fb85d7318a51c55a936d3a66f518a0d907a296ec8235066b5"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/query_runner.rs",
+    "bytes": 3219,
+    "sha256": "c74c5232752934ac36c28877601ba71f47fdb892c58851d61179758a64742078"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/snapshot.rs",
+    "bytes": 1656,
+    "sha256": "ec0dbcf35038293600c4ca005acef62ef381484c90b53ee3b7fd3c3d9f53975e"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/status_bar.rs",
+    "bytes": 3096,
+    "sha256": "7affce8e2a99d1083d59c9788d07670c076d566affe3ca758108442ba5ce4d77"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/update_queue.rs",
+    "bytes": 1926,
+    "sha256": "0fe399b74c3fb79ef62a4ce2ae58b55db0e69e460c0dac0acba87e5f68a994ca"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/workspace_manager.rs",
+    "bytes": 16358,
+    "sha256": "3a428fbb846a242852d06aa8fcac140a0f908cdae2edb4dfdcc07e92a07db0e4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/workspace_manager/tests.rs",
+    "bytes": 14086,
+    "sha256": "3ab72453c8c58103740932298520868f4e7a2218bc641c3b568ee926cca762b6"
+  },
+  {
+    "path": "crates/emmylua_ls/src/context/workspace_state.rs",
+    "bytes": 2829,
+    "sha256": "68371153fd37333315e010f82638a58d2d6ea0faa6163906b73bc0812f166620"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/call_hierarchy/build_call_hierarchy.rs",
+    "bytes": 8907,
+    "sha256": "982ff623c495d6ef35df8a7d0eefd188ef5543c61426aa1766f0202c5a1af841"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/call_hierarchy/mod.rs",
+    "bytes": 3337,
+    "sha256": "bc2e6acddd45d43183d23d9952223e634fd9c9b2e5f733966eb76e349c350ecd"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_actions/actions/build_disable_code.rs",
+    "bytes": 9673,
+    "sha256": "d56142e9948f2e52d16b23e3032ca9cbdc1e94ce29865f9814a17a913fcc729c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_actions/actions/build_fix_code.rs",
+    "bytes": 3356,
+    "sha256": "41a5384699923c6c34153f243997c964a0d803188172a3943be09133f7b83302"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_actions/actions/mod.rs",
+    "bytes": 103,
+    "sha256": "3e3c246ce50f2272a09b19365282fce0837b8729d71e27eef1a6fe4cc2e8f4e0"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_actions/build_actions.rs",
+    "bytes": 4505,
+    "sha256": "79cb30bf1857ae7d0444898edf5e2cf67090968a73e0b7c82b32972781ef5f0d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_actions/mod.rs",
+    "bytes": 1798,
+    "sha256": "7df6cac79fae76a753b1c874887e5b1b8dc6f8e6b4dff4cf926a1102575f1023"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_lens/build_code_lens.rs",
+    "bytes": 4316,
+    "sha256": "329e0caa5af970f5f4701c16982e8816f0201c1bf63339a5e502e200c11514f6"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_lens/mod.rs",
+    "bytes": 2047,
+    "sha256": "2ad85243bc3b819747ab3ac8da0045a57a4ea53ce832da98ab112f04b9ff0ef3"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/code_lens/resolve_code_lens.rs",
+    "bytes": 3384,
+    "sha256": "b5b0ddcedb6fd90e84c4b278853d9e487b58b27b1b611107857a762e97d261dc"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/command/commands/emmy_add_doc_tag.rs",
+    "bytes": 2117,
+    "sha256": "cf51b8f4f0dcf078c0637fdd091ba9e2fd193085bec3394c9d4820c5468341e6"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/command/commands/emmy_auto_require.rs",
+    "bytes": 7578,
+    "sha256": "2692f9ba56d8fb9ced39452fc3056456cca0e24c723aa335b0566a55d42f9c6b"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/command/commands/emmy_disable_code.rs",
+    "bytes": 2778,
+    "sha256": "28921765d2e87e0063f1a2b1de3fc2e6940eeb098272998338c1eb84292fe2c7"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/command/commands/emmy_fix_format.rs",
+    "bytes": 341,
+    "sha256": "c0062e61715e6713d8eef67281a24d5178eed21b7b7a1e9974832fffd3aa412a"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/command/commands/mod.rs",
+    "bytes": 1530,
+    "sha256": "e3ffbcc1a84f75adab3c94a778ef793f500995ef40fc601937d6b81e8be569d2"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/command/mod.rs",
+    "bytes": 1067,
+    "sha256": "2a278b915ed9e0846131ee92d46c9a64dc637b13222879ab3971eff53bbd079c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/common/find_origin.rs",
+    "bytes": 5732,
+    "sha256": "554aa8626b93fd3c9e5dd2b53a3cb92abb096cb224599dabf05cb212ce64ab25"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/common/mod.rs",
+    "bytes": 116,
+    "sha256": "96e82aea087b1534ab3d438b547dd965078bb2100744723d01d327298b3e613f"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/common/semantic_alias.rs",
+    "bytes": 7026,
+    "sha256": "cb5f0503a070564e4dd4eadd5bfacf50dbf8faf014b29054d20442e173dd8750"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/common/semantic_reference.rs",
+    "bytes": 19126,
+    "sha256": "65696ae019a6cede25887f706304dc8b447bc06700581ad0e1601bd2ec1ef3df"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/add_completions/add_decl_completion.rs",
+    "bytes": 1563,
+    "sha256": "fc821561aedb72189f469018acbc3e43b9b80a76e9e7ffcf932ff9cdd91a5954"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/add_completions/add_member_completion.rs",
+    "bytes": 14066,
+    "sha256": "798093c6901f4a89d47b4d0c2f554c48759923d55571bf1a2283b4e2e0f7bbae"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/add_completions/check_match_word.rs",
+    "bytes": 4207,
+    "sha256": "251984df34b3b81007b8f3657c9ee392f66df8843ccc8c3effd094c6afb4a667"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/add_completions/mod.rs",
+    "bytes": 8077,
+    "sha256": "c80b203902702d13081b374130d1bdf90ec28ffc310581f021d029106ce65713"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/completion_builder.rs",
+    "bytes": 14047,
+    "sha256": "cf24f99eaf922748e009387edf514b03ea588ee69f2240fbe3fd11503d0917f7"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/completion_context.rs",
+    "bytes": 1219,
+    "sha256": "4cacc9cf4b0b8bd895cea571a3d0d6b1faa36f740605609f8d9da2ad03cf669f"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/completion_data.rs",
+    "bytes": 953,
+    "sha256": "c0b58dc86a4037bcd2fdc060d6329fdfbc5e83713865c1bc1ca43dcad7574912"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/data/doc_tags.rs",
+    "bytes": 502,
+    "sha256": "9515ba90d6b54fbd9cf47b289cebbce21d6ca187edf7f82ab5ad946e9c261d87"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/data/keywords.rs",
+    "bytes": 5952,
+    "sha256": "c50920213ea0b43fb50deb4ed8cce7f633251ea8f874ee0ad49ec32b65f4e9fb"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/data/mod.rs",
+    "bytes": 71,
+    "sha256": "cd9018a0878a9597b62212524ca1a679c84594e138aecf4d012b826545e13d99"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/mod.rs",
+    "bytes": 5122,
+    "sha256": "cded3c1dbf894cbba38c37032230027ecfc1df4788fc5008444acd2e4208ec9c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers.rs",
+    "bytes": 7295,
+    "sha256": "39a8cf2a26457a53196bc41deec4ba79cc80a9da5f0996e20cfca574fad34a44"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/array_append_provider.rs",
+    "bytes": 4641,
+    "sha256": "b3e774996a2940ef223e095bd07cf5dda2e56f6fdb514364ae2332b2258e2fe8"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/auto_require_provider.rs",
+    "bytes": 10343,
+    "sha256": "5b905a00e9fbdcdfd1fbd25354ecff97044a9e3f20b368935d01a071c817c53c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/desc_provider.rs",
+    "bytes": 20330,
+    "sha256": "b7c1dca2b237e918659b4b050d3f0fb9ffbb2f4c6faaeaa4845c0e3f15cf6ba3"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/doc_name_token_provider.rs",
+    "bytes": 14032,
+    "sha256": "1b37d5b914c03a59b1688fd80118626ade17b25bd23290a31beaba10e38e705d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/doc_tag_provider.rs",
+    "bytes": 5815,
+    "sha256": "06e4ec851f7546717beaa666c06b13798a73badbbaf2069e54449a27795d0245"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/doc_type_provider.rs",
+    "bytes": 5604,
+    "sha256": "0a541d4466dc1e515cc4cbee80f0820f424c8a1e3093f4a1042b2620b9f4a2ae"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/env_provider.rs",
+    "bytes": 11161,
+    "sha256": "84d1e6df36a3fba08e5006fb5a52ec51d6d58d1852829e1b4f9cccb685eb52bc"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/equality_provider.rs",
+    "bytes": 7562,
+    "sha256": "e058787d2c74a871e4414dc519c055dfefe4f2b38b786a21ea0dee12dc8bf3e3"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/file_path_provider.rs",
+    "bytes": 3219,
+    "sha256": "e96a68a1687014bf2b2679643b62c7be919f7731e0b07efc80c2c8fdcbb583d4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/function_provider.rs",
+    "bytes": 33309,
+    "sha256": "6606af7e963c0813d8e6b7544faa8df365f5274f685034c4c4fd91fee70bb78f"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/keywords_provider.rs",
+    "bytes": 8076,
+    "sha256": "70f464c1d1d80aab713b70a73bc2e3c957947cd02ddbde028e91c89f84f5dd79"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/member_provider.rs",
+    "bytes": 29169,
+    "sha256": "8fef1ec2ad59fa7e1f88d5c17b582150087f567170fecc40cb82525d48e7a135"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/module_path_provider.rs",
+    "bytes": 4932,
+    "sha256": "3c1170ff58f9a002e88c67fa060516b164638bf0c1e517641d9a29b132fe5991"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/postfix_provider.rs",
+    "bytes": 8181,
+    "sha256": "f939f18f8550897eba927b246c7f36e7d3b59d86729ea505b4ca777ea4994a5c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/see_provider.rs",
+    "bytes": 2341,
+    "sha256": "f6260027894689f6ae6fa78b8c5b0628e5001eb100c8f1db912e5150276e595d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers/table_field_provider.rs",
+    "bytes": 16210,
+    "sha256": "0c073ce2983603b3ddb55c4055df55ec3601b772c23c409d57d4d950baa3bffc"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/array_append_provider.rs",
+    "bytes": 4615,
+    "sha256": "cb1dd7053c86c05b76304797a9a26901b827dacc2f3a6941f739591ea720b6b5"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/auto_require_provider.rs",
+    "bytes": 9571,
+    "sha256": "db900066962f2a6ddf0f2e50252f34c25c65caf2d2d1cfdd51a919f28abf7f1f"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/desc_provider.rs",
+    "bytes": 6399,
+    "sha256": "c810d49eea77abf4f926c2082871351ade78c0ddd71cf8a48b215d1929ff56b0"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/doc_name_token_provider.rs",
+    "bytes": 14071,
+    "sha256": "30cf3a354d95b015aff0f74995314371dda912fce0019593e5777ee920f5964e"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/doc_tag_provider.rs",
+    "bytes": 6171,
+    "sha256": "c331aae4041fd633ae127f1f1574883d3128cb6d807024e3d7e1e0f39e5ee6c5"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/doc_type_provider.rs",
+    "bytes": 5703,
+    "sha256": "b03996bca8f828e4f23ee8999c506f7acbf470771d8e4ec6d4300cc614ee073d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/env_provider.rs",
+    "bytes": 8320,
+    "sha256": "7a66b0170853ceaa93cc79d81d6570f01b7358f0604fa0d196038809012464a3"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/equality_provider.rs",
+    "bytes": 6809,
+    "sha256": "f9614cd74a1b61c2d1adc63018d2bb00fd10cfa5e5b002fad2494a8ab4acae92"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/file_path_provider.rs",
+    "bytes": 3219,
+    "sha256": "98a99263083fc186c5ced34c9e6e18d2e4616cac74f1ba9dd9b2780c361984c4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/function_provider.rs",
+    "bytes": 25457,
+    "sha256": "3ee673f7fe766aa498481b30c45992fc2c761588521b1ab5acfb1e04752a7694"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/keywords_provider.rs",
+    "bytes": 6844,
+    "sha256": "83e7c73bbbc46d1c071c3e616edb1f056bab3e191f6260b9e7cbd9915060438d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/member_provider.rs",
+    "bytes": 8638,
+    "sha256": "05306670d1db6d7a38756e35b4935438aab657fff0d881b719add6e53f3cb810"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/mod.rs",
+    "bytes": 5382,
+    "sha256": "d27009aec9c68ec95b3961f5e87fe42e2d11d6e33a2950f0bfebf2a56c90833d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/module_path_provider.rs",
+    "bytes": 4555,
+    "sha256": "255e64046a45c53e14d75a2db1c79b7a6f2f1ae9cd3869fd2b9b8c2a8eeff667"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/postfix_provider.rs",
+    "bytes": 8236,
+    "sha256": "61a081b14b219baaed65f3abefda69e0bc53c798a1173f47fba61f1c7447edba"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/providers_legacy/table_field_provider.rs",
+    "bytes": 14390,
+    "sha256": "5d8e3d75e8dc282bcb8a5a254db6134c0b8d1c51ba38e4e630fec6b4a83e3b00"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/completion/resolve_completion.rs",
+    "bytes": 3829,
+    "sha256": "5ddb6da757b0f2fefc1fde1e0b4b4fe271cfdb4fea75db35d02586013207ce05"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/configuration/mod.rs",
+    "bytes": 5325,
+    "sha256": "2276432e2d8466a6a33f0fced7b25f045476cc090554381a94a9060f22efe3c9"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/definition/goto_def_definition.rs",
+    "bytes": 17692,
+    "sha256": "4bcf991cc43ffe97f4eb37890359665f56d01550225a34b09757ea5b8e2ab924"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/definition/goto_label.rs",
+    "bytes": 945,
+    "sha256": "10c1989227cc11f4e6522d3a646a87f8406c277fa5e50437f4168127781d3bf1"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/definition/goto_module_file.rs",
+    "bytes": 967,
+    "sha256": "707e8c415ad0d1459a0bf5e60e8321bd1ff714b4e7b860b84dcea26f1f9defcd"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/definition/goto_string.rs",
+    "bytes": 4985,
+    "sha256": "79ad0e96e4ffd2ce2aa90672bab9058e6f5d2ca9b022a6b45dffe46019d3886d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/definition/mod.rs",
+    "bytes": 3486,
+    "sha256": "186e7a4c7d3d0ec16cf58a98dd61a860ca4da60d85e8bf1fe6506e6cc5f13ee9"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/diagnostic/document_diagnostic.rs",
+    "bytes": 1235,
+    "sha256": "c2e5370665d4477709fff77181b3a0cfbb59754ad68fe39a1ad8e108678d034d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/diagnostic/mod.rs",
+    "bytes": 845,
+    "sha256": "1b5d5563b5544c11b0ab37366688b7151e4d7be8f44174c619eebcb68075d6e0"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/diagnostic/workspace_diagnostic.rs",
+    "bytes": 4126,
+    "sha256": "8d0cced5f8f6dcf89eda876b579759cddacfe131a0992ee34687af90529c5fa1"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_color/build_color.rs",
+    "bytes": 3976,
+    "sha256": "270bed5edf0a51ab63f2214d35c828b7842916ad0fb75cb413d3b969adf092e0"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_color/mod.rs",
+    "bytes": 2862,
+    "sha256": "8b5bcb2914b51eee816066fb5db12ae2cfae50a4d66228d500b2fa50427d6b4e"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_formatting/external_format.rs",
+    "bytes": 7303,
+    "sha256": "5175a2c630becc8f61bf0614fe8b945242db4b9e17b096310011501cd5863cd2"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_formatting/format_diff.rs",
+    "bytes": 13642,
+    "sha256": "904ff21f8aee372e5746eb382f339e21303d206e5e1f4e5b471aed02fd059b40"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_formatting/mod.rs",
+    "bytes": 6115,
+    "sha256": "f5f614cb1f98a521170957b268a04f1f4a1b9bf7a335954c08042dd4eecb1306"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_highlight/highlight_tokens.rs",
+    "bytes": 6456,
+    "sha256": "f342fb085cacad0e98a296bc030b57662bf09cc46eae3c5c20ef8b5b5511b159"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_highlight/mod.rs",
+    "bytes": 2296,
+    "sha256": "4c3a9de553a281905a5da96bb42e4a05fe75ba4841e18418d7fa15167974a7ca"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_link/build_link.rs",
+    "bytes": 3177,
+    "sha256": "4e10d856c2be34495922541b9e74c0eec8b11b2a93280e61ce4cd9a92e7e6730"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_link/mod.rs",
+    "bytes": 1667,
+    "sha256": "e67df6c4f4837896ba84358f83c7fbd28b79c8a69fb4a2eafb02a3b42211893e"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_range_formatting/external_range_format.rs",
+    "bytes": 1370,
+    "sha256": "d82728063075ba95dbcfd46c236275e3927403849649465789e981d7155db879"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_range_formatting/mod.rs",
+    "bytes": 11402,
+    "sha256": "8bbf8d8f72b01a0424b54669a187280d096741595b4df59cdab57c29d32d273f"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_selection_range/mod.rs",
+    "bytes": 3804,
+    "sha256": "5a87a3a8a637aff1551b0bfe946eb4fc7bcd45215e102b10c79734bcbc773e27"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_symbol/builder.rs",
+    "bytes": 9195,
+    "sha256": "7725eecee17ddcb0fc0d9684c6313ac693a277a7fb0518924043f5dbfaa826b0"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_symbol/comment.rs",
+    "bytes": 1441,
+    "sha256": "7c3d629572746d119dbeddbaedef5a09fa97cec269e354281f62065db6257a83"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_symbol/expr.rs",
+    "bytes": 3869,
+    "sha256": "2277d3a451589ade10122cc252471a68221195013c97ccd1f1d430b629de3dfe"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_symbol/mod.rs",
+    "bytes": 7604,
+    "sha256": "a2cc97592dd4b6d21bd084b55819870944bd7358f7b015df536949e24d40a4a8"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/document_type_format/mod.rs",
+    "bytes": 959,
+    "sha256": "3ba79ab258241bf8c1b1e5dc84db9601f4f55d77bc5200bc271c31868866556d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_annotator/build_annotator.rs",
+    "bytes": 9899,
+    "sha256": "f8a42223d4bdc65a6c163aca2c8789c29f79900eb08cf6ee802675845e4bfdae"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_annotator/emmy_annotator_request.rs",
+    "bytes": 1502,
+    "sha256": "15f9f45e504b16bef89d8df79465715957933aa151fee5a89a03131445157404"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_annotator/mod.rs",
+    "bytes": 1130,
+    "sha256": "6607347ec7d9fa9f6cfd66a4c4af49c7c4e1a58a2b42c73098d6851ddc790ed0"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_gutter/emmy_gutter_detail_request.rs",
+    "bytes": 786,
+    "sha256": "7be5b13936dffe8e54a443bbfd5a97cd1345101214d6a2acb9177b5381e7f664"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_gutter/emmy_gutter_request.rs",
+    "bytes": 1308,
+    "sha256": "c179ab0d37e532645b2a82aeac8f422fd2a6c5bfad0ca87c63a51b3b22588947"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_gutter/mod.rs",
+    "bytes": 8183,
+    "sha256": "7f16d8b667ed679001655e26424fe8b6a9b3fed8bef6fbb73cbaf97270f2672e"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_syntax_tree/emmy_syntax_tree_request.rs",
+    "bytes": 548,
+    "sha256": "33ea50f346ff919d13941a27fda852239c6d3a8baf6699bc669c02f3d123e7dd"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/emmy_syntax_tree/mod.rs",
+    "bytes": 1029,
+    "sha256": "ff584384db9c61317a3bd646388d5364a3b73385c79def25ba9e480bd5efcd52"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/fold_range/builder.rs",
+    "bytes": 5025,
+    "sha256": "28c866ee572b04b5567b76c820b853c0077f62c2c3cf9e80d4be4a855cbc1317"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/fold_range/comment.rs",
+    "bytes": 1281,
+    "sha256": "cc2f684bde179f1d8b058c714314365065aa59fb5e4c85844da535d20158d1a4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/fold_range/expr.rs",
+    "bytes": 2601,
+    "sha256": "ff07beaca7e3aca59e5738026b78be9e5d42c939722019f5f4622c68c7a237d5"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/fold_range/imports.rs",
+    "bytes": 3163,
+    "sha256": "c93bc110348332a9284813a735ef71ecadb40ec1ee4a04a4ce5550e1da27c374"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/fold_range/mod.rs",
+    "bytes": 3784,
+    "sha256": "570f2ed8b1ebae6e533d88e36396142d7ca80d95a8772217f331aff9f1b2459f"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/fold_range/stats.rs",
+    "bytes": 4692,
+    "sha256": "7a2c31cd6f45f766677640438801844979e07a49c320c860bcb080f98653af8a"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/hover/build_hover.rs",
+    "bytes": 85390,
+    "sha256": "fea9f1c16c0f76a80fe554cf8d558496811f264acf6ffda9d83704b5faa48eb1"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/hover/desc.rs",
+    "bytes": 18258,
+    "sha256": "69bf4a71fda3dcf2566a140f52c70d67280ba3aeda5f5bab3850ede58de0cafe"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/hover/keyword_hover.rs",
+    "bytes": 1771,
+    "sha256": "71ed2d9421f4975565f22543a27196ac3d064aeabbe94d55ef1b72d6c27c069c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/hover/mod.rs",
+    "bytes": 3692,
+    "sha256": "b404f7508eea34e88cca6da7cb587b39ccc776d391cd191e179210f888d756a8"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/hover/render.rs",
+    "bytes": 187,
+    "sha256": "6cdf681a2fa3425859d516f5d3347cf4cf823cf52ec7fbbf74a8e9a0fc4c59a5"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/implementation/implementation_searcher.rs",
+    "bytes": 9025,
+    "sha256": "f7e87a8ff828db2da43ada799f0aebc865c598c3f0ab42d61eb5feb3658cfec1"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/implementation/mod.rs",
+    "bytes": 2269,
+    "sha256": "c3bbe60377193ec2050f2375b266c5353237b281d18e241631abb37e7b9d845b"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/initialized/client_config/default_config.rs",
+    "bytes": 2846,
+    "sha256": "eb8f2eb7793745a1451659938bc90e8cfd4ff8ff66c5d0b8f428454d581d9de4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/initialized/client_config/mod.rs",
+    "bytes": 1231,
+    "sha256": "2d7fd5c1cefccd7a93026419fa7716bd464279be69dc64b9d5579b4d4964b7ad"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/initialized/client_config/vscode_config.rs",
+    "bytes": 1656,
+    "sha256": "ce9e78588c21b0f00c23ecef084919cfd36ea4186a0d67930f91d85f3b7594c4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/initialized/locale.rs",
+    "bytes": 418,
+    "sha256": "f4708e601063d01cc4a7c9cb529f7a2c2cbd42d3d344a5b4fc3797d5d15d959c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/initialized/mod.rs",
+    "bytes": 7069,
+    "sha256": "62aae53a5db3339d2a8ad4000eff2491377f2a22120b250a4ada1475d8a968fa"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/initialized/std_i18n.rs",
+    "bytes": 39699,
+    "sha256": "18ed753a2db51f9b78b6d9b68377ff2a064003a155c8af984100089b1f46e906"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/inlay_hint/build_inlay_hint.rs",
+    "bytes": 24605,
+    "sha256": "94c81fe39faeaea5ed52bd46cf1e4a1ce7ffda14818877920c56a16e9976bd16"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/inlay_hint/mod.rs",
+    "bytes": 2326,
+    "sha256": "0a51d0fdbc5410bcd8641150afa3b389bd4ec7f88bc47be88298b569273c9fcd"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/inline_values/build_inline_values.rs",
+    "bytes": 2754,
+    "sha256": "f1f67367889e9376f7cc36f5aa760311b26930f293c1443ee697c4c12deee2ad"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/inline_values/mod.rs",
+    "bytes": 1334,
+    "sha256": "0db59e2004715e230f4b70d8a75e5197db0b1e28d1d27698c2e22ec86af6b9c4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/mod.rs",
+    "bytes": 3354,
+    "sha256": "56a86188fe0e446f754df3aa1a0b319d36af8526b09d017983689a083258e8c5"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/notification_handler.rs",
+    "bytes": 3627,
+    "sha256": "7fe0132603d0b6ceabd68af66bfa97623ee207fb67fb4282642ec938ec2f0c83"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/references/mod.rs",
+    "bytes": 2643,
+    "sha256": "22308296ce2df545107f6d907421becd3f0680af3ae7df747eec112117ca07a2"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/references/reference_searcher.rs",
+    "bytes": 12700,
+    "sha256": "3297f9c4e4c2cd8196ceca7e81f72b0fdd328257bdb7d4352c1aa9d1e0f0d235"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/rename/mod.rs",
+    "bytes": 8378,
+    "sha256": "667f015a649dcd50e0b11c6b4b113dcbba6f637318d150ebd0030dfd2c8ff638"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/rename/rename_decl.rs",
+    "bytes": 3177,
+    "sha256": "c046d9135235a8fbb745fbbef5406643f989c0ed6627785fa944e8e4cdb129e2"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/rename/rename_member.rs",
+    "bytes": 908,
+    "sha256": "daa8ba5fc068466fd6086015c56a0b1feae958abe760bcaf11507d77d0d7ec1a"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/rename/rename_type.rs",
+    "bytes": 673,
+    "sha256": "2f66b184375fb65b4847938d82c99d66ceb8f8267dc0c101b8428d3600fec946"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/request_handler.rs",
+    "bytes": 6134,
+    "sha256": "e90eefd6c2b8ff6a761ad242a3c5514b5783bee31db6540e4482a3a8f868ec09"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/response_handler.rs",
+    "bytes": 292,
+    "sha256": "843301b957e2f14bcad76d3cc5f39a701b46cab60d2dd1fe3211c589b67027a1"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/semantic_token/build_semantic_tokens.rs",
+    "bytes": 33256,
+    "sha256": "95c562d8037f879b65d69c3bd3d3cd517b69501b8274ead4b701325d14110893"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/semantic_token/function_string_highlight.rs",
+    "bytes": 2125,
+    "sha256": "9f8e576f1bc1d83396a4a29c52854917cf3d49d0628fb2a6511a41af9abb76c8"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/semantic_token/language_injector.rs",
+    "bytes": 6433,
+    "sha256": "ce8ec5ef8946ea6c88dce10da183e13776a5b9c0bb2cbef9dedf9b5dc1789c3e"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/semantic_token/mod.rs",
+    "bytes": 2979,
+    "sha256": "8e7129b09388905d79406666d77e53522bc4908b75a593d44f17ccb65fe72e76"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/semantic_token/semantic_token_builder.rs",
+    "bytes": 14862,
+    "sha256": "e1738fe61023a6bd6579440746c09e5883cd637eb9b4a6d0761c992312a21b98"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/signature_helper/build_signature_helper.rs",
+    "bytes": 11098,
+    "sha256": "c96a9e6169965f37fa540f5b652a0f8c153e7276405736cc65c675590d874f5d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/signature_helper/mod.rs",
+    "bytes": 4233,
+    "sha256": "b9c5b6e279e0e85eb5c3d8de768ad6cb82a822a77caec0f57b30614fc41baf36"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/code_actions_test.rs",
+    "bytes": 3006,
+    "sha256": "bcb4c8a22ca2d8097d1d1899a2a40809728e9810de83135fd8a4d8b21d5ae93d"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/completion_resolve_test.rs",
+    "bytes": 4726,
+    "sha256": "16d656e0422a909725df1bdd018c5291121ee4dfa8ae837be912155033ff5c78"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/completion_test.rs",
+    "bytes": 88451,
+    "sha256": "e43250b3be9d337fadbca8ef00f5ff9e6bc7cf25eade41084977da79733f8c30"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/definition_test.rs",
+    "bytes": 15009,
+    "sha256": "57ea916efcf7d9d8b1b0f89b952138c16716e7b79b776b8e2bf816208aff6862"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/hover_function_test.rs",
+    "bytes": 38595,
+    "sha256": "e056b702c342abf5ffb3fe99581cb59c9a764787a62c4ffa96ef5642471c491f"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/hover_test.rs",
+    "bytes": 29456,
+    "sha256": "02be06605561867f530d48a1e6a62cb063670d37a425a329f136ddba98178c25"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/implementation_test.rs",
+    "bytes": 6252,
+    "sha256": "a2e9c0eff10fc74990da84744326db6e88ce1f9b983080f0418cfde609d5efc7"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/inlay_hint_test.rs",
+    "bytes": 11380,
+    "sha256": "e71c2ce7e88dd4387435f4919cea4aa294746beb233687370ef9826cea921a61"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/mod.rs",
+    "bytes": 271,
+    "sha256": "9c1ecde14a6349715005a046635cde1d8dae86221d83c68dd1d4e78a2a194777"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/references_test.rs",
+    "bytes": 8669,
+    "sha256": "5480b1cc78a29aee3d6878977cd82935421ca8909eca8e3de61f70878524430e"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/rename_test.rs",
+    "bytes": 9836,
+    "sha256": "3f1e188db0801e9e85c55e872e82ba57a29c7390c5e86bdb33d17ffbe2c7e7f4"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/semantic_token_test.rs",
+    "bytes": 5959,
+    "sha256": "77576b0431b10605ad33a52ac5355fa53cdc8545ee95913a2ca739fde7da6208"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test/signature_helper_test.rs",
+    "bytes": 1729,
+    "sha256": "dc01733f419abf24022164ac442e0d9ed7fdc966e0d5514e3ce5e6f73eb8a052"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/test_lib/mod.rs",
+    "bytes": 20929,
+    "sha256": "adb95dc720ef162a7043feaa0c6fc0cf626d0603cc5a9ad2bb14fe76ba5b14ec"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/text_document/mod.rs",
+    "bytes": 1412,
+    "sha256": "ef883503db08ad6abb48775b71ade410db09647274388362af9a8ee689fd6940"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/text_document/register_file_watch.rs",
+    "bytes": 9095,
+    "sha256": "786de38dddfbf8ff23542cbe147de1f919f8f123e1c35ef3f5b5eb98317ce557"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/text_document/set_trace.rs",
+    "bytes": 178,
+    "sha256": "0b5912e5569cc98b6254f1f9b3c1e84dead8426c2ba619d7b0f653dd26a0ea80"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/text_document/text_document_handler.rs",
+    "bytes": 7207,
+    "sha256": "4891bc9a37fe6b642eaee306d314f30288868f3eb2895d2c9938a2c78cb61935"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/text_document/watched_file_handler.rs",
+    "bytes": 4704,
+    "sha256": "27f640b153baf8c84aa6758435676f0723df1a94d7d37965a6a81a3e76e4feb1"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/workspace/did_rename_files.rs",
+    "bytes": 9942,
+    "sha256": "b1eaf9f734928ee7e6f6a86e20d6b51348b9cc20102ba75a1a9d00cb21222049"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/workspace/mod.rs",
+    "bytes": 1427,
+    "sha256": "226917cc387f46c152b253829185f09bc4ed107789181dfcad147d7d64ae8f9c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/workspace_symbol/build_workspace_symbols.rs",
+    "bytes": 2945,
+    "sha256": "53bf7274a8fd9c83cd3d82a77a65a6f131acb361330110987a447cd7b7db18af"
+  },
+  {
+    "path": "crates/emmylua_ls/src/handlers/workspace_symbol/mod.rs",
+    "bytes": 1054,
+    "sha256": "2b6f09c84f9c06fef72858409d9bc2041c47dfaf303370cc87ad52f1ff1eea8c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/lib.rs",
+    "bytes": 278,
+    "sha256": "05d1ae7c2696632dfa1eeaa2d367e81a500267f9bc02654a18cd202be7e52fd8"
+  },
+  {
+    "path": "crates/emmylua_ls/src/logger/best_log_path.rs",
+    "bytes": 1560,
+    "sha256": "e32d419247d32a090a10354061cd44cb09296c2c3a5db7f895441cfe4410cc36"
+  },
+  {
+    "path": "crates/emmylua_ls/src/logger/mod.rs",
+    "bytes": 3355,
+    "sha256": "106959139aa014d9dc513fc547b0a89cf9670184946ab5c4425c45e4b0c54eb3"
+  },
+  {
+    "path": "crates/emmylua_ls/src/meta_text/mod.rs",
+    "bytes": 183,
+    "sha256": "160802a9e75a28d9b83eaca89935471d5a92a6be649f1bda7ff7e57b9a65c450"
+  },
+  {
+    "path": "crates/emmylua_ls/src/server/connection.rs",
+    "bytes": 2627,
+    "sha256": "40ea1f95c2d6529f58016788ab6a5a77a7ccca78b2152f3c062a840ee66a577c"
+  },
+  {
+    "path": "crates/emmylua_ls/src/server/error.rs",
+    "bytes": 443,
+    "sha256": "65c7a14d213f18b9b4de6cb90b776e90ffb03952df3f29de8ae5657a7eadfa47"
+  },
+  {
+    "path": "crates/emmylua_ls/src/server/lsp_server.rs",
+    "bytes": 3442,
+    "sha256": "0a70d25f97baa6a8c90b1b85c9383fbedbb375f60d37d961e4b30df0a18f7895"
+  },
+  {
+    "path": "crates/emmylua_ls/src/server/main_loop.rs",
+    "bytes": 908,
+    "sha256": "7f39aa6a375528f17227b5e2357f0e747d95e221882efdacf27ae4819f69f763"
+  },
+  {
+    "path": "crates/emmylua_ls/src/server/message_processor.rs",
+    "bytes": 4050,
+    "sha256": "6c0f612c7f6aea50711aaeb3f1366d849225de3b96bb5d5dbc05cb65d942e3bc"
+  },
+  {
+    "path": "crates/emmylua_ls/src/server/mod.rs",
+    "bytes": 1634,
+    "sha256": "c1718204dc6bc5a0f3c1b80d33fff73b607aca661491b93b78dc8706c3f9d9e1"
+  },
+  {
+    "path": "crates/emmylua_ls/src/util/catch_unwind.rs",
+    "bytes": 1415,
+    "sha256": "4d710dfa7a3f7aa896571c5dfe763999f3c3632b02f85f9868d4567b44a342fe"
+  },
+  {
+    "path": "crates/emmylua_ls/src/util/desc.rs",
+    "bytes": 1306,
+    "sha256": "fadcf591729036fdf16b4010f75069f1b81947b869d61b222d012d6265b439a6"
+  },
+  {
+    "path": "crates/emmylua_ls/src/util/mod.rs",
+    "bytes": 317,
+    "sha256": "481a90bf669fdec60d2b084c2b097e0a19628c64b64ec3a1ff58a39939d0eefe"
+  },
+  {
+    "path": "crates/emmylua_ls/src/util/module_name_convert.rs",
+    "bytes": 3029,
+    "sha256": "b1c4624f5fa032d75102b9e8460998dc1448f25903be8c7ca9911ceacafff4c2"
+  },
+  {
+    "path": "crates/emmylua_ls/src/util/time_cancel_token.rs",
+    "bytes": 356,
+    "sha256": "753a16cc77f421c4f06c87873b191dfa286d36b6f40fbafdef6b258b08cec214"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/bit/meta.yaml",
+    "bytes": 21,
+    "sha256": "7907678f40e2ca905726f445aaeace50b466663180f6886bf70449113d99ea21"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/bit/zh_CN.yaml",
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/bit32/meta.yaml",
+    "bytes": 2950,
+    "sha256": "01ab91473f69a4931264259251f0ba1788032570810968a4da10e47a94740a01"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/bit32/zh_CN.yaml",
+    "bytes": 2662,
+    "sha256": "090dee81c4b32a43794f73c998c5b67972ff5909c36b14fede9d543103ec6b38"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/builtin/meta.yaml",
+    "bytes": 3825,
+    "sha256": "be4caf72db468a29565e933c16122682844558a276749132d90fe17b51f13ec8"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/builtin/zh_CN.yaml",
+    "bytes": 5492,
+    "sha256": "70df2180baa5e33fd2e20bd5838d388c708e0738cf74ecd27289bf015fac6364"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/coroutine/meta.yaml",
+    "bytes": 2292,
+    "sha256": "f77749272569580b3c48ae04ed674cc2c57101ceb67184ca19f410bdcf7cb97e"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/coroutine/zh_CN.yaml",
+    "bytes": 2440,
+    "sha256": "7dec5c25535d928079476fcb8233f47020e041dcbb460e094df13936aa0a9b86"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/debug/meta.yaml",
+    "bytes": 5666,
+    "sha256": "0bd92b66cfc3d809a432f0507ab1e433b2185a79c5a0e889f4d9ea683f40b05c"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/debug/zh_CN.yaml",
+    "bytes": 7938,
+    "sha256": "58d925e1bcaaa2841ab42aad2e05361fba1d5a6a48e2b90969c34d631b7f3692"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/ffi/meta.yaml",
+    "bytes": 21,
+    "sha256": "390310a05b61d7b985c2745b99d024c35d5edabdc0ec396eae8d159b0aa601d5"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/ffi/zh_CN.yaml",
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/global/meta.yaml",
+    "bytes": 8679,
+    "sha256": "5748d0edcd659302d6a7dc52c240f2f74f24932a5d26f3c462edfed3c2e799fc"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/global/zh_CN.yaml",
+    "bytes": 13959,
+    "sha256": "56a43a50c323ce4423ab4f13f6199e702689f5118a494495722068857cbd75f8"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/io/meta.yaml",
+    "bytes": 5119,
+    "sha256": "0b54dbfc5a83998815996c4e353dd2d20b61e959cdb6c99522e0f88a74196d11"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/io/zh_CN.yaml",
+    "bytes": 7020,
+    "sha256": "0e81233d37072f5699a0fcb8bf749f975f9f7da604cea3d72f6b8e57a1cdc1bf"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/jit/meta.yaml",
+    "bytes": 21,
+    "sha256": "86284e4580518866666ce031ee2a37d214a064243a6e051340e7944103b02b2b"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/jit/profile/meta.yaml",
+    "bytes": 29,
+    "sha256": "aca6125f796aef5101c76e86dac5a20b6e78ce1d0f94cc4e547cc33f90476a0e"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/jit/profile/zh_CN.yaml",
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/jit/util/meta.yaml",
+    "bytes": 26,
+    "sha256": "16b49e45f591009466a90f00081b8725bac13dcd8834ad0179b8342f77426a79"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/jit/util/zh_CN.yaml",
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/jit/zh_CN.yaml",
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/math/meta.yaml",
+    "bytes": 6682,
+    "sha256": "11d2042ba87998cecc0550f4e5b4c1a651448655cab65e8287903172585216a6"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/math/zh_CN.yaml",
+    "bytes": 4033,
+    "sha256": "9aacaded13b563ead1dbe7754b240af8d4a1a6fe59442a0fa4d382c77b412d64"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/os/meta.yaml",
+    "bytes": 4340,
+    "sha256": "5bf3f865b8cbe005c0ee40301e8f65b915344680ec8efcecd9ba6411c61ec850"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/os/zh_CN.yaml",
+    "bytes": 6874,
+    "sha256": "2fe96738de12210438a70fa4c6395050c29fcfb04046eb174d64b8101832eeb3"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/package/meta.yaml",
+    "bytes": 1738,
+    "sha256": "fb266cb0fb3fb20791c6956137bcc3de066ae2cbe8976a1784f972301c89af81"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/package/zh_CN.yaml",
+    "bytes": 4994,
+    "sha256": "602323fd1c9b59616bfaa468396bbd5f5ec96d8e8025175c81c4797b8f75f2a1"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/string/buffer/meta.yaml",
+    "bytes": 5767,
+    "sha256": "3dcde98d4ce55a15bcc6dc1dc2a5165b9292f57710d12b9571a8c792f8b3fc74"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/string/buffer/zh_CN.yaml",
+    "bytes": 11773,
+    "sha256": "ebaa4d68ee92326e76206068f76f78d91b79ba674f5785206fb415bfdcde6599"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/string/meta.yaml",
+    "bytes": 3934,
+    "sha256": "f3ae217fcc2404e1b5a2cf8bd0779e985fa0a5c972a1e5de045a929c9b9ed4d9"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/string/zh_CN.yaml",
+    "bytes": 8968,
+    "sha256": "b7fa2164c3e3b588afd1bcd277a68142d5a65019c7bdea626263f80e919a9244"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/table/clear/meta.yaml",
+    "bytes": 170,
+    "sha256": "f3a0414dc827c531c82ab9a1ca066a5b001b2f693ca62dbca405f5cb06a1f410"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/table/clear/zh_CN.yaml",
+    "bytes": 666,
+    "sha256": "e804059723910813dd0fe7cf5b2a58de71beb8c5819123dd1aaf5e9de79d9c4b"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/table/meta.yaml",
+    "bytes": 2302,
+    "sha256": "05c9caa38f2a2f5481d5e50eacd7e34d82b0e1bac9644b1be380f8f20178de82"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/table/new/meta.yaml",
+    "bytes": 174,
+    "sha256": "8a7e8cbbf5c81787ee929c8b5d8d0ea4102e4e742f20b288a8dd21b2a9fcfafc"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/table/new/zh_CN.yaml",
+    "bytes": 453,
+    "sha256": "7f81ac8b1e2c7018f5b5ca03f20d427b15236ca2cfc81bc6f585019f75aef755"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/table/zh_CN.yaml",
+    "bytes": 3460,
+    "sha256": "dde218a808d28c023b6357d81a94d0977a3b37d5c9ac7abaab5e8c28a9aab43c"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/utf8/meta.yaml",
+    "bytes": 1276,
+    "sha256": "6053eae71ad45c9eec89503e23fdb99a9dc16c736f1f72232073f096a8afbb10"
+  },
+  {
+    "path": "crates/emmylua_ls/std_i18n/utf8/zh_CN.yaml",
+    "bytes": 1854,
+    "sha256": "d1840a15f8bcba2ae5ff0b8de6adc9d5b146fc7fd72d2d55e57f7f566483f3b5"
+  },
+  {
+    "path": "crates/emmylua_parser/Cargo.toml",
+    "bytes": 580,
+    "sha256": "a5210b77133abeedd01c0ef699167a68408e706ca84df13eadc7f4b7e2082323"
+  },
+  {
+    "path": "crates/emmylua_parser/README.md",
+    "bytes": 908,
+    "sha256": "5d473d665772452b5eec28dffb6466a46681ef5a747525557d70991a6cee7075"
+  },
+  {
+    "path": "crates/emmylua_parser/locales/app.yml",
+    "bytes": 25448,
+    "sha256": "b0bf9a2d7fcd8da6c1b0734b2dd0e2813e40a0d463d90b13008fc115e754ab77"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/doc/mod.rs",
+    "bytes": 3462,
+    "sha256": "8b472bb3f78520ac4617c94102c8e7ce927b178bf36580f40ca5b986063022f9"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/doc/tag.rs",
+    "bytes": 23927,
+    "sha256": "54bad5be260f3321e866a5066ed4b620cf677e24e18a70e59be5406c86f3eaa9"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/doc/test.rs",
+    "bytes": 126739,
+    "sha256": "fed9f91749b9bd0e3464092d1853ee2f0defc079ac12f4497336332a943c9e4e"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/doc/types.rs",
+    "bytes": 19014,
+    "sha256": "d3bb3f5566d0ff8edba098906f869d42afe27d07909a9db77bcc075d2bdb2acc"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/lua/expr.rs",
+    "bytes": 34405,
+    "sha256": "73aef77f97234a537346020caaa2f30f2f9392094e0e02e41a4965b505190aa1"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/lua/mod.rs",
+    "bytes": 3742,
+    "sha256": "3a1a437172a54574d877918e73ac48cc5b1b08fe218d8efb1422012a45a63359"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/lua/stat.rs",
+    "bytes": 33710,
+    "sha256": "b900fd6993d019d33fe64fa15e48355b0b3715991496d480c3f9bf2563cb52a4"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/lua/test.rs",
+    "bytes": 70197,
+    "sha256": "7391796ed702d79ca96491d3f07018d1ba6382c01ad28b44bb766c0b6252db80"
+  },
+  {
+    "path": "crates/emmylua_parser/src/grammar/mod.rs",
+    "bytes": 454,
+    "sha256": "a6b469791569636f250c536bc7b5a8362fc4eb9772b315c0f0c0e1d9fa137633"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_features.rs",
+    "bytes": 5203,
+    "sha256": "99609b9d0fbf55de0178b8ae2f1d4f411e4a4b63237a01600a0080ce3a99330f"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_language_level.rs",
+    "bytes": 861,
+    "sha256": "43534b7550a8b7fecafcaa28faad13094801f5b4b7bac1bf2973c1ffdd3c1fce"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_operator_kind.rs",
+    "bytes": 2641,
+    "sha256": "a48c9ce5de74e7fdeeadc9402cdf22bc25e3ce1ac41abffd7904ffccc9a7dcb4"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_syntax_kind.rs",
+    "bytes": 3875,
+    "sha256": "98dcd1453d6a3e9de39b0422b1d04367d0ec8143ce6794fb1506282b8f15b824"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_token_kind.rs",
+    "bytes": 10999,
+    "sha256": "60f5273098c03c4ca1c6686829518c075955e16e8d6c02d35ca4c42a2bab9e39"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_type_operator_kind.rs",
+    "bytes": 1002,
+    "sha256": "b38a2d869bc7f5a691d95b91e660b4649b67ea642758ee7b64bc3189dcf9e2a2"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_version.rs",
+    "bytes": 2487,
+    "sha256": "1f8f888f273394f97798dcde5c423dfa3a370bc33c45ee1270cf90d11c1fda52"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/lua_visibility_kind.rs",
+    "bytes": 970,
+    "sha256": "c2152bf2ffc92ff0afb29252f5cf02769f04f167b748dc5d76e2aa14e14d62c1"
+  },
+  {
+    "path": "crates/emmylua_parser/src/kind/mod.rs",
+    "bytes": 6933,
+    "sha256": "c77325b6602e718b13158201e3b0fd830b925c0a4ddaf3c5b02a6c68a98ffafd"
+  },
+  {
+    "path": "crates/emmylua_parser/src/lexer/lexer_config.rs",
+    "bytes": 1523,
+    "sha256": "e8d26d401b8cf113ff14c3212165fdb71f084c808bc78cf27ddb12a566206e77"
+  },
+  {
+    "path": "crates/emmylua_parser/src/lexer/lua_doc_lexer.rs",
+    "bytes": 31162,
+    "sha256": "e68d75ad2b4d04d43de270c6ec20f6e503da9a385417cebb736a5bdf31692831"
+  },
+  {
+    "path": "crates/emmylua_parser/src/lexer/lua_lexer.rs",
+    "bytes": 27091,
+    "sha256": "d86d113ead20f4216ab8b866747556055dd371fab558364aac6264af68502d87"
+  },
+  {
+    "path": "crates/emmylua_parser/src/lexer/mod.rs",
+    "bytes": 779,
+    "sha256": "197cb59da03de555ecfd73c17bf7f6ee0ea98e92a37f726e1dc626f76e8a5c77"
+  },
+  {
+    "path": "crates/emmylua_parser/src/lexer/test.rs",
+    "bytes": 100841,
+    "sha256": "b31722959f6a9914426ba90f9815f2d9617b51d6bb06ff055bc989f1ebf70a75"
+  },
+  {
+    "path": "crates/emmylua_parser/src/lexer/token_data.rs",
+    "bytes": 313,
+    "sha256": "9298b491b8beb1906521fa43612e2f8b631d3dcc75ce3b7d1045ffd871f7bd68"
+  },
+  {
+    "path": "crates/emmylua_parser/src/lib.rs",
+    "bytes": 528,
+    "sha256": "2b6d2a0b1382e168347804992985c324768d8f03d80b38570fe98c5a325ef7aa"
+  },
+  {
+    "path": "crates/emmylua_parser/src/parser/lua_doc_parser.rs",
+    "bytes": 9725,
+    "sha256": "3778a78b3a82f151d3df1bdcbde11577c59fa0730f563b194be367db94c83358"
+  },
+  {
+    "path": "crates/emmylua_parser/src/parser/lua_parser.rs",
+    "bytes": 15230,
+    "sha256": "cfd33fa196b425263456ffcdf4f3e5f1bafb7f21464a78b1ce0cf3deaf63c1b8"
+  },
+  {
+    "path": "crates/emmylua_parser/src/parser/marker.rs",
+    "bytes": 3340,
+    "sha256": "dfeb841603254ed7fe3d6a8c096e6c7bfe23d7411b0630a1ea215f5d7122a24c"
+  },
+  {
+    "path": "crates/emmylua_parser/src/parser/mod.rs",
+    "bytes": 289,
+    "sha256": "16ff570cf097687ce52ae1e96e8e2530c65e2bc38a35a308cf83208f10488431"
+  },
+  {
+    "path": "crates/emmylua_parser/src/parser/parser_config.rs",
+    "bytes": 2494,
+    "sha256": "23c8b1cda05046c339d51858922ca6f7a7b1714f5effcafc462d2b77bdc8c017"
+  },
+  {
+    "path": "crates/emmylua_parser/src/parser_error/mod.rs",
+    "bytes": 1010,
+    "sha256": "23ccedaf4f603a5f788ffe80bc53181be961d1df0eaa63febc47f60ffa8f2c4f"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/mod.rs",
+    "bytes": 7409,
+    "sha256": "a886809b73c0800ca182bc3975923c07568e2f2a22b40956732d9f5fa0ca78e7"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/doc/description.rs",
+    "bytes": 2269,
+    "sha256": "5865465753a8fc84b7f772ac20bd06a96df4a7f12136daf98f27404cb0215747"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/doc/mod.rs",
+    "bytes": 18906,
+    "sha256": "fc11a60b1ebf7fd79c7537ea5a06de196db5da0960a0235fd282b5d64c6f69bf"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/doc/tag.rs",
+    "bytes": 40713,
+    "sha256": "e5b15011811c7b70aabcf6418a58bc58c9a67209c6d0ab902340423ed2d6794e"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/doc/test.rs",
+    "bytes": 6978,
+    "sha256": "687fbdbc676dc37041c4a879743d4cf9407bd4c2fbfbe3f02b83ee8f9c8f8f41"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/doc/types.rs",
+    "bytes": 24359,
+    "sha256": "9cb0e80d61b7c116199b53a6aef170256461c014c3ae1231ea2c3224315e4edf"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/lua/expr.rs",
+    "bytes": 23823,
+    "sha256": "21dc1122b68c51d0a4a04d43ea9ffed2b4b1cd174bdb6d4c275e7e63463ed0fa"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/lua/mod.rs",
+    "bytes": 13472,
+    "sha256": "112485c9827f0aab7984bd6373f33a71db64dc232c148afb74fa83de1924276e"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/lua/path_trait.rs",
+    "bytes": 3058,
+    "sha256": "7fe860eac4e34be25b083fd913e1fe13adebced87fd1b35d95e21069b2d5fcc0"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/lua/stat.rs",
+    "bytes": 26085,
+    "sha256": "f208c3dc389c3de7af2c1f3791c5b2cf6c1ce9e4b1242f5868046f07975bcc74"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/lua/test.rs",
+    "bytes": 1923,
+    "sha256": "fac4686cb9af22cc0d4350129dfc418c84f7b108757c9fd2bbfd94072038dd2d"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/mod.rs",
+    "bytes": 23296,
+    "sha256": "3d0683b6c71de31fffae9aeb1e73e39097a3b023308ac4ceee038c2993e49b0a"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/test.rs",
+    "bytes": 9299,
+    "sha256": "142a0c46a203459ba223e190ec77a3ea71f2ce4da3453bb8c1e62b9555470971"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/token/mod.rs",
+    "bytes": 223,
+    "sha256": "a996012589e30bddb4f686d13490af4a112da065a7d2fb6613f4cd6fa8f2c5e1"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/token/number_analyzer.rs",
+    "bytes": 9377,
+    "sha256": "06682450c4c08e1b3ea48bb9e1243d1b5021c65f2845a5c3cadf01be34fa6c0b"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/token/string_analyzer.rs",
+    "bytes": 7842,
+    "sha256": "3a6766dec5aa08be6d0e2b2ec999eeacd1a298f32a1c1024ddd973108ee606fe"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/token/test.rs",
+    "bytes": 6646,
+    "sha256": "83f62d2529780fcf54ebe70227c4df651060b8e85f6503c284b4d16a73ddda0e"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/node/token/tokens.rs",
+    "bytes": 17188,
+    "sha256": "9fca7e7a798469a91dc5b5a69bdbd7b5f7df30b29311dd533fa8b6e681ede4d2"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/traits/comment_trait.rs",
+    "bytes": 2409,
+    "sha256": "4e6b561eebe7cb1e32ad725892256bb3b8fe79d5cf9590d59ecab4d21867a9e6"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/traits/description_trait.rs",
+    "bytes": 3548,
+    "sha256": "4999edb5233ef469e2daf1bbb17ebf82edb41c4d9917d9df66c2caf3de7ebd09"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/traits/mod.rs",
+    "bytes": 5633,
+    "sha256": "ee8c9201b25cfff901ba8c92034470a655eff9c1fa5456f8030aa2835a4de069"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/tree/lua_green_builder.rs",
+    "bytes": 7706,
+    "sha256": "c213aa5f2cf897bc9ee1db553319f5a820eb1f4e8642bf0afdd191bf59916fbf"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/tree/lua_syntax_tree.rs",
+    "bytes": 1014,
+    "sha256": "b60438e3d9cd2576c7402990c73486352cf1541396f5ea4ce801f04ec094415f"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/tree/lua_tree_builder.rs",
+    "bytes": 2815,
+    "sha256": "515a1e1479401b2501990fc33858fea6d767bca21f7880b09fd36e8dbb03bfc1"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/tree/mod.rs",
+    "bytes": 159,
+    "sha256": "1ab181569b620aa77017c003a3f950fac60f8947216d47d1801ba719eec780b2"
+  },
+  {
+    "path": "crates/emmylua_parser/src/syntax/tree/test.rs",
+    "bytes": 2974,
+    "sha256": "d299e9d38e2e0ccbb1c83190999f54c31f0c1a9f63263704133e00c7da25a8e2"
+  },
+  {
+    "path": "crates/emmylua_parser/src/text/line_index.rs",
+    "bytes": 4643,
+    "sha256": "52901c3e05d94c7ab3a0bd13658e836785bfd27146249467fd38b52bccac55ad"
+  },
+  {
+    "path": "crates/emmylua_parser/src/text/mod.rs",
+    "bytes": 143,
+    "sha256": "65bd468bfcbd5e6bde3bc48af8a870e5ceba2d305ebb798dac030ebec39f48d8"
+  },
+  {
+    "path": "crates/emmylua_parser/src/text/reader.rs",
+    "bytes": 7909,
+    "sha256": "666ac1dcbc9eebbd80fb1e7d67a1c06c61ace4b748093dea1f9fa5a144f2b115"
+  },
+  {
+    "path": "crates/emmylua_parser/src/text/test.rs",
+    "bytes": 866,
+    "sha256": "4b53dd07e5bdd2d823fb6985f8be8f2fc61c173a3b737eb581070c8a64752f42"
+  },
+  {
+    "path": "crates/emmylua_parser/src/text/text_range.rs",
+    "bytes": 2371,
+    "sha256": "536818e622bd649f9fb01008d9e064b66213327457689950d992047b7a2e8e81"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/Cargo.toml",
+    "bytes": 608,
+    "sha256": "8508d04d583a49729686dcb74d2f3d86a1e0b0158e14ce35995349b0e77a72bf"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/README.md",
+    "bytes": 1072,
+    "sha256": "8f3ef1fecd557d4ae2b80dee55b231e02acbcaa68eff760352ed0d62dee35942"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/json/json_lexer.rs",
+    "bytes": 9952,
+    "sha256": "0f650fe1c1f770dd9acf226374d090f11d476ec1740bf9213cd412bc2c52f704"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/json/mod.rs",
+    "bytes": 1478,
+    "sha256": "2a0e4ee4a5640b9094aa8c5188ffb58e28c46907113ca0c1d9993a0ec74e8104"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/lua.rs",
+    "bytes": 4155,
+    "sha256": "d17c8b813be0ad49a9e950c1e96187b830c1f5a4ea8f29fb5ba33508d6c4f6aa"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/mod.rs",
+    "bytes": 1931,
+    "sha256": "2f51ceebe4bc1e8119b66dfc1a6f3e4eee122a11a50986a3dd7b2e542aee2986"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/protobuf/mod.rs",
+    "bytes": 2258,
+    "sha256": "fec27badc186847dfd7d832022f72e08a675e81fdd16d2e1de7f4b31805507bd"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/protobuf/protobuf_lexer.rs",
+    "bytes": 13310,
+    "sha256": "4863477d4fb512f414f802d3a23ae25a37237e3e2175573aae3980f03f792b35"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/shell/mod.rs",
+    "bytes": 2219,
+    "sha256": "10c6c435be7b7156ca877a52d79edb35b025170c22a521cea90734762819f30a"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/shell/shell_lexer.rs",
+    "bytes": 21175,
+    "sha256": "7524a92252bcb083d6f596bd0350e3a7733375c91d90b295b566a3bf0dac49e8"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/sql/mod.rs",
+    "bytes": 2110,
+    "sha256": "7e3b5b5f7b405c3b2a929c24ea21f8f69856556cdb7e80d4c168cf00458151d0"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/sql/sql_lexer.rs",
+    "bytes": 21347,
+    "sha256": "ef5cd7926f6d31228d2a6b80284126edc51590f670a539e0d86a224c91a2f120"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/vimscript/mod.rs",
+    "bytes": 1508,
+    "sha256": "c7e15d2fb187378fa9eb7ddc7f353773ddfe4117100051f1ba86ced93979c930"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lang/vimscript/vim_lexer.rs",
+    "bytes": 15196,
+    "sha256": "e2472d3168b6caaa3a72dc107637683777b2cb13536ca2406bbdc8e27f75d54b"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/lib.rs",
+    "bytes": 2513,
+    "sha256": "731783fdb748e9adbfab8be62e5928e270c7f6eabe63292eda08ae82ecb15730"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/markdown/mod.rs",
+    "bytes": 63511,
+    "sha256": "307dbdc24866edcf729bc16fe1cc6ce0eaf3b3966d4cd4602a0177ba7e29baa0"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/markdown/test.rs",
+    "bytes": 14786,
+    "sha256": "6dfad2308256c8f6b73d9ac1ad62b439c6eed563c1227cb347fb1aa7db5ef134"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/markdown_rst/mod.rs",
+    "bytes": 54901,
+    "sha256": "338d1ac6829675354fb066b7c5c01956d30f4f25b0dc079835e09db9e9cff37e"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/markdown_rst/test.rs",
+    "bytes": 19013,
+    "sha256": "b3fed7ad3baf26811b379056ccacaf46a35821e7b71dd8cd0bc81b01c6f72251"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/ref_target.rs",
+    "bytes": 11582,
+    "sha256": "925f23717c73221c9f8af1855186762cd4da317f019ff509e7814be105a86e54"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/testlib.rs",
+    "bytes": 2757,
+    "sha256": "a6c12b3ab30133d31ea6c1ee13a4750cf9d56e2c9a863a586fa48b55a1a26222"
+  },
+  {
+    "path": "crates/emmylua_parser_desc/src/util.rs",
+    "bytes": 13524,
+    "sha256": "9657dcaa93e68acc4d6e10e1f5189e72e08e74b8b56f5e8ed6b7f7dfdd1afd86"
+  },
+  {
+    "path": "crates/schema_to_emmylua/Cargo.toml",
+    "bytes": 411,
+    "sha256": "3c71a8d14411a3ce78b450c88389b92db4561893bd556d373a434b28e100bbb1"
+  },
+  {
+    "path": "crates/schema_to_emmylua/README.md",
+    "bytes": 1584,
+    "sha256": "d548cd974052a04a5d1dfa9a9b441d15f8ed3ec0a4fc0ffa42b55ddec7d25ddd"
+  },
+  {
+    "path": "crates/schema_to_emmylua/src/converter.rs",
+    "bytes": 23722,
+    "sha256": "f08e7e54d825ef3df1871bf9b9d8c943bdd69565ec503288ef051e050a935f52"
+  },
+  {
+    "path": "crates/schema_to_emmylua/src/lib.rs",
+    "bytes": 201,
+    "sha256": "e556ae9467b6074e5b373b0b516eeddb37816bd93ace4c83da92f9c41c087e1e"
+  },
+  {
+    "path": "crates/schema_to_emmylua/src/lua_emitter.rs",
+    "bytes": 3957,
+    "sha256": "6ff395e0ce13cf742a0f5e934027b5df35d3d0a0fa346712c6516d77de3cf3d3"
+  },
+  {
+    "path": "crates/schema_to_emmylua/src/main.rs",
+    "bytes": 1357,
+    "sha256": "96c715fbba7932ca433e34257f65fbe97181f6801ac030ca34cfa2e43976fd34"
+  },
+  {
+    "path": "crates/schema_to_emmylua/src/markdown_doc.rs",
+    "bytes": 224,
+    "sha256": "9bb811cd5e6abe9306b618456fc827e7b28d17bca688e0ab3fed4fceedd4f25d"
+  },
+  {
+    "path": "crates/schema_to_emmylua/src/schema_walker.rs",
+    "bytes": 1063,
+    "sha256": "5d17bb87995e3f8faaea1c3dd5b556b205e5cac75a07c4980c0820ada62e6f78"
+  },
+  {
+    "path": "docs/config/emmyrc_json_CN.md",
+    "bytes": 14441,
+    "sha256": "363c1acb222772db44c165924f24c19af00ead0ea582aa196f9ffa7a7af158db"
+  },
+  {
+    "path": "docs/config/emmyrc_json_EN.md",
+    "bytes": 15106,
+    "sha256": "8c301a8cc3cd6d5562bc9fdc4ac5e4ff83485f6c4718b5225b26b8727f1e647f"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/README.md",
+    "bytes": 4037,
+    "sha256": "f14c4d0f802d84b8d48d595b21a9ef1050c41aeb66982168020da2712ae3371b"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/alias.md",
+    "bytes": 1668,
+    "sha256": "9769ac22bc80500d61158e8f93ab7c3c371878369761e0a0fbf638d3d8d0973b"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/async.md",
+    "bytes": 7291,
+    "sha256": "36e98165d82412db32d5f96b74fcadfb6a367be83bffd2aa56b7378c934a6a38"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/cast.md",
+    "bytes": 2118,
+    "sha256": "ab754e8725aa07afacca5a75d0b7115a6fa3e702f689f96d6f24c858608a4c89"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/class.md",
+    "bytes": 2665,
+    "sha256": "5acfa0fdea808716ed32d2f1bf089e9163d1a2372b8e0c7b2979d4a3ba115340"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/deprecated.md",
+    "bytes": 4458,
+    "sha256": "5fcd2b193806c32e07490dc3e7cfdc0d230a83db19463343f235c37d4f888581"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/diagnostic.md",
+    "bytes": 2169,
+    "sha256": "fddccdb8be5e4b555e554cc8cb1231e6dda73f59c06bfdf1b61d54451c318aff"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/enum.md",
+    "bytes": 5082,
+    "sha256": "88aa09ccd988f09c5dd6d228fa4bce5b23405c90645524617ea09eba4bcc6a6b"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/field.md",
+    "bytes": 2875,
+    "sha256": "ba1407b17c36976eb4a6f866a8255a7c01d9725cff85a0242bc62a6822000708"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/generic.md",
+    "bytes": 6454,
+    "sha256": "c05d7ef76de958cf3d65478216cf2fdf3682d2e0efa76c3b2a2863b0e9fdf434"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/meta.md",
+    "bytes": 4125,
+    "sha256": "2ede8429bf0acb636cce6a57d5c819e0157b2de8c1f92f5d1f3d1105565713aa"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/module.md",
+    "bytes": 2051,
+    "sha256": "8188110a90b2535881b45a5e9c82d0e6af532582435a776061e5205c0a3ca04b"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/nodiscard.md",
+    "bytes": 2247,
+    "sha256": "16cd62919f4ee8b1f06955d456bb08880dd66a8d328f409da1a75b9b8529cd72"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/operator.md",
+    "bytes": 2100,
+    "sha256": "50dd6f0ec4f5964373618d4629d95f34bcd69f4b2d5d1a529cd92448f92c8f4f"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/overload.md",
+    "bytes": 6408,
+    "sha256": "2e42a946a07036a1a5197e55659dfae7d9da4402088ca776ad78c1192b208c6d"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/param.md",
+    "bytes": 3739,
+    "sha256": "0789633ef6bf01e560de6fdee673cc9bfea3af454d6824a5361463773e041ec2"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/return.md",
+    "bytes": 5550,
+    "sha256": "b6058ef6999c454f62355196bb1026ec250c36635225481249efd81fd75fb804"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/see.md",
+    "bytes": 1047,
+    "sha256": "08f6b173d44b9002cb627dc1e29f269725d338f3a56b07f31c7829361db40d45"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/source.md",
+    "bytes": 608,
+    "sha256": "1f332d3ee2908da3c916e4a2d25c42f62fd8a39c9fd3a3a5c1f158f7deb5afb7"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/type.md",
+    "bytes": 4819,
+    "sha256": "1e111a3b7930d4a41a22fdad3bd36a28724675db22dea490609a8d23c9f40633"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_CN/version.md",
+    "bytes": 861,
+    "sha256": "f533e1f8c51a6e98b62a1ff9093d27e222a52aebade73217e7e38310c2d19e92"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/README.md",
+    "bytes": 4630,
+    "sha256": "7001edd02ae4ae9a227b31756649d7635129e06a77be4eb51333734006e17c66"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/alias.md",
+    "bytes": 1785,
+    "sha256": "9b004ce7bc6c43897b8167b2ae1dcf89395eb01a2686cc70dcc84b50bc467dbd"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/async.md",
+    "bytes": 3656,
+    "sha256": "e3e747d36be83e5712060d401d7d0283712b36957e688659fdf8028a9edcb907"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/cast.md",
+    "bytes": 2175,
+    "sha256": "4ad7e75a18fbb125ea425e46a56f7ae2eef06c84cd9dd4c4cbcf770cccffcca4"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/class.md",
+    "bytes": 2840,
+    "sha256": "2b55e47d0283b1fb4049f4dbbc8fe01a800471761aebb27574b8a1ef7853069e"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/deprecated.md",
+    "bytes": 3259,
+    "sha256": "1e5f4248adb88dbd1f6530d2ffb879447eaedce0f4ce5a6dad45135d5798376a"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/diagnostic.md",
+    "bytes": 3249,
+    "sha256": "f962a219bab316114e471ce3721413299f064b27bbc60c037ed4ff40551e19ea"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/enum.md",
+    "bytes": 3187,
+    "sha256": "57ec4d708382098edfac5faeff13b89b7db3d5fc2f94662b7272cc7c8eeeb36c"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/field.md",
+    "bytes": 3043,
+    "sha256": "c5a3ee1f8e57860c123fda6bbfc450cace6e0d287d8ca835d50dd7aa15cb54f3"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/generic.md",
+    "bytes": 3070,
+    "sha256": "70e147fb4909e21f0da35271dbff6a1a4617e4cf36d34c39361c4ae2dcea144b"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/meta.md",
+    "bytes": 3576,
+    "sha256": "4b7a08ecb3704523b3508bbd370f5e7a7493010bb8d98461b426e201ba510364"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/module.md",
+    "bytes": 4594,
+    "sha256": "e12324bfe91b763afc78effebb1634f3cb7f73c660e5f1a328535e712850aaee"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/nodiscard.md",
+    "bytes": 2724,
+    "sha256": "27666c00f66a0004d4b60e6707c61ea14b113e0f1edce20b3f0bd99b57ea14c4"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/operator.md",
+    "bytes": 5248,
+    "sha256": "7a52277fdde29415f77e9fa2a1ad6e54426dc73b24df88b0bac6dd6ef87d766c"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/overload.md",
+    "bytes": 4310,
+    "sha256": "e0f119d1a4a61839d4043aacffc0d8b424abc08c0e8ad5272b0e16a534e52be1"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/param.md",
+    "bytes": 3932,
+    "sha256": "ea92466c54e696a9a775d545183119c595d612cd373b14023d2ef615525a7d13"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/return.md",
+    "bytes": 5778,
+    "sha256": "f4017889a83a8a9eb06464cc56d677b3e4daeae181e04354d9df2dde1908e87f"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/see.md",
+    "bytes": 4638,
+    "sha256": "ec55ee122bc95a2f0e7eb476dddbc835f132e87b4984c7588889fb1d41897c57"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/source.md",
+    "bytes": 4321,
+    "sha256": "e040a893bb6ab5b10ae5897099b60c98e9d5881b2243b5c0d893a9e6cc22fce4"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/type.md",
+    "bytes": 4882,
+    "sha256": "5abba10761e6b6888bda72cd794a05ac426009fd648e4548b5485408912fa3e5"
+  },
+  {
+    "path": "docs/emmylua_doc/annotations_EN/version.md",
+    "bytes": 972,
+    "sha256": "acfce8fba51d753fa574fc447e2ab46790b13ae0a8fc069c536c7f5874dcd796"
+  },
+  {
+    "path": "docs/emmylua_formatter/README_CN.md",
+    "bytes": 2266,
+    "sha256": "73b350f505990feb414c2be141895f3d7463d6ca7457f9501aed85a2bf5a76cf"
+  },
+  {
+    "path": "docs/emmylua_formatter/README_EN.md",
+    "bytes": 2585,
+    "sha256": "177a4b6e122c172cdc1057695ba60da9fa93066b6d11cea85662bb0d24e1c900"
+  },
+  {
+    "path": "docs/emmylua_formatter/examples_CN.md",
+    "bytes": 4092,
+    "sha256": "e09f0663227cb0ffbfc7c539f647e6e613931f0e2d7540c209a2523bed1184b1"
+  },
+  {
+    "path": "docs/emmylua_formatter/examples_EN.md",
+    "bytes": 4205,
+    "sha256": "f3958ff9faa60d55805fd0950170cba319ca126c213dfa6ac875dd05d2c24963"
+  },
+  {
+    "path": "docs/emmylua_formatter/options_CN.md",
+    "bytes": 11186,
+    "sha256": "252b54976b4d8699153924dff62bc8e76c4b6fb186f9c0c51d8c9b435eeba23a"
+  },
+  {
+    "path": "docs/emmylua_formatter/options_EN.md",
+    "bytes": 11631,
+    "sha256": "56787775dae6eefe96352a78925d604f478036386f2e8d8678106a00730e7139"
+  },
+  {
+    "path": "docs/emmylua_formatter/profiles_CN.md",
+    "bytes": 3433,
+    "sha256": "615f393042d2b545cb090550ff88213af7cca9cb2c79461892758fc3d120b2de"
+  },
+  {
+    "path": "docs/emmylua_formatter/profiles_EN.md",
+    "bytes": 3610,
+    "sha256": "025ad74ebf0e72686d3818f5a88e17a828b14575ceab9de534c93d3884ac6be9"
+  },
+  {
+    "path": "docs/emmylua_formatter/tutorial_CN.md",
+    "bytes": 3180,
+    "sha256": "c216845908e7e44b7b2565e280a884a131dae13d6460bb5cd07d54efe0b35ea1"
+  },
+  {
+    "path": "docs/emmylua_formatter/tutorial_EN.md",
+    "bytes": 3203,
+    "sha256": "5b632a1355f0a799004e500c46ecbc7902bdc25aa086483e8376b61dc2935ccb"
+  },
+  {
+    "path": "docs/external_format/external_formatter_options_CN.md",
+    "bytes": 4339,
+    "sha256": "ecad6313fe00be288d33c9bb48efce7d92708e066b53af67e54a5023ccc6c0f7"
+  },
+  {
+    "path": "docs/external_format/external_formatter_options_EN.md",
+    "bytes": 4856,
+    "sha256": "d9705e61db90016f51ec5146e942d42363a6f4f82a4636db2dbb309952bc2ac5"
+  },
+  {
+    "path": "docs/features/features_CN.md",
+    "bytes": 11493,
+    "sha256": "e6cd6253ad2ac7c2f4ded1a720b7bb746fb9fa98f0bffbc064a08ad9ccf5d06f"
+  },
+  {
+    "path": "docs/features/features_EN.md",
+    "bytes": 13116,
+    "sha256": "34838d4bec24f1eb87999bcbd26e72e79b40133af46c512e9f2a0c10250dea14"
+  },
+  {
+    "path": "flake.lock",
+    "bytes": 2038,
+    "sha256": "3fb2f28b5bef585ab01bf55000ff72901edc5ba91cdf71e56b0861eca16e66b3"
+  },
+  {
+    "path": "flake.nix",
+    "bytes": 1155,
+    "sha256": "1cc5d60d98b2424e0c0a64f2f4a6a469dda3a9579dcfb6cdd01ac2c04231f058"
+  },
+  {
+    "path": "nix/packages.nix",
+    "bytes": 862,
+    "sha256": "a48daedaff76f1892961e7a140ca8562a1b99916b6d870fa71b9d9fb955edf2e"
+  },
+  {
+    "path": "rust-toolchain.toml",
+    "bytes": 66,
+    "sha256": "a6a0bbd29ffaa8182dc22d1d9149709f1091e47df40ed96eb8a78a711c66a4ce"
+  },
+  {
+    "path": "rustfmt.toml",
+    "bytes": 263,
+    "sha256": "8ceadc5bfe3a6ef006cfd7bcbd106dd3d346e4759b43da2b0ea65a9bdbe9b4cb"
+  },
+  {
+    "path": "tools/edit_version/Cargo.toml",
+    "bytes": 110,
+    "sha256": "fd31cb471877215582dcdc22f86da83cb0b611ac8550181c71aab9ae477d798b"
+  },
+  {
+    "path": "tools/edit_version/src/main.rs",
+    "bytes": 2047,
+    "sha256": "67f6d34c5b5b714611bfd30fd97cb263c845b6c00dce7c989eba95e6a29dabed"
+  },
+  {
+    "path": "tools/schema_json_gen/Cargo.toml",
+    "bytes": 249,
+    "sha256": "61fa1720f3dbba00a94d35012476f2cedc745a3d8ac6bd74f4a7d2fb76e06403"
+  },
+  {
+    "path": "tools/schema_json_gen/src/main.rs",
+    "bytes": 531,
+    "sha256": "ed3158ddd0c09b9e61f7df0d52b2d70520922d3b19f1d843aa1135a785cc05a3"
+  },
+  {
+    "path": "tools/std_i18n/Cargo.toml",
+    "bytes": 210,
+    "sha256": "5916eadde1f4719d03a5dcc0f853e528261849878835a38c6be785317f410340"
+  },
+  {
+    "path": "tools/std_i18n/src/analysis.rs",
+    "bytes": 31762,
+    "sha256": "5c95a70767bbb4f77f9068763e0ac4dff53375ba40016188b0ce9fcd6e484cbf"
+  },
+  {
+    "path": "tools/std_i18n/src/diagnostics.rs",
+    "bytes": 841,
+    "sha256": "ff823b4c37572caa5451a95155b00aa4e83052d3862853a7d3bc5db132d5cde2"
+  },
+  {
+    "path": "tools/std_i18n/src/doc_text.rs",
+    "bytes": 7874,
+    "sha256": "e4d0f8c346ce66a045b8dd0848e6b9ecb26ce63c3bdcd65db6990de7caffba2d"
+  },
+  {
+    "path": "tools/std_i18n/src/fs.rs",
+    "bytes": 1067,
+    "sha256": "b7ba1a1fd27d23752d33c7be682c35bfd666091937ad69fd6beef928cc88e752"
+  },
+  {
+    "path": "tools/std_i18n/src/keys.rs",
+    "bytes": 1351,
+    "sha256": "f93b18b6300808049877471ee22850261429ea9e0990ceddb64151abe8d2b0c0"
+  },
+  {
+    "path": "tools/std_i18n/src/locale_yaml.rs",
+    "bytes": 4196,
+    "sha256": "6402a0a6cc265f8d8de614c22b6ad29af23b1215b7ecb28449bb4b7bf90b90b0"
+  },
+  {
+    "path": "tools/std_i18n/src/main.rs",
+    "bytes": 1268,
+    "sha256": "2ba4e35173affac7f9804bf80e2e892e6ae5cf285c0f9338afe8fc8eaf579ac7"
+  },
+  {
+    "path": "tools/std_i18n/src/meta_format.rs",
+    "bytes": 7646,
+    "sha256": "84da71a089e2aad14b2a34177363f7479a2db6a9aff63d014a25617a44f7e328"
+  },
+  {
+    "path": "tools/std_i18n/src/model.rs",
+    "bytes": 2161,
+    "sha256": "6acf04fb433f3c09cd5d7ca77b72c0d966d2fa593336a80d2b0f41a5b1ce44a4"
+  },
+  {
+    "path": "tools/std_i18n/src/pipeline.rs",
+    "bytes": 1492,
+    "sha256": "2d56f5d368eba40c7df7fe29439b42a4c3bbeb1e190adcd17b9a4bc0c1d43e35"
+  },
+  {
+    "path": "tools/std_i18n/src/target.rs",
+    "bytes": 9900,
+    "sha256": "65b83ed648ba7b37b3ea3ab7297c86e9b9ed4f779c8572c6f8791d5a2d437a54"
+  },
+  {
+    "path": "typos.toml",
+    "bytes": 482,
+    "sha256": "f0b8eaf986bca5e86c3081e2096c64fc88a128efc30f43e9ecd5e1e0f3c9a3d4"
+  }
+]

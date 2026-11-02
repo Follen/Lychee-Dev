@@ -1,0 +1,911 @@
+//! Retained hotfix field/scan wire format (3057a966 layout) and
+//! records.hotfix.go named-table state transitions. Synthetic offline inputs.
+#[path = "support/data_cache.rs"]
+mod data_cache;
+use lycheedev_core::{
+    control::{OperationControl, TrackedCancellation},
+    evidence,
+    metadata::Metadata,
+    selection::{self, DataPin, SelectionSpec},
+    storage, workspace,
+};
+use lycheedev_data::{
+    hotfix::{self, CacheFilter, LocalInput, LocalRequest, ScanRequest, Request},
+    request::DataContext,
+    resource::{Budget, Cost},
+    schema,
+};
+use serde_json::{Value, json};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+const BUILD: &str = "12.1.0.69875";
+const TABLE: u32 = 42;
+const SIMPLE: &str =
+    "COLUMNS\nint ID\nstring Name\n\nBUILD 12.1.0.69875\n$noninline,id$ID<u32>\nName\n";
+fn definition(text: &str) -> schema::Definition {
+    schema::Document::parse(text.as_bytes())
+        .unwrap()
+        .select(BUILD, "")
+        .unwrap()
+}
+fn budget() -> Budget {
+    Budget::new(
+        Cost::defaults(),
+        Instant::now() + Duration::from_secs(30),
+        None,
+    )
+}
+fn cache(version: u32, entries: &[(u32, u8, i32, &[u8])]) -> Vec<u8> {
+    let mut raw = b"XFTH".to_vec();
+    raw.extend(version.to_le_bytes());
+    raw.extend(69875u32.to_le_bytes());
+    if version >= 5 {
+        raw.resize(44, 0);
+    }
+    for &(id, status, push, payload) in entries {
+        let width = match version {
+            1 | 7 => 24,
+            9 => 32,
+            _ => 28,
+        };
+        let mut header = vec![0; width];
+        header[..4].copy_from_slice(b"XFTH");
+        let (po, table, record, size, state) = match version {
+            1 => (4, 12, 16, 8, 20),
+            2..=6 => (8, 16, 20, 12, 24),
+            7 => (4, 8, 12, 16, 20),
+            8 => (4, 12, 16, 20, 24),
+            _ => (8, 16, 20, 24, 28),
+        };
+        header[po..po + 4].copy_from_slice(&push.to_le_bytes());
+        header[table..table + 4].copy_from_slice(&TABLE.to_le_bytes());
+        header[record..record + 4].copy_from_slice(&id.to_le_bytes());
+        header[size..size + 4].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+        header[state] = status;
+        if version == 9 {
+            header[4..8].copy_from_slice(&3u32.to_le_bytes());
+        }
+        raw.extend(header);
+        raw.extend(payload);
+    }
+    raw
+}
+#[test]
+fn wire_decode_hotfix_fields_exact_types_arrays_relation_and_unicode() {
+    let d = definition(
+        "COLUMNS\nint ID\nstring Name\nlocstring Label\nint Small\nint Wide\nfloat Rate\nint Parent\nint Values\n\nBUILD 12.1.0.69875\n$noninline,id$ID<32>\nName\nLabel\nSmall<8>\nWide<u64>\nRate\n$noninline,relation$Parent<u16>\nValues<u16>[2]\n",
+    );
+    let mut raw = b"Name\0".to_vec();
+    raw.extend("中文\0".as_bytes());
+    raw.push(0xfe);
+    raw.extend(u64::MAX.to_le_bytes());
+    raw.extend(1.5f32.to_le_bytes());
+    raw.extend(0x1234u16.to_le_bytes());
+    raw.extend(0u16.to_le_bytes());
+    raw.extend(u16::MAX.to_le_bytes());
+    let fields = hotfix::decode_fields(&raw, 42, &d, Some(&budget())).unwrap();
+    assert_eq!(
+        serde_json::to_value(&fields).unwrap(),
+        json!({"ID":42,"Name":"Name","Label":"中文","Small":-2,"Wide":u64::MAX,"Rate":1.5,"Parent":0x1234,"Values":[0,65535]})
+    );
+    assert!(
+        serde_json::to_string(&fields)
+            .unwrap()
+            .contains("18446744073709551615")
+    );
+    raw.push(0);
+    assert_eq!(
+        hotfix::decode_fields(&raw, 42, &d, None).unwrap_err().code,
+        "records.hotfix_fields"
+    );
+}
+#[test]
+fn wire_decode_inline_and_noninline_header_identity() {
+    let inline = definition("COLUMNS\nint ID\n\nBUILD 12.1.0.69875\n$id$ID<u32>\n");
+    assert_eq!(
+        hotfix::decode_fields(&42u32.to_le_bytes(), 42, &inline, None).unwrap()["ID"],
+        42
+    );
+    assert_eq!(
+        hotfix::decode_fields(&42u32.to_le_bytes(), 43, &inline, None)
+            .unwrap_err()
+            .code,
+        "records.hotfix_fields"
+    );
+    let signed = definition("COLUMNS\nint ID\n\nBUILD 12.1.0.69875\n$noninline,id$ID<8>\n");
+    assert_eq!(
+        hotfix::decode_fields(&[], u32::MAX, &signed, None).unwrap()["ID"],
+        -1
+    );
+    assert_eq!(
+        hotfix::decode_fields(&[], 128, &signed, None)
+            .unwrap_err()
+            .code,
+        "records.hotfix_fields"
+    );
+    let unsigned = definition("COLUMNS\nint ID\n\nBUILD 12.1.0.69875\n$noninline,id$ID<u8>\n");
+    assert_eq!(
+        hotfix::decode_fields(&[], 256, &unsigned, None)
+            .unwrap_err()
+            .code,
+        "records.hotfix_fields"
+    );
+}
+#[test]
+fn wire_decode_rejects_malformed_payload_and_definition_without_partial_rows() {
+    let text = definition("COLUMNS\nstring Text\n\nBUILD 12.1.0.69875\nText\n");
+    for raw in [
+        &b""[..],
+        b"unterminated",
+        &[0xff, 0],
+        b"a\0\0",
+        &[1, 0, 0, 0, b'a'],
+    ] {
+        assert_eq!(
+            hotfix::decode_fields(raw, 0, &text, None).unwrap_err().code,
+            "records.hotfix_fields"
+        );
+    }
+    let float = definition("COLUMNS\nfloat Value\n\nBUILD 12.1.0.69875\nValue\n");
+    for bits in [0x7f800000u32, 0xff800000, 0x7fc00000] {
+        assert_eq!(
+            hotfix::decode_fields(&bits.to_le_bytes(), 0, &float, None)
+                .unwrap_err()
+                .code,
+            "records.hotfix_fields"
+        );
+    }
+    assert_eq!(
+        hotfix::decode_fields(&[1], 0, &float, None)
+            .unwrap_err()
+            .code,
+        "records.hotfix_fields"
+    );
+    let array = definition("COLUMNS\nstring Names\n\nBUILD 12.1.0.69875\nNames[2]\n");
+    assert_eq!(
+        hotfix::decode_fields(b"\0B\0", 0, &array, None).unwrap()["Names"],
+        json!(["", "B"])
+    );
+    for kind in 0..7 {
+        let mut invalid = definition(SIMPLE);
+        match kind {
+            0 => invalid.fields.clear(),
+            1 => invalid.fields[1].name = "ID".into(),
+            2 => invalid.fields[0].bits = 7,
+            3 => invalid.fields[1].elements = 0,
+            4 => invalid.fields[1].inline = false,
+            5 => invalid.fields[1].identity = true,
+            _ => invalid.fields[1].kind = "unknown".into(),
+        }
+        assert_eq!(
+            hotfix::decode_fields(b"ok\0", 1, &invalid, None)
+                .unwrap_err()
+                .code,
+            "records.hotfix_fields"
+        );
+    }
+}
+#[test]
+fn wire_decode_limits_cancellation_and_metered_v8_framing() {
+    let mut d = definition("COLUMNS\nstring Text\n\nBUILD 12.1.0.69875\nText\n");
+    let mut raw = vec![b'a'; 1 << 20];
+    raw.push(0);
+    assert!(hotfix::decode_fields(&raw, 0, &d, Some(&budget())).is_ok());
+    raw.insert(0, b'a');
+    assert_eq!(
+        hotfix::decode_fields(&raw, 0, &d, None).unwrap_err().code,
+        "records.hotfix_limit"
+    );
+    d.fields[0].array = true;
+    d.fields[0].elements = 65537;
+    assert_eq!(
+        hotfix::decode_fields(&[], 0, &d, None).unwrap_err().code,
+        "records.hotfix_limit"
+    );
+    let cancelled_token = TrackedCancellation::new();
+    cancelled_token.cancel();
+    let cancelled = Budget::new(
+        Cost::defaults(),
+        Instant::now() + Duration::from_secs(30),
+        Some(cancelled_token),
+    );
+    assert_eq!(
+        hotfix::decode_fields(&[], 0, &d, Some(&cancelled))
+            .unwrap_err()
+            .exit_code,
+        7
+    );
+    let raw = cache(8, &[(1, 1, -1, b"a\0")]);
+    assert_eq!(
+        hotfix::inspect_budgeted(
+            &raw,
+            CacheFilter {
+                build: 69875,
+                limit: 1,
+                ..Default::default()
+            },
+            Some(&cancelled)
+        )
+        .unwrap_err()
+        .exit_code,
+        7
+    );
+    let tight = Budget::new(
+        Cost {
+            decode_work: 0,
+            ..Cost::defaults()
+        },
+        Instant::now() + Duration::from_secs(30),
+        None,
+    );
+    assert_eq!(
+        hotfix::inspect_budgeted(
+            &raw,
+            CacheFilter {
+                build: 69875,
+                limit: 1,
+                ..Default::default()
+            },
+            Some(&tight)
+        )
+        .unwrap_err()
+        .code,
+        "records.query_resource_budget"
+    );
+}
+#[test]
+fn named_page_states_preserve_physical_rows_and_validated_tail() {
+    for version in 1..=9 {
+        let invalid = if version >= 7 { 2 } else { 0 };
+        let raw = cache(
+            version,
+            &[
+                (42, 1, -3, b"hello\0"),
+                (42, invalid, -2, b"invalid bytes"),
+                (9, 1, -1, b""),
+            ],
+        );
+        let filter = CacheFilter {
+            build: 69875,
+            limit: 20,
+            ..Default::default()
+        };
+        let page = hotfix::inspect(&raw, filter.clone()).unwrap();
+        let decoded = hotfix::decode_page(&raw, page, &definition(SIMPLE), &budget()).unwrap();
+        assert_eq!(decoded.entries.len(), 3);
+        assert_eq!(decoded.entries[0].decode_state, "decoded");
+        assert_eq!(decoded.entries[0].fields.as_ref().unwrap()["Name"], "hello");
+        assert_eq!(decoded.entries[1].decode_state, "not_valid");
+        assert!(decoded.entries[1].fields.is_none());
+        assert_eq!(decoded.entries[2].decode_state, "no_payload");
+        assert!(decoded.entries[2].fields.is_none());
+        let mut corrupt = raw;
+        corrupt.push(0);
+        assert_eq!(
+            hotfix::inspect(&corrupt, CacheFilter { limit: 1, ..filter })
+                .unwrap_err()
+                .code,
+            "records.hotfix_format"
+        );
+    }
+    let mut text = vec![b'<'; 1 << 20];
+    text.push(0);
+    let raw = cache(9, &[(1, 1, 1, &text), (2, 1, 1, &text)]);
+    let page = hotfix::inspect(
+        &raw,
+        CacheFilter {
+            build: 69875,
+            limit: 20,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        hotfix::decode_page(&raw, page, &definition(SIMPLE), &budget())
+            .unwrap_err()
+            .code,
+        "records.hotfix_limit",
+        "Go fields cap counts HTML-escaped JSON"
+    );
+}
+
+struct Fixture {
+    root: PathBuf,
+    home: PathBuf,
+    file: PathBuf,
+    pin: String,
+}
+impl Fixture {
+    fn new(raw: &[u8]) -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "lychee-hotfix-table-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let home = root.join("home");
+        workspace::initialize(&home).unwrap();
+        let file = root.join("DBCache.bin");
+        fs::write(&file, raw).unwrap();
+        let pin = selection::pin_selection(
+            &home,
+            SelectionSpec {
+                data: Some(DataPin {
+                    product: "retail".into(),
+                    region: "cn".into(),
+                    language: "zhCN".into(),
+                    full_build: BUILD.into(),
+                    build_config: "b".repeat(32),
+                    cdn_config: "c".repeat(32),
+                    definition_commit: "a".repeat(40),
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+        let fixture = Self {
+            root,
+            home,
+            file,
+            pin,
+        };
+        fixture.definition(SIMPLE, false);
+        fixture
+    }
+    fn definition(&self, text: &str, collision: bool) {
+        let commit = "a".repeat(40);
+        let manifest = if collision {
+            json!([{"tableName":"Example","tableHash":"0000002A","db2FileDataID":1},{"tableName":"Other","tableHash":"0000002A","db2FileDataID":2}])
+        } else {
+            json!([{"tableName":"Example","tableHash":"0000002A","db2FileDataID":1}])
+        };
+        let manifest = serde_json::to_vec(&manifest).unwrap();
+        for (path, raw) in [
+            ("manifest.json", manifest.as_slice()),
+            ("definitions/Example.dbd", text.as_bytes()),
+        ] {
+            let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{commit}/{path}");
+            let blob = evidence::publish_blob(&self.home, raw, 4 << 20).unwrap();
+            let key = format!("definition/{}", storage::sha256(url.as_bytes()));
+            let metadata = data_cache::Cache::new(&self.home);
+            let generation = metadata.generation(&key).unwrap();
+            metadata
+                .put(&key, &json!({"url":url,"blob":blob}), generation)
+                .unwrap();
+        }
+    }
+    fn context(&self) -> DataContext {
+        DataContext {home:self.home.clone(),cwd:self.root.clone(),control:Default::default(),source:Default::default()}
+    }
+    fn request(&self) -> LocalRequest {
+        LocalRequest {snapshot:self.pin.clone(),input:LocalInput::File(self.file.clone()),table:Some("Example".into()),offline:true,
+            max_bytes:128<<20,filter:CacheFilter {limit:20,..Default::default()}}
+    }
+    fn run(&self, request: &LocalRequest) -> lycheedev_core::Result<lycheedev_core::Outcome> {
+        hotfix::dispatch(&self.context(), &Request::Local(request.clone()))
+    }
+    fn count(&self, prefix: &str) -> usize {
+        Metadata::open(&self.home, false)
+            .unwrap()
+            .list::<Value>(prefix, 1000)
+            .unwrap()
+            .len()
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+#[test]
+fn named_hotfix_dispatch_archives_validated_fields_and_paginates_same_changes_pin() {
+    let raw = cache(
+        9,
+        &[
+            (42, 1, 1, b"first\0"),
+            (43, 1, 1, b"second\0"),
+            (44, 2, 1, b"bad"),
+            (45, 1, 1, b""),
+        ],
+    );
+    let fixture = Fixture::new(&raw);
+    let mut request = fixture.request();
+    request.filter.limit = 2;
+    let first = fixture.run(&request).unwrap();
+    assert!(!first.complete);
+    assert_eq!(
+        first.data["page"]["entries"][0]["fields"],
+        json!({"ID":42,"Name":"first"})
+    );
+    assert_eq!(first.data["page"]["nextIndex"], 1);
+    assert_eq!(first.data["sources"]["identity"]["hash"], TABLE);
+    assert_eq!(first.data["definition"]["build"], BUILD);
+    assert_ne!(first.data["snapshot"], fixture.pin);
+    assert_eq!(first.selection["changes"]["sha256"], storage::sha256(&raw));
+    assert_eq!(first.provenance[0]["provenance"]["kind"], "hotfix-cache");
+    assert_eq!(first.provenance[1]["provenance"]["kind"], "hotfix-records");
+    let source = first.data["source"]["id"].as_str().unwrap().to_owned();
+    let snapshot = first.data["snapshot"].as_str().unwrap().to_owned();
+    request.input = LocalInput::Capture(source);
+    request.snapshot = snapshot.clone();
+    request.filter.after_index = Some(1);
+    let second = fixture.run(&request).unwrap();
+    assert_eq!(second.data["snapshot"], snapshot);
+    assert_eq!(
+        second.data["page"]["entries"][0]["decodeState"],
+        "not_valid"
+    );
+    assert!(second.data["page"]["entries"][0].get("fields").is_none());
+    assert_eq!(
+        second.data["page"]["entries"][1]["decodeState"],
+        "no_payload"
+    );
+    assert_eq!(second.data["page"]["truncated"], false);
+    assert!(!second.complete);
+    assert_eq!(fixture.count("pin/"), 2);
+    assert_eq!(fixture.count("capture/"), 3);
+    for capture in second.provenance {
+        let archived =
+            evidence::read_capture(&fixture.home, capture["id"].as_str().unwrap()).unwrap();
+        assert_eq!(capture, archived);
+        evidence::read_blob(&fixture.home, &capture["blob"], 32 << 20).unwrap();
+    }
+}
+#[test]
+fn named_hotfix_failures_never_publish_cache_or_changes_and_recover() {
+    let fixture = Fixture::new(&cache(9, &[(42, 1, 1, b"missing terminator")]));
+    assert_eq!(
+        fixture.run(&fixture.request()).unwrap_err().code,
+        "records.hotfix_fields"
+    );
+    assert_eq!(fixture.count("capture/"), 0);
+    assert_eq!(fixture.count("pin/"), 1);
+    fs::write(&fixture.file, cache(9, &[(42, 1, 1, b"ok\0")])).unwrap();
+    fixture.definition(SIMPLE, true);
+    assert_eq!(
+        fixture.run(&fixture.request()).unwrap_err().code,
+        "schema.ambiguous_definition"
+    );
+    fixture.definition(&SIMPLE.replace(BUILD, "12.1.0.69999"), false);
+    assert_eq!(
+        fixture.run(&fixture.request()).unwrap_err().code,
+        "schema.definition_not_found"
+    );
+    assert_eq!(fixture.count("capture/"), 0);
+    assert_eq!(fixture.count("pin/"), 1);
+    fixture.definition(SIMPLE, false);
+    assert!(fixture.run(&fixture.request()).unwrap().complete);
+    assert_eq!(fixture.count("capture/"), 2);
+    assert_eq!(fixture.count("pin/"), 2);
+}
+#[test]
+fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
+    let fixture = Fixture::new(&cache(7, &[(42, 1, 1, b"ok\0")]));
+    let mut unsupported=fixture.request();
+    unsupported.filter.region=Some(3);
+    assert_eq!(fixture.run(&unsupported).unwrap_err().code,"records.hotfix_filter_unsupported");
+    assert_eq!(fixture.count("capture/"), 0);
+    assert_eq!(fixture.count("pin/"), 1);
+    // Scan is now a supported fixed-Go route. Keep an actual successful
+    // dispatch here; its checkpoint/recovery boundaries have their own suite.
+    let scan = fixture.request();
+    let scanned = hotfix::dispatch(&fixture.context(), &Request::Scan(ScanRequest {page:scan,cursor:String::new(),max_pages:100})).unwrap();
+    assert!(scanned.complete);
+    assert_eq!(scanned.data["result"]["returned"], 1);
+    assert_eq!(scanned.data["capture"]["provenance"]["kind"], "hotfix-scan");
+    let snapshot = |prefix: &str| {
+        Metadata::open(&fixture.home, false)
+            .unwrap()
+            .list::<Value>(prefix, 1000)
+            .unwrap()
+    };
+    // The successful scan publishes captures. Cancellation and timeout must
+    // preserve their exact ordered manifests (including IDs and count).
+    let captures_after_scan = snapshot("capture/");
+    let pins_after_scan = snapshot("pin/");
+    assert!(!captures_after_scan.is_empty());
+    for expired in [false, true] {
+        let request = fixture.request();
+        let control = OperationControl::uncancelable(if expired {
+            Instant::now() - Duration::from_secs(1)
+        } else {
+            Instant::now() + Duration::from_secs(30)
+        });
+        if !expired {
+            control.tracked_cancel_handle().unwrap().cancel();
+        }
+        let mut ctx = fixture.context();
+        ctx.control = control;
+        assert_eq!(
+            hotfix::dispatch(&ctx,&Request::Local(request)).unwrap_err().code,
+            if expired {
+                "command.deadline"
+            } else {
+                "command.cancelled"
+            }
+        );
+        assert_eq!(snapshot("capture/"), captures_after_scan);
+        assert_eq!(snapshot("pin/"), pins_after_scan);
+    }
+    let mut raw = fixture.request();
+    raw.table = None;
+    raw.filter.table_hash = Some(0x0000002A);
+    let result = fixture.run(&raw).unwrap();
+    assert!(result.data["page"]["entries"][0].get("fields").is_none());
+    assert!(
+        result.data["page"]["entries"][0]
+            .get("decodeState")
+            .is_none()
+    );
+}
+
+#[test]
+fn named_hotfix_fixed_changes_and_archived_context_cannot_be_retargeted() {
+    let raw = cache(9, &[(42, 1, 1, b"original\0")]);
+    let fixture = Fixture::new(&raw);
+    let result = fixture.run(&fixture.request()).unwrap();
+    let mut fixed = fixture.request();
+    fixed.snapshot = result.data["snapshot"].as_str().unwrap().into();
+    fs::write(&fixture.file, cache(9, &[(42, 1, 1, b"different\0")])).unwrap();
+    assert_eq!(
+        fixture.run(&fixed).unwrap_err().code,
+        "records.hotfix_identity"
+    );
+    assert_eq!(fixture.count("capture/"), 2);
+    let mut other = selection::load_pinned(&fixture.home, &fixture.pin)
+        .unwrap()
+        .data
+        .clone()
+        .unwrap();
+    other.region = "us".into();
+    let other = selection::pin_selection(
+        &fixture.home,
+        SelectionSpec {
+            data: Some(other),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    fixed.input = LocalInput::Capture(result.data["source"]["id"].as_str().unwrap().into());
+    fixed.snapshot = other.id;
+    assert_eq!(
+        fixture.run(&fixed).unwrap_err().code,
+        "records.hotfix_identity"
+    );
+    assert_eq!(fixture.count("capture/"), 2);
+    let mut directory = fixture.request();
+    directory.input = LocalInput::File(fixture.root.clone());
+    assert_eq!(
+        fixture.run(&directory).unwrap_err().code,
+        "records.hotfix_format"
+    );
+    fs::write(&fixture.file, raw).unwrap();
+    fixed.snapshot = result.data["snapshot"].as_str().unwrap().into();
+    assert!(fixture.run(&fixed).unwrap().complete);
+}
+
+#[test]
+fn integral_float_pages_use_encoded_fields_limit() {
+    // Go encoding/json: each value is `1`, not serde_json's `1.0`.
+    // 32 x 65536 values encode to ~4 MiB, below the 8 MiB aggregate cap.
+    let d = definition("COLUMNS\nfloat Values\n\nBUILD 12.1.0.69875\nValues[65536]\n");
+    let payload = 1f32.to_le_bytes().repeat(65536);
+    let entries: Vec<_> = (0..32).map(|id| (id, 1, 1, payload.as_slice())).collect();
+    let raw = cache(9, &entries);
+    let page = hotfix::inspect(
+        &raw,
+        CacheFilter {
+            build: 69875,
+            limit: 32,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let decoded = hotfix::decode_page(&raw, page, &d, &budget()).unwrap();
+    assert_eq!(decoded.entries.len(), 32);
+    assert_eq!(
+        decoded.entries[31].fields.as_ref().unwrap()["Values"][65535],
+        1.0
+    );
+}
+
+#[test]
+fn fractional_float_fields_cap_accepts_exact_limit_and_rejects_one_more_byte() {
+    // 31 arrays of 65535 binary32 1.5 values leave room for one string.
+    // Go JSON {"Pad":"","Values":[...]} is 21 + 4*cells bytes per row.
+    // Both raw payloads stay below 8 MiB; only encoded fields cross the cap.
+    const ROWS: usize = 31;
+    const CELLS: usize = 65535;
+    const LIMIT: usize = 8 << 20;
+    const PADDING: usize = LIMIT - ROWS * (21 + 4 * CELLS);
+    let d =
+        definition("COLUMNS\nfloat Values\nstring Pad\n\nBUILD 12.1.0.69875\nValues[65535]\nPad\n");
+    // Pad uses the final cell in the unchanged 65536-cell schema allowance.
+    let floats = 1.5f32.to_le_bytes().repeat(CELLS);
+    for extra in [0, 1] {
+        let padding = PADDING + extra;
+        let mut first = floats.clone();
+        first.resize(first.len() + padding, b'a');
+        first.push(0);
+        let mut rest = floats.clone();
+        rest.push(0);
+        let entries: Vec<_> = (0..ROWS)
+            .map(|id| {
+                (
+                    id as u32,
+                    1,
+                    1,
+                    if id == 0 { &first[..] } else { &rest[..] },
+                )
+            })
+            .collect();
+        assert!(first.len() + (ROWS - 1) * rest.len() < LIMIT);
+        let raw = cache(9, &entries);
+        let page = hotfix::inspect(
+            &raw,
+            CacheFilter {
+                build: 69875,
+                limit: ROWS,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = hotfix::decode_page(&raw, page, &d, &budget());
+        if extra == 0 {
+            let page = result.unwrap();
+            assert_eq!(page.entries.len(), ROWS);
+            assert_eq!(
+                page.entries[ROWS - 1].fields.as_ref().unwrap()["Values"][CELLS - 1],
+                1.5
+            );
+        } else {
+            assert_eq!(result.unwrap_err().code, "records.hotfix_limit");
+        }
+    }
+}
+
+#[test]
+fn named_hotfix_capture_keeps_wire_bytes_and_public_numbers_keep_precision() {
+    let values = [
+        1f32,
+        0.0,
+        -0.0,
+        0.1,
+        1e-6,
+        1e-7,
+        1e20,
+        1e21,
+        f32::from_bits(1),
+        f32::MAX,
+    ];
+    let mut payload = u64::MAX.to_le_bytes().to_vec();
+    payload.extend((-0.0f32).to_le_bytes());
+    for value in values {
+        payload.extend(value.to_le_bytes());
+    }
+    payload.extend("<>&\u{2028}\u{2029}-0\0".as_bytes());
+    let fixture = Fixture::new(&cache(9, &[(42, 1, 1, &payload)]));
+    fixture.definition(
+        "COLUMNS\nint Wide\nfloat Zero\nfloat Values\nstring Label\n\nBUILD 12.1.0.69875\nWide<u64>\nZero\nValues[10]\nLabel\n",
+        false,
+    );
+    let result = fixture.run(&fixture.request()).unwrap();
+    let expected_values = "[1,0,-0,0.10000000149011612,9.999999974752427e-7,1.0000000116860974e-7,100000002004087730000,1.0000000200408773e+21,1.401298464324817e-45,3.4028234663852886e+38]";
+    let fields = &result.data["page"]["entries"][0]["fields"];
+    // Generic Value must retain the sign. Its public constructor spells this
+    // value -0.0, while the Go-format archive below must contain exact -0.
+    assert_eq!(
+        serde_json::to_string(&fields["Values"]).unwrap(),
+        expected_values.replacen(",-0,", ",-0.0,", 1)
+    );
+    assert_eq!(fields["Wide"].as_u64(), Some(u64::MAX));
+    assert!(fields["Zero"].as_f64().unwrap().is_sign_negative());
+    assert!(fields["Values"][1].as_f64().unwrap().is_sign_positive());
+    assert!(fields["Values"][2].as_f64().unwrap().is_sign_negative());
+    assert_eq!(fields["Label"], "<>&\u{2028}\u{2029}-0");
+    let expected_fields = format!(
+        r#""fields":{{"Label":"\u003c\u003e\u0026\u2028\u2029-0","Values":{expected_values},"Wide":18446744073709551615,"Zero":-0}}"#
+    );
+    let mut public = Vec::new();
+    lycheedev_core::public_json::write_line(&mut public, &result.data, &result.public_numbers)
+        .unwrap();
+    let expected_public_fields = format!(
+        r#""fields":{{"Label":"<>&\u2028\u2029-0","Values":{expected_values},"Wide":18446744073709551615,"Zero":-0}}"#
+    );
+    assert!(
+        std::str::from_utf8(&public)
+            .unwrap()
+            .contains(&expected_public_fields),
+        "the actual typed public encoder must preserve integer precision, Go floats and public HTML escaping"
+    );
+
+    let encoded =
+        evidence::read_blob(&fixture.home, &result.provenance[1]["blob"], 32 << 20).unwrap();
+    assert!(
+        std::str::from_utf8(&encoded)
+            .unwrap()
+            .contains(&expected_fields),
+        "the archived capture must use the same Go encoding as the fields quota"
+    );
+    // Read original number tokens: generic Value loses lexical -0, and
+    // serde_json's optional fast typed-float parser is not a precision oracle.
+    // Rust's correctly rounded parser verifies the actual archived digits.
+    #[derive(serde::Deserialize)]
+    struct Fields {
+        #[serde(rename = "Values")]
+        values: Vec<Box<serde_json::value::RawValue>>,
+        #[serde(rename = "Zero")]
+        zero: Box<serde_json::value::RawValue>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Row {
+        fields: Fields,
+    }
+    #[derive(serde::Deserialize)]
+    struct Page {
+        entries: Vec<Row>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ResultBody {
+        page: Page,
+    }
+    let archived: ResultBody = serde_json::from_slice(&encoded).unwrap();
+    assert!(
+        archived.page.entries[0]
+            .fields
+            .zero
+            .get()
+            .parse::<f64>()
+            .unwrap()
+            .is_sign_negative()
+    );
+    for (index, token) in archived.page.entries[0].fields.values.iter().enumerate() {
+        let number = token.get().parse::<f64>().unwrap();
+        assert_eq!(number.to_bits(), f64::from(values[index]).to_bits());
+        assert_eq!(
+            fields["Values"][index].as_f64().unwrap().to_bits(),
+            number.to_bits()
+        );
+    }
+}
+
+#[test]
+fn named_hotfix_above_default_metadata_capacity_remains_valid() {
+    // A large unselected physical record is still fully framed and archived;
+    // the selected table's exact DBD costs must not steal the input allowance.
+    let mut raw = cache(9, &[(1, 1, 1, b"selected\0"), (2, 1, 1, &[])]);
+    let second = raw.len() - 32;
+    raw[second + 16..second + 20].copy_from_slice(&(TABLE + 1).to_le_bytes());
+    let payload_bytes = 129 << 20;
+    raw[second + 24..second + 28].copy_from_slice(&(payload_bytes as u32).to_le_bytes());
+    raw.resize(raw.len() + payload_bytes, 0);
+    let fixture = Fixture::new(&raw);
+    drop(raw);
+    let mut request = fixture.request();
+    request.max_bytes = 130usize << 20;
+    let result = fixture.run(&request).unwrap();
+    assert_eq!(result.data["page"]["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(fixture.count("capture/"), 2);
+    let mut bounded = fixture.request();
+    bounded.max_bytes = 128usize << 20;
+    assert_eq!(
+        fixture.run(&bounded).unwrap_err().code,
+        "records.hotfix_limit"
+    );
+    assert_eq!(fixture.count("capture/"), 2);
+}
+
+#[test]
+fn named_hotfix_maximum_scalar_schema_page_releases_temporary_allocations() {
+    // Fixed Go limits: 4096 fields x 200 records; each decoded object is
+    // 40,961 bytes, so 8,192,200 aggregate bytes is legally below 8 MiB.
+    let mut dbd = String::from("COLUMNS\n");
+    for field in 0..4096 {
+        dbd.push_str(&format!("int F{field:04}\n"));
+    }
+    dbd.push_str("\nBUILD 12.1.0.69875\n");
+    for field in 0..4096 {
+        dbd.push_str(&format!("F{field:04}<u8>\n"));
+    }
+    let payload = vec![0; 4096];
+    let entries: Vec<_> = (0..200).map(|id| (id, 1, 1, payload.as_slice())).collect();
+    let raw = cache(9, &entries);
+    assert!(raw.len() < 1 << 20);
+    let fixture = Fixture::new(&raw);
+    fixture.definition(&dbd, false);
+    let mut request = fixture.request();
+    request.max_bytes = 1usize << 20;
+    request.filter.limit = 200;
+    let result = fixture.run(&request).unwrap();
+    let entries = result.data["page"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 200);
+    assert_eq!(entries[199]["fields"]["F4095"], 0);
+    assert_eq!(entries[199]["fields"].as_object().unwrap().len(), 4096);
+    assert_eq!(fixture.count("capture/"), 2);
+    assert_eq!(fixture.count("pin/"), 2);
+}
+
+#[test]
+fn named_hotfix_pages_retain_cache_through_archived_continuation() {
+    // Fixed Go records/capture_dependencies_test.go::
+    // TestHotfixOrdinaryPagesProtectSourceAndContinue, with named DBD decoding.
+    {
+        let fixture = Fixture::new(&cache(
+            9,
+            &[(42, 1, 1, b"first\0"), (43, 1, 1, b"second\0")],
+        ));
+        let mut request = fixture.request();
+        request.filter.limit = 1;
+        let first = fixture.run(&request).unwrap();
+        let source_id = first.data["source"]["id"].as_str().unwrap().to_owned();
+        let source_blob = &first.data["source"]["blob"];
+        let source_body = evidence::read_blob(&fixture.home, source_blob, 32 << 20).unwrap();
+        let digest = source_blob["sha256"].as_str().unwrap();
+        let data_owner = workspace::data_disk::DataCachePaths::new(&fixture.home).shared_blobs();
+        let owner_records = ["intent", "complete"].map(|extension| {
+            let path = data_owner.join(format!("{digest}.{extension}"));
+            let bytes = fs::read(&path).unwrap();
+            (path, bytes)
+        });
+        let current = first.provenance[1].clone();
+        assert_eq!(current["dependencies"], json!([source_id]));
+        let owner = current.clone();
+        let original = evidence::read_blob(&fixture.home, &owner["blob"], 32 << 20).unwrap();
+        let error = evidence::remove_capture(&fixture.home, &source_id).unwrap_err();
+        assert_eq!(
+            (error.code.as_str(), error.exit_code),
+            ("evidence.capture_referenced", 3)
+        );
+        request.input = LocalInput::Capture(source_id.clone());
+        request.snapshot = first.data["snapshot"].as_str().unwrap().into();
+        request.filter.after_index = Some(first.data["page"]["nextIndex"].as_u64().unwrap() as u32);
+        let second = fixture.run(&request).unwrap();
+        assert_eq!(second.data["source"]["id"], source_id);
+        assert_eq!(second.provenance[1]["dependencies"], json!([source_id]));
+        assert_eq!(
+            second.data["page"]["entries"][0]["fields"]["Name"],
+            "second"
+        );
+        assert_eq!(
+            evidence::read_capture(&fixture.home, owner["id"].as_str().unwrap()).unwrap(),
+            owner
+        );
+        assert_eq!(
+            evidence::read_blob(&fixture.home, &owner["blob"], 32 << 20).unwrap(),
+            original
+        );
+        evidence::remove_capture(&fixture.home, owner["id"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            evidence::remove_capture(&fixture.home, &source_id)
+                .unwrap_err()
+                .code,
+            "evidence.capture_referenced"
+        );
+        evidence::remove_capture(&fixture.home, second.provenance[1]["id"].as_str().unwrap())
+            .unwrap();
+        // Removing the last CAP releases its manifest. Data's independent body
+        // ownership survives, through continuation and explicit capture removal.
+        assert_eq!(
+            evidence::remove_capture(&fixture.home, &source_id).unwrap(),
+            json!({
+                "captureId":source_id, "manifestRemoved":true, "retentionRemoved":false,
+                "blobRemoved":false, "blobShared":true, "blobMissing":false
+            })
+        );
+        assert_eq!(fixture.count("capture/"), 0);
+        assert_eq!(
+            fs::read(evidence::blob_path(&fixture.home, digest).unwrap()).unwrap(),
+            source_body
+        );
+        for (path, bytes) in owner_records {
+            assert_eq!(fs::read(path).unwrap(), bytes);
+        }
+    }
+}

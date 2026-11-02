@@ -1,0 +1,32 @@
+0x1 Human
+0x2 Orc
+0x4 Dwarf
+0x8 Night Elf
+0x10 Undead
+0x20 Tauren
+0x40 Gnome
+0x80 Troll
+0x100 Goblin
+0x200 Blood Elf
+0x400 Draenei
+0x800 Dark Iron Dwarf
+0x1000 Vulpera
+0x2000 Mag'har Orc
+0x4000 Mechagnome
+0x8000 Dracthyr Horde
+0x10000 Dracthyr Alliance
+0x20000 Earthen Dwarf Horde
+0x40000 Earthen Dwarf Alliance
+0x80000 Harronir Horde
+0x100000 Harronir Alliance
+0x200000 Worgen
+0x400000
+0x800000 Pandaren Neutral
+0x1000000 Pandaren Alliance
+0x2000000 Pandaren Horde
+0x4000000 Nightborne
+0x8000000 Highmountain Tauren
+0x10000000 Void Elf
+0x20000000 Lightforged Draenei
+0x40000000 Zandalari Troll
+0x80000000 Kul Tiran

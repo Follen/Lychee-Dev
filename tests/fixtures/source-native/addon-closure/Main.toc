@@ -1,0 +1,3 @@
+## Interface: 120100, 50504, 38002
+Code/Legal.lua
+UI.xml

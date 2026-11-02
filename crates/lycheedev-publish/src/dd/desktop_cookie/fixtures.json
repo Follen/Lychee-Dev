@@ -1,0 +1,34 @@
+{
+  "source": "Independent Node crypto AES-GCM; synthetic data only",
+  "algorithm": "aes-{128,192,256}-gcm",
+  "cases": [
+    {
+      "name": "old",
+      "key": "10101010101010101010101010101010",
+      "version": 23,
+      "cookie": "synthetic-browser-cookie-old",
+      "encrypted": "7631300102030405060708090a0b0cc7289d134be7991ad7f9fcb5bf71e9b1a376a90f976967d2da158b5779c2655657bb51bfacce032dd5390917"
+    },
+    {
+      "name": "bound192",
+      "key": "181818181818181818181818181818181818181818181818",
+      "version": 24,
+      "cookie": "synthetic-browser-cookie-bound192",
+      "encrypted": "7631300102030405060708090a0b0c23efd39288a635e7a024256419812a54877ef96583f2051ed82cdac0411c202150165a631673a91865d1320f8c96929c76f198b46c3976821f9f82f54af6eb56392940c62a7a14a47c53ab32f80a917f0f"
+    },
+    {
+      "name": "bound256",
+      "key": "2020202020202020202020202020202020202020202020202020202020202020",
+      "version": 24,
+      "cookie": "synthetic-browser-cookie-bound256",
+      "encrypted": "7631300102030405060708090a0b0c18406a3c987fdf10d1f085033fb2a37200061293010f108334a973d40b8029a0a3d3e0de8b170acf8fea3315df64fe1b8d147e562b8afaea17af33b7d1b1da1f60166f072efd63ab35c6352dccfba430da"
+    },
+    {
+      "name": "wrongHost",
+      "key": "2020202020202020202020202020202020202020202020202020202020202020",
+      "version": 24,
+      "cookie": "synthetic-browser-cookie-wrongHost",
+      "encrypted": "7631300102030405060708090a0b0cdf3e96a9fcf1934f839db92cb04b0f8102def6aee13ef77841b32b53fa06ce54a3d3e0de8b170acf8fea3315df64fe1b8d147e562b8afaea17ba2eadd1b2a045255760d8e018d2c78f68193f6dcc26f9e9a6"
+    }
+  ]
+}

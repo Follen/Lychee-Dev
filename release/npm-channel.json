@@ -1,5 +1,6 @@
 {
   "schema": "lycheedev.npm-channel.v1",
-  "version": "3.2.7",
-  "distTag": "latest"
+  "version": "3.5.0",
+  "distTag": "beta",
+  "preserveLatest": "3.2.7"
 }

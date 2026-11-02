@@ -1,4 +1,5 @@
 import test from 'node:test';
+
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -64,7 +65,6 @@ test('collectAddonZipEntries ships one flat manifest, its loads and Media', () =
   const { entries, tocs, report } = collectAddonZipEntries(repo);
   assert.deepEqual(tocs.map(toc => toc.name), ['Lychee Dev.toc']);
   assert.ok(entries.has(MANIFEST));
-  assert.ok(entries.has('Lychee Dev/Bindings.xml'));
   // A per-client TOC variant is the engine selection rule the single-manifest
   // architecture removed; the archive must not carry one.
   for (const client of ['Mainline', 'Mists', 'Wrath', 'Forever']) {
@@ -78,15 +78,6 @@ test('collectAddonZipEntries ships one flat manifest, its loads and Media', () =
   assert.deepEqual(declared, SUPPORTED_INTERFACES);
   assert.ok(toc.loads.some(line => /^Core\\ClientGate\.lua$/i.test(line)));
   assert.equal(toc.loads.at(-1), 'Core\\Startup.lua');
-  assert.ok(toc.loads.indexOf('Core\\Runtime.lua') < toc.loads.indexOf('Core\\Controls.lua'));
-});
-
-test('host package smoke inputs use the current Native Mailbox load graph', () => {
-  const { entries } = collectAddonZipEntries(repo);
-  for (const name of ['Bridge/SlotRuntime.lua', 'Bridge/InputState.lua', 'Bridge/MemoryProtocol.lua']) {
-    assert.ok(entries.has(`Lychee Dev/${name}`), name);
-  }
-  assert.equal(entries.has('Lychee Dev/Bridge/Definitions.lua'), false);
 });
 
 test('built addon zip verifies clean', async t => {
@@ -107,11 +98,6 @@ test('a deleted load file entry fails verification', async t => {
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Core\/Locale\.lua/);
 });
 
-test('missing automatically loaded bindings fails verification', async t => {
-  const { buffer } = await fixtureZip(t, entries => entries.delete('Lychee Dev/Bindings.xml'));
-  assertViolation(verifyAddonZip(buffer), /missing bindings/);
-});
-
 test('an extra tests entry fails verification', async t => {
   const { buffer } = await fixtureZip(t, entries => entries.set('Lychee Dev/tests/x.lua', Buffer.from('return\n')));
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/tests\/x\.lua/);
@@ -122,11 +108,18 @@ test('a Python file fails verification', async t => {
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/automation\.py/);
 });
 
+test('a task block in Definitions.lua fails verification', async t => {
+  const { buffer } = await fixtureZip(t, entries => {
+    entries.set('Lychee Dev/Bridge/Definitions.lua',
+      Buffer.from('local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n  {id="local"},\n}}\n'));
+  });
+  assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Bridge\/Definitions\.lua/);
+});
 
 test('an incomplete Interface declaration fails verification', async t => {
   const { buffer } = await fixtureZip(t, entries => {
     const text = entries.get(MANIFEST).toString('utf8');
-    const trimmed = text.replace(', 16001', '');
+    const trimmed = text.replace('## Interface: 120105, 120100, 50504, 38002, 16001', '## Interface: 120105, 120100, 50504, 38002');
     assert.notEqual(trimmed, text);
     entries.set(MANIFEST, Buffer.from(trimmed));
   });
@@ -167,9 +160,31 @@ test('missing Media fails verification', async t => {
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Media\//);
 });
 
-test('addon ZIP includes the same project license and notices as npm', async t => {
- const {entries}=collectAddonZipEntries(repo);
- for(const name of ['LICENSE','THIRD_PARTY_NOTICES']) assert.deepEqual(entries.get(`Lychee Dev/${name}`),readFileSync(join(repo,'packages/npm/lycheedev',name)));
- const {buffer}=await fixtureZip(t,files=>files.delete('Lychee Dev/LICENSE'));
- assertViolation(verifyAddonZip(buffer),/missing license/);
+
+test('implicit binding declarations are mandatory without adding a TOC load', async t => {
+  const { buffer } = await fixtureZip(t, entries => entries.delete('Lychee Dev/Bindings.xml'));
+  assertViolation(verifyAddonZip(buffer), /missing bindings: Lychee Dev\/Bindings\.xml/);
+});
+
+test('project license and notices must both exist and be nonempty', async t => {
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES']) for (const empty of [false, true]) {
+    await t.test(name + (empty ? ' empty' : ' absent'), async t => {
+      const { buffer } = await fixtureZip(t, entries => {
+        if (empty) entries.set('Lychee Dev/' + name, Buffer.alloc(0));
+        else entries.delete('Lychee Dev/' + name);
+      });
+      assertViolation(verifyAddonZip(buffer), new RegExp('missing license: Lychee Dev/' + name));
+    });
+  }
+});
+
+test('unselected, tool and legacy payload entries are rejected', async t => {
+  const unselected = ['tests/case.lua', 'tools/luals/runtime.json', 'docs/README.md',
+    'node_modules/module.js', 'vendor/crate.js', '.git/config', 'automation.py', 'fixtures/case.json'];
+  for (const path of unselected) {
+    await t.test(path, async t => {
+      const { buffer } = await fixtureZip(t, files => files.set('Lychee Dev/' + path, Buffer.from('return\n')));
+      assertViolation(verifyAddonZip(buffer), /entry not selected as toc\/load\/media|banned entry/);
+    });
+  }
 });

@@ -1,0 +1,515 @@
+{
+  "schema": "lycheedev.lua-tool-supply.v1",
+  "version": "5.1.5",
+  "platform": "windows-amd64",
+  "archive": {
+    "path": "supply.tgz",
+    "bytes": 997170,
+    "sha256": "16eb25f9a1853e749e30a8cec99427822dc39e93a5c73e2c02d7fac8da598d42"
+  },
+  "tools": {
+    "luac": {
+      "executable": "luac/luac.exe",
+      "sourceArchive": "luac/lua-5.1.5.tar.gz",
+      "license": "luac/LICENSE",
+      "runtime": "luac/runtime.json",
+      "producerReport": "luac/producer/build-report.json",
+      "producerReceipt": "luac/producer/evidence/receipt.json",
+      "recipe": "luac/producer/recipe.mjs"
+    },
+    "lua51": {
+      "executable": "lua51/lua.exe",
+      "sourceArchive": "lua51/lua-5.1.5.tar.gz",
+      "license": "lua51/LICENSE",
+      "producerReport": "lua51/producer/build-report.json",
+      "producerReceipt": "lua51/producer/evidence/receipt.json",
+      "recipe": "lua51/producer/recipe.mjs"
+    }
+  },
+  "productionLimits": {
+    "compilerIdentity": "cl.exe/link.exe SHA256 and compiler /Bv output; compiler headers and libraries were not hashed at production time",
+    "historicalPaths": "Original reports and receipts retain producer paths as evidence only; consumers resolve supply-relative inventory paths"
+  },
+  "files": [
+    {
+      "path": "lua51/LICENSE",
+      "bytes": 1528,
+      "sha256": "ee5e3e82af1e1b543c4f216e399d7c8cfee797711913f349e385101c4ae60a79"
+    },
+    {
+      "path": "lua51/lua-5.1.5.tar.gz",
+      "bytes": 221213,
+      "sha256": "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333"
+    },
+    {
+      "path": "lua51/lua.exe",
+      "bytes": 489472,
+      "sha256": "60d6027ffb7e3a2b99bcf5efc0ca67c5266b7c1d397942c8cb02c5c19753768a"
+    },
+    {
+      "path": "lua51/producer/build-report.json",
+      "bytes": 12113,
+      "sha256": "305cfd234c0a753fac1189d5e1493764aa7ba9bc036e5deff174741fc32a00eb"
+    },
+    {
+      "path": "lua51/producer/evidence/command-0.json",
+      "bytes": 2134,
+      "sha256": "fb09c5760ce6ea3a57f152e434b51c724d26d798ee8fbfb73d95f733c21b3f5c"
+    },
+    {
+      "path": "lua51/producer/evidence/command-1.json",
+      "bytes": 2054,
+      "sha256": "fdbc446f39bdd7e8fd2f4abe860e15c2dc34731c5258fceed31661bc4c90889c"
+    },
+    {
+      "path": "lua51/producer/evidence/command-2.json",
+      "bytes": 4872,
+      "sha256": "2dc685f87fe3981e9d12e6b05b2e7c7e3e1ee7baf13e529f0282f3964d813378"
+    },
+    {
+      "path": "lua51/producer/evidence/command-3.json",
+      "bytes": 2032,
+      "sha256": "25b0887dfea273821b037d643ad852fdfabf325bd854db3d85f2f856eae69257"
+    },
+    {
+      "path": "lua51/producer/evidence/command-4.json",
+      "bytes": 2156,
+      "sha256": "e3cd2864766ddef3b8da360288b43dacb7fd3d374353b17152d19b23e79b547a"
+    },
+    {
+      "path": "lua51/producer/evidence/interpreter-report.json",
+      "bytes": 12113,
+      "sha256": "305cfd234c0a753fac1189d5e1493764aa7ba9bc036e5deff174741fc32a00eb"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.identity.json",
+      "bytes": 1394,
+      "sha256": "1ea102e1f13a8c75f3dcd0d593e9e2bcdcd10433734a3833d763be3fe44ff689"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.job.json",
+      "bytes": 366,
+      "sha256": "226684b82fa7d7b75100820d34614f274d886dc02d00c4960c5c7a61414a7032"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.receipt.json",
+      "bytes": 5438,
+      "sha256": "1faf3df7a01ec89a2037ef61a642e848348ac6505ecd8b620f38d460f7853d32"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.request.json",
+      "bytes": 2259,
+      "sha256": "6e88e5f660cdaaa734c90b2cbe1a44718189338cb8e48050d83dc1e9b0bc21e4"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.root.json",
+      "bytes": 483,
+      "sha256": "b281b9f332094ede912ce7142d651c19edf1a458c38d41ad81eb9acd30d40a6e"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.stderr.bin",
+      "bytes": 1075,
+      "sha256": "a8f645bdc286bd18bda70e0361662a0783aa5c6e09d814cafbea2af96afa3141"
+    },
+    {
+      "path": "lua51/producer/evidence/process-061f8bd6-eaf4-4a7f-8dbd-b92bc1075066.stdout.bin",
+      "bytes": 334,
+      "sha256": "5d1e2c9b1a5d27921a4399ae7200e89a1035ed35a26b2f5317357f83755c28ea"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.identity.json",
+      "bytes": 1392,
+      "sha256": "cbe7b45061d571e73821e272afbae73089b5f7e02bca0d647b7f50106588f04d"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.job.json",
+      "bytes": 364,
+      "sha256": "5b3c85f05589b1e9b19ee9e5fde94e0fb5432f2d6b4d297d681bf2aa72b55a2d"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.receipt.json",
+      "bytes": 1948,
+      "sha256": "fb9bbca1c6dddee62da560e050f04476b6b2bed52695a765b7c660fe4fd8f1c9"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.request.json",
+      "bytes": 1541,
+      "sha256": "3b1bb82039e6ec7c9f5ca2ec4fae259f0d0fc040e053142cf4c96b661b98e075"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.root.json",
+      "bytes": 481,
+      "sha256": "e9452a5174aa2feaace9b2971fb727f525bff5cee7b2e36af4c06172c78f7e7b"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.stderr.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "lua51/producer/evidence/process-59751612-fb36-4cb2-afc2-90dc135fbf9f.stdout.bin",
+      "bytes": 119,
+      "sha256": "dfe62d02bfa10a061fa698dce52df73a22aa36448d5448e6a631c4f61fd79241"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.identity.json",
+      "bytes": 1394,
+      "sha256": "db660f69ec355dbcb71f18f3bf7bebfbc64b5238a4e8abcf5009cad6d695b58a"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.job.json",
+      "bytes": 366,
+      "sha256": "f659109252226eb532e9975cb4fbb302b7cdaf70c14161218a7c42d757a13e93"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.receipt.json",
+      "bytes": 1984,
+      "sha256": "e92ac339da836983c50661c167dfe9181c70e62c4d5f7e89dd51be4d23aed1f9"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.request.json",
+      "bytes": 1607,
+      "sha256": "049844acdf954cedcf09665d78511017ef4a7939ed2275d018d47af9625a88cb"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.root.json",
+      "bytes": 483,
+      "sha256": "6b8fd564e507c4f39a0b571bbedc446dbc2c0f4433230cda993e7b56cbe2c576"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.stderr.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "lua51/producer/evidence/process-7033ea4e-2e05-4f46-8eac-4a4bf3c82f84.stdout.bin",
+      "bytes": 27,
+      "sha256": "ffee273085e4b8281d2c71d641f42a457b18fe94f86961e672870fab87caabec"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.identity.json",
+      "bytes": 1394,
+      "sha256": "0be1488252168fb2a08384e89c3dd7974adc8730647bdd582b7358dd8b87591b"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.job.json",
+      "bytes": 366,
+      "sha256": "802dc0c4d188f7da9fcf47bf8d776777d64960be3496cc6b9786b79aa6cc08d5"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.receipt.json",
+      "bytes": 1906,
+      "sha256": "7be0e4759927fbb5d97410e8465f5e9b547fbb040eda2eea8b6103ee7a9c6718"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.request.json",
+      "bytes": 1663,
+      "sha256": "186ca1241c4bbfa5cb1fba317f59f849401f8d15f8b6575fa670097f87843de7"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.root.json",
+      "bytes": 483,
+      "sha256": "7864c94e1f05333722ad2c31d00590f5c445f27448788dfe74b728ed114a89c5"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.stderr.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e0d0b405-836d-456f-9129-73cec90f1ed5.stdout.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.identity.json",
+      "bytes": 1394,
+      "sha256": "3198dba529a8c2d9e377b97cfe809e36409da9cb8a2ed4bc8c6aa35e75081918"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.job.json",
+      "bytes": 366,
+      "sha256": "61ed52fc9334351e257350487b7481c9e279d8e8d2c7d4290e158762c90668d5"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.receipt.json",
+      "bytes": 1983,
+      "sha256": "09e1e97ae1bccfa735a14f1a4ef4bfb501d009ee4d6c150526adbb4c9d65d2b5"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.request.json",
+      "bytes": 1484,
+      "sha256": "15cef336b25d14e47b83c1fb4d4b252e2fb2734f35cb3613eb3fe85f89dc9af9"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.root.json",
+      "bytes": 482,
+      "sha256": "02b038cdfd1954e019f8f955f09aeba236eb7379dfa1efb07c0dbcffafe523c4"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.stderr.bin",
+      "bytes": 53,
+      "sha256": "7a2c548d4f9b937f51e5d63ae30440a85086b162121a77934f871f8ba069b119"
+    },
+    {
+      "path": "lua51/producer/evidence/process-e7bf15d7-7fd4-4bbd-84ad-04bd8f96f648.stdout.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "lua51/producer/evidence/receipt.json",
+      "bytes": 35045,
+      "sha256": "d1bfe1b47a19394b831897eae6ba6635b578c3538dddfaeff0986a95c76729c5"
+    },
+    {
+      "path": "lua51/producer/recipe.mjs",
+      "bytes": 14927,
+      "sha256": "61216d22bef2556de292e78f97f85752fc104799d4e104a9bb9ab9f443b2a670"
+    },
+    {
+      "path": "luac/LICENSE",
+      "bytes": 1528,
+      "sha256": "ee5e3e82af1e1b543c4f216e399d7c8cfee797711913f349e385101c4ae60a79"
+    },
+    {
+      "path": "luac/lua-5.1.5.tar.gz",
+      "bytes": 221213,
+      "sha256": "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333"
+    },
+    {
+      "path": "luac/luac.exe",
+      "bytes": 491008,
+      "sha256": "5aa1605bfea56e6c2961c6b4b0f845a699b43f9b3666dd64f50289c3952d441b"
+    },
+    {
+      "path": "luac/producer/build-report.json",
+      "bytes": 3829,
+      "sha256": "76047a9518980e2520c60ebbae76882a685a9f48be9004e13125700dd86e5a51"
+    },
+    {
+      "path": "luac/producer/evidence/command-0.json",
+      "bytes": 474,
+      "sha256": "9f7df384dd8459eaae6b826766a0f0c6f490d00df466a5d06a49a81c26cf0d46"
+    },
+    {
+      "path": "luac/producer/evidence/command-1.json",
+      "bytes": 361,
+      "sha256": "3a6cef08cffd0c4d1222e496a703e467b7e903f48a27291eff09961875aa0f1c"
+    },
+    {
+      "path": "luac/producer/evidence/command-2.json",
+      "bytes": 1088,
+      "sha256": "5e482b9adc7f83c4507a7b84b714c62c9be02ab6a4773f41bd3d198d6d579715"
+    },
+    {
+      "path": "luac/producer/evidence/command-3.json",
+      "bytes": 287,
+      "sha256": "656520f16a597c59383b8df3cd93ad3197946781a831198d234b1ce4f29868b0"
+    },
+    {
+      "path": "luac/producer/evidence/log-36.bin",
+      "bytes": 3829,
+      "sha256": "76047a9518980e2520c60ebbae76882a685a9f48be9004e13125700dd86e5a51"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.identity.json",
+      "bytes": 1395,
+      "sha256": "bab59d307a9de1426bb74c106295280fb8affc7cff023854e8e19539fc97f6ef"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.job.json",
+      "bytes": 366,
+      "sha256": "1251d4181a77cb05ecd8aa180a6565f182f367a8a6f114ab4b9887d02da12784"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.receipt.json",
+      "bytes": 1976,
+      "sha256": "22ca049332c2cb7577b57d1e4b580a95eae28bc67df97fd8545803234a6c1668"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.request.json",
+      "bytes": 1468,
+      "sha256": "d6efca9a60f748f6fc93b68c6a9658d4439a2b179cea6e9a8895918e147bc70f"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.root.json",
+      "bytes": 483,
+      "sha256": "dbbfe523b6d9c9b9b1050888701ee7b48850c855af88ee491002974cb5d39f10"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.stderr.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "luac/producer/evidence/process-15089464-eb1b-4bec-9439-d40a246b2974.stdout.bin",
+      "bytes": 53,
+      "sha256": "7a2c548d4f9b937f51e5d63ae30440a85086b162121a77934f871f8ba069b119"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.identity.json",
+      "bytes": 1395,
+      "sha256": "b88e10e6af9b6d33303af01baafede26bc4777cef8265667d8ef8a6cd6c8d30b"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.job.json",
+      "bytes": 366,
+      "sha256": "36f305fc20186151986dc76c4d9402e31e2a4bb83703b8535e8f4718bd292737"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.receipt.json",
+      "bytes": 1905,
+      "sha256": "314d63584030db0ec07666d623e03a6bd8904bb24bc9e2a1fa825754df3c6014"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.request.json",
+      "bytes": 1655,
+      "sha256": "458964aa47438374e79c437a84a92ff9b9841d7f857a142ceaf343d032f60018"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.root.json",
+      "bytes": 482,
+      "sha256": "11b971453e61aa31bb509ba61064f2fc79818738b548ec81028d7a8fc6af7aea"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.stderr.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "luac/producer/evidence/process-2525a35e-da50-48ad-9975-6ea1b1b814eb.stdout.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.identity.json",
+      "bytes": 1395,
+      "sha256": "ab0e4034ac84281ac05af03da66c6b128e5f16b7b333cad71d3d9a093e40ddc4"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.job.json",
+      "bytes": 366,
+      "sha256": "65ee03e704ca472e606eb728d1456e2384f39923fc4550915ec82234e376dcc5"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.receipt.json",
+      "bytes": 1948,
+      "sha256": "2971cb2b57e8d4c53654d2f7a3c1c79112feb0630d1de9a8e500c6d7b85585f4"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.request.json",
+      "bytes": 1542,
+      "sha256": "51c4becc25a625000f097ef55542802423a7bc4fc4f8667f71c82b6589b5a732"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.root.json",
+      "bytes": 483,
+      "sha256": "efd95d83afd5f0748dd508c04bb6f6031387060fcc699196c50857b7e5663c2f"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.stderr.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "luac/producer/evidence/process-98223362-2ba7-471a-a0c0-1ee60e155242.stdout.bin",
+      "bytes": 119,
+      "sha256": "dfe62d02bfa10a061fa698dce52df73a22aa36448d5448e6a631c4f61fd79241"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.identity.json",
+      "bytes": 1395,
+      "sha256": "4b8c1be18e4f6f1b2ef77cc506851bada64864f982a0744280463d4e0909a24b"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.job.json",
+      "bytes": 366,
+      "sha256": "d2f743645867b9cfaee0067f05b03538d81ca5c88e5013fbfb673f96af846436"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.receipt.json",
+      "bytes": 5438,
+      "sha256": "e67010463ec878f7f34ede862e2bfe0b6eec686655954d39e70cc463798926e9"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.request.json",
+      "bytes": 2268,
+      "sha256": "75a88aac00619a3fc93c7dbddec4b4f7a8806cedb5cc0ec6d775f068629de6c2"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.request.json.wrapper.json",
+      "bytes": 68,
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.root.json",
+      "bytes": 483,
+      "sha256": "f52eda10c111b2c17ced32ae73431d240c651de8a2b2e67c4faa608427a4f486"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.stderr.bin",
+      "bytes": 1075,
+      "sha256": "a8f645bdc286bd18bda70e0361662a0783aa5c6e09d814cafbea2af96afa3141"
+    },
+    {
+      "path": "luac/producer/evidence/process-d75ab7ba-8f42-464e-ace7-aac505b7de07.stdout.bin",
+      "bytes": 344,
+      "sha256": "db30888e1fee2b94077f0f36320e2477962c54334ca18c7633e98acf7ff3eed8"
+    },
+    {
+      "path": "luac/producer/evidence/receipt.json",
+      "bytes": 27564,
+      "sha256": "856fd23d02509054675e841777b7fcf0ed96e1d248b5c922c175fa49743d4125"
+    },
+    {
+      "path": "luac/producer/recipe.mjs",
+      "bytes": 14228,
+      "sha256": "55e95cedf9ae3fc503623469fcd118d0feb41aef24d7bc2cc3e325408ffa7b94"
+    },
+    {
+      "path": "luac/runtime.json",
+      "bytes": 335,
+      "sha256": "483b92e957e8875016627a000f6167d3e907a3c06c0ba3edb759339f8a651673"
+    }
+  ]
+}

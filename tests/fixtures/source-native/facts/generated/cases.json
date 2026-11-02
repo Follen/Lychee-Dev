@@ -1,0 +1,106 @@
+{
+  "schema": "lycheedev.source-facts-malformed-cases.v1",
+  "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "cases": [
+    {
+      "id": "ordinary_then_all_api",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/ordinary_then_all_api.lua",
+      "source": "function Before() Work() end\nlocal A={Name=\"First\",Type=\"System\",Namespace=\"C_First\",Functions={{Name=\"Run\",Type=\"Function\"}}}\nlocal B={Name=\"Second\",Type=\"System\",Events={{Name=\"Ready\",Type=\"Event\",LiteralName=\"READY\"}}}\nAPIDocumentation:AddDocumentationTable(A)\nfunction After() Tail() end"
+    },
+    {
+      "id": "all_sections_fixed_order",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/all_sections_fixed_order.lua",
+      "source": "local T={Name=\"C_All\",Type=\"System\",Callbacks={{Name=\"Callback\",Type=\"Callback\"}},ScriptObjects={{Name=\"Script\",Type=\"ScriptObject\"}},Enumerations={{Name=\"Enum\",Type=\"Enumeration\"}},Structures={{Name=\"Struct\",Type=\"Structure\"}},Tables={{Name=\"Table\",Type=\"Structure\"}},Events={{Name=\"Event\",Type=\"Event\",LiteralName=\"LITERAL\"}},Functions={{Name=\"Function\",Type=\"Function\"}}}"
+    },
+    {
+      "id": "first_invalid_type_masks_system",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/first_invalid_type_masks_system.lua",
+      "source": "local T={Type=false, Type=\"System\", Name=\"Hidden\",Functions={{Type=\"Function\",Name=\"Hidden\"}}}"
+    },
+    {
+      "id": "first_invalid_name_masks_later",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/first_invalid_name_masks_later.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\",Functions={{Type=\"Function\",Name=false,Name=\"Hidden\"},{Type=\"Function\",Name=\"First\",Name=\"Later\"}}}"
+    },
+    {
+      "id": "first_invalid_section_masks_later",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/first_invalid_section_masks_later.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\",Functions=false,Functions={{Type=\"Function\",Name=\"Hidden\"}}}"
+    },
+    {
+      "id": "quoted_escaped_and_parenthesized_keys",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/quoted_escaped_and_parenthesized_keys.lua",
+      "source": "local T={ [\"\\084ype\"]=\"System\", [(\"Name\")]=\"Root\", [\"Functions\"]={{[\"Name\"]=\"Run\",Type=\"Function\",Arguments={{[\"Name\"]=\"n\",Type=\"number\",Nilable=(true)}}}}}"
+    },
+    {
+      "id": "duplicate_semantic_keys",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/duplicate_semantic_keys.lua",
+      "source": "local T={Type=\"System\",[\"Type\"]=\"Other\",Name=\"First\",[\"\\078ame\"]=\"Last\",Functions={{Name=\"Run\",Type=\"Function\",Arguments={{Name=false,Name=\"later\",Type=false,Type=\"number\",Nilable=false,Nilable=true}}}}}"
+    },
+    {
+      "id": "nested_system_repeated_roots",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/nested_system_repeated_roots.lua",
+      "source": "local T={Type=\"System\",Name=\"Outer\",Namespace=\"C_Outer\",Tables={{Type=\"System\",Name=\"Inner\",Namespace=\"C_Inner\",Functions={{Type=\"Function\",Name=\"Child\"}}},{Type=\"Structure\",Name=\"Sibling\"}}}"
+    },
+    {
+      "id": "nested_system_clears_namespace",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/nested_system_clears_namespace.lua",
+      "source": "local T={Type=\"System\",Name=\"Outer\",Namespace=\"C_Outer\",Tables={{Type=\"System\",Name=\"Inner\",Functions={{Type=\"Function\",Name=\"Global\"}}}}}"
+    },
+    {
+      "id": "lowercase_descendant_only",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/lowercase_descendant_only.lua",
+      "source": "local T={Type=\"system\",Name=\"Ignored\"}; local U={Type=\"System\",Name=\"Root\",Tables={{Type=\"SYSTEM\",Name=\"C_Nested\",Functions={{Type=\"FUNCTION\",Name=\"Run\"}}}}}"
+    },
+    {
+      "id": "parenthesized_field_and_entry",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/parenthesized_field_and_entry.lua",
+      "source": "local T={Type=(\"System\"),Name=(\"Root\"),Functions=({({Type=\"Function\",Name=\"Ignored\"}),{Type=\"Function\",Name=\"Run\",Arguments={({Name=\"x\",Type=\"number\"}),{Name=\"y\",Type=\"string\"}}}})}"
+    },
+    {
+      "id": "signature_dynamic_nilable_and_returns",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/signature_dynamic_nilable_and_returns.lua",
+      "source": "local T={Type=\"System\",Name=\"C_Root\",Functions={{Type=\"Function\",Name=\"Run\",Arguments={{},{Name=\"n\",Type=\"number\",Nilable=(true)}},Returns={{Type=\"bool\"},{Name=\"x\"}}},{Type=\"Callback\",Name=\"Cb\",Returns=nil},{Type=\"ScriptObject\",Name=\"Method\",Arguments={false,{},42}}}}"
+    },
+    {
+      "id": "event_literal_alias_and_payload",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/event_literal_alias_and_payload.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\",Namespace=\"C_Test\",Events={{Type=\"Event\",Name=\"Ready\",LiteralName=\"READY\",Payload={{},{Name=\"x\",Type=\"number\",Nilable=true}}},{Type=\"Event\",Name=\"Same\",LiteralName=\"C_Test.Same\"}}}"
+    },
+    {
+      "id": "unknown_collections_are_not_docs",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/unknown_collections_are_not_docs.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\",Arguments={{Type=\"Function\",Name=\"Arg\"}},Payload={{Type=\"Event\",Name=\"Payload\"}},Fields={{Type=\"Structure\",Name=\"Field\"}},Widgets={{Type=\"ScriptObject\",Name=\"Widget\"}},Tables={{Type=\"Other\",Name=\"Skip\",Functions={{Type=\"Function\",Name=\"Nested\"}}}}}"
+    },
+    {
+      "id": "literal_bytes_and_raw_call_targets",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/literal_bytes_and_raw_call_targets.lua",
+      "source": "T[\"\\255\"](); frame:RegisterEvent(\"\\254\"); local T={Type=\"System\",Name=\"C_Test\",Functions={{Type=\"Function\",Name=\"\\255\\254\",Arguments={{Name=\"\\255\",Type=\"\\300\\q\"}}}},Events={{Type=\"Event\",Name=\"E\",LiteralName=\"\\253\"}}}"
+    },
+    {
+      "id": "bom_crlf_and_long_literals",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/bom_crlf_and_long_literals.lua",
+      "source": "﻿local T={\r\nType=\"System\",Name=[=[C_Root]=],\r\nFunctions={{Type=\"Function\",Name=\"Run\",Arguments={{Name=[=[\r\nx]=],Type=\"string\"}}}}}\r\nCall()"
+    },
+    {
+      "id": "malformed_clears_all",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/malformed_clears_all.lua",
+      "source": "Before(); local T={Type=\"System\",Name=\"Root\",Functions={{Type=\"Function\",Name=\"Run\"}}}; local broken = ;"
+    },
+    {
+      "id": "unsupported_clears_all",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/unsupported_clears_all.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\"}; return 1 // 2"
+    },
+    {
+      "id": "type_first_minimal",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/type_first_minimal.lua",
+      "source": "local T={Type=\"System\",Name=\"C_Min\",Functions={{Type=\"Function\",Name=\"Run\"}}}"
+    },
+    {
+      "id": "empty_and_nonliteral_namespace",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/empty_and_nonliteral_namespace.lua",
+      "source": "local T={Type=\"System\",Name=\"C_Fallback\",Namespace=false,Functions={{Type=\"Function\",Name=\"Run\"}}}"
+    }
+  ]
+}

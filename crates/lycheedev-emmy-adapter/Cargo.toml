@@ -1,0 +1,19 @@
+[package]
+name = "lycheedev-emmy-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rowan = "=0.17.0"
+lycheedev-binding-contracts = { path = "../lycheedev-binding-contracts", version = "=3.5.0" }
+# Keep this backend pin identical to the custody-verified Source engine.
+emmylua_code_analysis = { path = "../../.tmp/emmy-reconstruction-v1/upstream/crates/emmylua_code_analysis", version = "=0.30.0" }
+emmylua_parser = { path = "../../.tmp/emmy-reconstruction-v1/upstream/crates/emmylua_parser", version = "=0.30.0" }
+serde.workspace = true
+serde_json.workspace = true
+# Reuse the pinned engine's diagnostic types and shared locale backend.
+lsp_types = { package = "emmy_lsp_types", version = "=0.1.0" }
+rust-i18n = "=3.1.5"
+smol_str = "=0.3.6"

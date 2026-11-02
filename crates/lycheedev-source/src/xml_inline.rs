@@ -1,0 +1,529 @@
+//! Decoded XML Lua inputs retain segmented origins in the original UTF8 bytes.
+//! A generated closure is syntax scaffolding, not a handler parameter contract.
+pub mod source_map;
+use source_map::{MappedText,Origin,Span,utf16_range,lua_line_span};
+use lycheedev_core::{Result,ToolkitError,storage};
+use serde::Serialize;
+use serde_json::{Value,json};
+use std::{collections::BTreeMap,sync::Arc};
+
+pub const SOURCE_MAP_RULES:&str="xml-segmented-original-utf8-v1";
+const WRAPPER:&str="return function(self, ...)\n";
+const MAX_XML_BYTES:usize=32<<20;
+
+pub struct Script {
+    pub key:String,
+    pub path:String,
+    pub handler:String,
+    pub kind:String,
+    pub xml_sha256:String,
+    pub compiler:MappedText,
+    pub element:Span,
+    body:Span,
+    raw:Arc<str>,
+}
+fn invalid(message:impl ToString)->ToolkitError{ToolkitError::new("codebase.xml_invalid",message.to_string(),4)}
+fn span(value:&Value)->Span{
+    Span::new(value["start"].as_u64().expect("serialized span start")as usize,value["end"].as_u64().expect("serialized span end")as usize)
+}
+impl Script {
+    /// Generated text has one owner; compiler and semantic consumers borrow the same bytes.
+    pub fn source_bytes(&self)->&[u8]{self.compiler.text.as_bytes()}
+    pub(crate) fn original_shared(&self)->Arc<str>{Arc::clone(&self.raw)}
+    /// The only generated root closure spans the authenticated decoded body.
+    /// Nested user closures cannot cross either synthetic wrapper boundary.
+    pub(crate) fn is_syntax_wrapper(&self,start:usize,end:usize)->bool{
+        matches!(self.kind.as_str(),"handler"|"binding")&&start<self.body.start&&end>self.body.end
+    }
+    pub fn body_text(&self)->&str{&self.compiler.text[self.body.start..self.body.end]}
+    /// Tree-sitter fact rows count LF bytes. Project that decoded body line
+    /// through the same segments as native generated sites, including entities.
+    pub fn original_body_line(&self,line:usize)->Result<usize>{
+        let body=self.body_text();
+        let mut start=0;
+        for _ in 1..line {start+=body[start..].find('\n').ok_or_else(||invalid("inline fact line outside decoded body"))?+1;}
+        let end=start+body[start..].find('\n').unwrap_or(body.len()-start);
+        let mapping=self.project(Span::new(self.body.start+start,self.body.start+end))?;
+        let anchor=mapping["segments"].as_array().expect("segmented projection").iter().find_map(|segment|(!segment["raw"].is_null()).then(||span(&segment["raw"])).or_else(||(!segment["anchor"].is_null()).then(||span(&segment["anchor"])))).unwrap_or(self.element);
+        Ok(source_map::utf16_position(&self.raw,anchor.start).map_err(invalid)?["line"].as_u64().expect("original line")as usize+1)
+    }
+    pub fn mapping_manifest(&self)->Value{
+        json!({"rules":SOURCE_MAP_RULES,"path":self.key,"xmlPath":self.path,"xmlSHA256":self.xml_sha256,"xmlBytes":self.raw.len(),
+            "compilerSHA256":storage::sha256(self.source_bytes()),"compilerBytes":self.source_bytes().len(),"segments":self.compiler.segments,"element":self.element,
+            "wrapper":"syntax_only_closure","implicitHandlerParameters":if self.kind=="handler"{"self:xml_object; remaining:unknown"}else{"unknown"},"byteOffsets":"original_utf8_including_bom","positionEncoding":"utf-16","bomColumnPolicy":"encoding_marker_not_displayed"})
+    }
+    pub(crate) fn mapping_manifest_view(&self)->impl Serialize+'_ { MappingManifest(self) }
+    pub fn project(&self,range:Span)->Result<Value>{
+        let mut mapping=if range.is_empty(){self.compiler.project_point(range.start)}else{self.compiler.project(range)}.map_err(invalid)?;
+        for segment in mapping["segments"].as_array_mut().expect("segmented projection"){
+            if !segment["raw"].is_null(){segment["rawRange"]=utf16_range(&self.raw,span(&segment["raw"])).map_err(invalid)?;}
+            if !segment["anchor"].is_null(){segment["anchorRange"]=utf16_range(&self.raw,span(&segment["anchor"])).map_err(invalid)?;}
+        }
+        mapping["rules"]=json!(SOURCE_MAP_RULES);
+        Ok(mapping)
+    }
+    pub fn position(&self,range:Span)->Result<Value>{
+        let mapping=self.project(range)?;
+        let covering=if mapping["covering"].is_null(){Value::Null}else{utf16_range(&self.raw,span(&mapping["covering"])).map_err(invalid)?};
+        let synthetic=mapping["accuracy"]=="synthetic_or_mixed";
+        Ok(json!({"path":self.path,"range":if synthetic{Value::Null}else{covering.clone()},"coveringRange":covering,
+            "positionAccuracy":if synthetic{"synthetic-or-mixed"}else if mapping["accuracy"]=="exact"{"utf16-character"}else{"covering"},
+            "generatedRange":utf16_range(&self.compiler.text,range).map_err(invalid)?,"generatedBytes":range,
+            "sourceMap":mapping,"inlineHandler":self.handler,"xmlContentHash":self.xml_sha256}))
+    }
+    pub fn compiler_line(&self,line:usize)->Result<Value>{
+        let range=lua_line_span(&self.compiler.text,line).map_err(invalid)?;
+        let mapping=self.project(range)?;
+        let anchor=mapping["segments"].as_array().expect("segmented projection").iter().find_map(|segment|
+            (!segment["raw"].is_null()).then(||span(&segment["raw"]))
+                .or_else(||(!segment["anchor"].is_null()).then(||span(&segment["anchor"]))))
+            .unwrap_or(self.element);
+        let location=source_map::utf16_position(&self.raw,anchor.start).map_err(invalid)?;
+        Ok(json!({"line":location["line"].as_u64().expect("line")+1,"columnKnown":false,"compiledLine":line,"sourceMap":mapping}))
+    }
+}
+
+// Preserve the recursively sorted keys of mapping_manifest's Value without
+// allocating a second object tree for every retained compiler segment.
+struct MappingManifest<'a>(&'a Script);
+impl Serialize for MappingManifest<'_> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeMap;
+        let script=self.0;
+        let mut map=serializer.serialize_map(Some(14))?;
+        map.serialize_entry("bomColumnPolicy","encoding_marker_not_displayed")?;
+        map.serialize_entry("byteOffsets","original_utf8_including_bom")?;
+        map.serialize_entry("compilerBytes",&script.source_bytes().len())?;
+        map.serialize_entry("compilerSHA256",&storage::sha256(script.source_bytes()))?;
+        map.serialize_entry("element",&MappingSpan(script.element))?;
+        map.serialize_entry("implicitHandlerParameters",if script.kind=="handler"{"self:xml_object; remaining:unknown"}else{"unknown"})?;
+        map.serialize_entry("path",&script.key)?;
+        map.serialize_entry("positionEncoding","utf-16")?;
+        map.serialize_entry("rules",SOURCE_MAP_RULES)?;
+        map.serialize_entry("segments",&MappingSegments(&script.compiler.segments))?;
+        map.serialize_entry("wrapper","syntax_only_closure")?;
+        map.serialize_entry("xmlBytes",&script.raw.len())?;
+        map.serialize_entry("xmlPath",&script.path)?;
+        map.serialize_entry("xmlSHA256",&script.xml_sha256)?;
+        map.end()
+    }
+}
+struct MappingSpan(Span);
+impl Serialize for MappingSpan {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map=serializer.serialize_map(Some(2))?;
+        map.serialize_entry("end",&self.0.end)?;
+        map.serialize_entry("start",&self.0.start)?;
+        map.end()
+    }
+}
+struct MappingSegments<'a>(&'a [source_map::Segment]);
+impl Serialize for MappingSegments<'_> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq=serializer.serialize_seq(Some(self.0.len()))?;
+        for segment in self.0 {seq.serialize_element(&MappingSegment(segment))?;}
+        seq.end()
+    }
+}
+struct MappingSegment<'a>(&'a source_map::Segment);
+impl Serialize for MappingSegment<'_> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->std::result::Result<S::Ok,S::Error> {
+        use serde::ser::SerializeMap;
+        let segment=self.0;
+        let mut map=serializer.serialize_map(Some(if segment.anchor.is_some(){4}else{3}))?;
+        if let Some(anchor)=segment.anchor{map.serialize_entry("anchor",&MappingSpan(anchor))?;}
+        map.serialize_entry("origin",&segment.origin)?;
+        map.serialize_entry("output",&MappingSpan(segment.output))?;
+        map.serialize_entry("raw",&segment.raw.map(MappingSpan))?;
+        map.end()
+    }
+}
+
+/// The compiler and semantic paths consume the same ordered v8 extraction.
+pub fn extract(path:&str,raw:&[u8])->Result<Vec<Script>>{
+    let program=crate::xml_program::extract_production(path,raw).map_err(invalid)?;
+    scripts(&program,raw)
+}
+pub(crate) fn scripts(program:&crate::xml_program::XmlProgram,raw:&[u8])->Result<Vec<Script>>{
+    let raw_text:Arc<str>=std::str::from_utf8(raw).map_err(invalid)?.into();
+    let mut scripts=Vec::new();
+    for (index,source) in program.scripts.iter().enumerate(){
+        let mut compiler=MappedText::with_limits(MAX_XML_BYTES,raw.len()+2);
+        match source.kind.as_str(){
+            "handler"=>compiler.append(WRAPPER,None,Origin::Synthetic,source.compiler.segments[0].anchor).map_err(invalid)?,
+            "binding"=>compiler.append("return function(...)\n",None,Origin::Synthetic,source.compiler.segments[0].anchor).map_err(invalid)?,
+            _=>{},
+        }
+        let body=Span::new(compiler.text.len(),compiler.text.len()+source.decoded.text.len());
+        compiler.extend(&source.decoded).map_err(invalid)?;
+        if matches!(source.kind.as_str(),"handler"|"binding"){
+            compiler.append("\nend\n",None,Origin::Synthetic,source.compiler.segments.last().expect("wrapped source footer").anchor).map_err(invalid)?;
+        }
+        scripts.push(Script{key:format!("{}/__inline_{index}.lua",program.path),path:program.path.clone(),handler:source.tag.clone(),kind:source.kind.clone(),
+            xml_sha256:program.raw_sha256.clone(),compiler,element:source.element,body,raw:raw_text.clone()});
+    }
+    Ok(scripts)
+}
+pub type CompilerInputs=(BTreeMap<String,Vec<u8>>,BTreeMap<String,Script>);
+pub fn inputs(documents:&[crate::closure::Document])->Result<CompilerInputs>{
+    let mut files=BTreeMap::new();let mut scripts=BTreeMap::new();
+    // Match native_research's request-local lifetime: authenticate only when
+    // XML is first encountered and reuse the immutable catalog for this batch.
+    let mut catalog=None;
+    for document in documents{
+        if document.path.to_ascii_lowercase().ends_with(".lua"){files.insert(document.path.clone(),document.bytes.clone());}
+        else if document.path.to_ascii_lowercase().ends_with(".xml"){
+            let catalog=catalog.get_or_insert_with(crate::xml_program::catalog).as_ref().map_err(invalid)?;
+            let program=crate::xml_program::extract_production_with_catalog(&document.path,&document.bytes,catalog).map_err(invalid)?;
+            for script in self::scripts(&program,&document.bytes)?{files.insert(script.key.clone(),script.source_bytes().to_vec());scripts.insert(script.key.clone(),script);}
+        }
+    }
+    Ok((files,scripts))
+}
+/// Syntax checking needs decoded inline Lua, not native object-schema acceptance.
+/// Public facts own XML diagnostics; stop at a malformed token and retain only
+/// fully closed earlier scripts. Native semantic inputs still use `inputs`.
+pub(crate) fn syntax_inputs(documents: &[crate::closure::Document], control: &lycheedev_core::control::OperationControl) -> Result<CompilerInputs> {
+    control.check()?;
+    let mut files = BTreeMap::new();
+    let mut scripts = BTreeMap::new();
+    for document in documents {
+        control.check()?;
+        if document.path.to_ascii_lowercase().ends_with(".lua") {
+            files.insert(document.path.clone(), document.bytes.clone());
+        } else if document.path.to_ascii_lowercase().ends_with(".xml") {
+            for script in syntax_scripts(&document.path, &document.bytes, control)? {
+                files.insert(script.key.clone(), script.source_bytes().to_vec());
+                scripts.insert(script.key.clone(), script);
+            }
+        }
+    }
+    Ok((files, scripts))
+}
+
+fn syntax_scripts(path: &str, raw: &[u8], control: &lycheedev_core::control::OperationControl) -> Result<Vec<Script>> {
+    control.check()?;
+    use quick_xml::{Reader, events::Event};
+    use source_map::{borrowed_span, raw_cursor};
+    struct Element {
+        tag: String,
+        start: usize,
+        body: Option<(&'static str, MappedText)>,
+    }
+    if raw.len() > crate::xml_program::MAX_FILE || path.len() > 4096 {
+        return Err(invalid("xml.input_budget"));
+    }
+    let raw_text: Arc<str> = std::str::from_utf8(raw).map_err(invalid)?.into();
+    let digest = storage::sha256(raw);
+    let mut reader = Reader::from_reader(raw);
+    reader.config_mut().check_comments = true;
+    let prefix = if raw.starts_with(b"\xef\xbb\xbf") { 3 } else { 0 };
+    let mut stack = Vec::<Element>::new();
+    let mut scripts = Vec::new();
+    let mut decoded_bytes = 0usize;
+    let mut decoded_segments = 0usize;
+    'tokens: loop {
+        control.check()?;
+        let before = raw_cursor(raw.len(), prefix, reader.buffer_position()).map_err(invalid)?;
+        let Ok(event) = reader.read_event() else { break };
+        let empty = matches!(&event, Event::Empty(_));
+        let after = raw_cursor(raw.len(), prefix, reader.buffer_position()).map_err(invalid)?;
+        match event {
+            Event::Start(element) | Event::Empty(element) => {
+                // Go accepts duplicate attributes. Validate values before using
+                // the start token, without native attribute/schema restrictions.
+                for attribute in element.attributes().with_checks(false) {
+                    let Ok(attribute) = attribute else { break 'tokens };
+                    if crate::facts::xml_attribute(&attribute, reader.decoder()).is_err() {
+                        break 'tokens;
+                    }
+                }
+                let tag = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                let content = borrowed_span(raw, element.as_ref()).map_err(invalid)?;
+                let start = content.start.checked_sub(1).ok_or_else(|| invalid("xml.tag_position"))?;
+                if stack.len() >= crate::xml_program::MAX_DEPTH {
+                    return Err(invalid("xml.depth_budget"));
+                }
+                let under_scripts = stack.last().is_some_and(|parent| parent.tag == "Scripts");
+                let kind = if tag == "Script" {
+                    Some("top_level")
+                } else if tag == "Binding" {
+                    Some("binding")
+                } else if under_scripts || (tag.len() > 2 && tag.starts_with("On")) {
+                    Some("handler")
+                } else {
+                    None
+                };
+                if !empty {
+                    stack.push(Element { tag, start, body: kind.map(|kind| (kind, MappedText::default())) });
+                }
+            }
+            Event::End(_) => {
+                let Some(element) = stack.pop() else { break };
+                if let Some((kind, decoded)) = element.body {
+                    if kind == "binding" && decoded.text.is_empty() { continue; }
+                    if scripts.len() >= crate::xml_program::MAX_SCRIPTS {
+                        return Err(invalid("xml.script_budget"));
+                    }
+                    let range = Span::new(element.start, after);
+                    let wrapped = matches!(kind, "handler" | "binding");
+                    let mut compiler = MappedText::with_limits(MAX_XML_BYTES, raw.len() + 2);
+                    if wrapped {
+                        compiler.append(if kind == "handler" { WRAPPER } else { "return function(...)\n" },
+                            None, Origin::Synthetic, Some(Span::new(element.start, element.start))).map_err(invalid)?;
+                    }
+                    let body = Span::new(compiler.text.len(), compiler.text.len() + decoded.text.len());
+                    compiler.extend(&decoded).map_err(invalid)?;
+                    if wrapped {
+                        compiler.append("\nend\n", None, Origin::Synthetic, Some(Span::new(before, after))).map_err(invalid)?;
+                    }
+                    scripts.push(Script {
+                        key: format!("{path}/__inline_{}.lua", scripts.len()), path: path.into(),
+                        handler: element.tag, kind: kind.into(), xml_sha256: digest.clone(), compiler,
+                        element: range, body, raw: Arc::clone(&raw_text),
+                    });
+                }
+            }
+            Event::Text(text) => {
+                let Ok(decoded) = text.xml10_content() else { break };
+                if crate::facts::xml_characters(&decoded).is_err() || decoded.contains("]]>") { break; }
+                if let Some((_, body)) = stack.last_mut().and_then(|element| element.body.as_mut()) {
+                    let old_bytes = body.text.len();
+                    let old_segments = body.segments.len();
+                    body.append_physical(raw, borrowed_span(raw, text.as_ref()).map_err(invalid)?).map_err(invalid)?;
+                    decoded_bytes += body.text.len() - old_bytes;
+                    decoded_segments += body.segments.len() - old_segments;
+                }
+            }
+            Event::CData(text) => {
+                let Ok(decoded) = text.xml10_content() else { break };
+                if crate::facts::xml_characters(&decoded).is_err() { break; }
+                if let Some((_, body)) = stack.last_mut().and_then(|element| element.body.as_mut()) {
+                    let old_bytes = body.text.len();
+                    let old_segments = body.segments.len();
+                    body.append_physical(raw, borrowed_span(raw, text.as_ref()).map_err(invalid)?).map_err(invalid)?;
+                    decoded_bytes += body.text.len() - old_bytes;
+                    decoded_segments += body.segments.len() - old_segments;
+                }
+            }
+            Event::GeneralRef(reference) => {
+                let Ok(name) = reference.decode() else { break };
+                let Ok(decoded) = crate::facts::xml_entity(&name) else { break };
+                if let Some((_, body)) = stack.last_mut().and_then(|element| element.body.as_mut()) {
+                    let inner = borrowed_span(raw, reference.as_ref()).map_err(invalid)?;
+                    let span = Span::new(inner.start.checked_sub(1).ok_or_else(|| invalid("xml.entity_position"))?, inner.end + 1);
+                    let old_bytes = body.text.len();
+                    let old_segments = body.segments.len();
+                    body.append(&decoded, Some(span), Origin::Entity, None).map_err(invalid)?;
+                    decoded_bytes += body.text.len() - old_bytes;
+                    decoded_segments += body.segments.len() - old_segments;
+                }
+            }
+            Event::Eof => break,
+            Event::Decl(_) | Event::DocType(_) | Event::PI(_) | Event::Comment(_) => {}
+        }
+        if decoded_bytes > crate::xml_program::MAX_DECODED {
+            return Err(invalid("xml.aggregate_decoded_budget"));
+        }
+        if decoded_segments > crate::xml_program::MAX_SEGMENTS {
+            return Err(invalid("xml.aggregate_segment_budget"));
+        }
+    }
+    Ok(scripts)
+}
+
+pub fn remap(result:&mut Value,scripts:&BTreeMap<String,Script>)->Result<()>{
+    if let Some(rows)=result["diagnostics"].as_array_mut(){for row in rows{
+        if let Some(script)=row["file"].as_str().and_then(|path|scripts.get(path)){
+            let compiled=row["line"].as_u64().unwrap_or(1)as usize;
+            let mapped=script.compiler_line(compiled)?;
+            row["file"]=json!(script.path);row["line"]=mapped["line"].clone();row["sourceMap"]=mapped["sourceMap"].clone();
+            row["inlineHandler"]=json!(script.handler);row["compiledLine"]=json!(compiled);row["xmlContentHash"]=json!(script.xml_sha256);
+            row["generatedWrapper"]=json!("syntax_only_function(self, ...)");
+        }
+    }}
+    result["checkedInlineScripts"]=json!(scripts.len());Ok(())
+}
+
+#[cfg(test)]
+mod tests{
+    use super::*;
+    #[test]
+    fn streamed_mapping_manifest_preserves_canonical_nested_spans_nulls_and_empty_segments(){
+        let raw="\u{feff}<Ui>\r\n<Frame><Scripts><OnLoad>local text=&quot;界&quot;\r\n<![CDATA[return self]]></OnLoad></Scripts></Frame><Script>local x=1</Script></Ui>";
+        let mut scripts=extract("界 ui.xml",raw.as_bytes()).unwrap();
+        assert_eq!(scripts.len(),2);
+        for script in &scripts {
+            let expected=serde_json::to_vec(&script.mapping_manifest()).unwrap();
+            assert_eq!(serde_json::to_vec(&script.mapping_manifest_view()).unwrap(),expected);
+        }
+        let script=&mut scripts[0];
+        script.compiler.segments.push(source_map::Segment{output:Span::new(0,0),raw:None,origin:Origin::Synthetic,anchor:None});
+        let old=script.mapping_manifest();
+        assert!(old["segments"].as_array().unwrap().iter().any(|segment|segment["raw"].is_null()&&segment.get("anchor").is_none()));
+        assert_eq!(serde_json::to_vec(&script.mapping_manifest_view()).unwrap(),serde_json::to_vec(&old).unwrap());
+        script.compiler.segments.clear();
+        let old=script.mapping_manifest();assert_eq!(old["segments"],json!([]));
+        assert_eq!(serde_json::to_vec(&script.mapping_manifest_view()).unwrap(),serde_json::to_vec(&old).unwrap());
+    }
+    #[test]
+    fn compiler_inputs_lazily_share_catalog_per_batch_and_keep_native_scripts(){
+        let document=|path:&str,raw:&[u8]|crate::closure::Document{path:path.into(),bytes:raw.to_vec(),facts:Default::default(),blob:Value::Null};
+        let lua=document("Only.lua",b"local x=1");
+        let first=document("First.xml",b"<Ui><Script>Run()</Script></Ui>");
+        let second=document("Second.xml",b"<Ui><Frame><Scripts><PreClick>Click()</PreClick></Scripts></Frame></Ui>");
+        let before=crate::xml_program::catalog_verifications();
+        assert_eq!(inputs(&[lua]).unwrap().0.len(),1);
+        assert_eq!(crate::xml_program::catalog_verifications(),before);
+        let (_,scripts)=inputs(&[first,second]).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(),before+1);
+        assert_eq!(scripts.values().map(|s|s.handler.as_str()).collect::<Vec<_>>(),["Script","PreClick"]);
+        let bad=document("Bad.xml",b"<Root/>");
+        assert!(inputs(&[bad]).is_err());
+        assert_eq!(crate::xml_program::catalog_verifications(),before+2);
+    }
+    #[test]
+    fn syntax_inputs_accept_public_xml_without_native_profile_or_catalog() {
+        let raw = b"<x:Root xmlns:x='urn:test'><x:Frame name='one' name='two'><x:Scripts><x:PreClick>Run()</x:PreClick></x:Scripts><x:OnLoad>R&#117;<![CDATA[n]]>()</x:OnLoad></x:Frame><x:Script>Top()</x:Script><x:Binding>Bind()</x:Binding></x:Root>";
+        let facts = crate::facts::xml(raw);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        let document = crate::closure::Document { path: "Public.xml".into(), bytes: raw.to_vec(), facts, blob: Value::Null };
+        let before = crate::xml_program::catalog_verifications();
+        let (files, scripts) = syntax_inputs(std::slice::from_ref(&document), &lycheedev_core::control::OperationControl::default()).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
+        assert_eq!(scripts.values().map(|script| script.handler.as_str()).collect::<Vec<_>>(), ["PreClick", "OnLoad", "Script", "Binding"]);
+        assert!(String::from_utf8_lossy(&files["Public.xml/__inline_1.lua"]).contains("Run()"));
+        let script = &scripts["Public.xml/__inline_1.lua"];
+        let start = script.compiler.text.find("Run()").unwrap();
+        let mapping = script.project(Span::new(start, start + 3)).unwrap();
+        assert_eq!(mapping["segments"].as_array().unwrap().len(), 3);
+        assert_eq!(mapping["segments"][1]["origin"], "Entity");
+        assert_eq!(mapping["segments"][2]["origin"], "Exact");
+        assert!(inputs(&[document]).is_err());
+    }
+    #[test]
+    fn syntax_inputs_match_native_bytes_keys_order_and_mapping_for_native_fixtures() {
+        let fixtures: &[(&str, &[u8])] = &[
+            ("Golden.xml", include_bytes!("../../../tests/fixtures/source-native/xml-golden-204.xml")),
+            ("Split.xml", include_bytes!("../../../tests/fixtures/source-native/xml-split.xml")),
+            ("Bindings.xml", b"<Bindings><Binding name='RUN'>R&#117;<![CDATA[n]]>()</Binding><Binding name='EMPTY'></Binding></Bindings>"),
+            ("Empty.xml", b"<Ui><Script></Script><Frame><Scripts><OnLoad></OnLoad><PreClick>return self</PreClick></Scripts></Frame></Ui>"),
+        ];
+        for &(path, raw) in fixtures {
+            let document = crate::closure::Document { path: path.into(), bytes: raw.to_vec(), facts: Default::default(), blob: Value::Null };
+            let (syntax_files, syntax) = syntax_inputs(std::slice::from_ref(&document), &lycheedev_core::control::OperationControl::default()).unwrap();
+            let (native_files, native) = inputs(&[document]).unwrap();
+            assert_eq!(syntax_files, native_files, "{path}");
+            assert_eq!(syntax.keys().collect::<Vec<_>>(), native.keys().collect::<Vec<_>>(), "{path}");
+            for (key, script) in syntax {
+                let expected = &native[&key];
+                assert_eq!(script.mapping_manifest(), expected.mapping_manifest(), "{key}");
+                assert_eq!(script.body_text(), expected.body_text(), "{key}");
+            }
+        }
+    }
+    #[test]
+    fn syntax_inputs_keep_closed_scripts_before_public_xml_failure() {
+        let raw = b"<Root><Script>Before()</Script><OnLoad>&unknown;</OnLoad><Script>After()</Script></Root>";
+        let facts = crate::facts::xml(raw);
+        assert_eq!(facts.diagnostics.len(), 1);
+        let document = crate::closure::Document { path: "Broken.xml".into(), bytes: raw.to_vec(), facts, blob: Value::Null };
+        let (files, scripts) = syntax_inputs(&[document], &lycheedev_core::control::OperationControl::default()).unwrap();
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(files["Broken.xml/__inline_0.lua"], b"Before()");
+        let unclosed = syntax_scripts("Unclosed.xml", b"<Root><OnLoad>Partial()", &lycheedev_core::control::OperationControl::default()).unwrap();
+        assert!(unclosed.is_empty());
+    }
+    #[test]
+    fn syntax_inputs_keep_existing_depth_and_script_budgets() {
+        let deep = format!("{}{}", "<Root>".repeat(crate::xml_program::MAX_DEPTH + 1), "</Root>".repeat(crate::xml_program::MAX_DEPTH + 1));
+        assert_eq!(syntax_scripts("Deep.xml", deep.as_bytes(), &lycheedev_core::control::OperationControl::default()).err().unwrap().message, "xml.depth_budget");
+        let many = format!("<Root>{}</Root>", "<Script></Script>".repeat(crate::xml_program::MAX_SCRIPTS + 1));
+        assert_eq!(syntax_scripts("Many.xml", many.as_bytes(), &lycheedev_core::control::OperationControl::default()).err().unwrap().message, "xml.script_budget");
+    }
+    #[test]
+    fn syntax_inputs_preserve_original_cancelled_and_expired_controls() {
+        use lycheedev_core::control::OperationControl;
+        use std::{time::{Duration, Instant}};
+        let document = crate::closure::Document { path: "Stopped.xml".into(), bytes: b"<Root><Script>Run()</Script></Root>".to_vec(), facts: Default::default(), blob: Value::Null };
+        let cancelled = crate::native::stopped_control(false, Instant::now() + Duration::from_secs(180));
+        let expired = OperationControl::uncancelable(Instant::now());
+        for (control, code) in [(&cancelled, "command.cancelled"), (&expired, "command.deadline")] {
+            assert_eq!(syntax_inputs(std::slice::from_ref(&document), control).err().unwrap().code, code);
+            assert_eq!(syntax_scripts(&document.path, &document.bytes, control).err().unwrap().code, code);
+            assert_eq!(syntax_inputs(&[], control).err().unwrap().code, code);
+        }
+    }
+    #[test]
+    fn xml_entities_cdata_and_logical_lines_keep_original_line_map(){
+        let raw=b"<Ui>\n<Frame><Scripts><OnLoad>\nlocal x = 1 &lt; 2\n<![CDATA[local y = ...]]>&#10;local z = &quot;text&quot;\n</OnLoad></Scripts></Frame></Ui>";
+        let scripts=extract("UI CJK.xml",raw).unwrap();
+        assert_eq!(scripts.len(),1);
+        assert_eq!(scripts[0].source_bytes().as_ptr(),scripts[0].compiler.text.as_ptr());
+        assert_eq!(scripts[0].mapping_manifest()["compilerSHA256"],storage::sha256(scripts[0].source_bytes()));
+        assert_eq!(String::from_utf8_lossy(scripts[0].source_bytes()),"return function(self, ...)\n\nlocal x = 1 < 2\nlocal y = ...\nlocal z = \"text\"\n\nend\n");
+        assert_eq!(scripts[0].compiler_line(4).unwrap()["line"],4);assert_eq!(scripts[0].compiler_line(5).unwrap()["line"],4);assert_eq!(scripts[0].compiler_line(6).unwrap()["line"],5);
+        let footer=scripts[0].compiler.text.rfind("end\n").unwrap();
+        let projected=scripts[0].project(Span::new(footer,footer+3)).unwrap();
+        let closing=span(&projected["segments"][0]["anchor"]);
+        assert_eq!(&raw[closing.start..closing.end],b"</OnLoad>");
+        assert!(projected["segments"][0]["raw"].is_null());
+        assert!(extract("bad.xml",b"<Ui><OnLoad>&unknown;</OnLoad></Ui>").is_err());
+    }
+    #[test]
+    fn xml_split_fixture_preserves_entity_and_cdata_token_segments(){
+        let raw=include_bytes!("../../../tests/fixtures/source-native/xml-split.xml");
+        let script=extract("split.xml",raw).unwrap().remove(0);
+        let runs=script.compiler.text.match_indices("Run").take(2).map(|(at,_)|script.project(Span::new(at,at+3)).unwrap()).collect::<Vec<_>>();
+        assert_eq!(runs.len(),2);
+        assert_eq!(runs[0]["accuracy"],"covering");
+        assert_eq!(runs[0]["segments"][1]["origin"],"Entity");
+        let entity=span(&runs[0]["segments"][1]["raw"]);
+        assert_eq!(&raw[entity.start..entity.end],b"&#110;");
+        let segments=runs[1]["segments"].as_array().unwrap();
+        assert_eq!(segments.len(),2);
+        assert_eq!(segments.iter().map(|part|{let range=span(&part["raw"]);std::str::from_utf8(&raw[range.start..range.end]).unwrap()}).collect::<Vec<_>>(),vec!["R","un"]);
+        assert_eq!(runs[1]["accuracy"],"covering");
+    }
+    #[test]
+    fn xml_golden_fixture_keeps_bom_crlf_utf16_and_synthetic_origins_distinct(){
+        let raw=include_bytes!("../../../tests/fixtures/source-native/xml-golden-204.xml");
+        assert!(raw.starts_with(b"\xef\xbb\xbf<Ui>\r\n"));
+        let mut doubled_bom=b"\xef\xbb\xbf".to_vec();doubled_bom.extend_from_slice(raw);
+        assert_eq!(extract("double-bom.xml",&doubled_bom).err().expect("second BOM is root text").message,"xml.text_outside_root");
+        let scripts=extract("golden.xml",raw).unwrap();
+        assert_eq!(scripts.len(),2);
+        let script=&scripts[0];
+        let emoji=script.compiler.text.find('🙂').unwrap();
+        let mapped=script.position(Span::new(emoji,emoji+'🙂'.len_utf8())).unwrap();
+        assert_eq!(mapped["sourceMap"]["accuracy"],"exact");
+        let bytes=span(&mapped["sourceMap"]["covering"]);
+        assert_eq!(&raw[bytes.start..bytes.end],"🙂".as_bytes());
+        assert_eq!(mapped["range"]["end"]["character"].as_u64().unwrap()-mapped["range"]["start"]["character"].as_u64().unwrap(),2);
+        assert!(script.compiler.segments.iter().any(|segment|segment.origin==Origin::NewlineNormalization&&segment.raw.is_some_and(|raw|raw.len()==2)));
+        let synthetic=script.position(Span::new(0,WRAPPER.len()-1)).unwrap();
+        assert_eq!(synthetic["positionAccuracy"],"synthetic-or-mixed");assert!(synthetic["range"].is_null());
+        assert!(synthetic["sourceMap"]["segments"][0]["raw"].is_null());assert_eq!(synthetic["sourceMap"]["segments"][0]["origin"],"Synthetic");
+        assert!(script.source_bytes().starts_with(b"return function(self, ...)"));
+        assert_eq!(script.mapping_manifest()["implicitHandlerParameters"],"self:xml_object; remaining:unknown");
+        assert_eq!(source_map::utf16_position("\u{feff}🙂\r\n界",3).unwrap(),json!({"line":0,"character":0}));
+        assert_eq!(source_map::utf16_position("\u{feff}🙂\r\n界",7).unwrap(),json!({"line":0,"character":2}));
+        assert_eq!(source_map::utf16_position("\u{feff}🙂\r\n界",9).unwrap(),json!({"line":1,"character":0}));
+        assert_eq!(source_map::utf16_offset("\u{feff}🙂\r\n界",1,0).unwrap(),9);
+        assert!(source_map::utf16_offset("\u{feff}🙂\r\n界",0,1).is_err());
+    }
+    #[test]
+    fn xml_entity_cr_keeps_original_bytes_and_lua_lexer_line_order(){
+        let raw=b"<Ui><Frame><Scripts><OnLoad>local a=1&#13;local b=2\r\nlocal c=3&#10;&#13;local d=4</OnLoad></Scripts></Frame></Ui>";
+        let script=extract("cr.xml",raw).unwrap().remove(0);
+        assert!(script.compiler.text.contains("local a=1\rlocal b=2\nlocal c=3\n\rlocal d=4"));
+        let line=lua_line_span(&script.compiler.text,5).unwrap();
+        assert!(script.compiler.text[line.start..line.end].starts_with("local d=4"));
+        let projected=script.compiler_line(5).unwrap();
+        assert_eq!(projected["line"],2);
+        let newline=script.compiler.segments.iter().find(|segment|segment.origin==Origin::Entity&&&script.compiler.text[segment.output.start..segment.output.end]=="\r").unwrap();
+        let raw_range=newline.raw.unwrap();assert_eq!(&raw[raw_range.start..raw_range.end],b"&#13;");
+    }
+}

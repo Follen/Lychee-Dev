@@ -1,0 +1,45 @@
+{
+  "schema": "lycheedev.dd-wa-format-fixtures.v1",
+  "input": "synthetic object only; DD 100130 shipped open-source data serializers; no account or client execution",
+  "luaSHA256": "60d6027ffb7e3a2b99bcf5efc0ca67c5266b7c1d397942c8cb02c5c19753768a",
+  "sources": [
+    {
+      "path": "LibStub/LibStub.lua",
+      "sha256": "5d1b6803a62391a5d9a61414db2b523e03330f72a041bbb3cee01fea0644828b"
+    },
+    {
+      "path": "LibDeflate/LibDeflate.lua",
+      "sha256": "57b35649f3021f6175fc009950c1fd1c9140ada0f2ecb538b19fcd5d0986b29e"
+    },
+    {
+      "path": "LibSerialize/LibSerialize.lua",
+      "sha256": "45ced6b682be8ea2acb9b5133753093adb7c19bab3f6520ab3809a3d56073e0c"
+    },
+    {
+      "path": "AceSerializer-3.0/AceSerializer-3.0.lua",
+      "sha256": "9a364334adba3d6c818085f3472ec814486cb4aad7de7477a194fd91a71aa181"
+    }
+  ],
+  "fixtures": [
+    {
+      "file": "modern.txt",
+      "sha256": "7ff323ac13669ec8f23c9ede694446039d9dd768c91ce122c904d292c6802f11"
+    },
+    {
+      "file": "modern-serialization-v2.txt",
+      "sha256": "6ea191b606e8535be19881df6c2b200fdbda7c2935c647f855bdf0b0573f6b84"
+    },
+    {
+      "file": "legacy.txt",
+      "sha256": "7990c441b7dd0c41906613f836bee86108f92973fa681807e11d5c4d0c8027b4"
+    },
+    {
+      "file": "legacy-explicit.txt",
+      "sha256": "c2ac5356bf157efce12288358ee0f5bb64b0b9918d16621eb4c2c5a910ef7130"
+    }
+  ],
+  "expected": {
+    "parse_wa_uid": "SYNTHETIC-uid-001",
+    "parse_wa_id": "Synthetic WA 中文 ^ ~ 😀"
+  }
+}

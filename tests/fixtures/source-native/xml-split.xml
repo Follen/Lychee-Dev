@@ -1,0 +1,2 @@
+<Ui><Frame><Scripts><OnLoad>self:Ru&#110;();self:R<![CDATA[un]]>();local text="Run";-- Run()
+</OnLoad></Scripts></Frame></Ui>

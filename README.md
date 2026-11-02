@@ -1,91 +1,249 @@
-# Lychee Dev Toolkit
+# Lychee Dev
 
-<img src="addon/Media/Logo.png" width="80" alt="Lychee Dev" />
+[简体中文](README_zhCN.md)
 
-魔兽世界插件开发工具：一个 Go CLI、一套游戏内 Lua 工作台，以及配套 Agent Skill。用于查源码、读游戏数据、导出资源和验证真实客户端行为。
+[![CI](https://github.com/Follen/Lychee-Dev/actions/workflows/ci.yml/badge.svg?branch=rust-refactor)](https://github.com/Follen/Lychee-Dev/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/lycheedev)](https://www.npmjs.com/package/lycheedev)
+[![platform](https://img.shields.io/badge/platform-Windows_amd64-0078d4)](https://github.com/Follen/Lychee-Dev)
+[![runtime dependencies](https://img.shields.io/badge/npm_runtime_dependencies-0-52a788)](packages/npm/lycheedev/package.json)
+[![license](https://img.shields.io/badge/license-MIT-52a788)](LICENSE)
 
-[设计](Design.md) · [Live 协议](docs/live-protocol.md) · [开发指南](docs/development.md) · [更新记录](Changelog.md) · [待办与验证范围](todo.md)
+Lychee Dev is a World of Warcraft investigation toolkit for developers and
+agents: a native Rust CLI, an in-game Lua workbench addon, a first-party Agent
+Skill and an npm package. It turns a WoW question into fixed-source evidence,
+typed game data, exported assets or an authorized observation on a running
+client, and keeps the result inspectable.
 
-**当前版本为 3.2.7，npm 发行渠道为 `latest`。** 版本以 [release/version.json](release/version.json) 为准，发布产物见 [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases)。
+The released platform is **Windows amd64**. The product version is defined only
+by [release/version.json](release/version.json).
 
-## 功能
+## Capabilities
 
-| 入口 | 用途 |
+| Area | What it answers |
 | --- | --- |
-| Source | 固定 Git 提交，搜索 Lua/XML/TOC，查定义、引用、上下文和数据流；支持批量请求 |
-| Data | 从本地 CASC 或远端 CDN 读取固定构建的 DB2，执行只读 SQL，查关联记录 |
-| Hotfix / Assets | 按固定来源查 Hotfix、搜索资源和导出支持的文件格式 |
-| Live | 向选定客户端执行有预算的 Lua 探针，读取报告，完成释放、重载和中断恢复 |
-| 游戏内工作台 | 输入 `/dev` 使用 Run、Diagnostics、Inspector、Events、Function Trace |
-| Agent Skill | 按任务选择工具，保留来源、连接和请求，报告实际验证范围 |
+| Source | Fixed Blizzard UI or third-party addon revisions: declarations, callers, context, load closure, validation, secret/value flow and revision differences. |
+| Data | Typed DB2 records and metadata: catalog, fields, foreign keys, filters, joins, aggregates, paging, export and Hotfix records; spell, item, creature, encounter and decor reports. |
+| Assets | Listfile search, CASC file inspect, raw export and BLP2-to-PNG/lossless-WebP conversion; local installation or explicit CDN delivery. |
+| Live | Behavior in one verified running client through the existing addon and Lycheedev mailbox protocol v1: bounded Lua probes, verified reports, recovery and cleanup. |
+| Evidence | Fixed pins and project locks, content-addressed captures, verification, bundles and bounded cache management. |
+| Delivery | Managed addon and Skill installation, updates and removal from a release package; npm CLI update handoff. |
+| Publish | Author queries, plugin/configuration/WA publishing, media, relationships and selective cloud backups through native Rust adapters. |
 
-Source、Data 和 Assets 不需要启动游戏。Live 需要 Windows amd64、已进入角色的客户端及配套受管插件。
+Source, data and asset work do not require a running game. Live work requires a
+logged-in client with the managed addon loaded.
 
-## 支持的产品
+The six supported products are Retail, Classic, Classic Era, Titan, formal
+Forever and Anniversary. Formal Forever uses product ID `forever`, official
+remote product/flavor `wowf` and client folder `_forever_`; the two Forever beta
+products are outside the current support scope. Read the installed CLI catalog
+for each target's version and interface constraints.
 
-| 产品 | CLI product | 常见客户端目录 |
-| --- | --- | --- |
-| 正式服 | `retail` | `_retail_` |
-| 怀旧服 | `classic` | `_classic_` |
-| 经典旧世 | `classic-era` | `_classic_era_` |
-| 时光服 | `titan` | `_classic_titan_` |
-| 无限亚服测试服 | `forever-asia-beta` | `_classic_beta_` |
-| 无限国服测试服 | `forever-cn-beta` | `_cn_beta_` |
-| 周年服 | `anniversary` | `_anniversary_` |
+Author publishing is being integrated under `lycheedev publish`. Discover the
+available operations with `lycheedev cli search "publish"`, then read the selected
+leaf's schema for inputs, authentication, effects, plans and recovery. Current
+adapters cover CurseForge, NewBeeBox Creator/official, DD and Heybox authentication, author publishing
+and selective backups; remaining platform
+work is listed in [todo.md](todo.md). Original artifacts are reused. The Skill
+routes the task to the CLI rather than maintaining a separate field catalog.
 
-目录用于发现安装，产品身份取自客户端元数据。两个无限测试服共享上游 `forever` 源码分支，数据产品、地区和构建配置分别固定。完整映射见 [设计](Design.md)。
+## Requirements
 
-七产品均完成 Source 同步、本地/CDN 数据抽样，以及当前协议的 500 槽容量轮换和释放后续跑；Retail 另完成同安装双实例测试。通过范围及未完成场景见 [todo.md](todo.md)。
+- Windows amd64 (`x86_64-pc-windows-msvc`); this is the only released target.
+- [Node.js](https://nodejs.org/) **22.14.0 or newer** for the npm launcher and
+  package tooling. The CLI itself is a native executable and has no runtime npm
+  dependencies.
+- Git on `PATH` for Source repository preparation.
+- Game data work needs an installed client or an explicitly selected CDN
+  source; some content is encrypted or unavailable and is reported as such.
+- Live work needs a supported client, a running game process and the managed
+  addon. Client support in code is not a claim of interactive acceptance.
 
-## 使用当前仓库
+## Install and deploy
 
-开发环境：Windows amd64、Git、Go 1.27.1、Node.js 22.14.0 或以上。
+Replace the example path with the reviewed package you intend to install.
+For registry installation, select that release's explicit published version or
+tag; an unqualified package name can select a different release.
 
 ```powershell
-go build -o .tmp/lycheedev.exe ./cmd/lycheedev
-./.tmp/lycheedev.exe version --format json
-./.tmp/lycheedev.exe describe --format json
-```
-
-`describe` 是当前 CLI 的命令与参数目录；具体命令使用 `--help`。开发版插件需通过配套 stage 和受管安装部署，步骤见 [开发指南](docs/development.md)。
-
-## 使用 npm 发行包
-
-```powershell
-npm install --global lycheedev@latest --ignore-scripts
+npm install --global 'C:\Downloads\lycheedev-X.Y.Z.tgz' # selected release tarball
 lycheedev version --format json
-lycheedev describe --format json
 ```
 
-包内包含原生 CLI、addon、Skill、LuaLS 工具资源和发行清单。安装 npm 包后，按目标路径部署组件：
+The npm package contains the native CLI, the addon and the Agent Skill. Installing
+the package does **not** deploy the addon or Skill automatically:
 
 ```powershell
 $release = Join-Path (npm root -g) 'lycheedev'
-lycheedev addon install --release $release --installation 'D:/Game/World of Warcraft/_retail_'
-lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents/skills/lycheedev')
+$client  = 'D:\Game\World of Warcraft\_retail_'   # your client directory
+$skill   = Join-Path $env:USERPROFILE '.agents\skills\lycheedev'
+
+lycheedev addon install --release $release --installation $client
+lycheedev skill install --release $release --path $skill
 ```
 
-仓库文档可能领先于 npm 包，以已安装版本的 `version` 和 `describe` 为准。升级与恢复见 [安装指南](skills/lycheedev/references/installation.md)。
+Inspect targets first and apply later updates through the managed updater:
 
-## Live
+```powershell
+lycheedev schema update
+lycheedev update --plan --format json
+lycheedev update
+```
 
-协议名称为 **Lycheedev mailbox protocol v1**。
+`update` synchronizes the npm CLI and managed Skills/addons. `--release <root>`
+applies an already installed release offline; repeated `--path` / `--installation`
+options scope the targets explicitly. Filesystem completion does not activate a
+running game or an existing agent context: the client still needs a reload.
 
-CLI 在运行时通过指令特征和 RIP 相对位移找到 Lua 根，沿 Lua state → globals → Mailbox 读取。500 个 LoD 槽承载指令，正式快捷键触发执行与重载：
+The installed CLI's `schema update` explains the embedded release-channel policy.
+The updater selects and validates a candidate from that authority; the Skill
+does not choose a toolkit version or npm tag. Recovery keeps the original
+package and targets.
 
-| 动作 | 默认绑定 |
+## Discover capabilities
+
+The CLI is self-describing. Start from the task, then read only the contracts that
+are needed:
+
+```powershell
+lycheedev cli search "spell cooldown" --format json
+lycheedev schema target resolve
+lycheedev data agent schema
+lycheedev describe --format json
+lycheedev <command> --help
+```
+
+Discovery reads command metadata only: it does not create a workspace, open a
+cache, start a worker, use the network or connect to the game. The full installed
+command list is in `lycheedev describe`; the authoritative Agent task and session
+contract for Data is `lycheedev data agent schema`.
+
+## Examples
+
+### Source
+
+```powershell
+lycheedev init
+$source = lycheedev source sync --source wow-ui-source --product retail --ref refs/heads/live --format json | ConvertFrom-Json
+$sourcePin = $source.result.id
+
+lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json
+lycheedev source context --snapshot $sourcePin --symbol-id <symbolId> --format json
+```
+
+A branch is resolved once into an immutable pin. Reuse that pin, or the project
+lock, for follow-up reads. Use `source inspect`, `source refs`, `source diff` and
+`source validate` for exact files, relationships, revision comparison and addon
+load closures.
+
+### Data
+
+```powershell
+$target  = lycheedev target resolve --installation $client --region cn --locale zhCN --format json | ConvertFrom-Json
+$dataPin = $target.result.id
+
+lycheedev data agent serve --snapshot $dataPin --installation $client --format jsonl
+```
+
+Open one caller-owned `data agent serve` process and send the typed JSONL tasks
+declared by `lycheedev schema data agent serve`. The session owns a fixed data
+identity and result handles for paging, export and capture; closing or a deadline
+ends that ownership. Use `target available` for advertised releases and
+`target add` / `target show` / `target list` for named target configurations.
+
+### Assets
+
+```powershell
+lycheedev asset search --snapshot $dataPin --listfile community-csv --query "interface/icons" --format json
+lycheedev asset export --snapshot $dataPin --installation $client --file-id 123456 --encoding png --output .\icon.png
+```
+
+Raw bytes are the default export. An explicit encoding selects image conversion;
+a missing name, ambiguous variant, missing key or size limit is an error, not an
+empty success.
+
+### Live (authorized tasks only)
+
+```powershell
+lycheedev live instances --format json
+lycheedev doctor --pid <pid> --format json             # read-only readiness
+lycheedev live connect --installation $client --format json
+lycheedev live probe put --name <name> --file <probe.lua>
+lycheedev live execute --session <CON-id> --probe <name> --request <key> --budget-seconds 30 --format json
+lycheedev live disconnect <CON-id>
+```
+
+Live work binds one verified process/runtime and keeps durable ownership, request
+identity and recovery journals. `doctor --fix` repairs within the authorized
+installation/target scope; when no current input protocol is loaded, first
+activation can require one manual reload. Submitted or unknown input is never
+replayed. `live status`, `live resume` and `live session` inspect and recover the
+original work.
+
+### Workspace, cache and evidence
+
+```powershell
+lycheedev doctor --format json
+lycheedev cache status --data --format json
+lycheedev evidence list --limit 20 --format json
+lycheedev evidence verify <CAP-id>
+```
+
+`cache prune` reclaims only ordinary rebuildable cache; Data-derived pruning is an
+explicit `--data-derived` operation. Captures and committed evidence are kept
+until explicitly removed. The default Data capacity budget is decimal 5 GB
+(5,000,000,000 bytes) and is configurable with `lycheedev config set`.
+
+## Results and limits
+
+- Ordinary commands return the versioned `lycheedev.result.v1` envelope; JSONL
+  output uses begin/record/end frames with a legal end frame required for success.
+  Data Agent session output uses its own versioned protocol.
+- `complete`, `partial`, `pending`, truncated and unknown values are reported
+  separately. An empty partial result never proves absence.
+- Exit codes: `0` complete, `2` arguments/selection, `3` capability/environment,
+  `4` input/protocol, `5` external/business failure, `6` pending, `7` cancelled,
+  `8` internal.
+- Session result handles are owned by the session; CAPs are committed evidence and
+  outlive it. Pagination and export consume a retained result instead of
+  re-running the query.
+- Missing content, keys, coverage and quota are reported as errors or explicit
+  gaps; they are not substituted with another build, region, product or client.
+
+## Repository layout
+
+| Path | Contents |
 | --- | --- |
-| 执行 CLI 指令 | Ctrl+Alt+F12 |
-| 重载插件 | Ctrl+Alt+F11 |
+| [crates/lycheedev-cli](crates/lycheedev-cli/) | Command catalog, parsing, discovery, application orchestration and public output. |
+| [crates/lycheedev-source](crates/lycheedev-source/) | Fixed source identity, load closure, analysis, query, relation and validation. |
+| [crates/lycheedev-emmy-adapter](crates/lycheedev-emmy-adapter/), [crates/lycheedev-binding-contracts](crates/lycheedev-binding-contracts/) | Narrow adapter and shared types around the fixed Emmy upstream engine. |
+| [crates/lycheedev-data](crates/lycheedev-data/) | CASC/WDC/BLTE input, Engine, DataFusion, Data Agent session, assets and Hotfix. |
+| [crates/lycheedev-live](crates/lycheedev-live/) | Game instance binding, Mailbox, input, recovery, reports and cleanup. |
+| [crates/lycheedev-delivery](crates/lycheedev-delivery/) | Managed installation, update transactions, addon/Skill delivery and npm handoff. |
+| [crates/lycheedev-core](crates/lycheedev-core/) | Shared identities, errors, control, workspace, storage and evidence. |
+| [crates/lycheedev-windows](crates/lycheedev-windows/) | Windows handles, files, processes, jobs, IPC and input boundaries. |
+| [addon/](addon/) | Existing in-game Lua workbench addon, client profiles and Mailbox v1. |
+| [skills/lycheedev](skills/lycheedev/) | First-party Agent Skill and its task-specific references. |
+| [packages/npm/lycheedev](packages/npm/lycheedev/) | npm package and native CLI launcher. |
+| [tools/](tools/), [tests/](tests/) | Build, packaging, CI and test tooling; fixtures and test targets. |
+| [release/](release/) | Version source, release tool identities, license supplements and data. |
 
-实际键位由新鲜的 Mailbox INPUT 公布。普通编辑框选择性透传这两个动作，保留文字和焦点；CLI 发送输入前等待玩家松开相关实体按键。
+## Documentation
 
-每个客户端进程有独立连接，共享安装通过槽预约协调。中断沿原连接和请求恢复；报告核实与资源清理分别记录。已提交但结果未知的输入不会重放。
+- [DESIGN.md](DESIGN.md): business goals, architecture boundaries, public
+  contracts and the Skill/CLI usage surface.
+- [AGENTS.md](AGENTS.md): repository working rules, documentation ownership and
+  verification policy.
+- [todo.md](todo.md): open implementation, cleanup, CI and verification work.
+- [test.md](test.md): current test purpose, entry points and coverage.
+- [handover.md](handover.md): current branch, collaboration boundaries, actual
+  verification results and blockers.
+- [skills/lycheedev/SKILL.md](skills/lycheedev/SKILL.md): the installed Agent
+  skill.
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md): third-party components and
+  attribution.
 
-首次连接或异常先运行 `doctor`；需要修复时用 `doctor --fix`，归档并初始化500槽用 `doctor --fix --hard-reset`。首次安装尚无可验证 INPUT 时，需要在指定客户端手动重载一次。详细规则见 [Live 协议](docs/live-protocol.md)。
+## License
 
-## 开发与许可
-
-Agent 从 [lycheedev Skill](skills/lycheedev/SKILL.md) 开始。代码结构和合同见 [Design.md](Design.md)，测试与发布见 [开发指南](docs/development.md)。
-
-项目代码采用 [MIT](LICENSE)。第三方组件、游戏元数据和素材说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Project-owned code is distributed under the [MIT license](LICENSE). Third-party
+components retain their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

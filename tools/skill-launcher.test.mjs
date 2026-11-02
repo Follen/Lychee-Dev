@@ -59,3 +59,27 @@ test('Windows skill finds a custom global prefix outside PATH through the npm CL
   assert.equal(result.status, 7, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), args);
 });
+
+test('Skill launcher forwards exact arguments and exit code to the selected binary', t => {
+  const root = mkdtempSync(join(tmpdir(), 'lycheedev explicit 中文 '));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const program = join(root, 'echo arguments.mjs');
+  writeFileSync(program, 'console.log(JSON.stringify(process.argv.slice(2))); process.exitCode = 7;');
+  const args = [program, '中文 & spaces', '"quoted"', '--format=json', '$(not-a-shell)', ''];
+  const result = spawnSync(process.execPath, [resolve('skills/lycheedev/scripts/lycheedev.mjs'), ...args], {
+    env: { ...process.env, LYCHEEDEV_BIN: process.execPath }, encoding: 'utf8', windowsHide: true, shell: false,
+  });
+  assert.equal(result.status, 7, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), args.slice(1));
+});
+
+test('Missing explicitly selected binary fails without PATH fallback', t => {
+  const root = mkdtempSync(join(tmpdir(), 'lycheedev missing selected '));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const result = spawnSync(process.execPath, [resolve('skills/lycheedev/scripts/lycheedev.mjs'), 'describe'], {
+    env: { ...process.env, LYCHEEDEV_BIN: join(root, 'missing') }, encoding: 'utf8', windowsHide: true, shell: false,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /LYCHEEDEV_BIN does not exist/);
+  assert.equal(result.stdout, '');
+});

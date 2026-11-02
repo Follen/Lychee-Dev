@@ -163,6 +163,8 @@ assert(hugeId == nil and hugeError == L.EXPORT_TOO_LARGE, "oversized record was 
 
 -- A fresh session keeps the records but none of the session-only state.
 local durableId = Exports.Add("run_result", "durable", "durable body")
+History.Add("保存的代码", "durable history result", false)
+local historyTimestamp = Env.now
 local ns2 = Env.LoadWorkbench()
 assert(ns2.Persistence.Load())
 local Exports2 = ns2.Stores.Exports
@@ -170,7 +172,12 @@ assert(Exports2.GetPendingCount() == 0 and Exports2.GetProtectedCount() == 0,
     "session-only export state survived a SavedVariables load")
 assert(Exports2.Get(durableId) and Exports2.GetState(durableId) == "saved",
     "saved records were lost across sessions")
-assert(ns2.Stores.History.Get() == nil or #ns2.Stores.History.Get() >= 0, "history unreadable")
+local restoredHistory = assert(ns2.Stores.History.Get(), "history unavailable after reload")
+assert(#restoredHistory == 1 and ns2.Stores.History.GetStats() == 1,
+    "non-empty history was lost or duplicated across reload")
+assert(restoredHistory[1].code == "保存的代码" and restoredHistory[1].result == "durable history result"
+        and restoredHistory[1].succeeded == false and restoredHistory[1].timestamp == historyTimestamp,
+    "history contents changed across reload")
 
 -- Newer section versions refuse writes but preserve the stored data.
 LycheeToolkitDB.exports.version = 2

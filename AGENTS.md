@@ -1,66 +1,57 @@
-# AGENTS.md
+# 仓库工作约定
 
-## Project baseline
+## 当前产品与文档分工
 
-Lychee Dev Toolkit is a Go CLI, a Lua workbench addon, an Agent skill and an npm distribution. The current development baseline is 3.2.7; release/version.json remains the version authority. Windows amd64 is the shipped platform.
+当前重构产品由 Rust CLI、现有 Lua addon、第一方 Agent Skill 和 npm 包组成，交付 Windows amd64；版本只以 `release/version.json` 为准。架构以 [DESIGN.md](DESIGN.md) 为基点，不从历史版本、旧测试或 Git 记录推导当前需求。
 
-Read these current documents:
+开始工作先读本文件与 [handover.md](handover.md)，再按任务读取设计、待办和测试目录。核心文档与产品说明按以下分工维护：
 
-1. Design.md — architecture, module boundaries, products and contracts.
-2. docs/live-protocol.md — Lycheedev mailbox protocol v1.
-3. todo.md — incomplete work and honest real-client coverage.
-4. docs/development.md — build, tests, workspace hygiene and release.
-5. Changelog.md — changes in this development baseline.
+| 文档 | 负责什么 | 什么时候更新 |
+| --- | --- | --- |
+| [DESIGN.md](DESIGN.md) | 业务目标、架构边界、公开合同、Skill/CLI 使用面和 CI 产物复用方案。 | 经用户确认的业务或架构决定改变时。 |
+| [todo.md](todo.md) | 尚未完成的实现、深度清理、CI 改造及验证缺口。 | 完成事项、发现真实缺口或改变下一步时；完成项移出，不积累历史日志。 |
+| [test.md](test.md) | 当前测试的用途、正式入口、输入、证明范围、待删测试和待补业务回归。 | 增删、改名、改接测试或改变测试覆盖与运行入口时，同批更新。 |
+| [handover.md](handover.md) | 当前分支与协作边界、最近实际状态、验证结果、阻塞和下一步。 | 实现或验证完成、分工变化、交接时替换过期内容。 |
+| AGENTS.md | 工作方法、上述文档关系、维护和验证规则。 | 工作规则改变时。 |
+| [CHANGELOG.md](CHANGELOG.md)、[PRODUCT.md](PRODUCT.md)、中英文 README 与 npm README | 当前基线的用户可见变化、产品范围及安装使用说明。 | 用户可见行为、支持范围或交付合同改变时；变更说明不代替发布验收。 |
+| [Skill](skills/lycheedev/SKILL.md) 与专项 references | 安装后 Agent 需要的产品词汇、能力选择和必要操作约束。 | 产品使用合同改变时；版本/渠道选择由 CLI 解释，不抄研发进度。 |
 
-Do not recreate historical design ledgers or use Git history as current acceptance.
+每批改动收尾前检查受影响的文档并同步；不要求无关文件凑数改动。实现了某能力，就更新 todo 的状态、test 的实际覆盖和 handover 的验证事实；不能只改代码，留下相反的文档。设计要求不等于实现完成，列出测试也不等于测试已通过。
 
-## Multi-agent handover
+产品支持范围以 DESIGN 的客户端身份合同为准。正式 Forever 全链使用 `forever` / `wowf` / `_forever_`；历史 Beta PIN、CAP、原始输入和恢复记录保持原身份，历史可读不能自动变为当前目标可选。Live 代码与离线适配可按任务推进，真实客户端操作按用户安排执行。
 
-- Read [handover.md](handover.md) before starting or taking over repository work. It is the shared current task state; the architecture and contracts remain in the documents listed above.
-- Keep one concise, current snapshot: branch/PR, completed changes, open issue IDs, task owners and file boundaries, validation actually performed, blockers, and the next concrete action. Update it at assignment changes, completed implementation/validation, and handoff; replace stale entries instead of appending a run diary.
-- The coordinating agent maintains the shared handover. Workers report their owned changes and evidence to the coordinator; avoid concurrent edits to this file and coordinate any overlapping product files before editing them.
-- Preserve the distinction between confirmed defects, candidates, implemented fixes, offline verification, real-client verification, and published work. Link detailed findings instead of copying the full audit into the handover.
-- Handover records context, not additional authorization or approval gates. Follow the current user's scope and existing repository rules; do not infer permission to merge, publish, operate a game, or discard another agent's changes from a handover entry.
-- Store reusable tests with the code and completed-task temporary material under the existing cleanup policy. Do not put secrets, full logs, machine-local artifacts, or unverified success claims in handover.md.
+Mailbox 的业务合同见 DESIGN 的 Live 章节，具体格式对照当前 [addon](addon/) 与 [Rust Live](crates/lycheedev-live/src/) 实现。其他研发说明与上述文档冲突时按当前设计修正；不另建 handoff、迁移账本或永久运行日记。
 
-## Working rules
+## 工作范围与协作
 
-Follow the user's task scope. Reuse the current branch/worktree; do not create repositories, worktrees or PRs just to satisfy a workflow. Preserve unrelated edits. Do not commit or push without task authorization.
+复用当前本地 `Rust-refactor` 分支、`.worktrees/Rust-refactor` 工作树和 draft PR #14，不为了流程另建环境。远端继续使用 `origin/rust-refactor`，推送使用 `git push origin HEAD:refs/heads/rust-refactor`，保留现有 PR。保留无关改动；提交、推送按当前任务已有授权执行。本文件和交接记录不新增合并、发布、游戏输入、全局 Skill 安装或渠道切换授权。
 
-Use a focused change and verify its actual risks. Existing contracts belong at their boundary; do not add redundant guards, fallback frameworks or new approval gates. Keep logs only when needed for a current failure or requested result.
+协调者维护共享文档、根 Cargo/lock、tools、CI 和集成；模块改动遵守当前文件边界。遇到真实重叠再协调，不覆盖别人的工作。原生构建与测试共用现有 owner 队列，不并发占用同一运行环境。
 
-## Code and contracts
+## 实现与清理
 
-- internal/command/command_contract.go is the only command directory. Parser, help, describe and generated Skill references derive from it.
-- Query results use lycheedev.result.v1. JSONL requires a valid end frame and exit 0. Preserve explicit truncation and partial coverage.
-- Exit codes: 0 complete, 2 arguments/selection, 3 capability/environment, 4 invalid input/protocol, 5 external/business failure, 6 pending, 7 cancelled, 8 internal.
-- Source/Data/Changes use fixed references. A folder is a location, not product identity. The two Forever beta products share the forever source family but retain independent Data identities.
-- Use pinned API facts and current code. Client differences belong in addon/Core/Compat.lua, ClientGate or generated catalogs.
-- Never use retired wowdoc/wowdata/Python entrypoints or import legacy user data.
+- 唯一命令目录为 `crates/lycheedev-cli/src/commands.json`；入口转为类型化业务请求，帮助、发现、schema、示例和执行保持一致。
+- Data 只走 Agent Session → Engine → DataFusion；Source 只走固定原版 Emmy 与自有适配层；Live 只走现有 addon、Mailbox v1 和 SessionOwner。
+- 完整移除旧代码、旧路径、Go 源码及其冻结副本、旧实现测试、兼容入口、无用依赖、脚本和 CI；清理包含任务工作区内被忽略的旧源码副本，不把废弃实现移进 `cfg(test)`、archive 或换名保留。
+- 当前业务回归使用正式生产路径。独立输入和明确业务预期可以复用；旧执行器、迁移对账框架和旧实现内部结构不能作为保留理由。
+- 以实际用途判断退役。已有 Agent 测试或当前 Mailbox 代码即使名称带 SQL/Go，也先保留业务覆盖并改正命名；受支持的旧客户端与文件格式不是旧架构。
+- 本轮所说“旧”是旧代码和旧测试，不是旧数据。不得借清理删除用户数据、有效 CAP、固定输入、活动项目、无关工作区或未解决的恢复记录。
+- addon 沿用现有实现。Skill 极简，保留常用称呼、规范产品身份及 build ID 范围；CLI 面向 Agent 自解释，产品使用面不夹带迁移历史。
+- 只实现已确认能力。新增功能先和用户商量；不把讨论候选自动放入正式范围。
+- 为高度不确定或极罕见的竞争、安全场景增加复杂性前，先评估具体故障模式、发生概率及实现和维护成本；按实际风险决定代码与测试范围。
 
-## Addon and Live
+完整业务、精确数值、明确 partial、protected/secret 边界、未知输入不重放、已提交证据保留仍是合同。不添加重复校验、兜底执行器、额外审批或只复述实现的测试。
 
-- Disabled features create no frames, hooks, events, timers or OnUpdate. The minimal bootstrap and enabled-only INPUT/EditBox handling follow the explicit protocol exceptions.
-- Protected/forbidden UI, combat and secret values are trust boundaries. Chinese and English locale changes stay paired.
-- Native Live uses 500 LoD slots, runtime instruction/RIP Lua-root discovery and named Mailbox reads. No private-heap scan or cached address authorizes input.
-- The two formal bindings default to Ctrl+Alt+F12 and Ctrl+Alt+F11. Read their actual effective assignments from fresh INPUT. Native input sends zero Esc and no chat text.
-- Bind a fixed installation/PID/creation time/HWND, then GUID/runtime/owner/fence. Shared-installation tests must keep each process identity separate.
-- Use clean managed installation through delivery; do not overlay-copy source into managed game files.
-- Persist input intent before sending. Recover the original project/CON/request and deadline. Submitted or uncertain input never licenses replay.
-- Read-only doctor diagnoses; doctor --fix uses managed installation and original connection recovery. Without compatible fresh INPUT, first activation needs one manual reload.
-- A verified report and pending cleanup are separate facts. Complete cleanup without discarding the useful report.
-- Offline fixtures do not prove game behavior. Keep the current product matrix honest in todo.md.
+## 验证与 CI
 
-## Validation and delivery
+使用现有 owned Cargo runner、固定任务源码/测试工作区、锁定的离线依赖和默认栈。本机默认单 job；Windows CI 显式使用两个编译 job，仍由各自 runner 的同一 owner 队列执行。大型构建应留足编译时间，Cargo编译批次默认允许60分钟；不得用短业务命令的时限统一限制完整构建。测试执行沿用相应业务期限。构建缓存默认上限为 50 GiB，scratch 默认 5 GiB；它们与产品的十进制 5 GB Data 容量是不同概念。隔离 HOME、Skill、npm 和测试临时状态，不用额外 target 或无 owner 的 Cargo 绕过当前队列。
 
-Run go build ./... and go vet ./... after code edit batches, followed by affected tests. The full Lua-required Go suite must pass before presenting a code commit as done; use bounded package/test concurrency and explicit -timeout=0 to disable the Go test package-wide timeout. Missing required interpreters are failures, not passes.
+Rust 改动按影响执行 workspace all-targets 检查/构建及当前受影响测试，Lua、Windows 和包验证使用各自正式入口。版本、命令/Skill、打包输入改变时运行对应检查。成功检查不因“不放心”重复；仅新改动、实际失败或未解决问题触发补验。
 
-Check tools/version.mjs --check and the Skill contract when their inputs change. Do not repeat successful checks unless a new change, actual failure or unresolved issue requires it.
+CI 按 [DESIGN.md](DESIGN.md) 统一产出构建结果。相同输入、目标和配置只编译一次，下游测试、安装包验证及发布准备使用本次 CI 已编译的结果。需要构建的测试程序在构建阶段准备好；消费者不隐式再跑 Cargo、编译 luac 或重打原生二进制。缓存只加速产物生成，不能代替明确传递本轮产物。缺少或不匹配的产物直接报明原因。
 
-Do not change npm tags while merging code or cleaning docs. Release through the pinned workflow and channel manifest; 3.2.7 continues on latest. Future channel changes require explicit user authorization. Published artifacts are immutable.
+文档修改只检查链接、路径、差异与受影响的打包合同，不运行完整 Rust、Lua 或实机套件。测试通过、未运行、ignored、环境受阻和真实客户端通过分别记录；旧结果和已删除测试的数量不能证明当前工作树。
 
-Temporary work belongs in ignored .tmp/<task>/ and is removed when the task ends. Keep reusable tests in tests/ and current documentation concise; do not create permanent run diaries or archive copies for routine work.
+用户已接受当前性能，停止为原50%目标继续优化或补跑性能轮次，保留已有完整结果和实际测量。先完成当前业务回归，再循环审计架构/业务/Skill、有效覆盖与冗余、死代码、全仓集成和Rust原生度；每轮只修复核实的问题并执行受影响验证，不因轮次重复已通过的整套测试。性能比较的完整业务生命周期与原始控制器总时口径保持，外部固定Go参考只在仓库外使用。需要游戏或用户配合的项目始终放在handover最后一节。
 
-Before cleanup, distinguish active .lycheedev projects from completed experiments and inspect worktree changes and ignored files. Remove only targets covered by the user's cleanup scope, using checked absolute paths and git worktree remove where applicable. Preserve explicitly retained worktrees; .worktrees/rust-refactor is currently retained. Do not discard unrelated edits or unresolved recovery records.
-
-For documentation-only hygiene, check links, referenced paths and affected packaging contracts. Do not rerun full Go or real-client suites when no executable behavior changed.
+临时材料使用忽略目录 `.tmp/<task>/`，结束时按归属清理。删除前核实绝对路径和当前用途，不制造新的源码封存包或常驻证据账本。

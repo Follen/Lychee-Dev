@@ -1,0 +1,803 @@
+name: ci
+
+# Each PR produces the test configuration and optimized Release once.
+# Fixed Lua tools are verified/imported, and the addon ZIP is made before Rust.
+# Rust tests and addon checks do not wait for Release. Package installation,
+# content audit and candidate sealing consume one producer TGZ by hash.
+# Cargo caches accelerate builds; only explicit run artifacts feed consumers.
+# Failed stages retain finished outputs/reports. No consumer rebuilds inputs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '24.18.1'
+  RUST_VERSION: '1.99.0'
+
+jobs:
+  static:
+    name: static - docs, contracts, Node tools
+    runs-on: windows-2025
+    outputs:
+      native: ${{ steps.changes.outputs.native }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Classify the change set (documentation-only skips native stages)
+        id: changes
+        run: node tools/ci-changes.mjs --github-output $env:GITHUB_OUTPUT
+      - name: Install pinned Rust toolchain for Node identity tests (release/tools/rust.json)
+        if: steps.changes.outputs.native == 'true'
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+          $version = rustc -Vv
+          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
+          rustup -V
+          if ($LASTEXITCODE -ne 0) { throw 'rustup version probe failed' }
+          $cargo = (Get-Command cargo -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $cargoVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($cargo)
+          [pscustomobject]@{ path = $cargo; sha256 = (Get-FileHash -LiteralPath $cargo -Algorithm SHA256).Hash.ToLowerInvariant(); fileVersion = $cargoVersion.FileVersion; productVersion = $cargoVersion.ProductVersion } | ConvertTo-Json -Compress
+      - name: Documentation links and paths
+        run: node tools/ci-docs.mjs check
+      - name: Verify the fixed Lua supply before any native work
+        if: steps.changes.outputs.native == 'true'
+        run: node tools/lua-tool-supply.mjs verify
+      - name: Version source consistency
+        if: steps.changes.outputs.native == 'true'
+        run: node tools/version.mjs --check
+      - name: Skill static reference and link contract
+        if: steps.changes.outputs.native == 'true'
+        run: node tools/skill-contract.mjs
+      - name: Workflow structure and artifact-reuse policy
+        if: steps.changes.outputs.native == 'true'
+        run: node --test tools/workflow-structure.test.mjs
+      - name: Node tool tests (no native compilation)
+        if: steps.changes.outputs.native == 'true'
+        run: |
+          node --test `
+            tools/version.test.mjs `
+            tools/release-channel.test.mjs `
+            tools/ci-changes.test.mjs `
+            tools/ci-release.test.mjs `
+            tools/ci-package-business.test.mjs `
+            tools/lua-tool-supply.test.mjs `
+            tools/tar.test.mjs `
+            tools/addon-package.test.mjs `
+            tools/skill-contract.test.mjs `
+            tools/skill-launcher.test.mjs `
+            tools/rust-package-smoke.test.mjs `
+            tools/rust-build.test.mjs `
+            tools/rust-disk.test.mjs `
+            tools/luac.test.mjs `
+            tools/rust-license-inventory.test.mjs `
+            tools/rust-unsafe-boundaries.test.mjs `
+            tools/ci-artifacts.test.mjs `
+            tools/ci-test-programs.test.mjs `
+            tools/rust-formal-lua.test.mjs `
+            tools/rust-formal-lua-bridge.test.mjs `
+            tools/rust-owned-process.test.mjs `
+            tools/rust-owned-process-atomic-job.test.mjs `
+            tools/rust-agent-client.test.mjs `
+            tools/rust-emmy-identity.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Node tool tests failed' }
+      - name: FFI unsafe boundary inventory
+        if: steps.changes.outputs.native == 'true'
+        run: node tools/rust-unsafe-boundaries.mjs --check
+
+  prepare-resources:
+    name: prepare - fixed Lua tools and addon ZIP
+    needs: [static]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Install pinned Rust toolchain for this run manifest
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Import the authenticated fixed Lua tools (no compilation)
+        run: node tools/lua-tool-supply.mjs import .tmp/ci/build-release
+      - name: Produce the addon ZIP once before Rust compilation
+        run: node tools/addon-package.mjs build --out .tmp/ci/build-release/addon
+      - name: Seal this run resource inputs
+        run: |
+          node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/resources-manifest.json `
+            --component luac=.tmp/ci/build-release/luac `
+            --component lua51=.tmp/ci/build-release/lua51 `
+            --component addon-zip=.tmp/ci/build-release/addon
+      - name: Preserve resource outputs and import records
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-resources
+          path: .tmp/ci/build-release
+          if-no-files-found: error
+
+  build-test-programs:
+    name: build - test programs (test configuration, compiled once)
+    needs: [static, prepare-resources]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Prepare authenticated fixed EmmyLua source (no upstream execution)
+        run: |
+          python third_party/emmy/prepare.py --download
+          if ($LASTEXITCODE -ne 0) { throw 'Emmy source preparation failed' }
+      - name: Install pinned Rust toolchain (release/tools/rust.json)
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+          $version = rustc -Vv
+          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
+      - name: Restore Cargo dependency downloads
+        id: cargo-deps
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-
+      - name: Restore test configuration compilation cache
+        id: cargo-target
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ runner.arch }}-windows2025-test-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-windows2025-test-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-
+      - name: Fetch locked dependencies (network preparation, no product compile)
+        id: fetch
+        run: node tools/rust-cargo.mjs --owner ci-fetch-test -- fetch --locked
+      - name: Save authenticated Cargo downloads before compilation
+        if: steps.cargo-deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ steps.cargo-deps.outputs.cache-primary-key }}
+      - name: Compile the test configuration once (cargo test --no-run)
+        id: compile
+        env:
+          LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
+          LYCHEEDEV_BUILD_DIRTY: 'false'
+          CARGO_LOG: cargo::compiler::fingerprint=info
+          CARGO_INCREMENTAL: '0'
+        run: node tools/ci-test-programs.mjs build .tmp/ci/build-test --owner ci-test-programs-build --jobs 2 --timings
+      - name: Seal the build artifact manifest
+        run: node tools/ci-artifacts.mjs seal --out .tmp/ci/build-test/build-manifest.json --component test-programs=.tmp/ci/build-test
+      - name: Preserve this run's test programs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-test
+          path: .tmp/ci/build-test
+          if-no-files-found: error
+      - name: Preserve owned failure diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-test-diagnostics
+          path: .tmp/rust-disk/evidence
+          if-no-files-found: error
+      - name: Save successful test compilation even if later sealing or upload fails
+        if: always() && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ steps.cargo-target.outputs.cache-primary-key }}
+
+  build-release-native:
+    name: build - release native artifacts (compiled once)
+    needs: [static, prepare-resources]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Prepare authenticated fixed EmmyLua source (no upstream execution)
+        run: |
+          python third_party/emmy/prepare.py --download
+          if ($LASTEXITCODE -ne 0) { throw 'Emmy source preparation failed' }
+      - name: Install pinned Rust toolchain (release/tools/rust.json)
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+          $version = rustc -Vv
+          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
+      - name: Restore Cargo dependency downloads
+        id: cargo-deps
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-
+      - name: Restore release configuration compilation cache
+        id: cargo-target
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ runner.arch }}-windows2025-release-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-windows2025-release-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'release/tools/rust.json') }}-
+      - name: Fetch locked dependencies (network preparation, no product compile)
+        id: fetch
+        run: node tools/rust-cargo.mjs --owner ci-fetch-release -- fetch --locked
+      - name: Save authenticated Cargo downloads before compilation
+        if: steps.cargo-deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+          key: ${{ steps.cargo-deps.outputs.cache-primary-key }}
+      - name: Build the release CLI from this source tree
+        id: compile
+        env:
+          LYCHEEDEV_BUILD_COMMIT: ${{ github.sha }}
+          LYCHEEDEV_BUILD_DIRTY: 'false'
+          CARGO_LOG: cargo::compiler::fingerprint=info
+        run: node tools/rust-build.mjs .tmp/ci/build-release/cli release --one-shot --jobs 2 --timings
+      - name: Record the dependency license closure once beside the CLI
+        run: node tools/rust-dependencies.mjs .tmp/ci/build-release/cli/license-closure
+      - name: Seal native outputs before package assembly
+        run: |
+          node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/native-manifest.json `
+            --component cli-release=.tmp/ci/build-release/cli
+      - name: Preserve native artifacts independently of packaging
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-release-native
+          path: .tmp/ci/build-release
+          if-no-files-found: error
+      - name: Preserve owned failure diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-release-diagnostics
+          path: .tmp/rust-disk/evidence
+          if-no-files-found: error
+      - name: Save successful release compilation even if later packaging fails
+        if: always() && steps.compile.outcome == 'success' && steps.cargo-target.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target
+          key: ${{ steps.cargo-target.outputs.cache-primary-key }}
+
+  build-release:
+    name: build - release packaging (reuse native artifacts)
+    needs: [static, build-release-native, prepare-resources]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Pin the npm build tool
+        run: |
+          npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
+          $npmRoot = npm root --global
+          if ($LASTEXITCODE -ne 0) { throw 'npm global root lookup failed' }
+          $npmCli = Join-Path $npmRoot 'npm/bin/npm-cli.js'
+          $actual = node $npmCli --version
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
+          "npm_execpath=$npmCli" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install pinned Rust toolchain for manifest verification
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Download this run's native artifacts and license closure
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-release-native
+          path: .tmp/ci/build-release
+      - name: Download this run's sealed Lua tools
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-resources
+          path: .tmp/ci/build-release
+      - name: Verify native inputs before assembly (no rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/native-manifest.json --require cli-release
+      - name: Verify Lua inputs before assembly (no rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/resources-manifest.json --require luac,lua51,addon-zip
+      - name: Stage the exact Skill against the release CLI
+        run: node tools/rust-skill.mjs .tmp/ci/build-release/skill/staged .tmp/ci/build-release/cli/lycheedev.exe
+      - name: Assemble the npm package payload from the verified build inputs
+        run: node tools/rust-package-smoke.mjs produce .tmp/ci/build-release/npm-package .tmp/ci/build-release/luac --artifact .tmp/ci/build-release/cli/artifact.json --profile release --dependency-closure .tmp/ci/build-release/cli/license-closure
+      - name: Seal the build artifact manifest
+        run: |
+          node tools/ci-artifacts.mjs seal --out .tmp/ci/build-release/build-manifest.json `
+            --component cli-release=.tmp/ci/build-release/cli `
+            --component luac=.tmp/ci/build-release/luac `
+            --component lua51=.tmp/ci/build-release/lua51 `
+            --component addon-zip=.tmp/ci/build-release/addon `
+            --component skill=.tmp/ci/build-release/skill `
+            --component npm-package=.tmp/ci/build-release/npm-package
+      - name: Preserve this run's release artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-build-release
+          path: .tmp/ci/build-release
+          if-no-files-found: error
+
+  validate-rust:
+    name: validate - Rust ${{ matrix.shard }} (from build artifact)
+    needs: [static, build-test-programs, prepare-resources]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [data-delivery, source-runtime]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Install pinned Rust toolchain for manifest verification
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Download this run's test programs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-test
+          path: .tmp/ci/build-test
+      - name: Verify the build manifest (no rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-test/build-manifest.json --require test-programs
+      - name: Download this run's Lua interpreter and original build evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-resources
+          path: .tmp/ci/build-release
+      - name: Verify the Lua build component (no interpreter rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/resources-manifest.json --require lua51
+      - name: Run the compiled test programs directly
+        run: |
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --shard ${{ matrix.shard }} --report .tmp/ci/validate-rust/${{ matrix.shard }}/report.json --formal-lua .tmp/ci/build-release/lua51/build-report.json
+          if ($LASTEXITCODE -ne 0) { throw 'workspace test programs failed' }
+      - name: Reject a redirected slot member through a real file symlink
+        if: matrix.shard == 'data-delivery'
+        run: |
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package lycheedev-delivery --target slot_maintenance --arguments 'linked_static_slot_member_is_rejected_without_following_it,--ignored,--exact,--nocapture,--test-threads=1' --report .tmp/ci/validate-rust/${{ matrix.shard }}/symlink-slot.json
+          if ($LASTEXITCODE -ne 0) { throw 'slot file-symlink boundary failed' }
+      - name: Reject a redirected mailbox claim through a real file symlink
+        if: matrix.shard == 'source-runtime'
+        run: |
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package lycheedev-live --target lycheedev_live --arguments 'mailbox::admission::tests::mailbox_admission_redirected_claim_file_fails,--ignored,--exact,--nocapture,--test-threads=1' --report .tmp/ci/validate-rust/${{ matrix.shard }}/symlink-claim.json
+          if ($LASTEXITCODE -ne 0) { throw 'claim file-symlink boundary failed' }
+      - name: Exercise guarded process ownership and checked thread closure
+        if: matrix.shard == 'source-runtime'
+        run: |
+          $record = Get-Content .tmp/ci/build-test/test-programs.json -Raw | ConvertFrom-Json
+          $helpers = @($record.support | Where-Object { $_.package -eq 'lycheedev-windows' -and $_.target -eq 'guarded_spawn_fixture' })
+          if ($helpers.Count -ne 1) { throw 'one sealed guarded-spawn helper is required' }
+          $helper = Join-Path (Get-Location).Path $helpers[0].path
+          if ((Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash.ToLowerInvariant() -ne $helpers[0].sha256) { throw 'guarded-spawn helper identity differs' }
+          $guarded = Join-Path (Get-Location).Path '.tmp/ci/validate-rust/source-runtime/guarded'
+          New-Item -ItemType Directory -Path $guarded -Force | Out-Null
+          $env:LYCHEEDEV_SUSPENDED_HELPER = $helper
+          $env:LYCHEEDEV_SUSPENDED_HELPER_SHA256 = $helpers[0].sha256
+          $env:LYCHEEDEV_SUSPENDED_FIXTURE_ROOT = $guarded
+          node tools/ci-test-programs.mjs run .tmp/ci/build-test/test-programs.json --package lycheedev-windows --target lycheedev_windows --arguments 'guarded_spawn::tests::,--ignored,--nocapture,--test-threads=1' --report "$guarded/report.json" | Tee-Object -FilePath "$guarded/stdout.txt"
+          if ($LASTEXITCODE -ne 0) { throw 'guarded process regressions failed' }
+          if ((Get-Content "$guarded/stdout.txt" -Raw) -notmatch 'test result: ok\. 4 passed; 0 failed;') { throw 'all four guarded process regressions must execute' }
+      - name: Preserve the validation report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-validate-rust-${{ matrix.shard }}
+          path: .tmp/ci/validate-rust
+          if-no-files-found: error
+
+  validate-addon:
+    name: validate - addon Lua suites and release ZIP (from build artifact)
+    needs: [static, prepare-resources]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Install pinned Rust toolchain for manifest verification
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Download this run's release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-resources
+          path: .tmp/ci/build-release
+      - name: Verify the build manifest (no rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/resources-manifest.json --require lua51,addon-zip
+      - name: Verify the addon release ZIP structure
+        run: |
+          $zip = Get-ChildItem .tmp/ci/build-release/addon -Filter *.zip | Select-Object -First 1
+          if (-not $zip) { throw 'addon ZIP missing from build artifact' }
+          New-Item -ItemType Directory -Force .tmp/ci/validate-addon | Out-Null
+          node tools/addon-package.mjs verify --zip $zip.FullName | Out-File -Encoding utf8 .tmp/ci/validate-addon/addon-zip-verify.json
+          if ($LASTEXITCODE -ne 0) { throw 'addon ZIP verification failed' }
+      - name: Run every retained addon Lua suite on the built interpreter
+        # tests/addon/run-all.mjs is the current Go-free aggregate entry: it
+        # verifies the same formal interpreter build report, the unified TOC contract and
+        # every t_*.lua suite under the six supported client profiles.
+        run: |
+          node tests/addon/run-all.mjs .tmp/ci/build-release/lua51/build-report.json | Out-File -Encoding utf8 .tmp/ci/validate-addon/addon-lua.json
+          if ($LASTEXITCODE -ne 0) { throw 'addon Lua suites failed' }
+      - name: Preserve the validation reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-validate-addon
+          path: .tmp/ci/validate-addon
+          if-no-files-found: error
+
+  validate-package:
+    name: validate - Skill surface and isolated npm install (from build artifact)
+    needs: [static, build-release, build-test-programs]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Pin the npm build tool
+        run: |
+          npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
+          $npmRoot = npm root --global
+          if ($LASTEXITCODE -ne 0) { throw 'npm global root lookup failed' }
+          $npmCli = Join-Path $npmRoot 'npm/bin/npm-cli.js'
+          $actual = node $npmCli --version
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
+          "npm_execpath=$npmCli" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install pinned Rust toolchain for manifest verification
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Download this run's release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-release
+          path: .tmp/ci/build-release
+      - name: Verify the build manifest (no rebuild fallback)
+        run: node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-release/build-manifest.json --require cli-release,luac,skill,npm-package
+      - name: Check the staged Skill against the release CLI's advertised surface
+        run: |
+          New-Item -ItemType Directory -Force .tmp/ci/validate-package | Out-Null
+          node tools/skill-contract.mjs --skill-root .tmp/ci/build-release/skill/staged --bin .tmp/ci/build-release/cli/lycheedev.exe | Out-File -Encoding utf8 .tmp/ci/validate-package/skill-contract.json
+          if ($LASTEXITCODE -ne 0) { throw 'Skill/CLI surface contract failed' }
+      - name: Install and inspect the exact produced TGZ
+        run: |
+          node tools/rust-package-smoke.mjs validate .tmp/ci/validate-package/npm --package-report .tmp/ci/build-release/npm-package/report.json
+          if ($LASTEXITCODE -ne 0) { throw 'isolated npm install smoke failed' }
+      - name: Download the already compiled fixture producer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-test
+          path: .tmp/ci/build-test
+      - name: Verify the fixture producer and run installed Release business checks
+        run: |
+          node tools/ci-artifacts.mjs verify --manifest .tmp/ci/build-test/build-manifest.json --require test-programs
+          if ($LASTEXITCODE -ne 0) { throw 'fixture producer identity failed' }
+          node tools/ci-package-business.mjs --npm-report .tmp/ci/validate-package/npm/report.json --test-record .tmp/ci/build-test/test-programs.json --out .tmp/ci/validate-package/business
+          if ($LASTEXITCODE -ne 0) { throw 'installed Release business checks failed' }
+      - name: Preserve package reports without duplicating the installation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-validate-package
+          path: |
+            .tmp/ci/validate-package/npm/report.json
+            .tmp/ci/validate-package/skill-contract.json
+            .tmp/ci/validate-package/business
+          if-no-files-found: error
+
+  audit-package:
+    name: validate - exact TGZ content and payload identity
+    needs: [static, build-release]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Download this run produced package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-release
+          path: .tmp/ci/build-release
+      - name: Audit the original producer TGZ (no pack or installation)
+        run: |
+          $producer = '.tmp/ci/build-release/npm-package/report.json'
+          $report = Get-Content $producer | ConvertFrom-Json
+          $tgz = Join-Path (Split-Path $producer) $report.tgz
+          New-Item -ItemType Directory -Force .tmp/ci/audit-package | Out-Null
+          node tools/release.mjs audit-tgz --tgz $tgz --version $report.packageVersion --commit $report.commit --development-only --out .tmp/ci/audit-package/report.json
+          if ($LASTEXITCODE -ne 0) { throw 'npm tarball audit failed' }
+      - name: Preserve the content audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-audit-package
+          path: .tmp/ci/audit-package
+          if-no-files-found: error
+
+  release-ready:
+    name: release-ready - sealed candidate from the validated run
+    needs: [static, build-test-programs, build-release, validate-rust, validate-addon, validate-package, audit-package]
+    if: needs.static.outputs.native == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Install pinned Rust toolchain for identity/manifest verification
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+      - name: Download this run's test programs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-test
+          path: .tmp/ci/build-test
+      - name: Download this run's release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-build-release
+          path: .tmp/ci/build-release
+      - name: Download the Rust validation report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ci-validate-rust-*
+          path: .tmp/ci/validate-rust
+          merge-multiple: true
+      - name: Download the addon validation reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-validate-addon
+          path: .tmp/ci/validate-addon
+      - name: Download the package validation report and tarball
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-validate-package
+          path: .tmp/ci/validate-package
+      - name: Download the independent content audit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-audit-package
+          path: .tmp/ci/audit-package
+      - name: Verify complete, non-overlapping Rust test coverage
+        run: |
+          node tools/ci-test-programs.mjs aggregate .tmp/ci/build-test/test-programs.json `
+            --shard-report .tmp/ci/validate-rust/data-delivery/report.json `
+            --shard-report .tmp/ci/validate-rust/source-runtime/report.json `
+            --report .tmp/ci/validate-rust/report.json
+          if ($LASTEXITCODE -ne 0) { throw 'Rust test coverage aggregation failed' }
+      - name: Preserve Rust coverage and group identities
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-rust-coverage
+          path: .tmp/ci/validate-rust/report.json
+          if-no-files-found: error
+      - name: Assemble the release candidate from the same verified artifacts
+        run: |
+          $version = (Get-Content release/version.json | ConvertFrom-Json).version
+          node tools/ci-release.mjs identity --tag "v$version" --unverified --out .tmp/ci/release-ready/identity.json
+          if ($LASTEXITCODE -ne 0) { throw 'release identity derivation failed' }
+          node tools/ci-release.mjs candidate --identity .tmp/ci/release-ready/identity.json `
+            --build-manifest .tmp/ci/build-release/build-manifest.json `
+            --test-manifest .tmp/ci/build-test/build-manifest.json `
+            --npm-report .tmp/ci/validate-package/npm/report.json `
+            --report rust=.tmp/ci/validate-rust/report.json `
+            --report addon-lua=.tmp/ci/validate-addon/addon-lua.json `
+            --report addon-zip=.tmp/ci/validate-addon/addon-zip-verify.json `
+            --report skill=.tmp/ci/validate-package/skill-contract.json `
+            --report package-audit=.tmp/ci/audit-package/report.json `
+            --report package-business=.tmp/ci/validate-package/business/report.json `
+            --out .tmp/ci/release-candidate
+          if ($LASTEXITCODE -ne 0) { throw 'release candidate assembly failed' }
+      - name: Preserve the release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-release-candidate
+          path: .tmp/ci/release-candidate
+          if-no-files-found: error
+
+  ci-required:
+    name: ci-required
+    if: always()
+    needs: [static, prepare-resources, build-test-programs, build-release-native, build-release, validate-rust, validate-addon, validate-package, audit-package, release-ready]
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Reject failures, skipped required stages and cancellation
+        env:
+          NATIVE: ${{ needs.static.outputs.native }}
+          STATIC_RESULT: ${{ needs.static.result }}
+          BUILD_LUA_RESULT: ${{ needs.prepare-resources.result }}
+          BUILD_TEST_RESULT: ${{ needs.build-test-programs.result }}
+          BUILD_NATIVE_RESULT: ${{ needs.build-release-native.result }}
+          BUILD_RELEASE_RESULT: ${{ needs.build-release.result }}
+          VALIDATE_RUST_RESULT: ${{ needs.validate-rust.result }}
+          VALIDATE_ADDON_RESULT: ${{ needs.validate-addon.result }}
+          VALIDATE_PACKAGE_RESULT: ${{ needs.validate-package.result }}
+          AUDIT_PACKAGE_RESULT: ${{ needs.audit-package.result }}
+          RELEASE_READY_RESULT: ${{ needs.release-ready.result }}
+        run: |
+          if ($env:STATIC_RESULT -ne 'success') { throw "required job static finished with $env:STATIC_RESULT" }
+          if ($env:NATIVE -ne 'true') {
+            Write-Output "documentation-only change set: native build/validate/release stages intentionally skipped"
+            exit 0
+          }
+          $required = [ordered]@{
+            'prepare-resources' = $env:BUILD_LUA_RESULT
+            'build-test-programs' = $env:BUILD_TEST_RESULT
+            'build-release-native' = $env:BUILD_NATIVE_RESULT
+            'build-release' = $env:BUILD_RELEASE_RESULT
+            'validate-rust' = $env:VALIDATE_RUST_RESULT
+            'validate-addon' = $env:VALIDATE_ADDON_RESULT
+            'validate-package' = $env:VALIDATE_PACKAGE_RESULT
+            'audit-package' = $env:AUDIT_PACKAGE_RESULT
+            'release-ready' = $env:RELEASE_READY_RESULT
+          }
+          $failed = @()
+          foreach ($entry in $required.GetEnumerator()) {
+            if ($entry.Value -ne 'success') { $failed += "$($entry.Key)=$($entry.Value)" }
+          }
+          if ($failed.Count -ne 0) { throw "required stages did not succeed: $($failed -join ', ')" }
+          Write-Output 'all required CI stages succeeded'

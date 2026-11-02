@@ -1,0 +1,1 @@
+<Ui><Script file="A.lua"/><Include file="Child.xml"/><Script>Root = 1</Script><Include file="Child.xml"/><Frame name="Probe" mixin="Base" inherits="Template" virtual="true"><Scripts><OnShow method="Show"/><OnHide function="Hide"/><PostClick>self:Run(button)</PostClick></Scripts></Frame></Ui>

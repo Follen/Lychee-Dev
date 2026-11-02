@@ -18,6 +18,7 @@ const MAIN_TOC = 'Lychee Dev.toc';
 // archive ships exactly one manifest and it must declare all of these.
 const SUPPORTED_INTERFACES = ['120105', '120100', '50504', '38002', '16001', '11509', '20506'];
 const CATALOG_DATA = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
+const EMPTY_DEFINITIONS = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 // Ban tokens are path fragments on the lowercased, /-separated entry name.
 const BANNED_FRAGMENTS = [
   'automation.py', 'wowdoc', 'wowdata', 'wowdump',
@@ -64,7 +65,7 @@ export function parseToc(text) {
 /**
  * Collect the exact release payload from the addon source tree.
  * @param {string} repoRoot repository root containing `addon/` and `release/`
- * @returns {{entries: Map<string, Buffer>, tocs: {name: string, parse: ReturnType<typeof parseToc>}[], report: {path: string, selected: 'toc'|'load'|'media'}[]}} entries keyed `Lychee Dev/...`, the four TOCs in client order, and one report row per entry
+ * @returns {{entries: Map<string, Buffer>, tocs: {name: string, parse: ReturnType<typeof parseToc>}[], report: {path: string, selected: 'toc'|'load'|'media'}[]}} entries keyed `Lychee Dev/...`, the single client-matrix TOC, and one report row per entry
  * @throws {Error} `addon-package.missing_load` / `addon-package.missing_media` when a referenced load file or `addon/Media/` is missing on disk
  */
 export function collectAddonZipEntries(repoRoot) {
@@ -183,7 +184,6 @@ export function verifyAddonZip(input, options = {}) {
       violations.push(`${key}: Core\\ClientGate.lua must be loaded (runtime profile selection)`);
     }
     const catalogData = parse.loads.filter(line => CATALOG_DATA.test(line));
-    // Both Retail interfaces share Mainline; catalogs count client families.
     if (catalogData.length !== 6) {
       violations.push(`${key}: expected all 6 event catalog data files, found ${catalogData.length}`);
     }
@@ -229,6 +229,11 @@ export function verifyAddonZip(input, options = {}) {
     }
   }
 
+  // The probe registry ships empty: local task blocks must never reach release.
+  const definitions = zip.get(`${ROOT}/Bridge/Definitions.lua`);
+  if (definitions && definitions.toString('utf8').replaceAll('\r\n', '\n') !== EMPTY_DEFINITIONS) {
+    violations.push(`task block: ${ROOT}/Bridge/Definitions.lua must be the empty probe queue`);
+  }
 
   return {
     ok: violations.length === 0,

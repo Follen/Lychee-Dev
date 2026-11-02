@@ -1,0 +1,550 @@
+//! Query-local local CASC preparation. The immutable source and its parsed
+//! Encoding/Root directories survive all resolver callbacks without self-borrows.
+use super::*;
+use crate::blte::EncodedRead;
+use crate::metadata_format::{PreparedEncoding, RootContent, RootIndex};
+
+struct SharedReader<'a>(Arc<casc::LocalReader<'a>>);
+impl EncodedRead for SharedReader<'_> {
+    fn check_encoded(&self) -> Result<()> {
+        self.0.check_encoded()
+    }
+    fn encoded_size(&self) -> usize {
+        self.0.encoded_size()
+    }
+    fn read_encoded(&self, offset: usize, bytes: usize) -> Result<blte::EncodedSpan<'_>> {
+        self.0.read_encoded(offset, bytes)
+    }
+}
+struct Root(blte::Content);
+impl RootContent for Root {
+    fn content(&self) -> &blte::Content {
+        &self.0
+    }
+}
+fn root_limits(operation: casc::Limits) -> metadata_format::RootLimits {
+    // Fixed Go v3.2.3 readSession.prepare uses these query limits, not the
+    // generic Root parser's absolute ceilings. Matches also determines its
+    // temporary lookup reservation: 4096 * 256 bytes, not 256 MiB.
+    metadata_format::RootLimits {
+        groups: 65536,
+        matches: 4096,
+        operation,
+        ..Default::default()
+    }
+}
+struct Ready<'a> {
+    index: PreparedEncoding<SharedReader<'a>>,
+    root: RootIndex<Root>,
+    root_blob: Value,
+    configuration_blobs: Option<(Value, Value)>,
+    stats: decoded_cache::Stats,
+}
+pub(crate) struct Reader<'a> {
+    context: &'a DataContext,
+    pin: &'a selection::DataPin,
+    budget: &'a Arc<Budget>,
+    keys: Option<keys::Context>,
+    target: Option<installed::ResolvedLocalTarget>,
+    // The independent owner survives fallible Prepared constructors. Closing
+    // cannot be lost through an early error consuming their source argument.
+    source: Option<Arc<casc::LocalReader<'a>>>,
+    casc: Option<casc::QuerySource<'a>>,
+    ready: Option<Ready<'a>>,
+}
+impl<'a> Reader<'a> {
+    pub fn new(
+        context: &'a DataContext,
+        pin: &'a selection::DataPin,
+        budget: &'a Arc<Budget>,
+    ) -> Result<Self> {
+        context.control.check()?;
+        budget.check()?;
+        Ok(Self {
+            context,
+            pin,
+            budget,
+            keys: None,
+            target: None,
+            source: None,
+            casc: None,
+            ready: None,
+        })
+    }
+    fn limits(&self) -> casc::Limits {
+        casc::Limits {
+            deadline: self.budget.deadline,
+            ..Default::default()
+        }
+    }
+    fn prepare(&mut self) -> Result<()> {
+        self.context.control.check()?;
+        self.budget.check()?;
+        if self.ready.is_some() {
+            return self.check_source();
+        }
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::Prepare);
+        if self.keys.is_none() {
+            self.keys = Some(keys::Context::prepare_scoped(
+                &self.context.home,
+                self.context.source.key_file.as_deref(),
+                self.context.source.offline,
+                &self.context.control,
+                self.budget.deadline,
+                Some(self.budget.clone()),
+            )?);
+        }
+        if self.target.is_none() {
+            self.budget.charge(Cost::metadata(
+                self.context.source.installation.as_ref().expect("local reader installation").to_string_lossy().len()
+                    + self.pin.product.len()
+                    + self.pin.full_build.len()
+                    + self.pin.region.len()
+                    + self.pin.language.len()
+                    + self.pin.definition_commit.len(),
+            ))?;
+            let target = installed::resolve_pinned_target_budgeted(
+                self.context.source.installation.as_deref().expect("local reader installation"),
+                self.pin,
+                Some(self.budget),
+            )?;
+            if &target.data != self.pin {
+                return Err(fault(
+                    "records.pinned_build_changed",
+                    4,
+                    "Local configurations differ from fixed DataPin",
+                ));
+            }
+            self.target = Some(target);
+        }
+        let target = self.target.as_ref().expect("prepared local target");
+        let limits = self.limits();
+        if self.casc.is_none() {
+            self.casc = Some(casc::QuerySource::open(
+                &target.common_root,
+                limits,
+                self.budget,
+                &self.context.control,
+            )?);
+        }
+        let casc_source = self.casc.as_ref().expect("prepared CASC index source");
+        if self.source.is_none() {
+            self.budget.safety_only().charge(Cost::retained(
+                size_of::<casc::LocalReader<'_>>() + 2 * size_of::<usize>(),
+            ))?;
+            self.source = Some(Arc::new(casc::open_local_reader_from_source(
+                casc_source,
+                &target.metadata.encoding_key,
+                target.metadata.encoding_bytes,
+            )?));
+        }
+        let source = self.source.as_ref().expect("prepared Encoding source");
+        let ranges = blte::PreparedRanges::open(
+            SharedReader(source.clone()),
+            blte::Limits {
+                decoded_bytes: target.metadata.content_bytes,
+                ..Default::default()
+            },
+            self.budget.clone(),
+        )?;
+        if ranges.size() != target.metadata.content_bytes {
+            return Err(fault(
+                "records.invalid_metadata",
+                4,
+                "Encoding logical size differs from authenticated config",
+            ));
+        }
+        let keys = self.keys.as_mut().expect("prepared local keys");
+        let index = PreparedEncoding::open(ranges, keys.keys(), limits, self.budget.clone())?;
+        let check = || {
+            self.context.control.check()?;
+            self.budget.check()
+        };
+        let mapping = index.find(
+            keys.keys(),
+            &target.metadata.root_content_key,
+            limits,
+            check,
+        )?;
+        let mut stats = decoded_cache::Stats::default();
+        let (_, root, root_reference) = decoded_cache::read_content_with_reference_in_session(
+            &self.context.home,
+            casc_source,
+            &index,
+            &mapping,
+            limits,
+            keys,
+            &mut stats,
+            self.budget,
+            None,
+            &self.context.control,
+        )?;
+        // Reuse the reference authenticated by the same materialization owner;
+        // its checked close still precedes all following publication work.
+        let root_blob = serde_json::to_value(root_reference)?;
+        let root = RootIndex::open(Root(root), root_limits(limits), self.budget.clone(), check)?;
+        self.ready = Some(Ready {
+            index,
+            root,
+            root_blob,
+            configuration_blobs: None,
+            stats,
+        });
+        Ok(())
+    }
+    pub fn read(&mut self, id: u32) -> Result<File> {
+        let file = self.read_selected(
+            id,
+            ReadMode::Materialized(blte::DecodePolicy::TableAllowMissing),
+        )?;
+        match file.content {
+            SelectedContent::Bytes(bytes) => Ok(File {
+                bytes: bytes.into(),
+                reading: file.reading,
+            }),
+            SelectedContent::Blob(_) => unreachable!("materialized query representation"),
+        }
+    }
+    /// All callbacks share the original Encoding/Root/index observations.
+    /// A callback is never replayed, including if a later batch or check fails.
+    pub fn read_batches(
+        &mut self,
+        ids: &[u32],
+        policy: blte::DecodePolicy,
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.context.control.check()?;
+        self.budget.check()?;
+        validate_local_file_request(self.context, ids)?;
+        let mut pending = ids.to_vec();
+        let mut requested = 0usize;
+        while !pending.is_empty() {
+            self.budget.check()?;
+            requested = requested
+                .checked_add(pending.len())
+                .filter(|count| *count <= 32)
+                .ok_or_else(|| {
+                    fault(
+                        "records.file_query",
+                        2,
+                        "Require at most 32 positive file IDs across all batches",
+                    )
+                })?;
+            if pending.contains(&0) {
+                return Err(fault(
+                    "records.file_query",
+                    2,
+                    "Require at most 32 positive file IDs across all batches",
+                ));
+            }
+            let mut files = Vec::with_capacity(pending.len());
+            for id in pending {
+                let file = self.read_selected(id, ReadMode::Materialized(policy))?;
+                let SelectedContent::Bytes(bytes) = file.content else {
+                    unreachable!("materialized batch representation");
+                };
+                files.push(File {
+                    bytes: bytes.into(),
+                    reading: file.reading,
+                });
+            }
+            self.check_source()?;
+            pending = callback(files)?;
+            self.check_source()?;
+        }
+        Ok(())
+    }
+    pub fn read_verified(&mut self, id: u32) -> Result<VerifiedFile> {
+        let file = self.read_selected(id, ReadMode::Verified)?;
+        match file.content {
+            SelectedContent::Blob(blob) => Ok(VerifiedFile {
+                blob,
+                reading: file.reading,
+            }),
+            SelectedContent::Bytes(_) => unreachable!("verified query representation"),
+        }
+    }
+    fn read_selected(&mut self, id: u32, mode: ReadMode) -> Result<ResolvedFile> {
+        self.context.control.check()?;
+        self.budget.check()?;
+        let maximum = validate_local_file_request(self.context, &[id])?;
+        let first = self.read_once(id, maximum, mode);
+        match first {
+            Err(error)
+                if error.code == "container.key_unavailable"
+                    && error.details["missingKey"] == true
+                    && error.details.get("publication").is_none_or(|p| {
+                        p["state"] == "not_published"
+                            && p["reused"] != true
+                            && p.get("prior").is_none_or(Value::is_null)
+                    })
+                    && self.keys.as_ref().is_some_and(|keys| {
+                        keys.source.kind == "public" && keys.source.state != "loaded"
+                    }) =>
+            {
+                // No Source or row has escaped this failed resolver call.
+                mode.policy()
+                    .load_public(self.keys.as_mut().expect("retry keys"))?;
+                self.read_once(id, maximum, mode)
+            }
+            result => result,
+        }
+    }
+    fn read_once(&mut self, id: u32, maximum: usize, mode: ReadMode) -> Result<ResolvedFile> {
+        self.prepare()?;
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::Payload);
+        let limits = self.limits();
+        let ready = self.ready.as_mut().expect("prepared local session");
+        let target = self.target.as_ref().expect("prepared local target");
+        let keys = self.keys.as_mut().expect("prepared local keys");
+        let source = self.source.as_ref().expect("prepared Encoding source");
+        let check = || {
+            self.context.control.check()?;
+            self.budget.check()
+        };
+        let entries = ready.root.lookup(id, check)?;
+        let mask = locale(&self.pin.language)?;
+        let variant = self.context.source.content_variant.as_str();
+        let mut candidates = entries.iter().filter(|entry| {
+            entry.locale_mask & mask != 0
+                && (variant != "standard" || entry.content_flags & 0x80 == 0)
+                && (variant != "low-violence" || entry.content_flags & 0x80 != 0)
+        });
+        let entry = candidates.next().ok_or_else(|| {
+            fault(
+                "records.content_missing",
+                3,
+                "Pinned file locale/content variant must select exactly one Root record",
+            )
+        })?;
+        if candidates.next().is_some() {
+            return Err(fault(
+                "records.file_ambiguous",
+                4,
+                "Pinned file locale/content variant must select exactly one Root record",
+            ));
+        }
+        let mapping = ready
+            .index
+            .find(keys.keys(), &entry.content_key, limits, check)?;
+        if mapping.decoded_bytes > maximum as u64 {
+            return Err(fault(
+                "records.metadata_limit",
+                3,
+                "Selected content exceeds byte budget",
+            ));
+        }
+        let (encoding_key, content, content_blob) = match mode {
+            ReadMode::Materialized(policy) => {
+                let (key, content, reference) = decoded_cache::read_content_in_session(
+                    &self.context.home,
+                    self.casc.as_ref().expect("prepared CASC index source"),
+                    &ready.index,
+                    &mapping,
+                    limits,
+                    keys,
+                    &mut ready.stats,
+                    self.budget,
+                    Some(maximum),
+                    &self.context.control,
+                    policy,
+                )?;
+                let blob = serde_json::to_value(reference)?;
+                (key, SelectedContent::Bytes(content), blob)
+            }
+            ReadMode::Verified => {
+                let (key, blob) = decoded_cache::read_verified_content_in_session(
+                    &self.context.home,
+                    self.casc.as_ref().expect("prepared CASC index source"),
+                    &ready.index,
+                    &mapping,
+                    limits,
+                    maximum,
+                    keys,
+                    &mut ready.stats,
+                    self.budget,
+                    &self.context.control,
+                )?;
+                let reference = match serde_json::to_value(blob.reference()) {
+                    Ok(value) => value,
+                    Err(error) => return blob.close_after(Err(error.into())),
+                };
+                (key, SelectedContent::Blob(blob), reference)
+            }
+        };
+        let reported = (|| {
+            // Selected content has completed authentication (and any exact
+            // missing-body repair) before ordinary publication inventories
+            // all Data-owned shared bodies. Reuse these references across reads.
+            if ready.configuration_blobs.is_none() {
+                let [build, cdn] =
+                    lycheedev_core::workspace::data_disk::publish_shared_blob_pair_with_check(
+                        &self.context.home,
+                        [
+                            &target.metadata.build_document.raw,
+                            &target.metadata.cdn_document.raw,
+                        ],
+                        4 << 20,
+                        &self.context.control,
+                        &|| self.budget.check(),
+                    )?;
+                ready.configuration_blobs = Some((
+                    serde_json::to_value(build)?,
+                    serde_json::to_value(cdn)?,
+                ));
+            }
+            let (build_blob, cdn_blob) = ready
+                .configuration_blobs
+                .as_ref()
+                .expect("published local configurations");
+            let safety = self.budget.safety_only();
+            let size = capture::json_size(&(&ready.root_blob, build_blob, cdn_blob), &safety)?;
+            safety.charge(Cost::retained(size.saturating_mul(4).saturating_add(4096)))?;
+            let mut reading = json!({"contentVerified":true,"source":"installation","pin":self.pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":ready.root_blob,"entry":entry,"payloadEncodingKey":encoding_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":source.io_stats()});
+            if let SelectedContent::Bytes(bytes) = &content {
+                report_partial(&mut reading, &bytes.missing)?;
+            }
+            if !variant.is_empty() {
+                reading["contentVariant"] = json!(variant);
+            }
+            reading["keySource"] = keys.value();
+            reading["decodedCache"] = serde_json::to_value(&ready.stats)?;
+            ready.stats = decoded_cache::Stats::default();
+            self.context.control.check()?;
+            self.budget.check()?;
+            Ok(reading)
+        })();
+        match reported {
+            Ok(reading) => Ok(ResolvedFile { content, reading }),
+            Err(error) => match content {
+                SelectedContent::Blob(blob) => blob.close_after(Err(error)),
+                SelectedContent::Bytes(_) => Err(error),
+            },
+        }
+    }
+    pub fn check_source(&self) -> Result<()> {
+        self.context.control.check()?;
+        self.budget.check()?;
+        let Some(target) = &self.target else {
+            return Ok(());
+        };
+        // Recheck the selected client path too. Resolving only the common CASC
+        // root would skip client/version.txt and .flavor.info after preparation.
+        let after = installed::resolve_pinned_target_budgeted(
+            &target.installation,
+            self.pin,
+            Some(self.budget),
+        )?;
+        if after.common_root != target.common_root
+            || after.metadata.catalog_sha256 != target.metadata.catalog_sha256
+            || after.metadata.build_document.sha256 != target.metadata.build_document.sha256
+            || after.metadata.cdn_document.sha256 != target.metadata.cdn_document.sha256
+        {
+            return Err(fault(
+                "records.pinned_build_changed",
+                4,
+                "Local metadata changed during query",
+            ));
+        }
+        if let Some(source) = &self.source {
+            source.check_encoded()?;
+        }
+        if let Some(source) = &self.casc {
+            source.check()?;
+        }
+        self.budget.check()
+    }
+    pub fn verify_source(&self) -> Result<()> {
+        self.check_source()?;
+        if let Some(source) = &self.casc {
+            source.verify()?;
+        }
+        Ok(())
+    }
+    pub fn close_after<T>(mut self, result: Result<T>) -> Result<T> {
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::SourceClose);
+        drop(self.ready.take());
+        let result = match self.source.take() {
+            Some(source) => match Arc::try_unwrap(source) {
+                Ok(source) => source.close_after(result),
+                Err(_) => Err(fault(
+                    "records.internal",
+                    8,
+                    "Local query source still has a live borrower",
+                )),
+            },
+            None => result,
+        };
+        match self.casc.take() {
+            Some(source) => source.close_after(result),
+            None => result,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lycheedev_core::control::OperationControl;
+
+    fn root_groups(count: usize) -> Root {
+        let mut bytes = Vec::new();
+        for _ in 0..count {
+            // Classic Root: one ID, standard content, one locale, CKey/name.
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&2u32.to_le_bytes());
+            bytes.extend_from_slice(&7u32.to_le_bytes());
+            bytes.extend_from_slice(&[7; 16]);
+            bytes.extend_from_slice(&0u64.to_le_bytes());
+        }
+        Root(blte::Content {
+            bytes,
+            missing: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn actual_local_reader_uses_retained_session_root_limits_for_each_file_id() {
+        let limits = root_limits(casc::Limits::default());
+        assert_eq!((limits.groups, limits.matches), (65536, 4096));
+        for count in [4096, 4097] {
+            let control = OperationControl::default();
+            let budget = Arc::new(Budget::controlled(
+                Cost::defaults(),
+                control.deadline(),
+                control.clone(),
+            ));
+            let index = RootIndex::open(root_groups(count), limits, budget.clone(), || {
+                control.check()
+            })
+            .unwrap();
+            let before = budget.logical_snapshot().unwrap();
+            let actual = index.lookup(7, || control.check());
+            if count == 4096 {
+                let actual = actual.unwrap();
+                assert_eq!(actual.len(), 4096);
+                assert!(actual.iter().all(|record| record.file_data_id == 7));
+            } else {
+                let error = actual.err().unwrap();
+                assert_eq!(
+                    (error.code.as_str(), error.exit_code),
+                    ("records.metadata_limit", 3)
+                );
+            }
+            let after = budget.logical_snapshot().unwrap();
+            assert_eq!(after.retained_bytes, before.retained_bytes);
+            assert_eq!(
+                budget.memory_snapshot().unwrap().peak_scratch_bytes,
+                4096 * 256
+            );
+            assert_eq!(
+                budget.remaining_retained().unwrap(),
+                Cost::defaults().retained_bytes - after.retained_bytes,
+            );
+        }
+    }
+}
