@@ -45,7 +45,7 @@
 - 最终原包的 39 项本地检查全部通过：七组平台/通道发现、五类发布计划和无效输入纠正、官方插件 ZIP 打包复用、NewBee/DD/小黑盒/ModUs 四平台备份生成与上传计划。ZIP 与三类可重复生成的备份明确返回 reused=true，所有原产物哈希不变，未创建账号目录。owner `32442b42-1c4d-43a6-845a-b9f7816f480d` 已退休、handlesReaped=true，临时安装和样本已删除；报告为 `.tmp/fuploader-acceptance/publish-acceptance-41336899622.json`。
 - CI #23 对应前一版输入；首次三个任务因 GitHub Actions 内部错误中断，日志下载返回 BlobNotFound，仅重试失败任务并复用原测试程序和 Lua/addon 后通过。该原包发现的通道搜索失败保留原状态，修复后的结果由上述 CI #24 和新原包证明。
 - [CI #22 / 41329585974](https://github.com/Follen/Lychee-Dev/actions/runs/41329585974) 在 6e5316 推送后启动，因上述示例缺口主动取消，不计为通过。没有实际平台发布、账号读取、厂商 SDK 执行、全局安装或 Live。
-- `.tmp/fuploader-integration/` 的上游副本、当前客户端摘录及清点共 91 个文件、6,644,866 字节；已核实无产品/工具/测试/Skill 引用和重解析点，均未跟踪且被忽略。自动审批以 `blocked by policy` 拒绝删除，未说明具体原因；文件仍在，未换路径重试。
+- `.tmp/fuploader-integration/` 的上游副本、当前客户端摘录及清点共 91 个文件、6,644,866 字节；已核实无产品/工具/测试/Skill 引用和重解析点，均未跟踪且被忽略。用户追加“写脚本删”后，固定目标脚本已保存于 `.tmp/fuploader-cleanup/delete.ps1`，语法检查通过；脚本校验路径、文件清单与内容摘要，只逐文件删除并移除空目录。完整脚本提交执行审核后仍以 `blocked by policy` 被拒绝，未说明具体原因，进程未启动；复核 91 个文件及总字节均未变，不再换方式执行删除。
 
 ## 既有基线：CI与唯一包验收
 
