@@ -46,7 +46,7 @@ func TestCDNLocateStopsJoinedTerminalFailures(t *testing.T) {
 func TestSemanticParsingReservesBeforeRows(t *testing.T) {
 	raw := []byte(strings.Repeat("0\n", 100000))
 	limits := resource.DefaultLimits()
-	limits.RetainedBytes = int64(len(raw)) + 160
+	limits.RetainedBytes = int64(len(raw)) + 224
 	budget := resource.New(limits)
 	rows, err := parseSemanticValues(context.Background(), raw, "12.1.0.69933", budget)
 	if rows != nil || !errors.Is(err, resource.ErrBudget) || budget.Snapshot().DecodeWork != 1 || budget.Snapshot().RetainedBytes != limits.RetainedBytes {
@@ -60,7 +60,7 @@ func TestSemanticParsingReservesBeforeRows(t *testing.T) {
 		t.Fatalf("mapping materialized past budget: %v %v %+v", mappings, err, budget.Snapshot())
 	}
 	// Dense malformed lines are rejected after a bounded token prefix.
-	if _, err := parseSemanticValues(context.Background(), []byte(strings.Repeat("0 ", 100000)), "12.1.0.69933"); !errors.Is(err, ErrDefinitionIdentity) {
+	if _, err := parseSemanticValues(context.Background(), []byte("invalid "+strings.Repeat("0 ", 100000)), "12.1.0.69933"); !errors.Is(err, ErrDefinitionIdentity) {
 		t.Fatal(err)
 	}
 }

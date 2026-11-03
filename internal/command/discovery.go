@@ -9,7 +9,38 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"unicode"
 )
+
+// Text help exposes one level at a time. Machine help and describe retain the
+// complete command catalog from the same contracts.
+func helpOverview(words []string, commands []Definition) map[string]any {
+	seen := map[string]bool{}
+	children := []string{}
+	for _, command := range commands {
+		parts := strings.Fields(command.Path)
+		if len(parts) <= len(words) {
+			continue
+		}
+		child := strings.Join(parts[:len(words)+1], " ")
+		if !seen[child] {
+			seen[child] = true
+			children = append(children, child)
+		}
+	}
+	sort.Strings(children)
+	return map[string]any{
+		"usage":    strings.TrimSpace("lycheedev "+strings.Join(words, " ")) + " <command> [options]",
+		"commands": children,
+		"next": []string{
+			"lycheedev discover \"<task or platform>\" --format json",
+			"lycheedev schema <command...> --format json",
+			"lycheedev <command...> --help",
+			"lycheedev describe --format json (complete command catalog)",
+		},
+		"workspace": "For a new workspace, run lycheedev init --home <root>. Discovery and schema do not require initialization.",
+	}
+}
 
 type FlagSchema struct {
 	Required     bool     `json:"required"`
@@ -184,14 +215,21 @@ func describeFlag(route string, s flagSpec) FlagSchema {
 		f.Default = 80
 	case "--limit":
 		bounds(1, int64(dataLimitCeiling(route)))
-		f.Default = 50
+		if !f.Required {
+			f.Default = 50
+		}
 	case "--status":
 		bounds(0, 255)
 	case "--push":
 		bounds(-2147483648, 2147483647)
 	case "--race-id", "--gender":
 		bounds(-9223372036854775808, 9223372036854775807)
-	case "--max-depth", "--page", "--max-objects":
+	case "--max-depth":
+		defaultDepth, maximum := dataDepthBounds(route)
+		bounds(0, int64(maximum))
+		f.Default = defaultDepth
+		f.Description += "; 0 uses the same default depth as omission"
+	case "--page", "--max-objects":
 		bounds(0, 9223372036854775807)
 	case "--max-requests":
 		bounds(1, 9223372036854775807)
@@ -219,10 +257,8 @@ func describeFlag(route string, s flagSpec) FlagSchema {
 			f.Enum = []string{"wago", "dbcache", "raidbots"}
 		}
 	case "--encoding":
-		if route == "data sql" {
+		if route == "data sql" || route == "data hotfix" {
 			f.Enum = []string{"csv"}
-		} else if route == "data hotfix" {
-			f.Enum = []string{"csv", "raw", "png", "webp"}
 		} else {
 			f.Enum = []string{"raw", "png", "webp"}
 		}
@@ -236,11 +272,60 @@ func resultEnvelopeSchema() map[string]any {
 
 func discoverCommands(question string) map[string]any {
 	normalized := strings.ToLower(question)
-	aliases := map[string]string{"无限服": "forever target", "国服": "cn target", "正式服": "retail target", "怀旧": "classic target", "法术": "spell data", "技能": "spell data", "物品": "item data", "源码": "source", "调用": "source refs", "报错": "doctor source", "恢复": "live resume doctor", "安装": "addon install", "备份": "publish backup evidence", "数据库": "data sql", "查询": "query", "发布": "publish", "网易": "publish dd", "黑盒": "publish blackbox", "牛盒": "publish newbee", "作者": "publish", "图标": "asset", "贴图": "asset", "运行": "live execute", "热修": "data hotfix"}
+	words := strings.FieldsFunc(normalized, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_' })
+	// ASCII names also occur next to Chinese text, e.g. "DD发布".
+	asciiWords := strings.FieldsFunc(normalized, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') })
+	hasWord := func(word string) bool {
+		for _, value := range asciiWords {
+			if value == word {
+				return true
+			}
+		}
+		return false
+	}
+	platforms := []string{}
+	for _, platform := range []struct{ name, alias string }{{"curseforge", ""}, {"dd", "网易"}, {"blackbox", "黑盒"}, {"newbee", "牛盒"}, {"modus", ""}} {
+		if hasWord(platform.name) || platform.alias != "" && strings.Contains(normalized, platform.alias) {
+			platforms = append(platforms, "publish "+platform.name+" ")
+		}
+	}
+	productAliases := map[string][]string{"forever": {"无限服"}, "retail": {"正式服"}, "classic": {"怀旧"}}
+	matchedProducts := []map[string]any{}
+	for _, product := range selection.DataProducts() {
+		terms := []string{}
+		if hasWord(product.Product) {
+			terms = append(terms, product.Product)
+		}
+		for _, alias := range productAliases[product.Product] {
+			if strings.Contains(normalized, alias) {
+				terms = append(terms, alias)
+			}
+		}
+		if len(terms) > 0 {
+			matchedProducts = append(matchedProducts, map[string]any{"product": product.Product, "matchedTerms": terms})
+			normalized += " target"
+		}
+	}
+	recoveryTerms := "live resume doctor"
+	if len(platforms) > 0 {
+		recoveryTerms = "operation status verify resume"
+	}
+	aliases := map[string]string{"国服": "cn target", "法术": "spell data", "技能": "spell data", "物品": "item data", "源码": "source", "调用": "source refs", "报错": "doctor source", "恢复": recoveryTerms, "核验": "verify", "查看": "status", "安装": "addon install", "备份": "publish backup evidence", "数据库": "data sql", "查询": "query", "发布": "publish", "网易": "publish dd", "黑盒": "publish blackbox", "牛盒": "publish newbee", "作者": "publish", "图标": "asset", "贴图": "asset", "运行": "live execute", "热修": "data hotfix", "预检": "publish plan"}
 	for key, value := range aliases {
 		if strings.Contains(normalized, key) {
 			normalized += " " + value
 		}
+	}
+	if hasWord("recover") || hasWord("recovery") || hasWord("resume") {
+		normalized += " " + recoveryTerms
+	}
+	if hasWord("zip") {
+		normalized += " plugin upload"
+	}
+	// Count each search term once; overlapping aliases should not amplify it.
+	terms := map[string]bool{}
+	for _, term := range append(words, strings.Fields(normalized)...) {
+		terms[term] = true
 	}
 	type candidate struct {
 		definition Definition
@@ -252,7 +337,17 @@ func discoverCommands(question string) map[string]any {
 			continue
 		}
 		score := 0
-		for _, term := range strings.Fields(normalized) {
+		if len(platforms) > 0 && strings.HasPrefix(c.Path, "publish ") {
+			selected := false
+			for _, platform := range platforms {
+				selected = selected || strings.HasPrefix(c.Path, platform)
+			}
+			if !selected {
+				continue
+			}
+			score += 10
+		}
+		for term := range terms {
 			if strings.Contains(c.Path, term) {
 				score += 5
 			} else if strings.Contains(strings.ToLower(c.Summary), term) {
@@ -271,5 +366,5 @@ func discoverCommands(question string) map[string]any {
 	for _, match := range matches {
 		commands = append(commands, match.definition)
 	}
-	return map[string]any{"query": question, "commands": commands, "next": "lycheedev schema <command...>", "products": selection.DataProducts()}
+	return map[string]any{"query": question, "commands": commands, "next": "lycheedev schema <command...>", "products": selection.DataProducts(), "matchedProducts": matchedProducts}
 }

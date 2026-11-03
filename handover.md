@@ -1,28 +1,31 @@
 # 当前交接
 
-更新：2026-11-03，Asia/Shanghai。架构与合同见 [Design.md](Design.md)，本次范围和DuckDB迁移结果见 [整改计划](docs/rectification-plan.md)，后续验收见 [todo.md](todo.md)。
+更新：2026-11-03，Asia/Shanghai。架构与合同见 [Design.md](Design.md)，本次整改与 DuckDB 迁移见 [整改计划](docs/rectification-plan.md)，后续验收见 [todo.md](todo.md)。
 
-## 当前状态与责任
+## 分支与任务
 
-- 复用main `a8fdb7fc8464f06c1cffbd05e6648e124edcb0e2`，修改全部留在当前工作区。未新建分支/PR、提交、推送、发布或变更npm渠道；保留既有`.zcodeignore`删除和`.worktrees/Rust-refactor`。
-- 本轮循环审计、代码/测试清理、文档修正、CI优化和临时清理已完成；既有worker已停写。Cobra/自解释、Skill精简、正式Forever身份、DBCD/Data、Source、五平台Go Publish及CI去重前轮已完成。Data/Source/CLI前轮全新审计，以及DD第11轮、公共层/CF/NewBee第9轮、ModUs/Blackbox第11轮与Publish CLI窄复审均无新增可复核问题。
-- 追加DuckDB迁移已完成：官方驱动v2.20000.0、DuckDB2.0.0、bindings/原生库v0.20000.0；流式Data表源与安全单表ID索引接入。旧relational的50个源码/测试文件已删除，无旧方言转换、引擎开关或回退。此次迁移由主Agent实施和验证，未将此前独立审计结论扩展为新引擎独立复审。
-- Windows固定GCC14.2/CGO静态构建、完整原生许可和流式源码归档已接入。CLI约140.5MB，含LuaLS的npm包约46.3MB；LuaLS peer核验上限随实际包体调整至256MiB，真实跨进程回归通过。
-- SQL-AUD-01已先红后绿：表列别名将普通字段命名为ID时，原索引提示导致等值/IN漏行；现对列重命名交给DuckDB完整绑定。按调用图删去不可达函数，测试便捷入口移入测试或改用生产API；Source重复摘要/包装已删除，历史恢复fixture与解码入口按实际消费者保留。CI移除5个Linux作业的Windows TMP步骤、修正对应过度约束测试，固定download-artifact SHA，原生准备先选择固定Node。最新手工复审与Windows测试调用图检查无新增，最终候选完整套件已通过。
+- 当前 main；基线整改已提交 `271b0c3a87e9c3104c865679ea3d0f0bdf5b12e2`，未推送或发布，npm 渠道保持 3.2.7/latest。用户随后授权隔离 Agent 评估及深入排查、修复同类问题；追加修复随本次提交交付，未推送或发布。
+- 主 Agent 维护 command/vault、Skill 和共享文档；records、Source、Publish 修复以及独立复审均已完成，所有 worker 已停写，无文件交叉修改待处理。
+- 既有 `.zcodeignore` 删除不纳入提交，`.worktrees/Rust-refactor` 保留。固定编译器缓存 `.tmp/toolchains`、活动项目及无关旧材料不在本轮清理范围。
 
-## 实际验证
+## 本轮已完成
 
-- 最终Lua5.1必需Go套件：`-p=2 -parallel=4 -count=1 -timeout=0 ./...`，35包、3455条测试通过事件、30项环境/helper skip、0失败、exit0。固定DBCD Hotfix差分、真实LuaLS/打包Source/跨CLI broker及跨盘备份均实际执行。
-- 每批代码build/vet和受影响SQL/Data/CLI测试通过；sqlengine race通过。前轮DD race及ModUs/Blackbox定向验证保留，未因文档变化重复运行。
-- 98项Node检查通过；后续发行参数变化的44项检查43通过、1项未配置archive skip（该archive用例在前述全套已通过）。最终Skill为6份Markdown、351命令、0违规；导入合同843个Go文件、0违规；actionlint通过，版本仍为3.2.7。
-- 新原生CLI在仅系统PATH下启动，并通过SQL/CSV、Hotfix及资源导出；最终npm包隔离安装通过。原生PE依赖为Windows系统DLL，固定工具链prepare实际执行通过，未安装到用户游戏或全局CLI。
-- 工作区快照的vendored离线源码重建字节一致，归档约202.4MB。移除含本地库搜索路径的链接build ID，继续核验VCS与产物SHA。范围为工作区快照和固定预编译原生库，非tag发行、非DuckDB C++源码重编译。
-- 单ID/35-ID在本地与离线CDN fixture准备链上只供给1/35行。24项合成数据准备链基准通过；100ms采样的整基准进程峰值working set约51MiB/private约75MiB。无真实网络或迁移前后加速比例结论。
-- 全仓40份Markdown的182处本地链接及diff空白检查通过；最后文档收尾仅更新当前验收和清理状态。
+- 三个无历史上下文 Agent 分别完成 CLI 自解释、固定 Source 调查和本机 Data/CSV 查询。发现的问题均已复现修复：首次工作区错误给出同路径初始化参数；文本帮助逐级显示；发现结果解释产品别名并保留所选平台的恢复链；Source 空结果和 LuaLS 缺失给出有效下一步。
+- DBD 元数据支持多词名称、可选注释、BUILD 预设及版本覆盖默认值；Hotfix 在读写前拒绝无效编码或不成对的 CSV 参数；Data schema 与执行共用行数、深度边界和默认值。
+- CurseForge plan 明确本地检查范围、远端条件和可选版本选择；DD 新回执保留原 session，status 给出原 request/session 恢复输入，旧回执仍可读取。原有账号和不重放边界保持。
+- Skill 改为直接的任务提示，命令细节继续由 CLI 提供。主文档与 Changelog 已同步；无新增平台写入或游戏操作。
 
-## 待验、清理与下一步
+## 验证证据
 
-- 真实账号/平台写入、短信、UAC、游戏操作与云端CI未执行。正式Forever实机、六产品安装矩阵、真实PIN/联网冷CDN、旧基线同输入性能及大输入/多进程资源测量继续列todo。
-- ModUs图片字节无读回端点，图片修改保留待核验；未知storage登记无查询端点时保留pending、不重放。NewBee Creator缺少稳定账号ID，原会话绑定有效token摘要，token刷新暂停原pending续写。
-- 用户追加要求用脚本清理后，固定清单的PowerShell脚本完成路径、项目与目录链接检查，预览和实际执行均exit0：删除51个已结束任务目录、1个临时状态文件和6个本轮npm隔离目录，清理脚本随后移除。此前清理阻塞已解除。`.tmp/toolchains`为当前开发所需固定编译器缓存，继续保留；活动项目、无关旧材料和Rust worktree未动。
-- 最终验证已结束，无运行中的验收进程或未修复的确认项；本轮临时清理后核对工作区和worktree登记，未改动产品代码，未重复完整套件。下一步为用户安排todo中的真实平台、游戏与云端验收；提交、推送和发布继续等待对应授权。
+- 每批代码 `go build ./...`、`go vet ./...` 与受影响测试通过；最终 command、records、vault、publish、codebase 五包通过，Lua 5.1 为必需输入。新增回归均先复现失败再验证修复。
+- 独立复审无新增确认缺陷或待复现候选：固定上游 358 份元数据 × 7 个构建，共 2506 组独立 oracle 对照通过；CF plan/恢复及 DD status→verify/resume 原会话检查通过。
+- 最终全新 Agent 按 CLI/Skill 完成首次初始化、正式 Forever 入口识别、枚举查询、真实 SpellName CSV 与 CurseForge 离线预检，无阻断任务的 help/schema 冲突。真实 Data 固定 Retail 12.1.5.70688/zhCN；ID 17/116/133 及 CSV 哈希一致，SpellName 全表缺钥仍保留 partial，未叠加 Hotfix。Source 调查固定提交 `18c6d677b605b312f3d813d498404631fb941977`，API 声明与实际调用点已核实。
+- Skill quick validate、6 份 Markdown/351 命令的 Skill 合同、845 个 Go 文件导入合同和版本检查通过，版本仍为 3.2.7。
+- 最终 Lua 5.1 必需完整 Go 套件通过：固定 GCC14.2/CGO1，`-p=2 -parallel=4 -count=1 -timeout=0 ./...`，35 包、3446 条测试通过事件、48 项跳过（38 项环境材料、10 项 helper）、0 失败、exit0，另有 3 个无测试包。跳过项包括可选 LuaLS/DBCD/固定外部输入、真实客户端、跨盘环境与符号链接权限；基线集成证据单独保留。
+
+## 待验与下一步
+
+- 本轮验证和收尾已完成。PowerShell 清理脚本先核对绝对路径、目录链接及完整套件 exit0，预览后删除 `.tmp/agent-eval` 内全部隔离项目、临时报告和脚本；其中无 Live 连接或恢复事务。活动项目、编译器缓存和保留工作树未动。后续具体工作为 todo 中的真实平台/客户端与规模验收，按用户后续范围执行。
+- 真实账号/平台写入、短信、UAC、游戏操作及云端 CI 未执行。正式 Forever 实机、六产品安装/DBD/缺钥/Hotfix矩阵、联网冷 CDN、迁移前后同输入性能及大输入/多进程资源测量继续列 todo。
+- ModUs 图片字节无读回端点，图片修改保留待核验；未知 storage 登记无查询端点时保留 pending、不重放。NewBee Creator 缺少稳定账号 ID，原会话绑定有效 token 摘要，token 刷新暂停原 pending 续写。
+- 基线已验证原生 SQL/CSV/Hotfix/资源导出、隔离 npm 安装、固定预编译原生库的 vendored 工作区快照离线重建；LuaLS/DBCD 集成和 98 项 Node 检查的证据属于基线。此次未重复无关包装测试，不扩大 tag 发行、DuckDB C++ 重编译或实机覆盖。

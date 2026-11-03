@@ -16,8 +16,9 @@ import (
 const WorkspaceSchema = "lycheedev.workspace.v1"
 
 var (
-	ErrLegacyWorkspace = errors.New("vault.legacy_detected")
-	ErrWorkspaceFormat = errors.New("vault.unsupported_workspace")
+	ErrWorkspaceMissing = errors.New("vault.workspace_missing")
+	ErrLegacyWorkspace  = errors.New("vault.legacy_detected")
+	ErrWorkspaceFormat  = errors.New("vault.unsupported_workspace")
 	// ErrWorkspaceSchemaNewer is joined with ErrWorkspaceFormat so callers that
 	// only understand the old error keep working while new callers can report
 	// precisely that a newer toolkit wrote this workspace.
@@ -50,7 +51,7 @@ func OpenStore(root string) (*Store, error) {
 		if listErr == nil && len(entries) > 0 {
 			return nil, ErrLegacyWorkspace
 		}
-		return nil, err
+		return nil, errors.Join(ErrWorkspaceMissing, err)
 	}
 	if err != nil {
 		return nil, err

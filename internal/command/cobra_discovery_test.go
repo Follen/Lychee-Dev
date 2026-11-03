@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -99,5 +100,73 @@ func TestCobraOutputFormatDoesNotParseOtherFlagValues(t *testing.T) {
 	opts, err := parseOptions([]string{"data", "sql", "--sql", "--format=xml", "--unknown", "--format=json"})
 	if err == nil || opts.format != "json" {
 		t.Fatalf("parse failure encoding: %+v %v", opts, err)
+	}
+}
+
+func TestMissingWorkspaceReturnsExecutableInitialization(t *testing.T) {
+	for _, args := range [][]string{
+		{"source", "sync", "--source", "wow-ui-source", "--product", "retail", "--ref", strings.Repeat("a", 40)},
+		{"target", "list"},
+		{"config", "show"},
+	} {
+		t.Run(strings.Join(args[:2], "-"), func(t *testing.T) {
+			home := filepath.Join(t.TempDir(), "new workspace")
+			response, code := invoke(t, append(args, "--home", home, "--format=json")...)
+			if code != 3 || response.Error == nil || response.Error.Code != "vault.workspace_missing" {
+				t.Fatalf("missing workspace: code=%d response=%+v", code, response)
+			}
+			if _, err := os.Stat(home); !os.IsNotExist(err) {
+				t.Fatalf("diagnosis changed the workspace: %v", err)
+			}
+			details, ok := response.Error.Details.(map[string]any)
+			if !ok {
+				t.Fatalf("missing recovery: %#v", response.Error.Details)
+			}
+			initArgs := stringList(t, details["arguments"])
+			if len(initArgs) != 3 || initArgs[0] != "init" || initArgs[1] != "--home" || initArgs[2] != home {
+				t.Fatalf("recovery lost workspace selection: %v", initArgs)
+			}
+			initialized, exit := invoke(t, append(initArgs, "--format=json")...)
+			if exit != 0 || !initialized.OK {
+				t.Fatalf("returned recovery failed: %d %+v", exit, initialized)
+			}
+			listed, exit := invoke(t, "target", "list", "--home", home, "--format=json")
+			if exit != 0 || !listed.OK {
+				t.Fatalf("initialized workspace unusable: %d %+v", exit, listed)
+			}
+		})
+	}
+}
+
+func TestDiscoveryFindsProductSelectionAndPlatformRecovery(t *testing.T) {
+	for _, question := range []string{"forever", "正式无限服", "国服无限服"} {
+		result := discoverCommands(question)
+		commands := result["commands"].([]Definition)
+		found := false
+		for _, command := range commands {
+			found = found || command.Path == "target resolve"
+		}
+		if !found {
+			t.Fatalf("%q did not find target resolution: %+v", question, commands)
+		}
+		matched, ok := result["matchedProducts"].([]map[string]any)
+		if !ok || len(matched) != 1 || matched[0]["product"] != "forever" {
+			t.Fatalf("%q lost product alias: %#v", question, result["matchedProducts"])
+		}
+	}
+	for _, question := range []string{"网易DD发布提交后没收到回复，查看和核验原操作再恢复", "DD recover original operation"} {
+		result := discoverCommands(question)
+		found := map[string]bool{}
+		for _, command := range result["commands"].([]Definition) {
+			found[command.Path] = true
+			if strings.HasPrefix(command.Path, "publish ") && !strings.HasPrefix(command.Path, "publish dd ") {
+				t.Fatalf("%q selected another platform: %s", question, command.Path)
+			}
+		}
+		for _, path := range []string{"publish dd operation status", "publish dd operation verify", "publish dd operation resume"} {
+			if !found[path] {
+				t.Fatalf("%q omitted %s: %#v", question, path, found)
+			}
+		}
 	}
 }

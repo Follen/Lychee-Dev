@@ -20,6 +20,7 @@ import (
 type ddReceipt struct {
 	Schema       string            `json:"schema"`
 	Request      string            `json:"request"`
+	Session      string            `json:"session,omitempty"`
 	Author       string            `json:"author"`
 	Action       string            `json:"action"`
 	Digest       string            `json:"digest"`
@@ -73,8 +74,16 @@ func ddLoad(home, request string) (ddReceipt, error) {
 	return r, nil
 }
 func (r ddReceipt) result(action string) Result {
-	return Result{Platform: "dd", Action: action, Complete: r.Verification == "verified", OperationID: r.Request, Submission: r.Submission, Verification: r.Verification, Data: map[string]any{"request": r.Request, "original_action": r.Action, "sn": r.SN, "author_id": r.Author, "batch": r.Batch, "replayAllowed": false}}
+	data := map[string]any{"request": r.Request, "original_action": r.Action, "sn": r.SN, "author_id": r.Author, "batch": r.Batch, "replayAllowed": false}
+	if r.Session != "" {
+		data["recoveryInput"] = map[string]any{"request": r.Request, "session": r.Session}
+		data["sessionGuidance"] = "Use recoveryInput with operation verify or operation resume in the same --home; inspect the retained task with session status. The session ID does not prove that the task is still available."
+	} else {
+		data["sessionGuidance"] = "This older receipt has no session ID. Recover the retained task ID from the original session start output and inspect it with session status in the same --home; do not start a new session or resubmit the original operation."
+	}
+	return Result{Platform: "dd", Action: action, Complete: r.Verification == "verified", OperationID: r.Request, Submission: r.Submission, Verification: r.Verification, Data: data}
 }
+
 func ddDigest(v any) string {
 	b, _ := json.Marshal(v)
 	s := sha256.Sum256(b)
@@ -166,7 +175,7 @@ func ddMutationRun(ctx context.Context, api ddAPI, req Request, action string, i
 	if err = ddUploadForm(ctx, api, req.Home, r, form, in); err != nil {
 		return Result{}, err
 	}
-	receipt := ddReceipt{Schema: "lycheedev.publish.dd-operation.v1", Request: req.RequestID, Author: author, Action: action, Digest: digest, SN: String(in, "sn"), Game: game, Submission: "intent_recorded", Verification: "pending", Expected: form, Created: time.Now().UTC()}
+	receipt := ddReceipt{Schema: "lycheedev.publish.dd-operation.v1", Request: req.RequestID, Session: String(in, "session"), Author: author, Action: action, Digest: digest, SN: String(in, "sn"), Game: game, Submission: "intent_recorded", Verification: "pending", Expected: form, Created: time.Now().UTC()}
 	if err = ddSave(ctx, req.Home, receipt); err != nil {
 		return Result{}, err
 	}

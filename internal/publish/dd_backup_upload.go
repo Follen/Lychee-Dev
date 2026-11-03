@@ -284,7 +284,7 @@ func ddBackupUpload(ctx context.Context, api ddAPI, req Request, in map[string]a
 	if name := String(in, "name"); name != "" {
 		expected["name"] = name
 	}
-	r := ddReceipt{Schema: "lycheedev.publish.dd-operation.v1", Request: req.RequestID, Author: author, Action: "backup upload", Digest: digest, Game: ddGame(b.bundle.Manifest), Expected: expected, Submission: "uncertain", Verification: "pending", Created: time.Now().UTC(), Backup: &ddBackupProgress{File: file, Stage: "allocate", Components: map[string]string{}}}
+	r := ddReceipt{Schema: "lycheedev.publish.dd-operation.v1", Request: req.RequestID, Session: String(in, "session"), Author: author, Action: "backup upload", Digest: digest, Game: ddGame(b.bundle.Manifest), Expected: expected, Submission: "uncertain", Verification: "pending", Created: time.Now().UTC(), Backup: &ddBackupProgress{File: file, Stage: "allocate", Components: map[string]string{}}}
 	if err = ddSave(ctx, req.Home, r); err != nil {
 		return Result{}, err
 	}

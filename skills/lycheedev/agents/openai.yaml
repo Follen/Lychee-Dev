@@ -1,7 +1,7 @@
 interface:
   display_name: "Lychee Dev Toolkit"
   short_description: "WoW research, live recovery and author publishing"
-  default_prompt: "Use $lycheedev to handle this WoW research or publishing task using the installed CLI contract."
+  default_prompt: "Use $lycheedev to investigate this WoW issue or complete the requested publishing task."
 
 policy:
   allow_implicit_invocation: true

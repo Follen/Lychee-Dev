@@ -156,10 +156,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	} else if opts.help {
 		if len(opts.words) == 0 {
 			response.Result = map[string]any{"commands": definitions, "flags": []string{"--home <root>", "--format text|json|jsonl", "--help"}}
+			if opts.format == "text" {
+				response.Result = helpOverview(nil, definitions)
+			}
 		} else if matches, helpErr := helpDefinitions(opts.words); helpErr != nil {
 			err, code = helpErr, 2
 		} else {
 			response.Result = map[string]any{"commands": matches, "next": "lycheedev schema <command...>"}
+			if opts.format == "text" {
+				response.Result = helpOverview(opts.words, matches)
+			}
 			if contract, _, e := findCommandContract(opts.words); e == nil && contract != nil {
 				definition := contract.publicDefinition()
 				response.Result = map[string]any{"commands": []Definition{definition}, "flags": append(definition.Flags, "--help"), "schema": contract.schema()}
@@ -836,6 +842,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case errors.Is(err, vault.ErrLegacyWorkspace):
 				code, faultCode = 3, "vault.legacy_detected"
+			case errors.Is(err, vault.ErrWorkspaceMissing):
+				code, faultCode = 3, "vault.workspace_missing"
 			case errors.Is(err, vault.ErrWorkspaceFormat):
 				code, faultCode = 4, "vault.unsupported_workspace"
 			case errors.Is(err, vault.ErrBlobIntegrity):
@@ -883,6 +891,21 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			code, faultCode, stage = 2, "records.export_options", "export"
 		}
 		response.Error = &Fault{Code: faultCode, Message: err.Error(), Stage: stage}
+		if errors.Is(err, vault.ErrWorkspaceMissing) {
+			root, _ := workspaceRoot(opts.home)
+			response.Error.Message = "Workspace is not initialized. Run lycheedev init with the same --home, then retry the original command."
+			response.Error.Details = map[string]any{"workspace": root, "next": "lycheedev init", "arguments": []string{"init", "--home", root}}
+		}
+		if faultCode == "luals.unavailable" {
+			if contract, _, e := findCommandContract(opts.words); e == nil && contract != nil {
+				if _, ok := contract.flag("--static-only"); ok {
+					response.Error.Details = map[string]any{
+						"next":         "lycheedev schema " + contract.Path,
+						"alternatives": []string{"Use --release with a complete toolkit distribution for semantic analysis.", "Use --static-only without --release or --session-reuse for structural evidence; semantic coverage remains incomplete."},
+					}
+				}
+			}
+		}
 		var publishErr *publish.Error
 		if errors.As(err, &publishErr) {
 			code = publishErr.Exit
@@ -1003,8 +1026,8 @@ func bindOption(opts *Options, route, key, value string, boolean bool) error {
 			opts.encoding = value
 			break
 		}
-		if route == "data sql" {
-			return errors.New("data sql --encoding must be csv")
+		if route == "data sql" || route == "data hotfix" {
+			return fmt.Errorf("%s --encoding must be csv", route)
 		}
 		if value != "raw" && value != "png" && value != "webp" {
 			return errors.New("--encoding must be raw, png, or webp")
@@ -1278,6 +1301,12 @@ func bindOption(opts *Options, route, key, value string, boolean bool) error {
 		if err != nil || key == "--max-depth" && n < 0 {
 			return fmt.Errorf("invalid %s", key)
 		}
+		if key == "--max-depth" {
+			_, maximum := dataDepthBounds(route)
+			if n > maximum {
+				return fmt.Errorf("--max-depth must be between 0 and %d", maximum)
+			}
+		}
 		switch key {
 		case "--race-id":
 			opts.raceID = n
@@ -1373,6 +1402,9 @@ func bindOption(opts *Options, route, key, value string, boolean bool) error {
 }
 
 func validateOptions(opts Options, route string, seen map[string]bool) error {
+	if route == "data hotfix" && !opts.help && (opts.encoding == "csv") != (opts.output != "") {
+		return errors.New("data hotfix CSV export requires both --encoding csv and --output")
+	}
 	if route == "addon status" && seen["--installation"] && seen["--path"] {
 		return errors.New("addon status accepts --installation or --path, not both")
 	}
@@ -1443,17 +1475,28 @@ func unsupportedRouteFlag(route, flag string) error {
 	return fmt.Errorf("%s is not supported by %s; use %s --help", flag, route, route)
 }
 
-// dataLimitCeiling keeps the documented 200 bound everywhere except the new
-// data verbs whose modules enforce their own exact per-mode ranges; the module
-// error then maps to exit 2 instead of a parser rejection.
+// Share the domain bounds with parsing and schema discovery.
 func dataLimitCeiling(route string) int {
 	switch route {
 	case "live probe list":
 		return 1000
-	case "data db2 search", "data db2 foreign-key", "data db2 stream", "data decor list":
-		return 200000
+	case "data db2 search":
+		return records.MaxSearchRows
+	case "data db2 foreign-key":
+		return records.MaxForeignKeyRows
+	case "data db2 stream":
+		return records.MaxStreamRows
+	case "data decor list":
+		return records.MaxDecorListRows
 	}
 	return 200
+}
+
+func dataDepthBounds(route string) (int, int) {
+	if route == "data encounter get" {
+		return records.MaxEncounterDepth, records.MaxEncounterDepth
+	}
+	return records.DefaultSpellDepth, records.MaxSpellDepth
 }
 
 // userHomeDirectory is the single home-resolution helper for command dispatch;

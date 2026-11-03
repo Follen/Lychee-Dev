@@ -141,6 +141,7 @@ func TestDDOriginalUnknownOperationIsNotReplayed(t *testing.T) {
 	if err == nil || first.Submission != "uncertain" {
 		t.Fatal(first, err)
 	}
+	assertDDRecoveryInput(t, req, "s")
 	before := f.calls
 	second, err := ddMutationRun(context.Background(), f, req, "backup rename", input)
 	if err == nil || writes != 1 || f.calls != before || second.OperationID != first.OperationID {
@@ -292,12 +293,13 @@ func TestDDBackupReusedComponentsAndReadbackNoReplay(t *testing.T) {
 		return nil, nil
 	}}
 	req := Request{Home: t.TempDir(), RequestID: "backup-1"}
-	result, err := ddBackupUpload(context.Background(), f, req, map[string]any{"file": file})
+	result, err := ddBackupUpload(context.Background(), f, req, map[string]any{"file": file, "session": "retained-backup-session"})
 	if err != nil || !result.Complete || writes != 2 {
 		t.Fatal(result, err, writes)
 	}
+	assertDDRecoveryInput(t, req, "retained-backup-session")
 	calls := f.calls
-	result, err = ddBackupUpload(context.Background(), f, req, map[string]any{"file": file})
+	result, err = ddBackupUpload(context.Background(), f, req, map[string]any{"file": file, "session": "retained-backup-session"})
 	if err != nil || !result.Complete || f.calls != calls {
 		t.Fatal(result, err, f.calls, calls)
 	}

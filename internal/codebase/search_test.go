@@ -96,6 +96,10 @@ func TestSearchFullTextTierEscalatesAndORJoins(t *testing.T) {
 	if len(precise.Results) != 0 || len(precise.Suggestions) == 0 {
 		t.Fatalf("precise full-text matched partial terms: %+v", precise)
 	}
+	// The recovery hint must name a mode the next query can actually execute.
+	if !strings.Contains(strings.Join(precise.Suggestions, " "), "--mode "+string(SearchModeExploratory)) {
+		t.Fatalf("missing executable mode recovery: %v", precise.Suggestions)
+	}
 	broad, err := b.Search(ctx, "PIN-TEST", pin, SearchQuery{Mode: SearchModeExploratory, Text: "widget factory helper"})
 	if err != nil {
 		t.Fatal(err)
@@ -111,6 +115,35 @@ func TestSearchFullTextTierEscalatesAndORJoins(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("exploratory full-text OR-join matched nothing: %+v", broad.Results)
+	}
+}
+
+func TestSearchEmptyRecoveryMatchesActiveFilters(t *testing.T) {
+	b, pin := indexedSearchFixture(t, searchWidgetTree())
+	ctx := context.Background()
+	for _, mode := range []SearchMode{SearchModePrecise, SearchModeExploratory} {
+		query := SearchQuery{Mode: mode, Text: "Widget", Topic: "toc"}
+		got, err := b.Search(ctx, "PIN-TEST", pin, query)
+		if err != nil || len(got.Results) != 0 {
+			t.Fatalf("filtered query: %+v %v", got, err)
+		}
+		hints := strings.Join(got.Suggestions, " ")
+		if !strings.Contains(hints, "--topic") {
+			t.Fatalf("missing filter recovery: %v", got.Suggestions)
+		}
+		if mode == SearchModeExploratory && (strings.Contains(hints, "--mode") || strings.Contains(hints, "use explore")) {
+			t.Fatalf("already exploratory query suggests switching mode: %v", got.Suggestions)
+		}
+		query.Topic = ""
+		recovered, err := b.Search(ctx, "PIN-TEST", pin, query)
+		if err != nil || len(recovered.Results) == 0 {
+			t.Fatalf("remove topic recovery: %+v %v", recovered, err)
+		}
+	}
+	// Asset matching does not change with mode, so changing it is not recovery.
+	got, err := b.Search(ctx, "PIN-TEST", pin, SearchQuery{Text: "missing", Topic: "asset"})
+	if err != nil || strings.Contains(strings.Join(got.Suggestions, " "), "--mode") {
+		t.Fatalf("asset recovery: %+v %v", got, err)
 	}
 }
 

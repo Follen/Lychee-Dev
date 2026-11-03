@@ -250,7 +250,7 @@ func ddDeleteBackups(ctx context.Context, api ddAPI, req Request, in map[string]
 		for _, v := range p["items"].([]any) {
 			ids = append(ids, ddText(ddMap(v)["sn"]))
 		}
-		r = ddReceipt{Schema: "lycheedev.publish.dd-operation.v1", Request: id, Author: author, Action: "backup delete-many", Digest: ddDigest(in["backup_ids"]), Submission: "prepared", Verification: "pending", Batch: &ddDeleteBatch{IDs: ids}, Created: time.Now().UTC()}
+		r = ddReceipt{Schema: "lycheedev.publish.dd-operation.v1", Request: id, Session: String(in, "session"), Author: author, Action: "backup delete-many", Digest: ddDigest(in["backup_ids"]), Submission: "prepared", Verification: "pending", Batch: &ddDeleteBatch{IDs: ids}, Created: time.Now().UTC()}
 		if err = ddSave(ctx, req.Home, r); err != nil {
 			return Result{}, err
 		}

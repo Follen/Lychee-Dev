@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -83,6 +84,11 @@ func parseSemanticValues(ctx context.Context, raw []byte, build string, budgets 
 		return nil, err
 	}
 	rows := [][]any{}
+	type selectedValue struct {
+		index     int
+		qualified bool
+	}
+	selected := map[any]selectedValue{}
 	for remaining := string(raw); remaining != ""; {
 		line, tail, _ := strings.Cut(remaining, "\n")
 		remaining = tail
@@ -94,12 +100,13 @@ func parseSemanticValues(ctx context.Context, raw []byte, build string, budgets 
 		if code == "" {
 			continue
 		}
-		if strings.HasPrefix(code, "(") {
+		qualified := strings.HasPrefix(code, "(")
+		if qualified {
 			annotation, rest, ok := strings.Cut(code, ")")
 			if !ok || !strings.HasPrefix(annotation, "(BUILD ") {
 				return nil, ErrDefinitionIdentity
 			}
-			matches, err := schema.MatchesBuild(build, strings.TrimPrefix(annotation, "(BUILD "))
+			matches, err := matchesSemanticBuild(build, strings.TrimPrefix(annotation, "(BUILD "))
 			if err != nil {
 				return nil, err
 			}
@@ -108,11 +115,10 @@ func parseSemanticValues(ctx context.Context, raw []byte, build string, budgets 
 			}
 			code = strings.TrimSpace(rest)
 		}
-		parts := semanticFields(code, 3)
-		if len(parts) < 1 || len(parts) > 2 {
-			return nil, ErrDefinitionIdentity
+		valueText, nameText := code, ""
+		if end := strings.IndexFunc(code, unicode.IsSpace); end >= 0 {
+			valueText, nameText = code[:end], strings.TrimSpace(code[end:])
 		}
-		valueText := parts[0]
 		base := 10
 		if strings.HasPrefix(valueText, "0x") {
 			base = 16
@@ -133,18 +139,56 @@ func parseSemanticValues(ctx context.Context, raw []byte, build string, budgets 
 			value = n
 		}
 		var name any
-		if len(parts) == 2 {
-			name = parts[1]
+		if nameText != "" {
+			name = nameText
+		}
+		if prior, ok := selected[value]; ok && (prior.qualified || qualified) {
+			if err := budget.Charge(resource.Cost{DecodeWork: 1}); err != nil {
+				return nil, err
+			}
+			if qualified {
+				rows[prior.index] = []any{value, name, strings.TrimSpace(comment)}
+				selected[value] = selectedValue{prior.index, true}
+			}
+			continue
 		}
 		if len(rows) >= 100000 {
 			return nil, ErrMetadataLimit
 		}
-		if err := budget.Charge(resource.Cost{RetainedBytes: 160, MetadataBytes: 160, DecodeWork: 1}); err != nil {
+		// Include the value-selection index used for BUILD overrides.
+		if err := budget.Charge(resource.Cost{RetainedBytes: 224, MetadataBytes: 224, DecodeWork: 1}); err != nil {
 			return nil, err
 		}
 		rows = append(rows, []any{value, name, strings.TrimSpace(comment)})
+		selected[value] = selectedValue{len(rows) - 1, qualified}
 	}
 	return rows, nil
+}
+
+// Metadata presets are fixed by WoWDBDefs 541f07fd4bf0e3ade0b6bafcadc1343dd699adb2,
+// code/C#/DBDefsLib/BuildRange.cs. Keep them outside the DBD layout parser.
+func matchesSemanticBuild(build, constraints string) (bool, error) {
+	presets := map[string]string{
+		"Pre":     "0.3.4.2953-0.12.0.3988",
+		"Vanilla": "1.0.0.3980-1.12.3.6141",
+		"TBC":     "2.0.0.5610-2.4.3.8606",
+		"WotLK":   "3.0.0.8120-3.3.5.12340",
+		"Cata":    "4.0.0.11927-4.3.4.15595",
+		"MoP":     "5.0.1.15464-5.4.8.18414",
+		"WoD":     "6.0.1.18125-6.2.4.21742",
+		"Legion":  "7.0.1.20740-7.3.5.26972",
+		"BfA":     "8.0.1.25703-8.3.7.35662",
+		"SL":      "9.0.1.33411-9.2.7.45745",
+		"DF":      "10.0.0.43342-10.2.7.55664",
+		"TWW":     "11.0.0.54311-11.2.7.65299",
+	}
+	parts := strings.Split(constraints, ",")
+	for i, part := range parts {
+		if replacement, ok := presets[strings.TrimSpace(part)]; ok {
+			parts[i] = replacement
+		}
+	}
+	return schema.MatchesBuild(build, strings.Join(parts, ","))
 }
 
 func semanticParseBudget(budgets []*resource.Budget) *resource.Budget {

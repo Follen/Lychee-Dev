@@ -452,7 +452,7 @@ func commandConstraints(route string) []string {
 	case "data sql":
 		return []string{"Exactly one of --sql, --file, --stdin is required.", "--file accepts SQL text or a query JSON object; --param name=scalar may repeat with unique names.", "A pinned Data snapshot is required (explicitly or through the project); choose --installation or --cdn.", "CSV export requires --encoding csv and --output; --overwrite permits replacing the chosen output."}
 	case "data hotfix":
-		return []string{"--source is required: wago, dbcache or raidbots.", "dbcache requires --snapshot and exactly one of --dbcache or --from CAP; raidbots requires --raidbots; wago requires explicit product/build/region/locale or compatible pinned parent.", "--scan is a bounded dbcache scan; --cursor resumes its original capture, not another source."}
+		return []string{"--source is required: wago, dbcache or raidbots.", "dbcache requires --snapshot and exactly one of --dbcache or --from CAP; raidbots requires --raidbots; wago requires explicit product/build/region/locale or compatible pinned parent.", "--scan is a bounded dbcache scan; --cursor resumes its original capture, not another source.", "CSV export requires both --encoding csv and --output; other encodings are not supported."}
 	case "target resolve":
 		return []string{"Choose --file, --target, --installation, or remote --product with --region and --locale.", "--file cannot combine with target/installation/product/build/region/locale/definitions/from/offline.", "--target cannot combine with file/installation/product/build/region/locale. --build requires --product.", "--from preserves the parent fixed identity; it cannot silently switch products or configurations."}
 	case "target add":

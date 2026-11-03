@@ -73,11 +73,12 @@ func TestDDBatchDeletionResumesAfterLostResponseWithoutReplay(t *testing.T) {
 		return nil, nil
 	}}
 	req := Request{Home: t.TempDir(), RequestID: "batch"}
-	in := map[string]any{"backup_ids": []any{"a", "b"}, "confirm_delete": true}
+	in := map[string]any{"backup_ids": []any{"a", "b"}, "confirm_delete": true, "session": "retained-batch-session"}
 	r, err := ddDeleteBackups(context.Background(), api, req, in, false, false)
 	if err == nil || r.Complete || writes["a"] != 1 || writes["b"] != 0 {
 		t.Fatal(r, err, writes)
 	}
+	assertDDRecoveryInput(t, req, "retained-batch-session")
 	r, err = ddDeleteBackups(context.Background(), api, req, map[string]any{"request": "batch"}, true, true)
 	if err == nil || r.Complete || writes["a"] != 1 || writes["b"] != 0 {
 		t.Fatal("read-only verification submitted the next item", r, err, writes)

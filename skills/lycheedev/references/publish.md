@@ -9,8 +9,8 @@ NewBee official CLI and Creator are explicit channels. Use the selected channel'
 capabilities; a missing official operation does not silently select Creator.
 DD retains a task-owned session or explicitly binds the chosen GUI account.
 ModUs main-client and Creator credentials are separate sources. CurseForge Core
-query keys and upload tokens have different purposes. The CLI owns credential
-handling; do not copy passwords, cookies or signed URLs into commands or reports.
+query keys and upload tokens have different purposes. Use the CLI's login and
+account commands; keep passwords, cookies and signed URLs out of reports.
 
 Prepare local inputs with `--plan` and inspect the result. It performs local
 validation; live account ownership, dynamic options and platform acceptance

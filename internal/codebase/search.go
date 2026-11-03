@@ -363,7 +363,13 @@ func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.S
 	response.Truncated = response.Truncated || candidateCut
 	response.Complete = summary.Complete && !response.Truncated
 	if len(response.Results) == 0 {
-		response.Suggestions = []string{"use explore for broader text and symbol matches", "check the topic, product and ref"}
+		if !broad && topic != "asset" {
+			response.Suggestions = append(response.Suggestions, "retry source query with --mode exploratory for broader text and symbol matches")
+		}
+		if topic != "" {
+			response.Suggestions = append(response.Suggestions, "retry source query without --topic to search other indexed source kinds")
+		}
+		response.Suggestions = append(response.Suggestions, "retry source query with a shorter name or fewer search terms; keep the same --snapshot")
 	}
 	return response, nil
 }

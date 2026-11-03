@@ -60,7 +60,7 @@ func CurseForgeInput(action string) (InputSpec, bool) {
 		s.Required = []string{"project_id", "file", "changelog", "release_type"}
 		s.MutuallyExclusive = [][]string{{"parent_file_id", "game_versions"}, {"parent_file_id", "game_version_names"}}
 		s.Example = map[string]any{"project_id": 123, "file": "Addon.zip", "changelog": "Fix an error.", "release_type": "release", "game_versions": []any{12345}}
-		s.DynamicOptions = map[string]string{"game_versions": "publish curseforge plugin game-versions"}
+		s.DynamicOptions = map[string]string{"game_versions": "publish curseforge plugin game-versions", "game_version_names": "publish curseforge plugin game-versions"}
 		s.Effects = []string{"reads and locks the local ZIP", "persists intent before one upload", "writes the explicitly selected remote project", "retains receipt; uncertain submission never permits replay"}
 	default:
 		return InputSpec{}, false
@@ -136,14 +136,26 @@ func RunCurseForge(ctx context.Context, action string, request Request) (Result,
 	}
 	if request.Plan {
 		result.Complete = true
-		result.Data = map[string]any{"plan": true, "effects": spec.Effects, "remoteConditions": "credentials, dynamic versions and target ownership are checked during execution"}
+		plan := map[string]any{"plan": true, "completionScope": "local_plan", "effects": spec.Effects, "remoteChecked": false, "remoteConditions": "execution requires credentials; the platform validates submitted versions and target permissions when handling the request"}
+		result.Data = plan
 		if action == "plugin upload" {
 			artifact, err := inspectArtifact(ctx, String(input, "file"))
 			if err != nil {
 				return result, err
 			}
 			defer artifact.file.Close()
-			result.Data = map[string]any{"plan": true, "project_id": Integer(input, "project_id"), "archive": artifact.name, "sha256": artifact.sha256, "bytes": artifact.size, "effects": spec.Effects, "remoteChecked": false}
+			plan["project_id"] = Integer(input, "project_id")
+			plan["archive"], plan["sha256"], plan["bytes"] = artifact.name, artifact.sha256, artifact.size
+			plan["localChecks"] = []string{"input schema", "ZIP structure and readable archive bytes", "archive hashes"}
+			plan["versionSelection"] = "unspecified"
+			plan["versionGuidance"] = "Game versions are optional and none were selected. To target a specific client/version, run publish curseforge plugin game-versions and supply game_versions or game_version_names; release_type is the release channel, not the game client."
+			if input["parent_file_id"] != nil {
+				plan["versionSelection"] = "parent"
+				plan["versionGuidance"] = "A parent file is selected; separate game version selection is omitted. The platform validates the parent during upload."
+			} else if input["game_versions"] != nil || input["game_version_names"] != nil {
+				plan["versionSelection"] = "explicit"
+				plan["versionGuidance"] = "Explicit version selection is present; this offline plan does not validate it against the platform catalog."
+			}
 		}
 		return result, nil
 	}

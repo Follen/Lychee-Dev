@@ -4,6 +4,8 @@
 
 旧命令保持可达；`data table` 是 `data db2` 的同处理器别名。`describe` 保留用于完整目录，`discover <任务>` 返回最多八个候选，`schema <command...>` 返回输入类型、范围、必填条件、示例、影响和结果信封。它们离线运行，不初始化工作区。
 
+默认文本帮助逐级列出入口；`--help --format json`和`describe`保留完整机器目录。发现结果中的`matchedProducts`记录产品别名命中，平台恢复问题限定到对应平台。需要工作区的命令在新`--home`上返回`vault.workspace_missing`（退出码3），`error.details.arguments`给出使用同一路径的初始化参数；诊断不会自动创建工作区。
+
 | 原命令 | 当前入口 | 处理 |
 | --- | --- | --- |
 | `update` | `update` | 保留原业务处理器 |

@@ -4,9 +4,10 @@
 
 ## 待办
 
-- [x] 完成[业务整改计划](docs/rectification-plan.md)本次授权的代码与离线验收：Cobra/Agent自解释、Skill精简、DBCD/Data、Source、五平台Go Publish、正式Forever身份、CI去重及代码/测试清理。各范围最新全新Agent复审无新增可复核问题；完整Go/Lua35包通过，后续局部修复的Publish/CLI补验通过。改动保留在main工作区，未提交、推送或发布。
+- [x] 完成[业务整改计划](docs/rectification-plan.md)本次授权的代码与离线验收：Cobra/Agent自解释、Skill精简、DBCD/Data、Source、五平台Go Publish、正式Forever身份、CI去重及代码/测试清理。各范围最新全新Agent复审无新增可复核问题；完整Go/Lua35包通过，后续局部修复的Publish/CLI补验通过。已提交main `271b0c3a87`，未推送或发布。
+- [ ] AGENT-GUIDANCE：首轮三个隔离Agent完成CLI发布准备、固定Source与本机Data/CSV任务；修复初始化指引、发现/帮助、Source空结果建议、元数据格式、Hotfix导出准入、schema范围/默认值、CF plan和DD原会话恢复输入。最新全新Agent复验初始化、枚举查询、CSV和CF预检全部成功；358份元数据×7构建独立对照通过。build/vet、受影响五包、Skill合同通过；完整Lua必需Go套件35包、3446条测试通过事件、48项环境/helper skip、0失败、exit0。
 - [x] DuckDB接入与迁移实现：DuckDB 2.0.0直接替换旧引擎，旧relational的50个源码/测试文件已删除，无旧方言兼容、引擎开关或回退。Windows固定GCC14.2/CGO静态交付，原生SQL/CSV/Hotfix/资源导出、隔离npm安装及工作区快照vendored离线重建通过；build/vet、受影响Go测试、sqlengine race、98项Node检查和最终Skill/导入合同通过。完整Lua5.1必需Go套件35包、3455条通过事件、30项环境/helper skip、0失败、exit0；详见[迁移验收](docs/rectification-plan.md#77-实际迁移结果与后续验收)。
-- [ ] DuckDB真实输入与规模补验：固定真实SpellName PIN、六产品DBD/缺钥/Hotfix矩阵、真实联网冷CDN、迁移前后相同输入性能对照、大输入/多进程资源峰值。当前24项本地/离线CDN准备链基准使用1000行合成样本；原生CLI约140.5MB，含LuaLS的npm包约46.3MB。tag发行、云端runner和DuckDB C++源码重编译分别列后续范围。
+- [ ] DuckDB真实输入与规模补验：已完成Retail 12.1.5.70688/zhCN固定PIN上的SpellName三ID、CSV一致性及ChrRaces数据/枚举查询，保留SpellName缺钥覆盖范围。六产品DBD/缺钥/Hotfix矩阵、真实联网冷CDN、迁移前后相同输入性能对照、大输入/多进程资源峰值仍待验。当前24项本地/离线CDN准备链基准使用1000行合成样本；原生CLI约140.5MB，含LuaLS的npm包约46.3MB。tag发行、云端runner和DuckDB C++源码重编译分别列后续范围。
 - [ ] 对本次Publish功能执行真实账号/平台写入与读回验收；运行云端CI并测量去重后的耗时和成本。当前离线fixture、SDK纯签名及本地打包结果分别保留，不扩大真实平台覆盖。
 
 - [x] STARTUP-ACTOR-WAIT：登录前actor_unavailable改为loading并等待现有PLAYER_LOGIN重试；登录后持续失败及其他错误继续报告。离线回归先复现误报再通过，尚未发布或安装。
