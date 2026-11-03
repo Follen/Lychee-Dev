@@ -258,3 +258,26 @@ func TestClientWindowLiveReadOnly(t *testing.T) {
 	}
 	t.Logf("readonly product=%s build=%s pid=%d hwnd=%d", bound.Client.Product, bound.Client.FullBuild, bound.Window.ProcessID, bound.Window.Handle)
 }
+
+func TestFormalForeverExecutableAndInstanceIdentity(t *testing.T) {
+	directory := t.TempDir()
+	for name, value := range map[string]string{".flavor.info": "wowf", "version.txt": "1.60.1.70658", "Wow.exe": "fixture", "WowB.exe": "fixture"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	window := desktop.WindowIdentity{Handle: 10, ProcessID: 20, ProcessStartedAt: 30, Executable: filepath.Join(directory, "Wow.exe"), Class: "fixture"}
+	other := window
+	other.Handle, other.ProcessID, other.ProcessStartedAt = 11, 21, 31
+	got, err := selectDiscoveredClientWindow(context.Background(), directory, 20, []desktop.WindowIdentity{other, window})
+	if err != nil || got.Window != window || got.Client.ProductCode != "wowf" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := selectDiscoveredClientWindow(context.Background(), directory, 0, []desktop.WindowIdentity{other, window}); err == nil {
+		t.Fatal("same installation merged process identity")
+	}
+	window.Executable = filepath.Join(directory, "WowB.exe")
+	if _, err := selectDiscoveredClientWindow(context.Background(), directory, 20, []desktop.WindowIdentity{window}); err == nil {
+		t.Fatal("wrong formal executable accepted")
+	}
+}

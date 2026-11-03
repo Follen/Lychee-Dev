@@ -93,6 +93,9 @@ func selectDiscoveredClientWindow(ctx context.Context, directory string, pid uin
 				return ClientWindow{}, err
 			}
 		}
+		if client.ProductCode == "wowf" && !strings.EqualFold(filepath.Base(executable), "Wow.exe") {
+			return ClientWindow{}, errors.New("live.window_executable_mismatch")
+		}
 		if result.Window.Handle != 0 {
 			return ClientWindow{}, errors.New("live.window_ambiguous")
 		}
@@ -125,16 +128,19 @@ func ConfirmClientWindow(ctx context.Context, expected ClientWindow) error {
 	if err := desktop.ConfirmWindow(ctx, expected.Window); err != nil {
 		return err
 	}
-	client, err := records.InspectClientInstallation(ctx, expected.Client.Directory)
+	client, err := records.InspectRetainedClientInstallation(ctx, expected.Client)
 	if err != nil {
 		return err
 	}
-	if client.Directory != expected.Client.Directory || client.Product != expected.Client.Product || client.FullBuild != expected.Client.FullBuild || client.Interface != expected.Client.Interface {
+	if client.Directory != expected.Client.Directory || client.Product != expected.Client.Product || client.ProductCode != expected.Client.ProductCode || expected.Client.CatalogProduct != "" && client.CatalogProduct != expected.Client.CatalogProduct || client.FullBuild != expected.Client.FullBuild || client.Interface != expected.Client.Interface {
 		return errors.New("live.window_client_changed")
 	}
 	executable, err := windowExecutable(expected.Window)
 	if err != nil {
 		return err
+	}
+	if client.ProductCode == "wowf" && !strings.EqualFold(filepath.Base(executable), "Wow.exe") {
+		return errors.New("live.window_executable_mismatch")
 	}
 	if !strings.EqualFold(filepath.Dir(executable), client.Directory) {
 		return errors.New("live.window_installation_mismatch")

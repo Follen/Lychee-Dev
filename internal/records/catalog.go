@@ -16,8 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/follenfang/lycheedev/internal/selection"
 )
 
 var (
@@ -107,26 +105,20 @@ func ResolveLocalBuild(ctx context.Context, root, product, fullBuild string) (Bu
 		found = true
 	}
 	if !found {
-		// A verified client flavor can use a different CASC catalog slot.
-		// Keep the raw row/config identity intact and only permit the explicit
-		// baseline mapping for its exact build series, never a folder guess.
-		for _, baseline := range selection.VerifiedClientBaselines() {
-			if baseline.ProductCode == product && baseline.DataSlot != "" && baseline.DataSlot != product && strings.HasPrefix(fullBuild, baseline.BuildSeries+".") {
-				slots := append([]string{baseline.DataSlot}, baseline.LocalDataSlots...)
-				matched := ""
-				for _, row := range rows {
-					for _, slot := range slots {
-						if row.Active && row.Product == slot && row.FullBuild == fullBuild {
-							if matched != "" {
-								return BuildMetadata{}, ErrBuildAmbiguous
-							}
-							matched = slot
-						}
+		// Historical family-only Forever pins used wow_forever. Preserve that
+		// mapping solely for reading their original CASC identity.
+		if product == "wow_forever" && strings.HasPrefix(fullBuild, "1.60.1.") {
+			matched := ""
+			for _, row := range rows {
+				if row.Active && (row.Product == "wow_classic_beta" || row.Product == "wow_cn_beta") && row.FullBuild == fullBuild {
+					if matched != "" {
+						return BuildMetadata{}, ErrBuildAmbiguous
 					}
+					matched = row.Product
 				}
-				if matched != "" {
-					return ResolveLocalBuild(ctx, root, matched, fullBuild)
-				}
+			}
+			if matched != "" {
+				return ResolveLocalBuild(ctx, root, matched, fullBuild)
 			}
 		}
 		return result, ErrBuildUnavailable

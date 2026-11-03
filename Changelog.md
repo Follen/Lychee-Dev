@@ -4,6 +4,17 @@
 
 ## 未发布
 
+- SQL 直接改用 DuckDB 2.0.0，删除旧解析器和执行器；采用原生 `$name` 参数、函数、类型及 EXPLAIN，无兼容翻译、引擎开关或回退。DB2/Hotfix 保留固定来源与覆盖状态，简单 ID 等值/集合查询继续使用 reader 索引。
+- 修复SQL表列别名把普通字段重命名为ID时误用主键索引、导致等值/IN查询漏行的问题；此类查询由DuckDB按列绑定执行。
+- Windows 发行改用固定 GCC 14.2 和 CGO 静态链接；保留原生依赖许可，源码归档改为流式压缩。LuaLS 会话的可执行文件核验上限调整至 256 MiB，以覆盖静态链接后的 CLI。
+
+- 命令解析改用 Cobra，增加离线 `discover`、`schema` 和 `data table` 别名；命令目录仍由单一合同生成，退役无实际效果的 `--passive`、`--no-cache`。Skill 精简为正文和五份解释型参考，字段与恢复入口由 CLI 提供。
+- 新目标统一支持正式无限服 `forever/wowf`；历史 beta PIN、CAP 和连接保留原身份，读取和恢复与当前目标选择分别处理。
+- 修正现代 Hotfix NotPublic、DB2 copy/Common 读取和 Source 条件加载、环境选择、coverage 与分页身份；DBCD 固定五表及十二项 Hotfix 差分接入 CI。
+- 新增 Go Publish 的 CurseForge、NewBee 官方/Creator、网易 DD、小黑盒与 ModUs 主客户端/Creator 模块，包含平台输入合同、本地plan、资源、备份和原操作恢复；离线验收及独立复审完成，真实平台发布未执行。
+- Publish 区分成功读取原操作状态、明确拒绝和未知结果；已验证原请求返回原结果且不重放。备份支持跨卷，并解析目录联接检查输出位置；删除前保留平台引用保护。
+- CI 复用同次完整套件的真实测试终态与构建产物，修正 doctor 专项来源，删除生产 Source 中的测试索引分流。
+- 清理不可达函数和测试专用包装，Source规则测试改走生产事实转换入口；CI移除Linux作业中无用的Windows准备步骤，原生编译器准备改用已配置的固定Node。
 - 修复登录前角色信息尚未就绪时误报`actor_unavailable`：启动状态保持loading，沿用PLAYER_LOGIN重试；登录后的持续失败和其他启动错误仍正常报告。
 
 ## 3.2.7 — 2026-10-30

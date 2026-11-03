@@ -7,8 +7,11 @@ import { pathToFileURL } from 'node:url';
 import { goCaseResult, modulePath, options, parseGoEvents, repository, sha256 } from './baseline-common.mjs';
 import { luaRuntime, stageLuaLS } from './luals.mjs';
 import { verifyBinaryIdentity } from './release.mjs';
+import { nativeBuildEnv } from './native-toolchain.mjs';
 import { oracleCommit, oracleTests } from '../tests/data-regression/evidence-policy.mjs';
 
+export const dbcdCommit = 'c0aeb5f6be0e9fbffc8eadb4f8b9b4e36b42af7c';
+export const dbcdTables = ['CommonBoth', 'CommonOrigin', 'CommonDefault', 'FullFields', 'Numeric'];
 export const retailCommit = '31c7f7b9cc79e56c986b365c06a6afbcf3c9177b';
 export const foreverCommit = '4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069';
 const docsPrefix = 'Interface/AddOns/Blizzard_APIDocumentationGenerated';
@@ -18,6 +21,7 @@ export const unitDigests = {
 };
 const children = (name, names) => [name, ...names.map(child => `${name}/${child}`)];
 export const requiredCases = [
+  { package: 'internal/records', tests: children('TestPinnedDBCDHotfixDifferential', [7, 8, 9].flatMap(version => ['base', 'valid', 'deleted', 'then-valid'].map(state => `v${version}/${state}`))) },
   { package: 'internal/codebase', tests: ['TestRealLuaLSMapsAPIReferencesAndDefinitions', 'TestRealBrokerAcrossCLIProcesses'] },
   { package: 'internal/command', tests: ['TestPackagedSourceSemanticCLIWhenAvailable', ...children('TestRealBrokerCloseWaitsForProcessCleanup', ['reply', 'listener'])] },
   { package: 'internal/luals', tests: ['TestRealRuntimePublicInterfaces', 'TestRealRuntimeOversizedLuaKeepsOrdinaryCoverage', 'TestRealWorkspaceSessionWarmAndCancellation', 'TestRealSessionCancelsAnInflightReadinessRequest', 'TestRealSessionEnvironmentAndConfigIsolation', 'TestRealRuntimeGeneratedEnvironment', 'TestRealRuntimeFullRetailAPIReferences'] },
@@ -94,18 +98,47 @@ export async function prepareStage(stage, archivePath) {
   const binaryPath = 'native/windows-amd64/lycheedev.exe';
   const binary = join(stage, binaryPath);
   mkdirSync(dirname(binary), { recursive: true });
-  run('go', ['build', '-trimpath', '-buildvcs=true', '-o', binary, './cmd/lycheedev'], { ...process.env, CGO_ENABLED: '0' });
+  run('go', ['build', '-trimpath', '-ldflags=-buildid=', '-buildvcs=true', '-o', binary, './cmd/lycheedev'], nativeBuildEnv());
   const bytes = readFileSync(binary);
   manifest.binaries['windows-amd64'] = { path: binaryPath, bytes: bytes.length, sha256: sha256(bytes) };
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
   return binary;
 }
 
+export function prepareDBCD(out, options = {}) {
+  const source = options.source ?? checkout('wowdev/DBCD', dbcdCommit, join(out, 'DBCD'));
+  const dotnet = options.dotnet ?? run('where.exe', ['dotnet']).split(/\r?\n/)[0];
+  const version = run(dotnet, ['--version']);
+  if (version !== '10.0.100') throw new Error(`DBCD SDK drift: ${version}`);
+  run(dotnet, ['build', 'tests/dbcd/Oracle.csproj', '-c', 'Release', `-p:DBCDSource=${source}`, '-p:TargetFrameworks=net10.0']);
+  const oracle = join(repository, '.tmp/dbcd-oracle-bin/Release/net10.0/Oracle.dll');
+  const fixtures = join(out, 'dbcd-fixtures');
+  const adapters = join(out, 'dbcd-adapters');
+  mkdirSync(adapters);
+  const binaries = Object.fromEntries(['fixture', 'read', 'compare'].map(name => {
+    const binary = join(adapters, name + '.exe');
+    run('go', ['build', '-o', binary, './tests/dbcd/' + name]);
+    return [name, binary];
+  }));
+  run(binaries.fixture, ['-out', fixtures]);
+  const comparisons = [];
+  for (const table of dbcdTables) {
+    const expected = join(fixtures, table + '.oracle.json');
+    const actual = join(fixtures, table + '.go.json');
+    run(dotnet, [oracle, fixtures, table, '12.1.0.69875', expected]);
+    run(binaries.read, ['-db2', join(fixtures, table + '.db2'), '-dbd', join(fixtures, table + '.dbd'), '-build', '12.1.0.69875', '-output', actual]);
+    run(binaries.compare, [expected, actual]);
+    comparisons.push({ table, state: 'passed', oracleSHA256: sha256(readFileSync(expected)), goSHA256: sha256(readFileSync(actual)) });
+  }
+  writeFileSync(join(out, 'dbcd-inputs.json'), JSON.stringify({ sourceCommit: dbcdCommit, sdk: version, oracleSHA256: sha256(readFileSync(oracle)), comparisons }, null, 2) + '\n');
+  return { LYCHEEDEV_DOTNET: dotnet, LYCHEEDEV_DBCD_ORACLE: oracle, LYCHEEDEV_DBCD_FIXTURES: fixtures, LYCHEEDEV_REQUIRE_DBCD: '1' };
+}
+
 async function prepare(out) {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('CI integration preparation requires native Windows amd64');
   // New output only: no cleanup or replacement of prior evidence.
   mkdirSync(out);
-  const receipt = { state: 'preparing', toolkitCommit: run('git', ['rev-parse', 'HEAD']), toolkitTree: run('git', ['rev-parse', 'HEAD^{tree}']), luaRuntime, retailCommit, foreverCommit, oracleCommit };
+  const receipt = { state: 'preparing', toolkitCommit: run('git', ['rev-parse', 'HEAD']), toolkitTree: run('git', ['rev-parse', 'HEAD^{tree}']), luaRuntime, retailCommit, foreverCommit, oracleCommit, dbcdCommit };
   const receiptPath = join(out, 'inputs.json');
   writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx' });
   receipt.compilers = Object.fromEntries(['gcc', 'g++'].map(compiler => [compiler, run(compiler, ['--version'])]));
@@ -119,6 +152,7 @@ async function prepare(out) {
   const casc = checkout('ladislav-zezula/CascLib', oracleCommit, join(out, 'CascLib'));
   run(process.execPath, ['tests/data-regression/build-oracle.mjs', casc, join(out, 'oracle')]);
   const env = {
+    ...prepareDBCD(out),
     LYCHEEDEV_LUALS_TEST_RUNTIME: join(stage, 'payload/tool/luals'),
     LYCHEEDEV_SOURCE_PACKAGE_RELEASE_ROOT: stage,
     LYCHEEDEV_SOURCE_PACKAGE_BINARY: binary,

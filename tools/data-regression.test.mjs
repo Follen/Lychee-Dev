@@ -15,7 +15,7 @@ function benchmarks(names = benchmarkCases, units = metricUnits) {
 const benchmark = (events, extras = {}) => assessEvidence({mode: 'benchmark', exitCode: 0, text: jsonl(events), ...extras});
 const oracle = (events, extras = {}) => assessEvidence({mode: 'fixture-oracle', exitCode: 0, text: jsonl(events), ...extras});
 
-test('benchmark evidence requires all 20 exact cases, metrics and package pass', () => {
+test('benchmark evidence requires all 24 exact cases, metrics and package pass', () => {
   assert.equal(benchmark([...benchmarks(), packagePass]).state, 'verified');
   for (const events of [[], [packagePass], [...benchmarks()], [...benchmarks(benchmarkCases.slice(1)), packagePass],
     [...benchmarks(benchmarkCases.map(name => name.replace('single', 'renamed'))), packagePass],

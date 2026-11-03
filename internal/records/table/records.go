@@ -298,7 +298,8 @@ func (r *Records) Values(ctx context.Context, id uint32, column int, elements ui
 		}
 		return []uint64{uint64(id)}, nil
 	}
-	return r.columns.Values(ctx, row.Data, row.OriginID, column, elements)
+	// Common storage is keyed by logical row ID, including copy destinations.
+	return r.columns.Values(ctx, row.Data, row.ID, column, elements)
 }
 
 func (r *Records) read(ctx context.Context, offset, length int64) ([]byte, error) {

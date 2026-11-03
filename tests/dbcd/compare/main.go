@@ -1,5 +1,5 @@
 // Command compare performs lossless JSON comparison of independent reader
-// output. It intentionally ignores only the oracle's source-commit annotation.
+// output. It validates the pinned oracle before comparing its evidence.
 package main
 
 import (
@@ -23,12 +23,28 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	delete(a, "sourceCommit")
-	if err := equal("$", a, b); err != nil {
+	if err := compare(a, b); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("matched count=%v, complete ID digest, encrypted IDs and %d sampled rows\n", a["count"], len(a["rows"].([]any)))
+	fmt.Printf("matched count=%v, complete ID/field digests and blocks, encrypted IDs and %d sampled rows\n", a["count"], len(a["rows"].([]any)))
+}
+func compare(a, b map[string]any) error {
+	if a["sourceCommit"] != "c0aeb5f6be0e9fbffc8eadb4f8b9b4e36b42af7c" {
+		return fmt.Errorf("unexpected oracle sourceCommit: %v", a["sourceCommit"])
+	}
+	for _, key := range []string{"db2SHA256", "dbdSHA256", "fieldDigest", "fieldBlocks", "hotfixSHA256", "build"} {
+		if _, ok := a[key]; !ok {
+			return fmt.Errorf("oracle missing %s", key)
+		}
+	}
+	checked := make(map[string]any, len(a)-1)
+	for key, value := range a {
+		if key != "sourceCommit" {
+			checked[key] = value
+		}
+	}
+	return equal("$", checked, b)
 }
 func read(path string) (map[string]any, error) {
 	f, err := os.Open(path)

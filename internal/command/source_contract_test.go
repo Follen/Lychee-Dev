@@ -2,13 +2,17 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/codebase/environment"
 	"github.com/follenfang/lycheedev/internal/codebase/flow"
+	"github.com/follenfang/lycheedev/internal/selection"
+	"github.com/follenfang/lycheedev/internal/testkit"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
@@ -73,10 +77,55 @@ func TestDoctorIncludesPackagedLuaLSCheck(t *testing.T) {
 	}
 }
 
-func TestMatrixRejectsSingleClientEnvironment(t *testing.T) {
-	response, code := invoke(t, "source", "validate", "--matrix", "matrix.json", "--semantic", "--environment", "PIN-client", "--format=json")
-	if code != 2 || response.OK {
-		t.Fatalf("single environment silently applied to matrix: %+v (%d)", response, code)
+func TestMatrixUsesIndependentClientEnvironmentForThirdPartySource(t *testing.T) {
+	ctx := context.Background()
+	home := filepath.Join(t.TempDir(), "home")
+	if _, err := vault.Initialize(ctx, home); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join("..", "..", "tests", "fixtures", "codebase", "sources", "valid-retail")
+	api, err := indexGitFixture(t, ctx, home, "wow-ui-source", "retail", fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addon := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(addon, "Mainline"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string]string{"Addon.toc": "[Family]/Main.lua\nMissing.lua [AllowLoadGameType classic]\n", "Mainline/Main.lua": "C_AuctionHouse.GetItemSearchResultInfo(1)\n"} {
+		if err := os.WriteFile(filepath.Join(addon, name), []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source, err := indexGitFixture(t, ctx, home, "elvui", "main", addon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := codebase.MatrixConfig{Path: addon, Targets: []codebase.MatrixTarget{{ID: "addon", TOC: "Addon.toc", Source: "elvui", Product: "main", Ref: source.Pin.ExactCommit}}}
+	file := filepath.Join(t.TempDir(), "matrix.json")
+	write := func() {
+		t.Helper()
+		raw, err := json.Marshal(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	args := []string{"source", "validate", "--matrix", file, "--environment", api.Snapshot.ID, "--home", home, "--format=json"}
+	result, code := invoke(t, args...)
+	if code != 0 || !result.OK {
+		t.Fatalf("third-party matrix: %+v (%d)", result, code)
+	}
+	config.Targets[0].Source = "wow-ui-source"
+	config.Targets[0].Product = "classic"
+	config.Targets[0].Ref = api.Pin.ExactCommit
+	write()
+	result, code = invoke(t, args...)
+	if code != 2 || result.OK {
+		t.Fatalf("conflicting client matrix: %+v (%d)", result, code)
 	}
 }
 
@@ -128,7 +177,7 @@ func TestSourceResearchThroughCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := filepath.Join("..", "..", "tests", "fixtures", "codebase", "sources", "valid-retail")
-	indexed, err := codebase.IndexFixtureSource(context.Background(), workspace, "wow-ui-source", "retail", fixture)
+	indexed, err := indexGitFixture(t, context.Background(), workspace, "wow-ui-source", "retail", fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,4 +272,25 @@ func TestSourceResearchThroughCLI(t *testing.T) {
 	if retainedCode != 0 || !retained.OK || resultMap(t, retained)["resolvedCommit"] != indexed.Pin.ExactCommit {
 		t.Fatalf("source prune lost fixed fixture pin: %+v (%d)", retained, retainedCode)
 	}
+}
+
+type gitFixtureIndex struct {
+	Pin      selection.SourcePin
+	Snapshot selection.PinnedSet
+	Summary  codebase.IndexSummary
+}
+
+func indexGitFixture(t testing.TB, ctx context.Context, root, repository, product, sourcePath string) (gitFixtureIndex, error) {
+	t.Helper()
+	repo, err := codebase.LookupRepository(repository)
+	if err != nil {
+		return gitFixtureIndex{}, err
+	}
+	commit := testkit.GitSourceFixture(t, ctx, root, repository, repo.URL, sourcePath)
+	snapshot, err := codebase.SynchronizeSource(ctx, root, repository, product, commit)
+	if err != nil {
+		return gitFixtureIndex{}, err
+	}
+	summary, err := codebase.BuildSourceIndex(ctx, root, snapshot.ID)
+	return gitFixtureIndex{Pin: *snapshot.Source, Snapshot: snapshot, Summary: summary}, err
 }

@@ -53,12 +53,6 @@ func (b *InputBindings) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func primaryInputBindings() *InputBindings {
-	return &InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}
-}
-func fallbackInputBindings() *InputBindings {
-	return &InputBindings{Wake: "ALT-CTRL-F10", Reload: "ALT-CTRL-F9"}
-}
 func (s InputObservation) validBindings() bool {
 	if s.Bindings == nil || s.InputBlocked == nil {
 		return false

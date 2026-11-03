@@ -12,8 +12,8 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const release = readFileSync(join(repository, '.github/workflows/toolkit-release.yml'), 'utf8');
-const ci = readFileSync(join(repository, '.github/workflows/toolkit-ci.yml'), 'utf8');
+const release = readFileSync(join(repository, '.github/workflows/toolkit-release.yml'), 'utf8').replaceAll('\r\n', '\n');
+const ci = readFileSync(join(repository, '.github/workflows/toolkit-ci.yml'), 'utf8').replaceAll('\r\n', '\n');
 
 test('version-bound next publication checks latest before and after without moving it', () => {
   const before=release.indexOf('--phase before --view channel-before.json');
@@ -98,12 +98,12 @@ test('manual dry-run writes release identity outside the checkout', () => {
 
 test('ci gate: required windows jobs aggregate strictly and stay callable', () => {
   assert.match(ci, /workflow_call:/);
-  assert.deepEqual(Object.keys(jobsOf(ci)), ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race', 'ci-required']);
+  assert.deepEqual(Object.keys(jobsOf(ci)), ['changes', 'windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race', 'ci-required']);
   for (const job of ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race', 'ci-required']) {
     assert.match(ci, new RegExp(`^  ${job}:$`, 'm'), `missing required job ${job}`);
   }
   assert.doesNotMatch(ci, /^  cross-platform-contract:$/m);
-  for (const job of ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race']) {
+  for (const job of ['changes', 'windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race']) {
     assert.match(ci, new RegExp(`^      - ${job}$`, 'm'), `ci-required must need ${job}`);
   }
   assert.doesNotMatch(ci, /      - cross-platform-contract/);
@@ -111,16 +111,50 @@ test('ci gate: required windows jobs aggregate strictly and stay callable', () =
 
 test('every windows job normalizes TMP before any test runs', () => {
   for (const [name, text, skip] of [
-    ['toolkit-ci.yml', ci, ['ci-required']],
+    ['toolkit-ci.yml', ci, ['changes', 'windows-process', 'windows-addon', 'ci-required']],
     ['toolkit-release.yml', release, ['ci']],
   ]) {
     const jobs = jobsOf(text);
     for (const job of Object.keys(jobs)) {
       if ((skip ?? []).includes(job) || jobs[job].usesJob) continue;
-      const body = text.slice(text.indexOf(`  ${job}:\n`));
+      const body = text.slice(text.indexOf(`  ${job}:\n`)).split(/\n(?=  [a-z][a-z-]*:\n)/)[0];
+      if (!/runs-on: windows-/.test(body)) {
+        assert.doesNotMatch(body, /Normalize TMP to the long runner temp path/, `${job} has a Windows-only setup step`);
+        continue;
+      }
       assert.match(body, /Normalize TMP to the long runner temp path/, `job ${job} in ${name} lacks TMP normalization`);
     }
   }
+});
+
+test('native compiler preparation uses the configured Node runtime', () => {
+  for (const text of [ci, release]) {
+    for (const job of Object.keys(jobsOf(text))) {
+      const body = text.slice(text.indexOf(`  ${job}:\n`)).split(/\n(?=  [a-z][a-z-]*:\n)/)[0];
+      const prepare = body.indexOf('run: node tools/native-toolchain.mjs prepare');
+      if (prepare < 0) continue;
+      const setup = body.indexOf('uses: actions/setup-node@');
+      assert.ok(setup >= 0 && setup < prepare, `${job} runs native preparation before selecting Node`);
+    }
+  }
+});
+
+test('ordinary suite and Lua build run once, evidence consumers retain their required names', () => {
+  assert.equal((ci.match(/node tests\/tools\/build-lua\.mjs/g) ?? []).length, 1);
+  assert.equal((ci.match(/\$command = @\('test', '-json'/g) ?? []).length, 1);
+  for (const group of ['process', 'addon']) {
+    const body = ci.slice(ci.indexOf(`  windows-${group}:\n`)).split(/\n(?=  [a-z][a-z-]*:\n)/)[0];
+    assert.match(body, /needs: \[changes, windows-contract\]/);
+    assert.match(body, /name: windows-go-coverage/);
+    assert.ok(body.includes(`tools/ci-evidence.mjs --group ${group}`));
+    assert.doesNotMatch(body, /go test|build-lua/);
+  }
+  assert.match(ci, /tools\/ci-evidence.mjs --group doctor/);
+  assert.doesNotMatch(ci, /go test[^\n]*TestLiveDoctorUpgrade/);
+  assert.match(ci, /install-smoke\.mjs \$npmCli --bin/);
+  assert.match(ci, /go test -race -p=2 -parallel=4 -count=1 -timeout=0/);
+  assert.match(ci, /CHANGES_RESULT: \$\{\{ needs.changes.result \}\}/);
+  assert.match(ci, /check changes "\$CHANGES_RESULT"/);
 });
 
 test('PR CI prepares pinned integration inputs before its single measured suite and rejects missing passes', () => {
@@ -133,5 +167,6 @@ test('PR CI prepares pinned integration inputs before its single measured suite 
   assert.match(contract, /\$coverageExit = \$LASTEXITCODE/);
   assert.match(contract, /\$LASTEXITCODE -ne 0 -or \$coverageExit -ne 0 -or \$testExit -ne 0/);
   assert.match(contract, /name: windows-integration-inputs/);
+  assert.match(contract, /toolkit-integration-inputs\/dbcd-inputs\.json/);
   assert.match(contract, /required-integrations\.json/);
 });

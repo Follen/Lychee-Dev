@@ -2,6 +2,7 @@ package codebase
 
 import (
 	"context"
+	"fmt"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -22,12 +23,26 @@ func AssessAddon(ctx context.Context, root, snapshot string, input AddonInput, o
 		return result, err
 	}
 	b := OpenBrowser(s)
-	if err = b.EnsureIndex(ctx, pin); err != nil {
+	checkPin := pin
+	if pin.Repository != "wow-ui-source" && (len(options) == 0 || options[0].EnvironmentSnapshot == "") {
+		return result, fmt.Errorf("%w: codebase.client_environment_required", ErrInvalidQuery)
+	}
+	if len(options) > 0 && options[0].EnvironmentSnapshot != "" {
+		checkPin, _, err = researchEnvironmentPin(ctx, root, pin, options[0].EnvironmentSnapshot)
+		if err != nil {
+			return result, err
+		}
+	}
+	if err = b.EnsureIndex(ctx, checkPin); err != nil {
 		return result, err
 	}
-	result.Result, err = OpenChecker(s).CheckClosure(ctx, pin, input)
+	result.Result, err = OpenChecker(s).CheckClosure(ctx, checkPin, input)
 	if err != nil {
 		return result, err
+	}
+	result.Result.Source = pin
+	if checkPin != pin {
+		result.Result.Environment = &checkPin
 	}
 	if len(options) > 0 && options[0].Semantic != nil {
 		result.Result.Semantic, err = b.checkSemantic(ctx, pin, result.Result.Load, options[0].Semantic, options[0].EnvironmentSnapshot)

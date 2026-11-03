@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -142,22 +140,11 @@ func (c *snapshotCache) assetBytes(ctx context.Context, r sourceRecord) ([]byte,
 	}
 	var data []byte
 	var err error
-	if c.manifest.FixtureRoot != "" {
-		f, openErr := os.Open(filepath.Join(c.manifest.FixtureRoot, filepath.FromSlash(r.Path)))
-		if openErr != nil {
-			return nil, openErr
-		}
-		data, err = io.ReadAll(io.LimitReader(f, r.Bytes+1))
-		closeErr := f.Close()
-		if err != nil || closeErr != nil {
-			return nil, errors.Join(err, closeErr)
-		}
-	} else {
-		data, err = gitBytes(ctx, c.b.mirror(c.pin.Repository), int(r.Bytes)+1, "cat-file", "blob", r.Object)
-		if err != nil {
-			return nil, err
-		}
+	data, err = gitBytes(ctx, c.b.mirror(c.pin.Repository), int(r.Bytes)+1, "cat-file", "blob", r.Object)
+	if err != nil {
+		return nil, err
 	}
+
 	sum := sha256.Sum256(data)
 	if int64(len(data)) != r.Bytes || hex.EncodeToString(sum[:]) != r.Asset.ContentHash {
 		return nil, errors.New("codebase.asset_content_mismatch")

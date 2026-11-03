@@ -1,5 +1,5 @@
 Analyze/
-publish/
+/publish/
 *.zip
 *.log
 *.pyc

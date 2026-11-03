@@ -1,5 +1,5 @@
 // Naming/import constraints for the 2.0 toolkit (regression ARC-01/ARC-02).
-// 1. Go import graph: stdlib + go.mod modules only (no new dependencies), no
+// 1. Go import graph: stdlib + declared go.mod modules only, no
 //    legacy tool entrypoints, no reversed internal->cmd/tests edges, no os/user.
 // 2. os.UserHomeDir stays in the single declared home-resolution file.
 // 3. Shipped code (npm launcher, addon Lua) must not reference legacy homes,
@@ -17,7 +17,7 @@ const shippedRoots = [join('packages', 'npm', 'lycheedev', 'bin'), 'addon'];
 // Slash-joined to match the normalized relativePath used in comparisons.
 const homeResolutionFile = ['internal', 'command', 'entry.go'].join('/');
 const forbiddenImportPatterns = [
-  /spf13\/cobra/i, /\bcobra\b/, /automation(\.py)?/, /packages\/cli/, /Lychee Dev skill/, /python/i,
+  /automation(\.py)?/, /packages\/cli/, /Lychee Dev skill/, /python/i,
 ];
 const forbiddenShippedPatterns = [
   { pattern: /~?\/?\.wowdoc|wowdoc/i, why: 'legacy wowdoc entrypoint or home' },
@@ -86,7 +86,8 @@ function importsOf(text) {
 const violations = [];
 const modules = goModModules();
 const externalImports = new Set();
-for (const file of goFiles()) {
+const checkedGoFiles = goFiles();
+for (const file of checkedGoFiles) {
   const relativePath = relative(repository, file).replaceAll(sep, '/');
   const text = readFileSync(file, 'utf8');
   for (const imported of importsOf(text)) {
@@ -100,7 +101,10 @@ for (const file of goFiles()) {
     if (!isStandard && !isOwn && !allowedModule) {
       violations.push(`${relativePath}: import ${imported} is not stdlib and not declared in go.mod`);
     }
-    if ((relativePath.startsWith('internal/') || relativePath.startsWith('tools/')) &&
+    // The DBCD differential test and oracle intentionally share only their
+    // digest format. Production code and every other reverse edge stay barred.
+    const oracleTestDigest = relativePath.endsWith('_test.go') && imported === `${modulePath}/tests/dbcd/digest`;
+    if (!oracleTestDigest && (relativePath.startsWith('internal/') || relativePath.startsWith('tools/')) &&
         (imported === `${modulePath}/cmd` || imported.startsWith(`${modulePath}/cmd/`) ||
          imported === `${modulePath}/tests` || imported.startsWith(`${modulePath}/tests/`))) {
       violations.push(`${relativePath}: reversed dependency on ${imported}`);
@@ -127,13 +131,13 @@ const summary = {
     shipped: shippedRoots.map(root => `${root}/**/*.{mjs,js,lua}`),
     rules: [
       'Go imports: stdlib + go.mod modules + own module only',
-      'no legacy entrypoint/Python/Cobra imports',
-      'no internal/tools -> cmd or tests reverse edges',
+      'no legacy entrypoint/Python imports',
+      'no internal/tools -> cmd or tests reverse edges except test-only DBCD digest reuse',
       'os.UserHomeDir only in internal/command/entry.go',
       'shipped code: no legacy homes/entrypoints, no downloads, no shell:true',
     ],
   },
-  goFiles: goRoots.length,
+  goFiles: checkedGoFiles.length,
   modules,
   imports: [...externalImports].sort(),
   violations,

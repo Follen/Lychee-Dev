@@ -2,7 +2,7 @@
 // from silently turning a functional baseline into an empty successful run.
 const go = (id, title, pkg, ...tests) => ({ id, title, kind: 'go', package: pkg, tests });
 export const offlineCases = [
-  go('BASE-01', 'Command admission and passive discovery', 'internal/command', 'TestLiveCommandFlagAdmissionComesFromItsContract', 'TestPassiveDiscoveryParsesWithoutDowngradingToActive', 'TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess'),
+  go('BASE-01', 'Command admission and offline discovery', 'internal/command', 'TestLiveCommandFlagAdmissionComesFromItsContract', 'TestRetiredNoOpFlagsAreRejected', 'TestDiscoveryIsOfflineAndSchemasUseActualGrammar', 'TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess'),
   go('BASE-02', 'Pinned targets and concurrent selection', 'internal/selection', 'TestPinsAreStableDerivedAndIsolated', 'TestConcurrentResolutionsDoNotLeakPins'),
   go('BASE-03', 'Source checkout isolation and dirty detection', 'internal/codebase', 'TestWorktreeExactReuseAndDirtyDetection', 'TestWorktreeConcurrentSameCommit', 'TestPruneSourceWorktreesKeepsActiveLeaseAndPins'),
   go('BASE-04', 'Source semantic environment and cache identity', 'internal/codebase', 'TestSemanticDefinitionsReuseFixedEnvironment', 'TestSemanticCacheBindsRuntimeEnvironmentAndSource'),
@@ -21,7 +21,7 @@ export const offlineCases = [
   go('BASE-17', 'Workbench pages, native bindings, disabled cost and locale fixtures', 'tests/addon', 'TestWorkbenchLuaSuites', 'TestUnifiedTOCContract'),
   go('BASE-18', 'Evidence integrity and isolated workspaces', 'internal/vault', 'TestBlobRoundTripAndCorruption', 'TestTwoHomesWithUnicodeAndSpacePathsAreIsolated'),
   go('BASE-19', 'SQL partial coverage, effective hotfix provenance and JSONL completion', 'internal/records/navigatetest', 'TestSQLIdentityLookupPreservesPartialCoverage', 'TestExplicitEffectiveSQLKeepsBaseAndProvenance', 'TestStreamEmitsTypedFrameContract', 'TestStreamErrorFrameEndsStreamWithoutEnd'),
-  go('BASE-20', 'SQL aggregation and subquery semantics', 'internal/records/relational', 'TestGroupSubqueries', 'TestAggregateInputSubqueries', 'TestSubqueryCardinality'),
+  go('BASE-20', 'DuckDB joins, aggregation, subqueries and exact types', 'internal/records/sqlengine', 'TestDuckDBJoinsGroupingCTEsAndSubqueries', 'TestDuckDBTypesRemainExact', 'TestDuckDBNativeCancellationAndEarlyScanCleanup'),
   go('BASE-21', 'Update preflight, replacement and interrupted recovery', 'internal/delivery', 'TestUpdateManagedPlanReplaceRepeat', 'TestUpdatePreflightsAllBeforeFirstMutation', 'TestUpdateRecoversOldMovedCheckpoint', 'TestUpdateRecoversInterruptedOldFileDeletion', 'TestUpdateRejectsChangedAndContainedTargets'),
 ];
 // These are real-client checks, not satisfied by four-profile Lua fixtures.

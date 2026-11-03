@@ -121,7 +121,7 @@ func TestInspectSourceTargetPreservesIndexCoverageAndCapture(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", fixture)
+			indexed, err := indexGitFixture(t, ctx, store.Root(), "wow-ui-source", "retail", fixture)
 			if err != nil {
 				t.Fatal(err)
 			}

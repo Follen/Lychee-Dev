@@ -1,88 +1,52 @@
-# Data investigation
+# Data and asset interpretation
 
-Use this branch for static game records, SQL, Hotfixes and their preparation
-failures. Follow the decisions below; open only the reference needed now.
-The CLI owns product routing, archive recovery and verification.
+Static DB2 records, client Hotfixes and measured server behavior are distinct
+evidence. Fix product, full build, source/configuration, region, locale and
+schema identity before comparing records. A successful target resolution proves
+identity, not content availability. Historical pins retain their original
+product codes and configurations.
 
-## 1. Choose the evidence
+For a known ID, prefer the domain query that owns the relationship. For a name,
+inspect the relevant localized schema and resolve candidates by related records
+and the requested context; the first same-name match is not necessarily the
+requested entity. Query the tables needed for the claim. Use SQL when joins,
+filters or calculations make the question clearer, with named parameters and
+the installed CLI's actual dialect and resource limits.
 
-| Requested answer | Next step |
-| --- | --- |
-| Names, IDs, static coefficients or related records | Static lookup below; details in [data-tables.md](data-tables.md) |
-| Changed records or retained Hotfix pushes | [data-hotfix.md](data-hotfix.md) |
-| Values after applying a specified cache | Explicit `effective` query in [data-query-recipes.md](data-query-recipes.md) |
-| Actual server behavior or measured coefficients | Establish the static baseline, then [live-investigation.md](live-investigation.md) when live work is authorized |
+Keep signed/unsigned 64-bit IDs exact when processing JSON. A double-only client
+can round them. DBD field names, array indexes, copy records and the selected
+layout affect interpretation; do not assign meaning from column position alone.
+A readable logical row count is not the total count of a partially encrypted
+table. Missing keys, partitions and chunks remain coverage limits even if one
+requested row is available.
 
-Static rows, client Hotfixes and server measurements are distinct evidence.
-Do not silently substitute one for another or open a game for a static-only task.
+A completed query may still have partial source coverage or an intentional
+LIMIT. Negative claims require complete readable coverage of the exact filters.
+For SQL pagination retain stable unique ordering, filters, PIN and overlay.
+Use only the continuation mechanism exposed by that command; never invent a
+cursor flag. JSONL is usable only with its valid terminal frame and exit 0.
 
-## 2. Fix the identity once
+## Hotfixes and effective values
 
-Use an explicit snapshot first, otherwise the invoking project's matching data
-pin. Inspect it with `target show <pin>`; use `project status` if project context
-is unclear. Check product, full build, region, locale and definitions against the
-request. A conflicting project pin must not silently answer a different product:
-use a matching explicit pin when the requested scope is clear; ask only for a
-remaining identity choice. Do not overwrite the project lock for an investigation.
+A local cache and a remote provider have their own scope and history. A complete
+local-cache scan does not cover every server Hotfix. Preserve provider, push
+identity, raw status, parent Data PIN and capture/checkpoint. Continue the
+archived source rather than rereading a changing cache for later pages.
 
-No matching pin? Read [data-targets.md](data-targets.md). `target list` lists saved
-names, not supported products. Use the exact product from `target available` or
-command help, checking that its mapping matches the requested product.
-For Forever / 无限服, follow the [formal product identity](../SKILL.md#forever-product-vocabulary):
-`forever` uses `wowf`; the retired beta targets do not answer a new formal-product
-request. Folder names and conversation language do not establish identity.
-Choose the requested local installation or CDN source, then retain that source
-and pin throughout the query. Different delivery configurations require separate,
-labeled pins; they are not interchangeable evidence.
-For local resolution, constrain the game root/client path with the requested
-product; use returned candidates only when selection remains ambiguous.
+Applying an overlay is explicit. Keep base and effective results labeled, bind
+the Hotfix capture to the compatible product/build/table, and preserve source
+coverage through the overlay. Provider time limits and empty partial searches
+cannot prove that no change exists. A row may be static, overlaid or measured;
+state which supports the answer.
 
-## 3. Query the smallest useful scope
+## Assets
 
-Decide what would settle the requested claim before expanding the query. One
-verified record or relationship can answer an ID-specific question; a negative
-claim needs complete readable coverage of its exact filters. Prepare only the
-tables needed for that claim, rather than exporting a whole build as a precaution.
+A listfile name is a discovery candidate; resolve file identity against the
+selected build before export. Keep raw bytes separate from decoded image,
+selected mip/face/layer, transformed media and bounded demux output. Some formats
+have multiple meaningful variants; choose the requested variant explicitly.
 
-- Verified ID: prefer the domain command that owns the needed relationship;
-  otherwise inspect table schema and query the ID or foreign key.
-- Business name only: inspect the relevant name table schema, search its actual
-  localized field with an explicit limit, then resolve candidates by relationships
-  and class/rank/context. Do not pick the first matching name or ask the user to
-  supply a table/ID the toolkit can discover. If evidence leaves multiple valid
-  interpretations, present the remaining choices.
-- Multiple tables, filtering or calculation: inspect the schemas and use SQL
-  with named parameters. Read [data-tables.md](data-tables.md) for mechanics and
-  [data-query-recipes.md](data-query-recipes.md) for parameter/overlay examples.
-
-Use installed `describe --format json` or help for exact commands and flags.
-If the installed CLI lacks a documented capability, report that version mismatch;
-do not claim source-only changes are installed or invent a replacement flag.
-
-## 4. Decide whether the evidence answers the question
-
-Read structured errors and coverage, not just exit status. Retain the snapshot,
-source, record IDs, filters and capture IDs with the conclusion.
-
-| Result | Decision |
-| --- | --- |
-| Complete for the requested scope | Answer within that scope; SQL LIMIT and a single record do not prove whole-table coverage |
-| More pages/truncated | Use a returned cursor with unchanged pin/source/filters; search without a cursor needs the bounded alternative below |
-| Missing keys/partitions or partial result | Use readable evidence with the limitation; empty partial results cannot establish absence |
-| Failure/deadline | [data-recovery.md](data-recovery.md); correct the cause or stop the affected branch after bounded retry |
-
-For JSONL, require a legal end frame and exit 0, then inspect coverage separately.
-Keep query completion, source readability and output truncation separate: a
-complete bounded query can still use a partial table or intentionally return
-only its SQL LIMIT. Retain the captures needed to reproduce the finding, not
-just a successful exit code.
-`db2 search` and `foreign-key` have no cursor: narrow to the requested scope,
-increase the limit within documented bounds, or use ordered SQL pagination.
-Do not invent `--after-id` for those verbs. With SQL, retain a stable unique order
-and filters across pages; use the last ID as a parameter for keyset continuation.
-For Hotfix continuation, retain the archived source/checkpoint rather than reread
-a mutable cache. A healthy workspace or successful target resolution does not
-prove that the requested content is available.
-
-Finish with the finding, fixed provenance and unresolved scope. Static evidence
-can be a completed baseline while server-side fitting remains unverified.
+Return the generated artifact with its manifest, fixed provenance and hashes.
+A capture verifies archived bytes, not the perpetual existence of an external
+output file. Preserve `partial`, omitted streams/frames and truncation in an
+export manifest; successful file publication does not make partial media whole.

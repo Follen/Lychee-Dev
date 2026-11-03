@@ -13,7 +13,6 @@ func hideProcess(command *exec.Cmd) { command.SysProcAttr = &syscall.SysProcAttr
 
 // A job with kill-on-close also owns workers spawned by public --check.
 // Attaching is mandatory: failing closed avoids leaving an unowned child.
-func guardProcess(command *exec.Cmd) (func(), error) { return guardProcessPolicy(command, false) }
 func guardProcessPolicy(command *exec.Cmd, broker bool) (func(), error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {

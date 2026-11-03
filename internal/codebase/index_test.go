@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -22,28 +21,6 @@ func TestIndexRetainsSyntaxDiagnostics(t *testing.T) {
 	result, err := b.Search(context.Background(), "PIN-TEST", pin, SearchQuery{Text: "missing", Limit: 10})
 	if err != nil || result.Complete || result.Coverage.Complete || len(result.Results) != 0 {
 		t.Fatalf("%+v %v", result, err)
-	}
-}
-
-func TestFixtureIndexRejectsChangedContentAtSamePath(t *testing.T) {
-	b, seed := sourceFixture(t)
-	root := t.TempDir()
-	name := filepath.Join(root, "Addon.lua")
-	if err := os.WriteFile(name, []byte("function One() end\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	pin, err := FixtureSourcePin(seed.Repository, seed.Product, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.IndexFixture(context.Background(), pin, root); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(name, []byte("function Two() end\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.IndexFixture(context.Background(), pin, root); err == nil || !strings.Contains(err.Error(), "fixture_changed") {
-		t.Fatalf("stale fixture map reused: %v", err)
 	}
 }
 

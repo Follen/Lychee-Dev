@@ -21,9 +21,6 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 	if limit < 1 || limit > 10000 {
 		return nil, false, errors.New("codebase.body_search_budget")
 	}
-	if c.manifest.FixtureRoot != "" {
-		return c.fixtureBodyCandidates(ctx, text, topic, limit)
-	}
 	if err := c.loadPaths(ctx); err != nil {
 		return nil, false, err
 	}
@@ -91,31 +88,6 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 		return nil, cut, err
 	}
 	return candidates, cut, nil
-}
-
-func (c *snapshotCache) fixtureBodyCandidates(ctx context.Context, text, topic string, limit int) ([]searchCandidate, bool, error) {
-	rows := []searchCandidate{}
-	cut := false
-	err := c.scanSelected(ctx, func(e recordOffset) bool { return e.Kind == "document" && bodyTopicPath(topic, e.Path) }, func(r sourceRecord) error {
-		if r.Kind != "document" || !bodyTopicPath(topic, r.Path) {
-			return nil
-		}
-		data, _, err := c.document(ctx, r.Path)
-		if err != nil {
-			return err
-		}
-		for i, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(strings.ToLower(line), strings.ToLower(text)) {
-				if len(rows) >= limit {
-					cut = true
-					return nil
-				}
-				rows = append(rows, searchCandidate{symbol: SymbolMatch{Kind: "body", Name: text, Path: r.Path, Line: i + 1, EndLine: i + 1, Signature: line, Confidence: "exact"}, matched: "body_text", rank: 60})
-			}
-		}
-		return nil
-	}, recordLookupKey{recordKind, "document"})
-	return rows, cut, err
 }
 
 func bodyTopicPath(topic, name string) bool {

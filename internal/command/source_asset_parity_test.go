@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/testkit"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -19,7 +18,7 @@ func TestSourceQueryModesThroughCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := filepath.Join("..", "..", "tests", "fixtures", "codebase", "sources", "valid-retail")
-	indexed, err := codebase.IndexFixtureSource(context.Background(), workspace, "wow-ui-source", "retail", fixture)
+	indexed, err := indexGitFixture(t, context.Background(), workspace, "wow-ui-source", "retail", fixture)
 	if err != nil {
 		t.Fatal(err)
 	}

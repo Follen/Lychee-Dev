@@ -31,7 +31,7 @@ func TestOversizedLuaDocumentDoesNotBlockOtherSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", root)
+	indexed, err := indexGitFixture(t, ctx, store.Root(), "wow-ui-source", "retail", root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestLuaDocumentAbovePreviousLimitIsIndexed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", root)
+	indexed, err := indexGitFixture(t, ctx, store.Root(), "wow-ui-source", "retail", root)
 	if err != nil {
 		t.Fatal(err)
 	}

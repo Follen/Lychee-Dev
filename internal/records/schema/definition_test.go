@@ -133,3 +133,34 @@ func FuzzDefinition(f *testing.F) {
 		}
 	})
 }
+func TestLayoutSelectionPolicyMatrix(t *testing.T) {
+	ctx := context.Background()
+	doc, err := schema.Parse(ctx, []byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, build, layout, match string
+		fields                     int
+		missing                    bool
+	}{
+		{"consistent", "12.1.0.69875", "12345678", "layout", 3, false},
+		{"conflicting-build", "12.1.0.69875", "AABBCCDD", "layout", 5, false},
+		{"build-only", "12.1.0.69875", "", "build", 3, false},
+		{"layout-only", "99.1.0.1", "AABBCCDD", "layout", 5, false},
+		{"unknown-layout-never-falls-back", "12.1.0.69875", "DEADBEEF", "", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := doc.Select(ctx, tc.build, tc.layout)
+			if tc.missing {
+				if !errors.Is(err, schema.ErrMissing) {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err != nil || got.Match != tc.match || len(got.Fields) != tc.fields {
+				t.Fatalf("%+v %v", got, err)
+			}
+		})
+	}
+}

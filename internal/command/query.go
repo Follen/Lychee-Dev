@@ -5,6 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"unicode/utf8"
+
 	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/codebase/environment"
 	"github.com/follenfang/lycheedev/internal/codebase/flow"
@@ -13,23 +19,12 @@ import (
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/archive"
 	"github.com/follenfang/lycheedev/internal/records/container"
-	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/schema"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 	"github.com/follenfang/lycheedev/internal/records/texture"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
-	"unicode/utf8"
 )
-
-type QueryLocation struct {
-	Offset int `json:"offset"`
-	Line   int `json:"line"`
-	Column int `json:"column"`
-}
 
 // errDoctorUnhealthy reports that doctor found at least one check with error
 // status. The checks themselves stay in the result; the sentinel only pins the
@@ -158,13 +153,14 @@ func queryFault(err error) (int, string, bool) {
 		{records.ErrHotfixWagoProtocol, 4, "records.hotfix_wago_protocol"},
 		{records.ErrHotfixWagoHTTP, 5, "records.hotfix_wago_http"},
 		{records.ErrExportEncoding, 4, "records.export_encoding"},
-		{relational.ErrSyntax, 2, "query.invalid_syntax"},
-		{relational.ErrBinding, 2, "query.unresolved_binding"},
-		{relational.ErrUnsupported, 3, "query.unsupported_expression"},
-		{relational.ErrBudget, 3, "query.budget_exceeded"},
-		{relational.ErrType, 4, "query.type_mismatch"},
-		{relational.ErrNumericRange, 4, "query.numeric_range"},
-		{relational.ErrCardinality, 4, "query.invalid_cardinality"},
+		{sqlengine.ErrSyntax, 2, "query.invalid_syntax"},
+		{sqlengine.ErrReadOnly, 2, "query.read_only_required"},
+		{sqlengine.ErrBinding, 2, "query.unresolved_binding"},
+		{sqlengine.ErrUnsupported, 3, "query.unsupported_expression"},
+		{sqlengine.ErrBudget, 3, "query.budget_exceeded"},
+		{sqlengine.ErrType, 4, "query.type_mismatch"},
+		{sqlengine.ErrNumericRange, 4, "query.numeric_range"},
+		{sqlengine.ErrCardinality, 4, "query.invalid_cardinality"},
 	} {
 		if errors.Is(err, entry.cause) {
 			return entry.exit, entry.code, true

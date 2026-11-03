@@ -77,9 +77,8 @@ function checkInvocation(file, invocation) {
   if (tokens.length === 1 && !contracts.has(tokens[0])) return;
   let path = tokens[0];
   let consumed = 1;
-  // Prefer the longest matching command path (3-word rows like
-  // "data decor list" have no 2-word contract for their prefix).
-  for (const depth of [3, 2]) {
+  // Platform/channel resources can have more than three words.
+  for (let depth = tokens.length; depth >= 2; depth--) {
     if (tokens.length >= depth && contracts.has(tokens.slice(0, depth).join(' '))) {
       path = tokens.slice(0, depth).join(' ');
       consumed = depth;

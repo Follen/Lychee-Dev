@@ -6,6 +6,15 @@
 
 当前开发环境为 Windows amd64、Git、Go 1.27.1、Node.js 22.14.0 或以上。Go toolchain 以 `go.mod` 为准，CI 的 Node/npm 版本以 workflow 为准。
 
+DuckDB通过CGO静态链接。先准备[固定的GCC14.2](../release/tools/mingw.json)，再为当前PowerShell设置编译器；脚本下载时核对SHA256，不修改系统工具链。GCC16的TLS ABI与当前上游静态库不匹配，不用于该版本构建。
+
+```powershell
+node tools/native-toolchain.mjs prepare
+$env:CGO_ENABLED = '1'
+$env:CC = '"' + (Resolve-Path '.tmp/toolchains/mingw64/bin/gcc.exe').Path + '"'
+$env:CXX = '"' + (Resolve-Path '.tmp/toolchains/mingw64/bin/g++.exe').Path + '"'
+```
+
 ```powershell
 go build -o .tmp/lycheedev.exe ./cmd/lycheedev
 ./.tmp/lycheedev.exe describe --format json
@@ -38,7 +47,6 @@ PR 的 Windows contract 作业通过 `tools/ci-inputs.mjs prepare` 准备公开�
 ```powershell
 node tools/version.mjs --check
 node tools/skill-contract.mjs
-node tools/skill-commands.mjs --check
 node --test tools/*.test.mjs
 node --test packages/npm/lycheedev/test/launcher.test.mjs
 ```
@@ -87,6 +95,8 @@ stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `d
 `release/npm-channel.json` 固定发行渠道；3.2.7 沿用 `latest`。`latest` 渠道在发布后核验目标版本；`next` 渠道可用 `preserveLatest` 指定需要保持的正式版本。后续改变渠道仍须有用户明确授权。
 
 发布使用 `.github/workflows/toolkit-release.yml`：固定干净提交，取得所需 CI 结果，校验许可和源码，构建 Windows 包及 corresponding source，完成重建比较、摘要封存和隔离安装；随后 OIDC 发布、回读 registry，再创建 GitHub Release。
+
+CI各Go构建作业通过`native-toolchain.mjs prepare`写入本次环境；发行脚本校验固定编译器并强制CGO=1。`verify-cgo`保留既有作业名，现验证系统PATH下的原生启动及真实SQL、CSV、Hotfix和资源解码，不再接受`--cgo zero/default`。发行源码包含vendored Go依赖及其官方静态库和provenance；离线重建复用这些固定库，不等于重新编译DuckDB C++源码。构建去除含本地库搜索路径的Go链接build ID，VCS身份和产物SHA256继续核验。对应源码归档逐文件流式压缩，避免把全部原生库复制到内存；GCC仍作为单独固定的构建工具准备。
 
 组装阶段用已固定的 LuaLS runtime 运行九项真实 runtime、Source、跨 CLI broker 与安装包语义测试，包括受控关闭后的进程退出和重新查询；任一缺失、跳过或失败都阻止后续发布。registry 回读分别检查包 integrity 和 provenance 元数据，registry signatures 不能代替 provenance；元数据存在检查不声称完成其密码学验证。
 

@@ -64,7 +64,7 @@ func TestLSPPumpAnswersRequestsWhileIdle(t *testing.T) {
 		reply <- e
 	}()
 	var result json.RawMessage
-	if err = c.request("textDocument/definition", map[string]any{}, &result); err != nil {
+	if err = c.requestContext(c.ctx, "textDocument/definition", map[string]any{}, &result); err != nil {
 		t.Fatal(err)
 	}
 	if err = <-reply; err != nil {

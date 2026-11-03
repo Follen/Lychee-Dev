@@ -33,7 +33,7 @@ func ResolveSelectionFile(ctx context.Context, root, path string) (PinnedSet, er
 		return PinnedSet{}, errors.New("selection.trailing_spec_data")
 	}
 	return vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (PinnedSet, error) {
-		return OpenPinner(m).PinSelection(ctx, spec)
+		return OpenPinner(m).PinCurrentSelection(ctx, spec)
 	})
 }
 

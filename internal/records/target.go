@@ -105,8 +105,8 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 			return result, ErrPinnedBuildChanged
 		}
 		build = after
-		pin, err := pinner.PinSelection(ctx, selection.SelectionSpec{Parent: request.Parent, Data: &selection.DataPin{
-			Product: dataProduct, Region: request.Region, Language: request.Locale, FullBuild: client.FullBuild,
+		pin, err := pinner.PinCurrentSelection(ctx, selection.SelectionSpec{Parent: request.Parent, Data: &selection.DataPin{
+			Product: dataProduct, ProductCode: selection.NewDataProductCode(dataProduct), Region: request.Region, Language: request.Locale, FullBuild: client.FullBuild,
 			BuildConfig: build.Installed.BuildConfig, CDNConfig: build.Installed.CDNConfig, DefinitionCommit: commit,
 		}})
 		if err != nil {

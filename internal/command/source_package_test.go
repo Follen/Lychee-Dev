@@ -8,6 +8,7 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/evidence"
+	"github.com/follenfang/lycheedev/internal/testkit"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
@@ -25,9 +26,22 @@ func TestPackagedSourceSemanticCLIWhenAvailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := filepath.Join("..", "..", "tests", "fixtures", "codebase", "sources", "valid-retail")
-	indexed, err := codebase.IndexFixtureSource(ctx, workspace, "wow-ui-source", "retail", fixture)
+	repository, err := codebase.LookupRepository("wow-ui-source")
 	if err != nil {
 		t.Fatal(err)
+	}
+	commit := testkit.GitSourceFixture(t, ctx, workspace, repository.Key, repository.URL, fixture)
+	synced, code := invokeExecutable(t, binary, "source", "sync", "--source", repository.Key, "--product", "retail", "--ref", commit, "--home", workspace, "--format=json")
+	if code != 0 || !synced.OK {
+		t.Fatalf("installed source sync: %+v (%d)", synced, code)
+	}
+	snapshotID, ok := resultMap(t, synced)["id"].(string)
+	if !ok || snapshotID == "" {
+		t.Fatalf("installed source sync omitted pin: %+v", synced)
+	}
+	indexed, code := invokeExecutable(t, binary, "source", "index", "--snapshot", snapshotID, "--home", workspace, "--format=json")
+	if code != 0 || !indexed.OK {
+		t.Fatalf("installed source index: %+v (%d)", indexed, code)
 	}
 	addon := filepath.Join(t.TempDir(), "Demo")
 	if err := os.MkdirAll(addon, 0o755); err != nil {
@@ -39,7 +53,7 @@ func TestPackagedSourceSemanticCLIWhenAvailable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(addon, "Main.lua"), []byte("local info = C_AuctionHouse.GetRestrictedInfo('player')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	response, code := invokeExecutable(t, binary, "source", "validate", "--snapshot", indexed.Snapshot.ID, "--path", addon, "--toc", "Demo.toc", "--semantic", "--release", releaseRoot, "--home", workspace, "--format=json")
+	response, code := invokeExecutable(t, binary, "source", "validate", "--snapshot", snapshotID, "--path", addon, "--toc", "Demo.toc", "--semantic", "--release", releaseRoot, "--home", workspace, "--format=json")
 	if code != 0 || !response.OK || len(response.Captures) != 1 {
 		t.Fatalf("installed semantic CLI: %+v (%d)", response, code)
 	}
@@ -70,7 +84,7 @@ func TestPackagedSourceSemanticCLIWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("main semantic capture failed verification: %v", err)
 	}
-	query, queryCode := invokeExecutable(t, binary, "source", "query", "GetRestrictedInfo", "--snapshot", indexed.Snapshot.ID, "--topic", "api", "--home", workspace, "--format=json")
+	query, queryCode := invokeExecutable(t, binary, "source", "query", "GetRestrictedInfo", "--snapshot", snapshotID, "--topic", "api", "--home", workspace, "--format=json")
 	if queryCode != 0 || !query.OK {
 		t.Fatalf("installed query: %+v (%d)", query, queryCode)
 	}
@@ -91,7 +105,7 @@ func TestPackagedSourceSemanticCLIWhenAvailable(t *testing.T) {
 		t.Fatalf("installed query had no symbolId: %+v", query)
 	}
 	for _, route := range []string{"refs", "context"} {
-		research, researchCode := invokeExecutable(t, binary, "source", route, "--snapshot", indexed.Snapshot.ID, "--symbol-id", symbolID, "--home", workspace, "--format=json")
+		research, researchCode := invokeExecutable(t, binary, "source", route, "--snapshot", snapshotID, "--symbol-id", symbolID, "--home", workspace, "--format=json")
 		if researchCode != 0 || !research.OK {
 			t.Fatalf("installed %s: %+v (%d)", route, research, researchCode)
 		}

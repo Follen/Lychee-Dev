@@ -308,12 +308,8 @@ func TestSourceHashCancellationChecksEveryChunk(t *testing.T) {
 
 func TestEmptySnapshotSealsAndReopensOffsets(t *testing.T) {
 	b, seed := sourceFixture(t)
-	root := t.TempDir()
-	pin, err := FixtureSourcePin(seed.Repository, seed.Product, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = b.IndexFixture(context.Background(), pin, root); err != nil {
+	pin := testCommit(t, b, seed, map[string]string{}, "empty")
+	if _, err := b.IndexSource(context.Background(), pin); err != nil {
 		t.Fatal(err)
 	}
 	cache, _, err := b.openIndex(context.Background(), pin)

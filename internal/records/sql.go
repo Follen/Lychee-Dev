@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/follenfang/lycheedev/internal/evidence"
-	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/resource"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"strings"
@@ -30,7 +30,7 @@ type QueryResult struct {
 	Complete         bool                  `json:"complete"`
 	Partial          bool                  `json:"partial"`
 	Query            DataQuery             `json:"query"`
-	Result           relational.Result     `json:"result"`
+	Result           sqlengine.Result      `json:"result"`
 	Sources          []TableReading        `json:"sources"`
 }
 
@@ -51,26 +51,10 @@ type QueryReading struct {
 // Hotfix and CDN are never silently substituted for unavailable local data.
 func QueryData(ctx context.Context, root, snapshot string, files FileQuery, request DataQuery) (QueryReading, error) {
 	if files.ContentBytes < 1 || files.ContentBytes > 512<<20 {
-		return QueryReading{}, relational.ErrBudget
-	}
-	program, err := relational.Compile(ctx, request.SQL)
-	if err != nil {
-		return QueryReading{}, err
-	}
-	if len(program.SourceTables()) > 32 {
-		return QueryReading{}, relational.ErrBudget
+		return QueryReading{}, sqlengine.ErrBudget
 	}
 	if len(request.Hotfix) > 16 {
-		return QueryReading{}, relational.ErrBudget
-	}
-	names := program.NamedParameters()
-	if len(names) != len(request.Parameters) {
-		return QueryReading{}, relational.ErrBinding
-	}
-	for _, name := range names {
-		if _, ok := request.Parameters[name]; !ok {
-			return QueryReading{}, relational.ErrBinding
-		}
+		return QueryReading{}, sqlengine.ErrBudget
 	}
 	// Own a bounded JSON snapshot for execution and evidence. UseNumber keeps
 	// integer parameters exact across the serialization seam.
@@ -79,13 +63,18 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		return QueryReading{}, err
 	}
 	if len(encoded) > 1<<20 {
-		return QueryReading{}, relational.ErrBudget
+		return QueryReading{}, sqlengine.ErrBudget
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.UseNumber()
 	if err := decoder.Decode(&request); err != nil {
 		return QueryReading{}, err
 	}
+	program, err := sqlengine.Open(ctx, request.SQL, request.Parameters, sqlengine.Limits{MemoryBytes: 64 << 20, ResultBytes: 16 << 20, SourceRows: 10000000})
+	if err != nil {
+		return QueryReading{}, err
+	}
+	defer program.Close()
 	return vault.WriteMetadata(ctx, root, func(store *vault.Store, metadata *vault.Metadata) (QueryReading, error) {
 		pin, err := selection.OpenPinner(metadata).ReadPinnedSet(ctx, snapshot)
 		if err != nil {
@@ -104,9 +93,9 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		if admission != nil {
 			defer admission.Close()
 		}
-		// Reserve the executor's independently enforced memory limit inside
-		// the whole-query retained budget before any source is prepared.
-		if err := files.budget.Charge(resource.Cost{RetainedBytes: 64 << 20}); err != nil {
+		// Reserve DuckDB's buffer limit and the independently bounded Go result
+		// storage. Neither is presented as a process-wide RSS guarantee.
+		if err := files.budget.Charge(resource.Cost{RetainedBytes: (64 + 16) << 20}); err != nil {
 			return QueryReading{}, err
 		}
 		definitions := OpenDefinitions(store, metadata).WithBudget(files.budget)
@@ -117,7 +106,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		defer reader.Close()
 		files = reader.Query()
 		reading := QueryResult{Query: request, Sources: []TableReading{}, Complete: true}
-		resolve := func(ctx context.Context, use relational.TableUse) (relational.Source, error) {
+		resolve := func(ctx context.Context, use sqlengine.TableUse) (sqlengine.Source, error) {
 			started := time.Now()
 			if strings.EqualFold(use.Catalog, "meta") {
 				source, provenance, err := definitions.SemanticSource(ctx, pin.Data.DefinitionCommit, pin.Data.FullBuild, use.Name, files.Offline)
@@ -129,15 +118,15 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			}
 			effective := strings.EqualFold(use.Catalog, "effective")
 			if !strings.EqualFold(use.Catalog, "static") && !effective {
-				return relational.Source{}, relational.ErrUnsupported
+				return sqlengine.Source{}, sqlengine.ErrUnsupported
 			}
 			if len(reading.Sources) >= 32 {
-				return relational.Source{}, relational.ErrBudget
+				return sqlengine.Source{}, sqlengine.ErrBudget
 			}
 			bundle, err := definitions.Prepare(ctx, pin.Data.DefinitionCommit, use.Name, files.Offline)
 			reading.Timings.DefinitionsMS += float64(time.Since(started)) / float64(time.Millisecond)
 			if err != nil {
-				return relational.Source{}, err
+				return sqlengine.Source{}, err
 			}
 			query := files
 			query.FileDataID = bundle.Identity.DB2FileDataID
@@ -145,7 +134,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			view, provenance, err := reader.PrepareTable(ctx, *pin.Data, query, bundle)
 			reading.Timings.PreparationMS += float64(time.Since(started)) / float64(time.Millisecond)
 			if err != nil {
-				return relational.Source{}, err
+				return sqlengine.Source{}, err
 			}
 			reading.Timings.DecodedSourceBytes += provenance.File.Content.Bytes
 			if provenance.File.PartialContent != nil {
@@ -154,13 +143,13 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			}
 			source, err := TableSource(view, 4<<20)
 			if err != nil {
-				return relational.Source{}, err
+				return sqlengine.Source{}, err
 			}
 			if effective {
 				var overlay EffectiveTable
 				source, overlay, err = reader.EffectiveSource(ctx, store, metadata, *pin.Data, source, view.Definition(), bundle, request.Hotfix)
 				if err != nil {
-					return relational.Source{}, err
+					return sqlengine.Source{}, err
 				}
 				reading.EffectiveSources = append(reading.EffectiveSources, overlay)
 			}
@@ -168,7 +157,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			return source, nil
 		}
 		started := time.Now()
-		reading.Result, err = program.Execute(ctx, resolve, request.Parameters, relational.Limits{Work: 10000000, MemoryBytes: 64 << 20})
+		reading.Result, err = program.Execute(ctx, resolve)
 		reading.Timings.ExecutionMS = max(0, float64(time.Since(started))/float64(time.Millisecond)-reading.Timings.DefinitionsMS-reading.Timings.PreparationMS)
 		if err != nil {
 			return QueryReading{}, err
@@ -183,7 +172,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			return QueryReading{}, err
 		}
 		if len(raw) > 16<<20 {
-			return QueryReading{}, relational.ErrBudget
+			return QueryReading{}, sqlengine.ErrBudget
 		}
 		digest := sha256.Sum256(encoded)
 		capture, err := evidence.OpenArchive(store, metadata).CommitCapture(ctx, evidence.CaptureDraft{

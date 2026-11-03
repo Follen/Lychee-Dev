@@ -6,7 +6,7 @@ name: toolkit foundation
 # rename, and do not turn a required job into a matrix — matrix legs would
 # suffixed the check names and break the literal references):
 #
-#   windows-contract          format, vet, naming/import + skill/schema
+#   windows-contract          vet, naming/import + skill/schema
 #                             consistency, full Go suite with Lua 5.1 REQUIRED
 #   windows-process           real multi-CLI-process, OS-lock and same-window
 #                             exclusivity contracts, run natively on Windows
@@ -43,13 +43,33 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: windows-2025
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Classify exact changed paths and check development-document links
+        id: scope
+        shell: pwsh
+        run: |
+          node tools/ci-scope.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'change classification or document links failed' }
+
   windows-contract:
+    needs: changes
     runs-on: windows-2025
     defaults:
       run:
         shell: pwsh
     steps:
       - name: Normalize TMP to the long runner temp path
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         # Hosted windows runners expose an 8.3 short TEMP
         # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
         shell: bash
@@ -58,32 +78,50 @@ jobs:
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         with:
           go-version: '1.27.1'
           cache: true
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         with:
           node-version: '24.18.1'
+      - name: Prepare pinned Windows native compiler
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        run: node tools/native-toolchain.mjs prepare
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        with:
+          dotnet-version: '10.0.100'
       - name: Pin the Go release toolchain
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = go version
           if ($LASTEXITCODE -ne 0) { throw 'go version failed' }
           if ($version -notmatch '^go version go1\.27\.1 ') { throw "toolchain drift: $version" }
       - run: go mod verify
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
       - run: node tools/version.mjs --check
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
       - run: node tools/release.mjs verify-source-inputs
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
       - name: Node tool tests (version, release, tar, tgz, addon-package)
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           node --test tools/*.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'tools tests failed' }
       - name: Naming and import constraints
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           node tools/import-contract.mjs
           if ($LASTEXITCODE -ne 0) { throw 'import contract failed' }
       - run: go vet ./...
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
       - run: go test -p=1 -parallel=2 -timeout=0 -tags casc_oracle ./tests/data-regression/compare
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
       - name: Build checksum-pinned Lua 5.1.5
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $luaDirectory = Join-Path $env:RUNNER_TEMP 'toolkit-lua51'
@@ -92,18 +130,21 @@ jobs:
           "LYCHEEDEV_LUA51=$(Join-Path $luaDirectory 'lua.exe')" >> $env:GITHUB_ENV
           'LYCHEEDEV_REQUIRE_LUA51=1' >> $env:GITHUB_ENV
       - name: Preserve Windows Lua build identity
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-contract-lua51-report
           path: ${{ runner.temp }}/toolkit-lua51/build-report.json
           if-no-files-found: error
       - name: Prepare fixed public integration inputs for the same full suite
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         id: integration-inputs
         run: |
           $ErrorActionPreference = 'Stop'
           node tools/ci-inputs.mjs prepare --out (Join-Path $env:RUNNER_TEMP 'toolkit-integration-inputs')
           if ($LASTEXITCODE -ne 0) { throw 'pinned integration input preparation failed' }
       - name: Full Go suite with Lua 5.1 required (missing interpreter fails, never skips)
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         id: go-suite
         env:
           COVERAGE_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -155,117 +196,89 @@ jobs:
           node tools/ci-inputs.mjs verify --events $events --out (Join-Path $report 'required-integrations.json')
           if ($LASTEXITCODE -ne 0 -or $coverageExit -ne 0 -or $testExit -ne 0) { throw 'go test, coverage or required integration evidence failed' }
       - name: Preserve exact Go coverage evidence
-        if: ${{ !cancelled() && steps.go-suite.outcome != 'skipped' }}
+        if: ${{ needs.changes.outputs.scope != 'docs' && !cancelled() && steps.go-suite.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-go-coverage
           path: ${{ runner.temp }}/toolkit-go-coverage/
           if-no-files-found: error
       - name: Preserve pinned integration input identities
-        if: ${{ !cancelled() && steps.integration-inputs.outcome != 'skipped' }}
+        if: ${{ needs.changes.outputs.scope != 'docs' && !cancelled() && steps.integration-inputs.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-integration-inputs
           path: |
             ${{ runner.temp }}/toolkit-integration-inputs/inputs.json
             ${{ runner.temp }}/toolkit-integration-inputs/documentation-inputs.json
+            ${{ runner.temp }}/toolkit-integration-inputs/dbcd-inputs.json
             ${{ runner.temp }}/toolkit-integration-inputs/definitions/manifest.json
             ${{ runner.temp }}/toolkit-integration-inputs/oracle/oracle-build.json
             ${{ runner.temp }}/toolkit-integration-inputs/oracle/CascLib-LICENSE
             ${{ runner.temp }}/toolkit-integration-inputs/release/release.json
           if-no-files-found: error
-      - name: Native doctor volume-boundary evidence (disk fixture, PID zero)
-        if: ${{ !cancelled() }}
+      - name: Native doctor volume-boundary evidence from the full suite
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
-          # Keep skip/volume GUID/failure-stage evidence visible even if the
-          # full suite failed. This does not invoke process discovery or input.
-          go test -v -count=1 -timeout=0 ./internal/command -run '^TestLiveDoctorUpgrade(CreatesDefaultArchiveParent|DefaultArchiveAcrossVolumes|PreservesExplicitArchive)$'
-          if ($LASTEXITCODE -ne 0) { throw 'doctor volume-boundary contract failed' }
-      - name: Native release-shape build
+          node tools/ci-evidence.mjs --group doctor --directory (Join-Path $env:RUNNER_TEMP 'toolkit-go-coverage')
+          if ($LASTEXITCODE -ne 0) { throw 'doctor evidence failed' }
+      - name: Describe the prepared native CLI
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
-          $env:CGO_ENABLED = '0'
-          go build -buildvcs=true ./cmd/lycheedev
-          if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
-      - run: go run ./cmd/lycheedev describe --format json
+          & $env:LYCHEEDEV_SOURCE_PACKAGE_BINARY describe --format json
+          if ($LASTEXITCODE -ne 0) { throw 'describe failed' }
       - name: Skill / command-reference consistency (schema vs documented commands)
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
-          node tools/skill-contract.mjs
+          node tools/skill-contract.mjs --bin $env:LYCHEEDEV_SOURCE_PACKAGE_BINARY
           if ($LASTEXITCODE -ne 0) { throw 'skill contract failed' }
-          node tools/skill-commands.mjs --check
-          if ($LASTEXITCODE -ne 0) { throw 'generated skill reference is stale' }
 
   windows-process:
+    needs: [changes, windows-contract]
     runs-on: windows-2025
     defaults:
       run:
         shell: pwsh
     steps:
-      - name: Normalize TMP to the long runner temp path
-        # Hosted windows runners expose an 8.3 short TEMP
-        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: '1.27.1'
-          cache: true
-      - name: Real multi-process, OS-lock and same-window exclusivity contracts
-        # tests/process          two real native CLI processes race on one
-        #                        output; only one may publish
-        # internal/delivery      install/upgrade worker processes, killed
-        #                        process recovery, queue OS locks, junctions
-        # internal/vault         lease-based OS locks
-        # internal/selection     project lock contracts
-        # internal/live/journal  same-window exclusivity (window owner/run
-        #                        work leases across processes)
-        run: |
-          go test -count=1 -timeout=0 ./tests/process/... ./internal/delivery/... ./internal/vault/... ./internal/selection/... ./internal/live/journal/...
-          if ($LASTEXITCODE -ne 0) { throw 'multi-process contracts failed' }
-
-  windows-addon:
-    runs-on: windows-2025
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - name: Normalize TMP to the long runner temp path
-        # Hosted windows runners expose an 8.3 short TEMP
-        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: '1.27.1'
-          cache: true
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         with:
           node-version: '24.18.1'
-      - name: Build checksum-pinned Lua 5.1.5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        with:
+          name: windows-go-coverage
+          path: ${{ runner.temp }}/toolkit-go-coverage
+      - name: Verify actual multi-process and OS-lock execution from the full suite
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $luaDirectory = Join-Path $env:RUNNER_TEMP 'toolkit-lua51'
-          node tests/tools/build-lua.mjs $luaDirectory gcc
-          if ($LASTEXITCODE -ne 0) { throw 'Lua interpreter build failed' }
-          "LYCHEEDEV_LUA51=$(Join-Path $luaDirectory 'lua.exe')" >> $env:GITHUB_ENV
-          'LYCHEEDEV_REQUIRE_LUA51=1' >> $env:GITHUB_ENV
-      - name: Supported-client Lua matrix and retained Forever fixture
-        # LYCHEEDEV_LUA51 arrives through GITHUB_ENV from the build step.
-        env:
-          LYCHEEDEV_REQUIRE_LUA51: '1'
+          node tools/ci-evidence.mjs --group process --directory (Join-Path $env:RUNNER_TEMP 'toolkit-go-coverage')
+          if ($LASTEXITCODE -ne 0) { throw 'process evidence failed' }
+
+  windows-addon:
+    needs: [changes, windows-contract]
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        with:
+          node-version: '24.18.1'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        with:
+          name: windows-go-coverage
+          path: ${{ runner.temp }}/toolkit-go-coverage
+      - name: Verify Lua matrix, protocol and TOC execution from the full suite
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
-          go test -count=1 -timeout=0 ./tests/addon/... ./tests/protocol/...
-          if ($LASTEXITCODE -ne 0) { throw 'Lua client matrix failed' }
-      - name: TOC order, load lists and event catalog contracts
-        run: |
-          go test -count=1 -timeout=0 ./internal/codebase/
-          if ($LASTEXITCODE -ne 0) { throw 'codebase TOC contracts failed' }
+          node tools/ci-evidence.mjs --group addon --directory (Join-Path $env:RUNNER_TEMP 'toolkit-go-coverage')
+          if ($LASTEXITCODE -ne 0) { throw 'addon evidence failed' }
       - name: Addon release ZIP structure check (build + verify, "Lychee Dev/" root)
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $out = Join-Path $env:RUNNER_TEMP 'addon-zip'
@@ -274,6 +287,7 @@ jobs:
           "zip_directory=$out" >> $env:GITHUB_OUTPUT
         id: addon-zip
       - name: Preserve the addon release ZIP
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-addon-release-zip
@@ -281,12 +295,14 @@ jobs:
           if-no-files-found: error
 
   windows-package:
+    needs: changes
     runs-on: windows-2025
     defaults:
       run:
         shell: pwsh
     steps:
       - name: Normalize TMP to the long runner temp path
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         # Hosted windows runners expose an 8.3 short TEMP
         # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
         shell: bash
@@ -295,13 +311,19 @@ jobs:
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         with:
           go-version: '1.27.1'
           cache: true
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         with:
           node-version: '24.18.1'
+      - name: Prepare pinned Windows native compiler
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        run: node tools/native-toolchain.mjs prepare
       - name: Pin npm build tool
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           $ErrorActionPreference = 'Stop'
           npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
@@ -309,6 +331,7 @@ jobs:
           $actual = npm --version
           if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
       - name: Packaging license gate
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         # Same semantics as licenseGate in tools/release.mjs: the combined-work
         # license decision belongs to the project owner; packaging refuses to
         # proceed until packages/npm/lycheedev/LICENSE exists.
@@ -319,21 +342,24 @@ jobs:
             throw "license decision pending: $license is absent; the combined-work license decision belongs to the project owner (see THIRD_PARTY_NOTICES.md owner-decision section), and packaging refuses to proceed until the owner supplies LICENSE"
           }
       - name: Windows-native release exe build and identity check
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = Join-Path $env:RUNNER_TEMP 'lycheedev-release.exe'
-          $env:CGO_ENABLED = '0'
-          go build -trimpath -buildvcs=true -o $exe ./cmd/lycheedev
+          $env:CGO_ENABLED = '1'
+          go build -trimpath -ldflags=-buildid= -buildvcs=true -o $exe ./cmd/lycheedev
           if ($LASTEXITCODE -ne 0) { throw 'release exe build failed' }
           $version = & $exe version --format=json | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $version.ok) { throw 'release exe version command failed' }
           $commit = (git rev-parse HEAD).Trim()
           if ($version.result.commit -ne $commit) { throw "release exe commit $($version.result.commit) != HEAD $commit" }
       - name: Launcher contracts
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         run: |
           node --test packages/npm/lycheedev/test/launcher.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'launcher tests failed' }
       - name: Actual tgz and isolated addon-skill deployment without scripts
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         # install-smoke packs a real tgz, installs it into an isolated prefix
         # under a path containing spaces and Chinese characters with
         # --ignore-scripts, then runs the offline business smoke (version,
@@ -344,9 +370,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $npmDirectory = Split-Path (Get-Command npm.cmd).Source
           $npmCli = Join-Path $npmDirectory 'node_modules/npm/bin/npm-cli.js'
-          node packages/npm/lycheedev/test/install-smoke.mjs $npmCli
+          node packages/npm/lycheedev/test/install-smoke.mjs $npmCli --bin (Join-Path $env:RUNNER_TEMP 'lycheedev-release.exe')
           if ($LASTEXITCODE -ne 0) { throw 'isolated package installation failed' }
       - name: Preserve package smoke report
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-package-report
@@ -355,9 +382,11 @@ jobs:
 
   race:
     name: shared-state race detection
+    needs: changes
     runs-on: windows-2025
     steps:
       - name: Normalize TMP to the long runner temp path
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         # Hosted windows runners expose an 8.3 short TEMP
         # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
         shell: bash
@@ -366,16 +395,26 @@ jobs:
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
         with:
           go-version: '1.27.1'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        with:
+          node-version: '24.18.1'
+      - name: Prepare pinned Windows native compiler
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
+        run: node tools/native-toolchain.mjs prepare
       # Bound concurrency for filesystem-heavy managed installation and Native lifecycle tests.
       - run: go test -race -p=2 -parallel=4 -count=1 -timeout=0 ./...
+        if: ${{ needs.changes.outputs.scope != 'docs' }}
 
   ci-required:
     # §2/§3: this aggregation always runs and rejects every non-success result;
     # skipped or cancelled required jobs never count as passed.
     if: always()
     needs:
+      - changes
       - windows-contract
       - windows-process
       - windows-addon
@@ -395,6 +434,7 @@ jobs:
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Reject failures, skipped jobs and cancellation
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           WINDOWS_CONTRACT_RESULT: ${{ needs.windows-contract.result }}
           WINDOWS_PROCESS_RESULT: ${{ needs.windows-process.result }}
           WINDOWS_ADDON_RESULT: ${{ needs.windows-addon.result }}
@@ -409,6 +449,7 @@ jobs:
               status=1
             fi
           }
+          check changes "$CHANGES_RESULT"
           check windows-contract "$WINDOWS_CONTRACT_RESULT"
           check windows-process "$WINDOWS_PROCESS_RESULT"
           check windows-addon "$WINDOWS_ADDON_RESULT"

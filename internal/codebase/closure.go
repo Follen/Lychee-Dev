@@ -23,7 +23,3 @@ func (c *Checker) InspectAddon(ctx context.Context, input AddonInput) (LoadAsses
 	}
 	return addoncheck.InspectLoad(ctx, input, c.store, maxSourceBytes)
 }
-
-func InspectLocalLoad(ctx context.Context, input AddonInput) (LoadAssessment, error) {
-	return addoncheck.InspectLoad(ctx, input, nil, maxSourceBytes)
-}

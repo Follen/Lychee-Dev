@@ -128,22 +128,6 @@ func installationDestination(target string) (parent, destination string, err err
 	return parent, filepath.Join(parent, name), nil
 }
 
-// InstallationLease derives the scope and resource of the shared installation
-// lease for one addon or skill directory. Both values come from the resolved
-// parent, so every spelling of the same installation (8.3 short names on
-// runner TMP, symlinks, aliased discovery directories) contends for exactly
-// one OS lock. Installation, upgrade, removal and queue publication share this
-// identity; rebuilding it from a literal path silently creates a second lock
-// domain next to the canonical one.
-func InstallationLease(addonDirectory string) (scope, resource string, err error) {
-	parent, target, err := installationDestination(addonDirectory)
-	if err != nil {
-		return "", "", err
-	}
-	scope, resource = installationLeaseIdentity(parent, target)
-	return scope, resource, nil
-}
-
 // installationLeaseIdentity is the single definition of the installation lease
 // identity used by every holder of the same installation. The resource resolves
 // the full target so one installation has one lock under any spelling: an

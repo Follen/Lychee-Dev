@@ -7,5 +7,16 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(DBCDSource)/DBCD/DBCD.csproj" />
+    <AssemblyMetadata Include="DBCDSourceCommit" Value="c0aeb5f6be0e9fbffc8eadb4f8b9b4e36b42af7c" />
   </ItemGroup>
+  <Target Name="VerifyDBCDSource" BeforeTargets="PrepareForBuild">
+    <Exec Command="git -C &quot;$(DBCDSource)&quot; rev-parse HEAD" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="ActualDBCDCommit" />
+    </Exec>
+    <Error Condition="'$(ActualDBCDCommit)' != 'c0aeb5f6be0e9fbffc8eadb4f8b9b4e36b42af7c'" Text="DBCD checkout must be c0aeb5f6be0e9fbffc8eadb4f8b9b4e36b42af7c; got $(ActualDBCDCommit)" />
+    <Exec Command="git -C &quot;$(DBCDSource)&quot; status --porcelain --untracked-files=all" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="DBCDSourceChanges" />
+    </Exec>
+    <Error Condition="'$(DBCDSourceChanges)' != ''" Text="DBCD checkout contains modified or untracked inputs: $(DBCDSourceChanges)" />
+  </Target>
 </Project>

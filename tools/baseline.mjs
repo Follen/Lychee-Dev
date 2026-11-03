@@ -20,11 +20,11 @@ export async function main(argv = process.argv.slice(2)) {
   const report = createReport('offline', opts['--out'], [...offlineCases, ...liveCases, ...manualCases]);
   saveReport(report);
   console.log(`Baseline evidence: ${report.output}`);
-  async function check(id, title, command, args, inspect) {
+  async function check(id, title, command, args, inspect, { timeout } = {}) {
     const entry = { id, title, state: 'running' }; report.checks.push(entry); saveReport(report);
     console.log(`RUN   ${id} ${title}`);
     try {
-      const run = await runCommand(report.output, id, command, args, { env });
+      const run = await runCommand(report.output, id, command, args, { env, timeout });
       Object.assign(entry, { run, state: run.code === 0 && !run.error && !run.signal ? 'passed' : 'failed' });
       if (inspect) inspect(entry, readFileSync(run.stdout, 'utf8'));
       if (run.code !== 0 || run.error || run.signal) entry.state = 'failed';
@@ -43,7 +43,7 @@ export async function main(argv = process.argv.slice(2)) {
     report.cases = report.cases.map(c => c.kind === 'go' ? goCaseResult(c, evidence) : c);
     report.cases.push(goCaseResult({ id: 'LUALS', title: 'Real LuaLS LSP integration', package: 'internal/codebase', tests: ['TestRealLuaLSMapsAPIReferencesAndDefinitions'] }, evidence));
     if (entry.failed.length || [...evidence.packages.values()].includes('fail')) entry.state = 'failed';
-  });
+  }, { timeout: 0 });
   const nodeFiles = [
     ...readdirSync(join(repository, 'tools')).filter(f => f.endsWith('.test.mjs')).map(f => `tools/${f}`),
     ...readdirSync(join(repository, 'packages/npm/lycheedev/test')).filter(f => f.endsWith('.test.mjs')).map(f => `packages/npm/lycheedev/test/${f}`),
@@ -51,7 +51,6 @@ export async function main(argv = process.argv.slice(2)) {
   await check('NODE', 'Distribution, launcher and regression runner tests', process.execPath, ['--test', '--test-reporter=tap', ...nodeFiles], (entry, text) => Object.assign(entry, parseTAP(text)));
   await check('VERSION', 'Release version consistency', process.execPath, ['tools/version.mjs', '--check']);
   await check('SKILL', 'Skill and CLI command contract consistency', process.execPath, ['tools/skill-contract.mjs']);
-  await check('SKILL-GENERATED', 'Generated command reference matches the current CLI', process.execPath, ['tools/skill-commands.mjs', '--check']);
   const after = sourceIdentity(report.output);
   report.checks.push({ id: 'SOURCE', title: 'Source unchanged during the run', state: after.treeSha256 === report.source.treeSha256 ? 'passed' : 'failed', after });
   const required = [...report.checks, ...report.cases.filter(c => c.kind === 'go' || c.id === 'LUALS')];

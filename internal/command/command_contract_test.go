@@ -68,7 +68,7 @@ func TestHelpAndDescribeExposeTheImplementedContract(t *testing.T) {
 		t.Fatalf("resume help: code=%d response=%+v", code, resumeHelp)
 	}
 	resume := commandList(t, resultMap(t, resumeHelp))[0]
-	if got := stringList(t, resume["flags"]); len(got) != 5 || got[0] != "--home <root>" || got[1] != "--format text|json|jsonl" {
+	if got := stringList(t, resume["flags"]); len(got) != 4 || got[0] != "--home <root>" || got[1] != "--format text|json|jsonl" {
 		t.Fatalf("live resume flags = %#v", got)
 	}
 	if got := stringList(t, resume["arguments"]); len(got) != 1 || got[0] != "<operation-id>" {
@@ -88,7 +88,7 @@ func TestConnectAndInstanceContractsComeFromTheSameTable(t *testing.T) {
 	got := stringList(t, commands[0]["flags"])
 	want := []string{"--home <root>", "--format text|json|jsonl",
 		"--snapshot <pin>", "--character <name>", "--realm <realm>", "--pid <pid>",
-		"--installation <client>", "--session <session-id>", "--project <directory>", "--wait-seconds <1-600> (default 120)", "--no-cache"}
+		"--installation <client>", "--session <session-id>", "--project <directory>", "--wait-seconds <1-600> (default 120)"}
 	if len(got) != len(want) {
 		t.Fatalf("live connect flags = %#v", got)
 	}
@@ -105,7 +105,7 @@ func TestConnectAndInstanceContractsComeFromTheSameTable(t *testing.T) {
 	if len(instances) != 1 || instances[0]["path"] != "live instances" || instances[0]["mutates"] != false {
 		t.Fatalf("live instances definition: %#v", instances)
 	}
-	if got := stringList(t, instances[0]["flags"]); len(got) != 4 || got[2] != "--installation <client-or-game-root>" || got[3] != "--passive" {
+	if got := stringList(t, instances[0]["flags"]); len(got) != 3 || got[2] != "--installation <client-or-game-root>" {
 		t.Fatalf("live instances flags = %#v", got)
 	}
 	described, code := invoke(t, "describe", "--format=json")
@@ -233,7 +233,7 @@ func TestWorkspaceVerbContractsAreAdvertised(t *testing.T) {
 		t.Fatalf("target add definition: %#v", commands)
 	}
 	got := stringList(t, commands[0]["flags"])
-	want := map[string]bool{"--home <root>": false, "--format text|json|jsonl": false, "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)": false,
+	want := map[string]bool{"--home <root>": false, "--format text|json|jsonl": false, "--product <retail|classic|classic-era|titan|forever|anniversary>": false,
 		"--region <us|eu|cn|kr|tw>": false, "--locale <locale>": false, "--build <full-build>": false,
 		"--installation <client-directory>": false, "--remote": false, "--replace": false}
 	for _, flag := range got {

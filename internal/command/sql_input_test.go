@@ -9,9 +9,25 @@ import (
 	"testing"
 )
 
+func invokeSQL(t *testing.T, args ...string) (Envelope, int) {
+	t.Helper()
+	node, launcher := os.Getenv("LYCHEEDEV_QUERY_NODE"), os.Getenv("LYCHEEDEV_QUERY_LAUNCHER")
+	if node == "" && launcher == "" {
+		return invoke(t, args...)
+	}
+	if launcher == "" {
+		t.Fatal("installed SQL test requires LYCHEEDEV_QUERY_LAUNCHER")
+	}
+	t.Logf("using installed SQL launcher: %s", launcher)
+	if node == "" {
+		return invokeExecutable(t, launcher, args...)
+	}
+	return invokeExecutable(t, node, append([]string{launcher}, args...)...)
+}
+
 func TestSQLInputSelectionAndParameters(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "query.sql")
-	if err := os.WriteFile(file, []byte("SELECT ID FROM SpellName WHERE ID=:id"), 0600); err != nil {
+	if err := os.WriteFile(file, []byte("SELECT ID FROM SpellName WHERE ID=$id"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
@@ -25,7 +41,7 @@ func TestSQLInputSelectionAndParameters(t *testing.T) {
 			t.Fatalf("accepted invalid SQL source or binding %v: %+v (%d)", args, result, code)
 		}
 	}
-	opts, err := parseOptions([]string{"data", "sql", "--sql", "SELECT :id, :label, :enabled, :nil", "--param", "id=9007199254740993", "--param", "label=001", "--param", "enabled=true", "--param", "nil=null"})
+	opts, err := parseOptions([]string{"data", "sql", "--sql", "SELECT $id, $label, $enabled, $nil", "--param", "id=9007199254740993", "--param", "label=001", "--param", "enabled=true", "--param", "nil=null"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +58,7 @@ func TestSQLInputSelectionAndParameters(t *testing.T) {
 		t.Fatal(err)
 	}
 	query, err = readSelectedDataQuery(context.Background(), opts)
-	if err != nil || query.SQL != "SELECT ID FROM SpellName WHERE ID=:id" {
+	if err != nil || query.SQL != "SELECT ID FROM SpellName WHERE ID=$id" {
 		t.Fatalf("plain SQL file: %+v %v", query, err)
 	}
 }
@@ -53,8 +69,8 @@ func TestSQLCSVExportFromPinnedFixture(t *testing.T) {
 		rows:    [][]any{{1, "Hello, world"}, {2, "Second"}},
 	}})
 	output := filepath.Join(t.TempDir(), "query.csv")
-	args := []string{"data", "sql", "--sql", "SELECT ID, Name FROM TestNames WHERE ID=:id", "--param", "id=1", "--snapshot", pin, "--cdn", "--offline", "--encoding", "csv", "--output", output, "--home", workspace, "--format=json"}
-	result, code := invoke(t, args...)
+	args := []string{"data", "sql", "--sql", "SELECT ID, Name FROM TestNames WHERE ID=$id", "--param", "id=1", "--snapshot", pin, "--cdn", "--offline", "--encoding", "csv", "--output", output, "--home", workspace, "--format=json"}
+	result, code := invokeSQL(t, args...)
 	if code != 0 || !result.OK || len(result.Captures) != 2 || resultMap(t, result)["schema"] != "lycheedev.query-csv.v1" {
 		t.Fatalf("CSV export: %+v (%d)", result, code)
 	}
@@ -65,7 +81,7 @@ func TestSQLCSVExportFromPinnedFixture(t *testing.T) {
 	if _, err := os.Stat(output + ".manifest.json"); err != nil {
 		t.Fatal(err)
 	}
-	conflict, code := invoke(t, args...)
+	conflict, code := invokeSQL(t, args...)
 	if code != 3 || conflict.OK || conflict.Error.Code != "records.export_conflict" {
 		t.Fatalf("CSV overwrite refusal: %+v (%d)", conflict, code)
 	}

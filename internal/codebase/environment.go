@@ -28,22 +28,32 @@ type environmentCacheManifest struct {
 
 const maxEnvironmentFactsBytes = 64 << 20
 
+func researchEnvironmentPin(ctx context.Context, root string, source selection.SourcePin, snapshot string) (selection.SourcePin, string, error) {
+	pin := source
+	if snapshot != "" {
+		var err error
+		pin, err = pinnedSource(ctx, root, snapshot)
+		if err != nil {
+			return selection.SourcePin{}, "invalid-client-pin", err
+		}
+		if pin.Repository != "wow-ui-source" {
+			return selection.SourcePin{}, "invalid-client-pin", fmt.Errorf("%w: codebase.client_source_pin_required", ErrInvalidQuery)
+		}
+		if source.Repository == "wow-ui-source" && (pin.Repository != source.Repository || pin.Product != source.Product || pin.ExactCommit != source.ExactCommit || pin.ParserRevision != source.ParserRevision) {
+			return selection.SourcePin{}, "invalid-client-pin", fmt.Errorf("%w: codebase.client_environment_conflict", ErrInvalidQuery)
+		}
+	} else if source.Repository != "wow-ui-source" {
+		return selection.SourcePin{}, "missing-client-pin", nil
+	}
+	return pin, "selected", nil
+}
+
 func (b *Browser) researchEnvironment(ctx context.Context, source selection.SourcePin, snapshot string) (environment.Result, string, error) {
 	ctx, closeQuery := sourceQueryContext(ctx)
 	defer closeQuery()
-	pin := source
-	if source.Repository != "wow-ui-source" {
-		if snapshot == "" {
-			return environment.Result{}, "missing-client-pin", nil
-		}
-		var err error
-		pin, err = pinnedSource(ctx, b.store.Root(), snapshot)
-		if err != nil {
-			return environment.Result{}, "invalid-client-pin", err
-		}
-		if pin.Repository != "wow-ui-source" {
-			return environment.Result{}, "invalid-client-pin", errors.New("codebase.client_source_pin_required")
-		}
+	pin, state, err := researchEnvironmentPin(ctx, b.store.Root(), source, snapshot)
+	if err != nil || state != "selected" {
+		return environment.Result{}, state, err
 	}
 	if err := b.EnsureIndex(ctx, pin); err != nil {
 		return environment.Result{}, "unavailable", err
@@ -96,27 +106,18 @@ func (b *Browser) researchEnvironment(ctx context.Context, source selection.Sour
 	if len(wanted) == 0 {
 		return environment.Result{}, "missing-metadata", nil
 	}
-	if cache.manifest.FixtureRoot != "" {
-		for _, file := range wanted {
-			data, _, err := cache.document(ctx, file.path)
-			if err != nil {
-				return environment.Result{}, "unavailable", err
-			}
-			docs[file.path] = data
+	err = b.visitDocuments(ctx, pin, wanted, func(file treeFile, data []byte) error {
+		h := sha256.Sum256(data)
+		if hex.EncodeToString(h[:]) != records[file.path].SHA256 || int64(len(data)) != records[file.path].Bytes {
+			return ErrSourceIntegrity
 		}
-	} else {
-		err = b.visitDocuments(ctx, pin, wanted, func(file treeFile, data []byte) error {
-			h := sha256.Sum256(data)
-			if hex.EncodeToString(h[:]) != records[file.path].SHA256 || int64(len(data)) != records[file.path].Bytes {
-				return ErrSourceIntegrity
-			}
-			docs[file.path] = data
-			return nil
-		})
-		if err != nil {
-			return environment.Result{}, "unavailable", err
-		}
+		docs[file.path] = data
+		return nil
+	})
+	if err != nil {
+		return environment.Result{}, "unavailable", err
 	}
+
 	result, err := environment.Build(ctx, identity, docs, environment.Limits{})
 	if err != nil {
 		return result, "unavailable", err

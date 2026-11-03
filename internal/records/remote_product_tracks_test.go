@@ -43,7 +43,14 @@ func TestRemoteTracksKeepCatalogsPinsAndCDNRoutesSeparate(t *testing.T) {
 			t.Fatalf("%s CDN route: %+v %v", profile.Product, meta, err)
 		}
 	}
-	if pins["forever-asia-beta"] == pins["forever-cn-beta"] {
-		t.Fatal("same-build beta pins collapsed")
+	if pins["forever"] == "" {
+		t.Fatal("formal Forever missing")
+	}
+	for _, product := range []string{"forever-asia-beta", "forever-cn-beta"} {
+		request := f.request
+		request.Product = product
+		if _, err := f.resolve(ctx, request); err == nil {
+			t.Fatal("retired target accepted", product)
+		}
 	}
 }

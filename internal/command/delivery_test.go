@@ -197,8 +197,11 @@ func TestAddonInstallCommand(t *testing.T) {
 }
 
 func TestAddonStatusUsesClientIdentity(t *testing.T) {
-	client := filepath.Join(t.TempDir(), "_classic_beta_")
+	client := filepath.Join(t.TempDir(), "_forever_")
 	if err := os.Mkdir(client, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(client, ".flavor.info"), []byte("wowf"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	version := filepath.Join(client, "version.txt")

@@ -81,8 +81,6 @@ type cacheManifest struct {
 	Summary       IndexSummary `json:"summary"`
 	RecordsHash   string       `json:"recordsHash"`
 	RecordBytes   int64        `json:"recordBytes"`
-	FixtureRoot   string       `json:"fixtureRoot,omitempty"`
-	FixtureDigest string       `json:"fixtureDigest,omitempty"`
 	DerivedSchema string       `json:"derivedSchema,omitempty"`
 	DerivedHash   string       `json:"derivedHash,omitempty"`
 	DerivedBytes  int64        `json:"derivedBytes,omitempty"`
@@ -165,43 +163,9 @@ func (b *Browser) IndexSource(ctx context.Context, pin selection.SourcePin) (Ind
 	if err != nil {
 		return IndexSummary{}, err
 	}
-	return b.buildIndex(ctx, pin, files, "", "", func(visit func(treeFile, []byte) error) error { return b.visitDocuments(ctx, pin, files, visit) })
+	return b.buildIndex(ctx, pin, files, func(visit func(treeFile, []byte) error) error { return b.visitDocuments(ctx, pin, files, visit) })
 }
-func (b *Browser) IndexFixture(ctx context.Context, pin selection.SourcePin, root string) (IndexSummary, error) {
-	if pin.Repository == "" || pin.Product == "" || !objectID(pin.ExactCommit) || pin.ParserRevision != ParserRevision {
-		return IndexSummary{}, errors.New("codebase.invalid_source_pin")
-	}
-	files, err := directoryTree(root)
-	if err != nil {
-		return IndexSummary{}, err
-	}
-	digest, err := fixtureDigest(ctx, root, files)
-	if err != nil {
-		return IndexSummary{}, err
-	}
-	return b.buildIndex(ctx, pin, files, root, digest, func(visit func(treeFile, []byte) error) error { return visitDirectory(ctx, root, files, visit) })
-}
-
-func fixtureDigest(ctx context.Context, root string, files []treeFile) (string, error) {
-	h := sha256.New()
-	err := visitDirectory(ctx, root, files, func(file treeFile, data []byte) error {
-		fmt.Fprintf(h, "%s\x00%d\x00", file.path, file.size)
-		sum := sha256.Sum256(data)
-		h.Write(sum[:])
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	for _, file := range files {
-		if !treeNeedsRead(file) {
-			fmt.Fprintf(h, "%s\x00%d\x00metadata-only\x00", file.path, file.size)
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files []treeFile, fixtureRoot, fixtureDigest string, enumerate func(func(treeFile, []byte) error) error) (IndexSummary, error) {
+func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files []treeFile, enumerate func(func(treeFile, []byte) error) error) (IndexSummary, error) {
 	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:v1:map:"+pin.Repository+":"+pin.ExactCommit)
 	if err != nil {
 		return IndexSummary{}, err
@@ -209,9 +173,6 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 	defer lease.Close()
 	if existing, summary, err := b.openIndex(ctx, pin); err == nil {
 		defer existing.Close()
-		if fixtureRoot != "" && existing.manifest.FixtureDigest != fixtureDigest {
-			return IndexSummary{}, errors.New("codebase.fixture_changed: frozen source path has different bytes")
-		}
 		return summary, nil
 	} else if !errors.Is(err, errIndexNotReady) {
 		return IndexSummary{}, err
@@ -403,7 +364,7 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 		return IndexSummary{}, err
 	}
 	summary.Complete = summary.Diagnostics == 0
-	manifest := cacheManifest{Summary: summary, RecordsHash: hex.EncodeToString(hash.Sum(nil)), RecordBytes: info.Size(), FixtureRoot: fixtureRoot, FixtureDigest: fixtureDigest}
+	manifest := cacheManifest{Summary: summary, RecordsHash: hex.EncodeToString(hash.Sum(nil)), RecordBytes: info.Size()}
 	if !derivedOverflow {
 		derivedRaw, err := json.Marshal(derivedIndex{Schema: derivedSchema, RecordsHash: manifest.RecordsHash, Entries: offsets})
 		if err != nil {
@@ -683,39 +644,20 @@ func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, stri
 	var data []byte
 	c.work.DocumentReads++
 	var err error
-	if c.manifest.FixtureRoot != "" {
-		full := filepath.Join(c.manifest.FixtureRoot, filepath.FromSlash(name))
-		info, err := os.Lstat(full)
-		if err != nil {
-			return nil, "", err
-		}
-		if !info.Mode().IsRegular() {
-			return nil, "", errors.New("codebase.not_regular_source_file")
-		}
-		f, err := os.Open(full)
-		if err != nil {
-			return nil, "", err
-		}
-		data, err = io.ReadAll(io.LimitReader(f, found.Bytes+1))
-		closeErr := f.Close()
-		if err != nil || closeErr != nil {
-			return nil, "", errors.Join(err, closeErr)
-		}
-	} else {
-		if !objectID(found.Object) {
-			return nil, "", errors.New("codebase.index_record_invalid")
-		}
-		if c.batch == nil {
-			c.work.GitBatchStarts++
-			c.batch, err = newDocumentBatch(ctx, c.b, c.pin)
-		}
-		if err == nil {
-			data, err = c.batch.read(found.Object, found.Bytes)
-		}
-		if err != nil {
-			return nil, "", err
-		}
+	if !objectID(found.Object) {
+		return nil, "", errors.New("codebase.index_record_invalid")
 	}
+	if c.batch == nil {
+		c.work.GitBatchStarts++
+		c.batch, err = newDocumentBatch(ctx, c.b, c.pin)
+	}
+	if err == nil {
+		data, err = c.batch.read(found.Object, found.Bytes)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
 	if int64(len(data)) != found.Bytes || digest != found.SHA256 {

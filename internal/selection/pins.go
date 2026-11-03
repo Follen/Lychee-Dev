@@ -23,6 +23,9 @@ type SourcePin struct {
 	ParserRevision string `json:"parserRevision"`
 }
 type DataPin struct {
+	// ProductCode distinguishes formal wowf pins from historical family-only Forever pins.
+	// Omission preserves the serialized identity of existing pins.
+	ProductCode      string `json:"productCode,omitempty"`
 	Product          string `json:"product"`
 	Region           string `json:"region"`
 	FullBuild        string `json:"fullBuild"`
@@ -59,6 +62,16 @@ func OpenPinner(metadata *vault.Metadata) *Pinner { return &Pinner{metadata: met
 // PinSelection accepts resolved identities only. Network resolution belongs to
 // the source/data providers; symbolic latest is never durable identity.
 func (p *Pinner) PinSelection(ctx context.Context, spec SelectionSpec) (PinnedSet, error) {
+	return p.pinSelection(ctx, spec, false)
+}
+
+// PinCurrentSelection admits new targets after inheritance, before persistence.
+// ReadPinnedSet and historical derivation retain their original identities.
+func (p *Pinner) PinCurrentSelection(ctx context.Context, spec SelectionSpec) (PinnedSet, error) {
+	return p.pinSelection(ctx, spec, true)
+}
+
+func (p *Pinner) pinSelection(ctx context.Context, spec SelectionSpec, current bool) (PinnedSet, error) {
 	if spec.Parent != "" {
 		parent, err := p.ReadPinnedSet(ctx, spec.Parent)
 		if err != nil {
@@ -78,6 +91,11 @@ func (p *Pinner) PinSelection(ctx context.Context, spec SelectionSpec) (PinnedSe
 			spec.Changes = parent.Changes
 		} else if parent.Changes != nil && *spec.Changes != *parent.Changes {
 			return PinnedSet{}, errors.New("selection.fixed_changes_conflict")
+		}
+	}
+	if current {
+		if err := ValidateNewSelection(spec); err != nil {
+			return PinnedSet{}, err
 		}
 	}
 	if err := validatePins(spec); err != nil {

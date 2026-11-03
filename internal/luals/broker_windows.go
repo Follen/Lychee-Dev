@@ -103,8 +103,11 @@ func BrokerProcessIdentity(pid uint32) (uint64, string, error) {
 	}
 	defer file.Close()
 	h := sha256.New()
-	copied, copyErr := io.Copy(h, io.LimitReader(file, (128<<20)+1))
-	if copyErr != nil || copied > 128<<20 {
+	// The CLI statically links DuckDB and is about 140 MB. Bound the streamed
+	// identity hash independently from LuaLS document/input budgets.
+	const executableBytes = 256 << 20
+	copied, copyErr := io.Copy(h, io.LimitReader(file, executableBytes+1))
+	if copyErr != nil || copied > executableBytes {
 		err = copyErr
 		if err == nil {
 			err = ErrBudget

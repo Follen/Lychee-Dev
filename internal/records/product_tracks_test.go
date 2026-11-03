@@ -11,9 +11,10 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/selection"
+	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-func TestLocalTargetsSevenDeliveryTracks(t *testing.T) {
+func TestLocalTargetsCurrentDeliveryProducts(t *testing.T) {
 	for _, profile := range selection.DataProducts() {
 		t.Run(profile.Product, func(t *testing.T) {
 			fixture, client, store, _ := targetFixture(t, profile.ProductCode, profile.BuildSeries+".70338", profile.Folder)
@@ -53,12 +54,17 @@ func TestForeverSameBuildKeepsSeparatePinsAndRejectsSiblingReads(t *testing.T) {
 		{"forever-cn-beta", cn, asia, fixture.buildKey},
 		{"forever-asia-beta", asia, cn, asiaKey},
 	} {
-		resolved, err := records.ResolveLocalTarget(ctx, store.Root(), records.LocalTargetRequest{Installation: fixture.root, Product: test.product, Region: "cn", Locale: "zhCN", Definitions: strings.Repeat("d", 40), Offline: true})
-		if err != nil || resolved.Pin.Data == nil || resolved.Pin.Data.BuildConfig != test.key || resolved.Client.Directory != test.path {
-			t.Fatalf("track mixed: %+v %v", resolved, err)
+		if _, err := records.ResolveLocalTarget(ctx, store.Root(), records.LocalTargetRequest{Installation: fixture.root, Product: test.product, Region: "cn", Locale: "zhCN", Definitions: strings.Repeat("d", 40), Offline: true}); err == nil {
+			t.Fatal("retired target accepted")
 		}
-		pins[test.product] = resolved.Pin.ID
-		_, err = records.OpenReader(store).ReadFile(ctx, *resolved.Pin.Data, records.FileQuery{Installation: test.sibling, FileDataID: 1, MetadataBytes: 1, ContentBytes: 1, Offline: true})
+		pin, err := vault.WriteMetadata(ctx, store.Root(), func(_ *vault.Store, m *vault.Metadata) (selection.PinnedSet, error) {
+			return selection.OpenPinner(m).PinSelection(ctx, selection.SelectionSpec{Data: &selection.DataPin{Product: test.product, Region: "cn", Language: "zhCN", FullBuild: fixture.fullBuild, BuildConfig: test.key, CDNConfig: fixture.cdnKey, DefinitionCommit: strings.Repeat("d", 40)}})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pins[test.product] = pin.ID
+		_, err = records.OpenReader(store).ReadFile(ctx, *pin.Data, records.FileQuery{Installation: test.sibling, FileDataID: 1, MetadataBytes: 1, ContentBytes: 1, Offline: true})
 		if !errors.Is(err, records.ErrPinnedBuildChanged) {
 			t.Fatalf("sibling read not rejected: %v", err)
 		}
@@ -66,7 +72,7 @@ func TestForeverSameBuildKeepsSeparatePinsAndRejectsSiblingReads(t *testing.T) {
 	if pins["forever-cn-beta"] == pins["forever-asia-beta"] {
 		t.Fatal("delivery identities collapsed")
 	}
-	if _, err := records.SelectClientInstallation(ctx, fixture.root, "forever"); !errors.Is(err, records.ErrInstallationAmbiguous) {
+	if _, err := records.SelectClientInstallation(ctx, fixture.root, "forever"); !errors.Is(err, records.ErrInstallationMissing) {
 		t.Fatalf("legacy selector guessed a region: %v", err)
 	}
 }

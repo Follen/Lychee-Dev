@@ -15,7 +15,7 @@ var cancelSQLSynchronousIO = windows.NewLazySystemDLL("kernel32.dll").NewProc("C
 // Windows stdin may be a synchronous pipe, file or console. File deadlines and
 // Close do not interrupt all of these. Keep the read on a known OS thread so
 // cancellation can interrupt synchronous I/O as well as an overlapped handle.
-func readSQLStdin(ctx context.Context, input *os.File) ([]byte, error) {
+func readBoundedStdin(ctx context.Context, input *os.File, limit int) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -31,14 +31,14 @@ func readSQLStdin(ctx context.Context, input *os.File) ([]byte, error) {
 	// Hold the File reference until both reading and cancellation have ended.
 	// A concurrent Close must not recycle the handle underneath CancelIoEx.
 	if err := conn.Control(func(fd uintptr) {
-		raw, readErr = readSQLStdinHandle(ctx, input, windows.Handle(fd))
+		raw, readErr = readBoundedStdinHandle(ctx, input, windows.Handle(fd), limit)
 	}); err != nil {
 		return nil, err
 	}
 	return raw, readErr
 }
 
-func readSQLStdinHandle(ctx context.Context, input *os.File, handle windows.Handle) ([]byte, error) {
+func readBoundedStdinHandle(ctx context.Context, input *os.File, handle windows.Handle, limit int) ([]byte, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	thread, err := windows.OpenThread(windows.THREAD_TERMINATE, false, windows.GetCurrentThreadId())
@@ -78,7 +78,7 @@ func readSQLStdinHandle(ctx context.Context, input *os.File, handle windows.Hand
 		// Join before releasing the thread, so cancellation cannot reach an
 		// unrelated syscall after the runtime reuses it. Stdin remains open.
 	}()
-	return io.ReadAll(io.LimitReader(sqlStdinContextReader{ctx, input}, (1<<20)+1))
+	return io.ReadAll(io.LimitReader(sqlStdinContextReader{ctx, input}, int64(limit)+1))
 }
 
 type sqlStdinContextReader struct {
@@ -95,4 +95,8 @@ func (reader sqlStdinContextReader) Read(buf []byte) (int, error) {
 		return n, contextErr
 	}
 	return n, err
+}
+
+func readSQLStdin(ctx context.Context, input *os.File) ([]byte, error) {
+	return readBoundedStdin(ctx, input, 1<<20)
 }

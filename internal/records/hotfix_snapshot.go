@@ -64,13 +64,6 @@ func RaidbotsSnapshot(file string, q HotfixQuery) (SnapshotHotfix, error) {
 	return OpenHotfixSnapshot(file, raidbotsProviderName, q, RaidbotsSnapshotMaxAge)
 }
 
-// DBCacheSnapshot declares the explicitly supplied client cache file. There is
-// no staleness policy because the live client file may be queried at any time;
-// the capture time is still reported.
-func DBCacheSnapshot(file string, q HotfixQuery) (SnapshotHotfix, error) {
-	return OpenHotfixSnapshot(file, dbcacheProviderName, q, 0)
-}
-
 func (s SnapshotHotfix) QueryHotfix(ctx context.Context, q HotfixQuery) (RemoteHotfixResult, error) {
 	if err := q.Validate(); err != nil {
 		return RemoteHotfixResult{}, err

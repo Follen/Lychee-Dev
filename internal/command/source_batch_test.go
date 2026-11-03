@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
@@ -16,7 +15,7 @@ func TestSourceBatchThroughCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := filepath.Join("..", "..", "tests", "fixtures", "codebase", "sources", "valid-retail")
-	indexed, err := codebase.IndexFixtureSource(context.Background(), root, "wow-ui-source", "retail", fixture)
+	indexed, err := indexGitFixture(t, context.Background(), root, "wow-ui-source", "retail", fixture)
 	if err != nil {
 		t.Fatal(err)
 	}

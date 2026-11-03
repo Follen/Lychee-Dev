@@ -24,6 +24,7 @@ type ReferenceAssessment struct {
 type CompatibilityAssessment struct {
 	Semantic          *SemanticAssessment   `json:"semantic,omitempty"`
 	Source            selection.SourcePin   `json:"source"`
+	Environment       *selection.SourcePin  `json:"environment,omitempty"`
 	Load              LoadAssessment        `json:"load"`
 	References        []ReferenceAssessment `json:"references"`
 	ExpectedInterface int                   `json:"expectedInterface,omitempty"`
@@ -46,6 +47,7 @@ func (c *Checker) CheckClosure(ctx context.Context, pin selection.SourcePin, inp
 		return result, err
 	}
 	defer db.Close()
+	input.Context.Family, input.Context.Game = selection.SourceLoadContext(pin)
 	result.Load, err = c.InspectAddon(ctx, input)
 	if err != nil {
 		return result, err
@@ -128,7 +130,7 @@ func (c *Checker) CheckClosure(ctx context.Context, pin selection.SourcePin, inp
 			result.References = append(result.References, reference)
 		}
 	}
-	result.Complete = result.Load.LoadValid && index.Complete && result.Unresolved == 0 && result.InterfaceStatus == "matched"
+	result.Complete = result.Load.LoadValid && result.Load.LoadComplete && index.Complete && result.Unresolved == 0 && result.InterfaceStatus == "matched"
 	result.Load.CompatibilityComplete = result.Complete
 	return result, nil
 }

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/follenfang/lycheedev/internal/live"
-	"github.com/follenfang/lycheedev/internal/selection"
 )
 
 // sameConnectionTarget preserves the identity checks on persisted connections.
@@ -19,14 +18,10 @@ func sameConnectionTarget(saved, observed live.ClientWindow) bool {
 	if saved.Client.CatalogProduct != "" || observed.Client.CatalogProduct == "" {
 		return false
 	}
-	for _, baseline := range selection.VerifiedClientBaselines() {
-		if saved.Client.Product == baseline.Product && saved.Client.ProductCode == baseline.ProductCode &&
-			baseline.DataSlot != "" && baseline.DataSlot != baseline.ProductCode &&
-			observed.Client.CatalogProduct == baseline.DataSlot &&
-			strings.HasPrefix(saved.Client.FullBuild, baseline.BuildSeries+".") {
-			saved.Client.CatalogProduct = baseline.DataSlot
-			return saved == observed
-		}
+	if saved.Client.Product == "forever" && saved.Client.ProductCode == "wow_forever" &&
+		observed.Client.CatalogProduct == "wow_classic_beta" && strings.HasPrefix(saved.Client.FullBuild, "1.60.1.") {
+		saved.Client.CatalogProduct = "wow_classic_beta"
+		return saved == observed
 	}
 	return false
 }

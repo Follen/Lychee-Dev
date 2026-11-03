@@ -20,7 +20,7 @@ func TestSemanticDefinitionsReuseFixedEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := filepath.Join("..", "..", "tests", "fixtures", "codebase", "sources", "valid-retail")
-	indexed, err := IndexFixtureSource(ctx, root, "wow-ui-source", "retail", fixture)
+	indexed, err := indexGitFixture(t, ctx, root, "wow-ui-source", "retail", fixture)
 	if err != nil {
 		t.Fatal(err)
 	}

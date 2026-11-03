@@ -2,11 +2,11 @@
 
 <img src="addon/Media/Logo.png" width="80" alt="Lychee Dev" />
 
-魔兽世界插件开发工具：一个 Go CLI、一套游戏内 Lua 工作台，以及配套 Agent Skill。用于查源码、读游戏数据、导出资源和验证真实客户端行为。
+魔兽世界插件开发工具：一个 Go CLI、一套游戏内 Lua 工作台，以及配套 Agent Skill。用于查源码、读游戏数据、导出资源、作者发布和备份，以及验证真实客户端行为。
 
 [设计](Design.md) · [Live 协议](docs/live-protocol.md) · [开发指南](docs/development.md) · [更新记录](Changelog.md) · [待办与验证范围](todo.md)
 
-**当前版本为 3.2.7，npm 发行渠道为 `latest`。** 版本以 [release/version.json](release/version.json) 为准，发布产物见 [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases)。
+**当前发行版本为 3.2.7，npm 发行渠道为 `latest`。** 本仓库新增能力见[未发布变更](Changelog.md#未发布)。版本以 [release/version.json](release/version.json) 为准，发布产物见 [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases)。
 
 ## 功能
 
@@ -15,6 +15,7 @@
 | Source | 固定 Git 提交，搜索 Lua/XML/TOC，查定义、引用、上下文和数据流；支持批量请求 |
 | Data | 从本地 CASC 或远端 CDN 读取固定构建的 DB2，执行只读 SQL，查关联记录 |
 | Hotfix / Assets | 按固定来源查 Hotfix、搜索资源和导出支持的文件格式 |
+| Publish | CurseForge、NewBee、网易 DD、小黑盒和 ModUs 的作者发布、选择性备份、读回与原请求恢复 |
 | Live | 向选定客户端执行有预算的 Lua 探针，读取报告，完成释放、重载和中断恢复 |
 | 游戏内工作台 | 输入 `/dev` 使用 Run、Diagnostics、Inspector、Events、Function Trace |
 | Agent Skill | 按任务选择工具，保留来源、连接和请求，报告实际验证范围 |
@@ -29,17 +30,18 @@ Source、Data 和 Assets 不需要启动游戏。Live 需要 Windows amd64、已
 | 怀旧服 | `classic` | `_classic_` |
 | 经典旧世 | `classic-era` | `_classic_era_` |
 | 时光服 | `titan` | `_classic_titan_` |
-| 无限亚服测试服 | `forever-asia-beta` | `_classic_beta_` |
-| 无限国服测试服 | `forever-cn-beta` | `_cn_beta_` |
+| 无限服 | `forever` | `_forever_` |
 | 周年服 | `anniversary` | `_anniversary_` |
 
-目录用于发现安装，产品身份取自客户端元数据。两个无限测试服共享上游 `forever` 源码分支，数据产品、地区和构建配置分别固定。完整映射见 [设计](Design.md)。
+目录用于发现安装，产品身份取自客户端元数据。正式无限服使用 `forever/wowf`；旧无限测试服退出新目标选择，历史 PIN、数据和原连接保留原身份。完整映射见 [设计](Design.md)。
 
-七产品均完成 Source 同步、本地/CDN 数据抽样，以及当前协议的 500 槽容量轮换和释放后续跑；Retail 另完成同安装双实例测试。通过范围及未完成场景见 [todo.md](todo.md)。
+历史七产品记录包含两个无限测试服的 Source、数据抽样和 500 槽实测；Retail 另有同安装双实例测试。正式无限服及其他待验场景按当前产品单列，实际通过范围见 [todo.md](todo.md)。
 
 ## 使用当前仓库
 
 开发环境：Windows amd64、Git、Go 1.27.1、Node.js 22.14.0 或以上。
+
+源码构建还需要固定GCC14.2；先按[开发环境准备](docs/development.md#环境与运行)设置CGO、CC和CXX，再执行：
 
 ```powershell
 go build -o .tmp/lycheedev.exe ./cmd/lycheedev
@@ -47,7 +49,7 @@ go build -o .tmp/lycheedev.exe ./cmd/lycheedev
 ./.tmp/lycheedev.exe describe --format json
 ```
 
-`describe` 是当前 CLI 的命令与参数目录；具体命令使用 `--help`。开发版插件需通过配套 stage 和受管安装部署，步骤见 [开发指南](docs/development.md)。
+当前仓库通过 `discover` 按问题查找能力，`schema` 查看具体输入，`describe` 查看完整目录，具体命令也可使用 `--help`。开发版插件需通过配套 stage 和受管安装部署，步骤见 [开发指南](docs/development.md)。
 
 ## 使用 npm 发行包
 
@@ -65,7 +67,7 @@ lycheedev addon install --release $release --installation 'D:/Game/World of Warc
 lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents/skills/lycheedev')
 ```
 
-仓库文档可能领先于 npm 包，以已安装版本的 `version` 和 `describe` 为准。升级与恢复见 [安装指南](skills/lycheedev/references/installation.md)。
+仓库文档可能领先于 npm 包，以已安装版本的 `version`、`describe` 和命令帮助为准。调查规则见 [LycheeDev Skill](skills/lycheedev/SKILL.md)。
 
 ## Live
 

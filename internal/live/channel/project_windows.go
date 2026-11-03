@@ -231,7 +231,7 @@ func deploymentGuard(ctx context.Context, target live.ClientWindow) error {
 	if err := live.ConfirmClientWindow(ctx, target); err != nil {
 		return err
 	}
-	client, err := records.InspectClientInstallation(ctx, target.Client.Directory)
+	client, err := records.InspectRetainedClientInstallation(ctx, target.Client)
 	if err != nil {
 		return err
 	}

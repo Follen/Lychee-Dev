@@ -47,7 +47,7 @@ func TestResolveLocalTargetFourClients(t *testing.T) {
 		t.Run(baseline.Product, func(t *testing.T) {
 			folder := "selected-client"
 			if baseline.Product == "forever" {
-				folder = "_classic_beta_"
+				folder = "_forever_"
 			}
 			fixture, client, store, metadata := targetFixture(t, baseline.ProductCode, baseline.BuildSeries+".99999", folder)
 			ctx := context.Background()
@@ -87,15 +87,15 @@ func TestResolveLocalTargetFourClients(t *testing.T) {
 	}
 }
 
-func TestResolveLocalTargetForeverReusableDataSlot(t *testing.T) {
-	fixture, client, store, _ := targetFixture(t, "wow_classic_beta", "1.60.1.70009", "_classic_beta_")
+func TestResolveLocalTargetFormalForeverDataSlot(t *testing.T) {
+	fixture, client, store, _ := targetFixture(t, "wowf", "1.60.1.70009", "_forever_")
 	result, err := records.ResolveLocalTarget(context.Background(), store.Root(), records.LocalTargetRequest{
 		Installation: client, Region: "us", Locale: "zhCN", Definitions: strings.Repeat("d", 40), Offline: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Client.ProductCode != "wow_forever" || result.Pin.Data.Product != "forever-asia-beta" || result.Pin.Data.BuildConfig != fixture.buildKey {
+	if result.Client.ProductCode != "wowf" || result.Pin.Data.Product != "forever" || result.Pin.Data.ProductCode != "wowf" || result.Pin.Data.BuildConfig != fixture.buildKey {
 		t.Fatalf("wrong identity: %+v", result)
 	}
 	if _, err := records.ResolveLocalBuild(context.Background(), fixture.root, "wow_classic", fixture.fullBuild); !errors.Is(err, records.ErrBuildUnavailable) {
@@ -199,7 +199,7 @@ func TestClientDataReadChecksSelectedClientBeforeArchives(t *testing.T) {
 }
 
 func TestResolveLocalTargetChinaForeverSlot(t *testing.T) {
-	fixture, client, store, _ := targetFixture(t, "wow_cn_beta", "1.60.1.70245", "_cn_beta_")
+	fixture, client, store, _ := targetFixture(t, "wowf", "1.60.1.70245", "_forever_")
 	if err := os.Remove(filepath.Join(client, "version.txt")); err != nil {
 		t.Fatal(err)
 	}
@@ -209,11 +209,11 @@ func TestResolveLocalTargetChinaForeverSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Client.ProductCode != "wow_forever" || result.Client.CatalogProduct != "wow_cn_beta" || result.Pin.Data.BuildConfig != fixture.buildKey {
+	if result.Client.ProductCode != "wowf" || result.Pin.Data.ProductCode != "wowf" || result.Pin.Data.BuildConfig != fixture.buildKey {
 		t.Fatalf("wrong CN identity: %+v", result)
 	}
-	meta, err := records.ResolveLocalBuild(context.Background(), fixture.root, "wow_forever", fixture.fullBuild)
-	if err != nil || meta.Installed.Product != "wow_cn_beta" {
+	meta, err := records.ResolveLocalBuild(context.Background(), fixture.root, "wowf", fixture.fullBuild)
+	if err != nil || meta.Installed.Product != "wowf" {
 		t.Fatalf("CN data slot unavailable: %+v %v", meta, err)
 	}
 }
@@ -225,7 +225,7 @@ func TestLocalForeverCatalogDoesNotChooseBetweenRegions(t *testing.T) {
 		t.Fatalf("ambiguous regions silently selected: %v", err)
 	}
 	result, err := records.ResolveLocalTarget(context.Background(), store.Root(), records.LocalTargetRequest{Installation: client, Region: "cn", Locale: "zhCN", Definitions: strings.Repeat("d", 40), Offline: true})
-	if err != nil || result.Client.CatalogProduct != "wow_cn_beta" {
-		t.Fatalf("explicit CN client lost its slot: %+v %v", result, err)
+	if err == nil {
+		t.Fatalf("retired client admitted as new target: %+v", result)
 	}
 }

@@ -17,9 +17,9 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/records/container"
-	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 	"github.com/follenfang/lycheedev/internal/records/table"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -213,7 +213,7 @@ func (n *navigator) open(ctx context.Context, name string) (*preparedTable, erro
 	}
 	if len(n.opened) >= MaxNavigateTables {
 		n.setTruncation(TruncationRelationBudget)
-		return nil, relational.ErrBudget
+		return nil, sqlengine.ErrBudget
 	}
 	bundle, err := n.definitions.Prepare(ctx, n.pin.DefinitionCommit, name, n.query.Offline)
 	if err != nil {
@@ -396,7 +396,7 @@ func marshalBounded(value any, maximum int) ([]byte, error) {
 		return nil, err
 	}
 	if len(raw) > maximum {
-		return nil, relational.ErrBudget
+		return nil, sqlengine.ErrBudget
 	}
 	return raw, nil
 }

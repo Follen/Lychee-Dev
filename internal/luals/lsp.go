@@ -424,9 +424,6 @@ func (c *lspClient) send(value any) error {
 func (c *lspClient) notify(method string, params any) error {
 	return c.send(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 }
-func (c *lspClient) request(method string, params any, result any) error {
-	return c.requestContext(c.ctx, method, params, result)
-}
 func (c *lspClient) requestContext(ctx context.Context, method string, params any, result any) error {
 	c.mu.Lock()
 	if c.terminal != nil {

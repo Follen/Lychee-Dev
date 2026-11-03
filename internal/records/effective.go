@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/evidence"
-	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"math"
@@ -31,10 +31,10 @@ type effectiveEntry struct {
 	raw     []byte
 }
 
-func (r *Reader) EffectiveSource(ctx context.Context, store *vault.Store, metadata *vault.Metadata, pin selection.DataPin, base relational.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (relational.Source, EffectiveTable, error) {
+func (r *Reader) EffectiveSource(ctx context.Context, store *vault.Store, metadata *vault.Metadata, pin selection.DataPin, base sqlengine.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (sqlengine.Source, EffectiveTable, error) {
 	if r.session != nil {
 		if r.session.closed || pin != r.session.pin || store != r.store {
-			return relational.Source{}, EffectiveTable{}, ErrCacheIdentity
+			return sqlengine.Source{}, EffectiveTable{}, ErrCacheIdentity
 		}
 		if r.session.hotfix == nil {
 			r.session.hotfix = newHotfixSnapshots(store, metadata, pin, r.session.query.budget)
@@ -44,39 +44,39 @@ func (r *Reader) EffectiveSource(ctx context.Context, store *vault.Store, metada
 	return effectiveSource(ctx, store, metadata, pin, base, definition, bundle, captures)
 }
 
-func effectiveSource(ctx context.Context, store *vault.Store, metadata *vault.Metadata, pin selection.DataPin, base relational.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (relational.Source, EffectiveTable, error) {
+func effectiveSource(ctx context.Context, store *vault.Store, metadata *vault.Metadata, pin selection.DataPin, base sqlengine.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (sqlengine.Source, EffectiveTable, error) {
 	return effectiveSourceWithSnapshots(ctx, newHotfixSnapshots(store, metadata, pin, nil), base, definition, bundle, captures)
 }
 
-func effectiveSourceWithSnapshots(ctx context.Context, snapshots *hotfixSnapshots, base relational.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (relational.Source, EffectiveTable, error) {
-	report := EffectiveTable{Table: bundle.Identity.Name, Policy: "push-ascending/capture-order/physical-index; valid-payload replaces; invalid deletes; cached-key exception"}
+func effectiveSourceWithSnapshots(ctx context.Context, snapshots *hotfixSnapshots, base sqlengine.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (sqlengine.Source, EffectiveTable, error) {
+	report := EffectiveTable{Table: bundle.Identity.Name, Policy: "push-ascending/capture-order/physical-index; valid-payload replaces; modern NotPublic ignored; invalid deletes; cached-key exception"}
 	if len(captures) == 0 || len(captures) > 16 {
-		return relational.Source{}, report, fmt.Errorf("%w: effective catalog requires hotfix capture IDs in query JSON", ErrCacheIdentity)
+		return sqlengine.Source{}, report, fmt.Errorf("%w: effective catalog requires hotfix capture IDs in query JSON", ErrCacheIdentity)
 	}
 	var entries []effectiveEntry
 	seenCaptures := map[string]bool{}
 	for ordinal, id := range captures {
 		if seenCaptures[id] {
-			return relational.Source{}, report, ErrCacheIdentity
+			return sqlengine.Source{}, report, ErrCacheIdentity
 		}
 		seenCaptures[id] = true
 		snapshot, err := snapshots.load(ctx, id)
 		if err != nil {
-			return relational.Source{}, report, err
+			return sqlengine.Source{}, report, err
 		}
 		selected := snapshot.tables[bundle.Identity.Hash]
 		if len(selected) > 100000-len(entries) {
-			return relational.Source{}, report, ErrCacheLimit
+			return sqlengine.Source{}, report, ErrCacheLimit
 		}
 		if err := snapshots.budget.Charge(resource.Cost{RetainedBytes: int64(len(selected)) * 384, MetadataBytes: int64(len(selected)) * 384, DecodeWork: int64(len(selected))}); err != nil {
-			return relational.Source{}, report, err
+			return sqlengine.Source{}, report, err
 		}
 		for _, entry := range selected {
 			if err := ctx.Err(); err != nil {
-				return relational.Source{}, report, err
+				return sqlengine.Source{}, report, err
 			}
 			if snapshot.layout >= 7 && entry.Status > 4 {
-				return relational.Source{}, report, fmt.Errorf("%w: unsupported effective status %d", ErrCacheFormat, entry.Status)
+				return sqlengine.Source{}, report, fmt.Errorf("%w: unsupported effective status %d", ErrCacheFormat, entry.Status)
 			}
 			entries = append(entries, effectiveEntry{CacheEntry: entry, capture: ordinal, layout: snapshot.layout, source: id, raw: snapshot.raw})
 		}
@@ -114,11 +114,11 @@ func effectiveSourceWithSnapshots(ctx context.Context, snapshots *hotfixSnapshot
 			identityIndex = i
 		}
 		if strings.HasPrefix(c, "__hotfix_") {
-			return relational.Source{}, report, ErrDefinitionIdentity
+			return sqlengine.Source{}, report, ErrDefinitionIdentity
 		}
 	}
 	if identityIndex < 0 || len(base.Columns) > 4093 {
-		return relational.Source{}, report, ErrDefinitionIdentity
+		return sqlengine.Source{}, report, ErrDefinitionIdentity
 	}
 	type replacement struct {
 		values []any
@@ -128,32 +128,37 @@ func effectiveSourceWithSnapshots(ctx context.Context, snapshots *hotfixSnapshot
 	var fieldsBytes int
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
-			return relational.Source{}, report, err
+			return sqlengine.Source{}, report, err
+		}
+		// Modern NotPublic is an ignored notification, not a deletion. Legacy
+		// caches use a nonzero validity byte and retain their existing semantics.
+		if e.layout >= 7 && e.Status == 4 {
+			continue
 		}
 		if !valid(e) {
 			if shouldDelete {
 				if err := snapshots.budget.Charge(resource.Cost{RetainedBytes: 384, MetadataBytes: 384}); err != nil {
-					return relational.Source{}, report, err
+					return sqlengine.Source{}, report, err
 				}
 				patches[e.RecordID] = replacement{entry: effectiveEntry{CacheEntry: e.CacheEntry, source: e.source}}
 			}
 			continue
 		}
 		if err := snapshots.budget.Charge(resource.Cost{RetainedBytes: int64(e.PayloadBytes)*4 + int64(len(base.Columns))*64 + 384, MetadataBytes: int64(len(base.Columns))*64 + 384, DecodeWork: int64(len(base.Columns)) + 1}); err != nil {
-			return relational.Source{}, report, err
+			return sqlengine.Source{}, report, err
 		}
 		fields, err := DecodeHotfixFields(ctx, e.raw[int(e.PayloadOffset):int(e.PayloadOffset)+e.PayloadBytes], e.RecordID, definition)
 		if err != nil {
-			return relational.Source{}, report, fmt.Errorf("effective record %d: %w", e.RecordID, err)
+			return sqlengine.Source{}, report, fmt.Errorf("effective record %d: %w", e.RecordID, err)
 		}
 		encoded, _ := json.Marshal(fields)
 		fieldsBytes += len(encoded)
 		if fieldsBytes > 32<<20 {
-			return relational.Source{}, report, ErrCacheLimit
+			return sqlengine.Source{}, report, ErrCacheLimit
 		}
 		values, err := flattenEffective(base.Columns, fields)
 		if err != nil {
-			return relational.Source{}, report, err
+			return sqlengine.Source{}, report, err
 		}
 		patches[e.RecordID] = replacement{values: values, entry: effectiveEntry{CacheEntry: e.CacheEntry, source: e.source}}
 	}
@@ -189,7 +194,7 @@ func effectiveSourceWithSnapshots(ctx context.Context, snapshots *hotfixSnapshot
 		}
 		return 0, ErrCacheFields
 	}
-	output := relational.Source{Columns: columns, Scan: func(ctx context.Context, y func([]any) error) error {
+	output := sqlengine.Source{Columns: columns, Types: append(append([]sqlengine.Kind{}, base.Types...), sqlengine.Text, sqlengine.Signed, sqlengine.Unsigned), Identity: identity, Scan: func(ctx context.Context, y func([]any) error) error {
 		visited := map[uint32]bool{}
 		err := base.Scan(ctx, func(row []any) error {
 			id, err := rowID(row[identityIndex])

@@ -87,7 +87,7 @@ func TestInstalledAssetCommand(t *testing.T) {
 		if code == 0 || missing.OK || missing.Result != nil {
 			t.Fatalf("offline cache miss hidden: %+v", missing)
 		}
-		query, err := records.QueryData(context.Background(), root, pin, records.FileQuery{Installation: installation, ContentBytes: 128 << 20, MetadataBytes: 512 << 20}, records.DataQuery{SQL: "SELECT ID, Filename FROM ChrClasses WHERE ID=:id", Parameters: map[string]any{"id": 1}})
+		query, err := records.QueryData(context.Background(), root, pin, records.FileQuery{Installation: installation, ContentBytes: 128 << 20, MetadataBytes: 512 << 20}, records.DataQuery{SQL: "SELECT ID, Filename FROM ChrClasses WHERE ID=$id", Parameters: map[string]any{"id": 1}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,7 +100,7 @@ func TestInstalledAssetCommand(t *testing.T) {
 		}
 		t.Logf("SQL application capture=%s rows=%v", query.Capture.ID, query.Result.Result.Rows)
 		queryFile := filepath.Join(t.TempDir(), "query.json")
-		if err := os.WriteFile(queryFile, []byte(`{"sql":"SELECT ID, Filename FROM ChrClasses WHERE ID=:id","parameters":{"id":1}}`), 0600); err != nil {
+		if err := os.WriteFile(queryFile, []byte(`{"sql":"SELECT ID, Filename FROM ChrClasses WHERE ID=$id","parameters":{"id":1}}`), 0600); err != nil {
 			t.Fatal(err)
 		}
 		queried, queryCode := invoke(t, "data", "sql", "--file", queryFile, "--snapshot", pin, "--installation", installation, "--offline", "--home", root, "--format=json")

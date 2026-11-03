@@ -20,7 +20,7 @@ import (
 // network latency benchmark. Clearing decoded metadata is outside the timer.
 func BenchmarkDataPreparation(b *testing.B) {
 	for _, physical := range []string{"offline-cdn", "local-archive"} {
-		for _, scenario := range []string{"single", "join", "static-effective", "hotfix-delete", "spell-navigation"} {
+		for _, scenario := range []string{"single", "join", "scalar-subquery", "static-effective", "hotfix-delete", "spell-navigation"} {
 			for _, state := range []string{"cold-decoded", "warm-decoded"} {
 				b.Run(physical+"/"+scenario+"/"+state, func(b *testing.B) {
 					specs := benchmarkTables(1000)
@@ -37,6 +37,8 @@ func BenchmarkDataPreparation(b *testing.B) {
 					switch scenario {
 					case "join":
 						request.SQL = "SELECT s.ID,r.Value FROM Sample s JOIN Related r ON s.ID=r.ID ORDER BY s.ID LIMIT 20"
+					case "scalar-subquery":
+						request.SQL = "SELECT s.ID,(SELECT COUNT(*) FROM Related) FROM Sample s ORDER BY s.ID LIMIT 20"
 					case "static-effective":
 						request.SQL = "SELECT s.ID,s.Value,e.Value FROM static.Sample s LEFT JOIN effective.Sample e ON s.ID=e.ID ORDER BY s.ID LIMIT 20"
 						request.Hotfix = []string{benchmarkDeletionCapture(b, fx, 500)}

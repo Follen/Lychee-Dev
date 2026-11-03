@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func InstallationLease(addonDirectory string) (scope, resource string, err error) {
+	parent, target, err := installationDestination(addonDirectory)
+	if err != nil {
+		return "", "", err
+	}
+	scope, resource = installationLeaseIdentity(parent, target)
+	return scope, resource, nil
+}
+
 // Installation, upgrade, removal and queue publication must all contend for
 // one OS lock per installation. These tests pin the identity derivation; the
 // spelling-sensitivity cases live in the unix and windows build-tagged files

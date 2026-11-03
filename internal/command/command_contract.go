@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/follenfang/lycheedev/internal/publish"
 	"github.com/follenfang/lycheedev/internal/selection"
 )
 
@@ -16,6 +17,7 @@ type Definition struct {
 	Mutates   bool     `json:"mutates"`
 	Arguments []string `json:"arguments"`
 	Flags     []string `json:"flags"`
+	Aliases   []string `json:"aliases,omitempty"`
 }
 
 type flagSpec struct {
@@ -29,6 +31,7 @@ type commandContract struct {
 	flags      []flagSpec
 	positional string
 	allowsHome bool
+	variadic   bool
 }
 
 func dataProductFlag() flagSpec {
@@ -36,7 +39,7 @@ func dataProductFlag() flagSpec {
 	for _, product := range selection.DataProducts() {
 		names = append(names, product.Product)
 	}
-	return flagSpec{name: "--product", display: "--product <" + strings.Join(names, "|") + "> (legacy: forever)", value: true}
+	return flagSpec{name: "--product", display: "--product <" + strings.Join(names, "|") + ">", value: true}
 }
 
 func liveDoctorTargetFlags() []flagSpec {
@@ -62,7 +65,15 @@ func dataSourceFlags(extra ...flagSpec) []flagSpec {
 	}, extra...)
 }
 
-var commandContracts = []commandContract{
+var commandContracts = append([]commandContract{
+	curseForgeCommand("session doctor", false),
+	curseForgeCommand("project list", false),
+	curseForgeCommand("plugin game-versions", false),
+	curseForgeCommand("plugin upload", true),
+	curseForgeCommand("plugin status", false),
+	curseForgeCommand("plugin verify", true),
+	{Definition: Definition{Path: "discover", Summary: "Find implemented commands by task, resource, platform or product nickname; static and offline", Mutates: false}, positional: "<question>", variadic: true},
+	{Definition: Definition{Path: "schema", Summary: "Describe exact command inputs, constraints, examples, effects and result envelope without accessing a workspace or network", Mutates: false}, positional: "<command...>", variadic: true},
 	{Definition: Definition{Path: "update", Summary: "Update npm CLI and synchronize managed skills/addons; --plan inspects current targets without writes; --release applies an already installed release offline. Repeated --path/--installation scope targets and disable discovery. Filesystem completion does not activate a running game or Agent.", Mutates: true}, flags: []flagSpec{{name: "--file", display: "--file <targets.json> (explicit array; disables discovery)", value: true}, {name: "--release", display: "--release <distribution-root>", value: true}, {name: "--path", display: "--path <skill-directory> (repeatable)", value: true}, {name: "--installation", display: "--installation <client-directory> (repeatable)", value: true}, {name: "--plan", display: "--plan"}}, allowsHome: true},
 	{Definition: Definition{Path: "project init", Summary: "Declare a project product: --product <track> [--path <directory>]; creates lycheedev.json without choosing latest", Mutates: true}, flags: []flagSpec{{name: "--product", display: "--product <track>", value: true}, {name: "--path", display: "--path <directory>", value: true}}},
 	{Definition: Definition{Path: "data hotfix", Summary: "Inspect independent Hotfix records with an explicit source: --source <wago|dbcache|raidbots>. dbcache reads a pinned --snapshot <pin> (--dbcache <DBCache.bin> | --from <cache-capture>); wago queries the remote record set from --product/--build/--region/--locale with an optional --snapshot parent; raidbots reads --raidbots <DBCache.bin> under 30 days. Filters: --table --table-hash --record --push --status --region-id --search and wago --from/--to; --latest selects the largest matching push batch before pagination; dbcache --scan owns bounded pagination with --max-pages and a resumable --cursor", Mutates: true}, flags: []flagSpec{
@@ -109,7 +120,7 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "addon status", Summary: "Inspect addon files with --path <addon-directory>, or resolve a supported client with --installation <client-directory>", Mutates: false}, flags: []flagSpec{{name: "--path", display: "--path <addon-directory>", value: true}, {name: "--installation", display: "--installation <client-directory>", value: true}}, allowsHome: false},
 	{Definition: Definition{Path: "addon install", Summary: "Install: --release <distribution-root> --installation <client-directory>; --output <archive> upgrades; --resume --installation <client> --output <archive> recovers without --release", Mutates: true}, flags: []flagSpec{{name: "--release", display: "--release <distribution-root>", value: true}, {name: "--installation", display: "--installation <client-directory>", value: true}, {name: "--output", display: "--output <archive>", value: true}, {name: "--resume", display: "--resume"}}, allowsHome: false},
 	{Definition: Definition{Path: "addon remove", Summary: "Archive an unchanged owned addon: --installation <client-directory> --output <recovery-directory>; never deletes SavedVariables", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client-directory>", value: true}, {name: "--output", display: "--output <recovery-directory>", value: true}}, allowsHome: false},
-	{Definition: Definition{Path: "data sql", Summary: "Read-only SQL over pinned static tables, meta.Table enum/flags metadata, or explicit effective.Table overlays (query JSON hotfix array): exactly one of --sql <text>, --file <query.sql|query.json>, or --stdin; repeated --param <name=scalar> binds named values; --encoding csv --output <file> writes a captured CSV and manifest", Mutates: true}, flags: []flagSpec{{name: "--key-file", display: "--key-file <WoW.txt|keys.json>", value: true}, {name: "--snapshot", display: "--snapshot <pin>", value: true}, {name: "--installation", display: "--installation <client-or-game-root>", value: true}, {name: "--cdn", display: "--cdn"}, {name: "--sql", display: "--sql <text>", value: true}, {name: "--file", display: "--file <query.sql|query.json>", value: true}, {name: "--stdin", display: "--stdin"}, {name: "--param", display: "--param <name=scalar>", value: true}, {name: "--encoding", display: "--encoding csv", value: true}, {name: "--output", display: "--output <file>", value: true}, {name: "--overwrite", display: "--overwrite"}, {name: "--max-bytes", display: "--max-bytes <n>", value: true}, {name: "--offline", display: "--offline"}}, allowsHome: true},
+	{Definition: Definition{Path: "data sql", Summary: "Read-only DuckDB SQL over pinned static tables, meta.Table enum/flags metadata, or explicit effective.Table overlays (query JSON hotfix array): exactly one of --sql <text>, --file <query.sql|query.json>, or --stdin; repeated --param <name=scalar> binds native $name values; --encoding csv --output <file> writes a captured CSV and manifest", Mutates: true}, flags: []flagSpec{{name: "--key-file", display: "--key-file <WoW.txt|keys.json>", value: true}, {name: "--snapshot", display: "--snapshot <pin>", value: true}, {name: "--installation", display: "--installation <client-or-game-root>", value: true}, {name: "--cdn", display: "--cdn"}, {name: "--sql", display: "--sql <text>", value: true}, {name: "--file", display: "--file <query.sql|query.json>", value: true}, {name: "--stdin", display: "--stdin"}, {name: "--param", display: "--param <name=scalar>", value: true}, {name: "--encoding", display: "--encoding csv", value: true}, {name: "--output", display: "--output <file>", value: true}, {name: "--overwrite", display: "--overwrite"}, {name: "--max-bytes", display: "--max-bytes <n>", value: true}, {name: "--offline", display: "--offline"}}, allowsHome: true},
 	{Definition: Definition{Path: "data db2", Summary: "Read typed rows: --snapshot <pin> (--installation <client-or-game-root> | --cdn) --table <name> [--id <n> | --limit <n> --after-id <n>] [--max-bytes <n>] [--offline]", Mutates: true}, flags: []flagSpec{{name: "--key-file", display: "--key-file <WoW.txt|keys.json>", value: true}, {name: "--snapshot", display: "--snapshot <pin>", value: true}, {name: "--installation", display: "--installation <client-or-game-root>", value: true}, {name: "--cdn", display: "--cdn"}, {name: "--table", display: "--table <name>", value: true}, {name: "--id", display: "--id <n>", value: true}, {name: "--limit", display: "--limit <n>", value: true}, {name: "--after-id", display: "--after-id <n>", value: true}, {name: "--max-bytes", display: "--max-bytes <n>", value: true}, {name: "--offline", display: "--offline"}}, allowsHome: true},
 	{Definition: Definition{Path: "data db2 schema", Summary: "Read parsed table schema fields, keys and relationship columns: data db2 schema <Table>", Mutates: true}, flags: dataSourceFlags(), positional: "<Table>", allowsHome: true},
 	{Definition: Definition{Path: "data db2 search", Summary: "Case-insensitive substring search over one field: data db2 search <Table> --field <name> --query <text> --limit <n>", Mutates: true}, flags: dataSourceFlags(
@@ -185,8 +196,7 @@ var commandContracts = []commandContract{
 		flagSpec{name: "--release", display: "--release <distribution-root>", value: true},
 		flagSpec{name: "--output", display: "--output <upgrade-archive>", value: true},
 		flagSpec{name: "--request", display: "--request <idempotency-key>", value: true},
-		flagSpec{name: "--wait-seconds", display: "--wait-seconds <1-600> (default 30)", value: true},
-		flagSpec{name: "--no-cache", display: "--no-cache"}), allowsHome: true},
+		flagSpec{name: "--wait-seconds", display: "--wait-seconds <1-600> (default 30)", value: true}), allowsHome: true},
 	{Definition: Definition{Path: "config show", Summary: "Read the workspace user preference and resource budget document; a missing document reports the documented defaults", Mutates: false}, allowsHome: true},
 	{Definition: Definition{Path: "config set", Summary: "Update the workspace budget: --cache-max-bytes <n> and/or --download-workers <n>; at least one flag is required", Mutates: true}, flags: []flagSpec{{name: "--cache-max-bytes", display: "--cache-max-bytes <n>", value: true}, {name: "--download-workers", display: "--download-workers <n>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "cache status", Summary: "Report managed cache accounting, protection visibility and the configured limit", Mutates: false}, allowsHome: true},
@@ -197,7 +207,7 @@ var commandContracts = []commandContract{
 		{name: "--uncommitted", display: "--uncommitted"},
 		{name: "--dry-run", display: "--dry-run"},
 	}, allowsHome: true},
-	{Definition: Definition{Path: "live instances", Summary: "List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding", Mutates: false}, flags: []flagSpec{{name: "--installation", display: "--installation <client-or-game-root>", value: true}, {name: "--passive", display: "--passive"}}, allowsHome: true},
+	{Definition: Definition{Path: "live instances", Summary: "List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding", Mutates: false}, flags: []flagSpec{{name: "--installation", display: "--installation <client-or-game-root>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live connect", Summary: "Discover and freshly bind a native memory/500-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work", Mutates: true}, flags: []flagSpec{
 		{name: "--snapshot", display: "--snapshot <pin>", value: true},
 		{name: "--character", display: "--character <name>", value: true},
@@ -260,7 +270,7 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "source diff", Summary: "Compare --from <pin-id> --to <pin-id> [--limit <n> per change category]", Mutates: true}, flags: []flagSpec{{name: "--from", display: "--from <pin-id>", value: true}, {name: "--to", display: "--to <pin-id>", value: true}, {name: "--limit", display: "--limit <n>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "source prune", Summary: "Explicitly reclaim only unused source worktrees toward --target-bytes <n>; fixed Git pins, facts and captures remain", Mutates: true}, flags: []flagSpec{{name: "--target-bytes", display: "--target-bytes <n>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "source validate", Summary: "Validate one pinned addon closure with --path/--toc/--snapshot, or a fixed multi-client --matrix <config.json>; add --semantic for bundled LuaLS using fixed client API metadata; report unresolved coverage", Mutates: true}, flags: []flagSpec{{name: "--semantic", display: "--semantic"}, {name: "--environment", display: "--environment <client-pin>", value: true}, {name: "--release", display: "--release <release-root>", value: true}, {name: "--path", display: "--path <addon-root>", value: true}, {name: "--toc", display: "--toc <relative-manifest>", value: true}, {name: "--snapshot", display: "--snapshot <pin-id>", value: true}, {name: "--matrix", display: "--matrix <config.json>", value: true}}, allowsHome: true},
-}
+}, platformPublishContracts()...)
 
 var definitions = publicDefinitions()
 
@@ -274,6 +284,7 @@ func publicDefinitions() []Definition {
 
 func (c commandContract) publicDefinition() Definition {
 	definition := c.Definition
+	definition.Aliases = c.commandAliases()
 	definition.Arguments = []string{}
 	if c.positional != "" {
 		definition.Arguments = []string{c.positional}
@@ -338,7 +349,7 @@ func (c commandContract) sharedFlags() []flagSpec {
 	}
 	flags := []flagSpec{{name: "--project", display: "--project <directory>", value: true}}
 	if c.Path != "live status" && c.Path != "live session" {
-		flags = append(flags, flagSpec{name: "--wait-seconds", display: "--wait-seconds <1-600> (default 120)", value: true}, flagSpec{name: "--no-cache", display: "--no-cache"})
+		flags = append(flags, flagSpec{name: "--wait-seconds", display: "--wait-seconds <1-600> (default 120)", value: true})
 	}
 	if c.Path == "live execute" {
 		flags = append(flags, flagSpec{name: "--policy", display: "--policy <opaque|observation> (default opaque)", value: true})
@@ -368,6 +379,7 @@ func (c commandContract) projectSelection() bool {
 }
 
 func findCommandContract(words []string) (*commandContract, string, error) {
+	words = canonicalCommandWords(words)
 	if len(words) == 0 {
 		return nil, "", nil
 	}
@@ -391,38 +403,10 @@ func findCommandContract(words []string) (*commandContract, string, error) {
 	contract := &commandContracts[best]
 	pathWords := strings.Fields(contract.Path)
 	extra := len(words) - len(pathWords)
-	if extra > 1 || extra == 1 && contract.positional == "" {
+	if !contract.variadic && extra > 1 || extra > 0 && contract.positional == "" {
 		return nil, "", fmt.Errorf("unexpected argument %q", words[len(pathWords)])
 	}
 	return contract, contract.Path, nil
-}
-
-func collectCommandWords(args []string) ([]string, error) {
-	words := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--help" || arg == "-h" || arg == "--offline" || arg == "--resume" || arg == "--allow-partial" || arg == "--stdin" {
-			continue
-		}
-		if !strings.HasPrefix(arg, "-") {
-			words = append(words, arg)
-			continue
-		}
-		key, _, inline := strings.Cut(arg, "=")
-		spec, known := anyFlagSpec(key)
-		if !known {
-			return nil, fmt.Errorf("unknown flag %s", key)
-		}
-		if !spec.value && inline {
-			return nil, fmt.Errorf("unknown flag %s", key)
-		}
-		if spec.value && !inline {
-			if i+1 < len(args) {
-				i++
-			}
-		}
-	}
-	return words, nil
 }
 
 func anyFlagSpec(name string) (flagSpec, bool) {
@@ -460,4 +444,293 @@ func commandFlag(contract *commandContract, name string) (flagSpec, bool) {
 		return flagSpec{}, false
 	}
 	return contract.flag(name)
+}
+
+// These input constraints and examples are part of the command directory.
+func commandConstraints(route string) []string {
+	switch route {
+	case "data sql":
+		return []string{"Exactly one of --sql, --file, --stdin is required.", "--file accepts SQL text or a query JSON object; --param name=scalar may repeat with unique names.", "A pinned Data snapshot is required (explicitly or through the project); choose --installation or --cdn.", "CSV export requires --encoding csv and --output; --overwrite permits replacing the chosen output."}
+	case "data hotfix":
+		return []string{"--source is required: wago, dbcache or raidbots.", "dbcache requires --snapshot and exactly one of --dbcache or --from CAP; raidbots requires --raidbots; wago requires explicit product/build/region/locale or compatible pinned parent.", "--scan is a bounded dbcache scan; --cursor resumes its original capture, not another source."}
+	case "target resolve":
+		return []string{"Choose --file, --target, --installation, or remote --product with --region and --locale.", "--file cannot combine with target/installation/product/build/region/locale/definitions/from/offline.", "--target cannot combine with file/installation/product/build/region/locale. --build requires --product.", "--from preserves the parent fixed identity; it cannot silently switch products or configurations."}
+	case "target add":
+		return []string{"A name plus --product, --region, --locale and exactly one of --installation or --remote are required.", "--replace explicitly replaces an existing named target; pinned records remain immutable."}
+	case "source refs", "source context":
+		return []string{"Exactly one of --symbol or --symbol-id is required.", "Third-party source requires an explicit compatible --environment PIN. Blizzard source uses its fixed environment and rejects a conflicting explicit environment.", "Pagination must retain the same snapshot, environment and query. Bounded/truncated or unsupported flow does not prove absence."}
+	case "source sync":
+		return []string{"--source and --product identify the repository and track. --ref fixes the requested ref; the result records its exact commit."}
+	case "source batch":
+		return []string{"--file supplies the batch JSON request; every query keeps its source/environment identity and coverage."}
+	case "source prune":
+		return []string{"--target-bytes is required; explicit zero requests maximal eligible cache reclamation."}
+	case "source validate":
+		return []string{"Choose a fixed snapshot or a local --path; --toc selects an addon manifest, --matrix selects explicit client contexts.", "--semantic uses the compatible pinned API environment; incomplete loading context remains partial."}
+	case "source diff":
+		return []string{"--from and --to identify the two fixed source snapshots."}
+	case "live execute":
+		return []string{"--session CON, --request, --budget-seconds and exactly one of --probe or --file are required.", "--policy observation is explicit; unknown submitted input is never re-executed."}
+	case "live connect":
+		return []string{"Select the installation/PID explicitly when discovery is ambiguous. --session resumes the original connection.", "The actual installation/PID/creation time/HWND, actor, runtime, owner and fence must match before input."}
+	case "live reload", "live bugs":
+		return []string{"--session and --request identify the original connection and durable request."}
+	case "live reload fallback":
+		return []string{"--installation, --pid and --request are required; fallback is limited to the original recoverable connection."}
+	case "live probe put":
+		return []string{"--name and --file are required; source is stored as an immutable probe revision without game input."}
+	case "doctor":
+		return []string{"--hard-reset requires --fix. Default diagnosis is read-only; --fix uses managed repair and original connection recovery."}
+	case "config set":
+		return []string{"At least one of --cache-max-bytes or --download-workers is required. Explicit zero retains its documented default/reset meaning."}
+	case "init":
+		return []string{"At most one enabled flag among --plan, --fresh, --resume."}
+	case "addon status":
+		return []string{"Choose --installation or --path, not both."}
+	case "skill install", "addon install":
+		return []string{"Normal install requires --release and a destination. Upgrade uses --output for recovery; --resume uses original destination/output without a new release."}
+	case "skill remove", "addon remove":
+		return []string{"A destination and --output recovery directory are required; removal archives owned files and retains SavedVariables."}
+	case "data db2":
+		return []string{"--table is required. --id is mutually exclusive with --after-id and --limit; ID zero remains an explicit ID."}
+	case "data db2 search":
+		return []string{"Table argument, --field, --query and a bounded --limit select the substring search."}
+	case "data db2 foreign-key":
+		return []string{"Table argument, --field, --value and --limit are required."}
+	case "data db2 stream":
+		return []string{"Requires --format jsonl and a bounded --limit. Only a valid end frame plus exit 0 completes the stream."}
+	}
+	if strings.HasPrefix(route, "data ") || strings.HasPrefix(route, "asset ") {
+		return []string{"Pinned Data and exactly one source (--installation or --cdn) are required for table/file reads; required domain IDs are named in the command summary."}
+	}
+	return []string{}
+}
+
+func commandExamples(c commandContract) [][]string {
+	args := strings.Fields(c.Path)
+	switch c.Path {
+	case "discover":
+		args = append(args, "无限服 法术查询")
+	case "schema":
+		args = append(args, "data", "sql")
+	case "target add":
+		args = append(args, "forever-cn", "--product", "forever", "--region", "cn", "--locale", "zhCN", "--remote")
+	case "target resolve":
+		args = append(args, "--product", "forever", "--region", "cn", "--locale", "zhCN")
+	case "target available":
+		args = append(args, "--region", "cn")
+	case "data sql":
+		args = append(args, "--snapshot", "PIN-example", "--cdn", "--sql", "SELECT ID FROM SpellName WHERE ID = $id", "--param", "id=441776")
+	case "source refs", "source context":
+		args = append(args, "--snapshot", "PIN-addon", "--environment", "PIN-client", "--symbol", "Example:OnEvent")
+	case "source sync":
+		args = append(args, "--source", "wow-ui-source", "--product", "forever", "--ref", "forever")
+	case "source prune":
+		args = append(args, "--target-bytes", "0")
+	case "config set":
+		args = append(args, "--download-workers", "2")
+	case "project init":
+		args = append(args, "--product", "forever")
+	case "project lock":
+		args = append(args, "--snapshot", "PIN-example")
+	case "live execute":
+		args = append(args, "--session", "CON-example", "--request", "inspect-1", "--probe", "inspect", "--budget-seconds", "10")
+	case "live probe put":
+		args = append(args, "--name", "inspect", "--file", "probe.lua")
+	case "source batch":
+		args = append(args, "--snapshot", "PIN-example", "--file", "batch.json")
+	case "source diff":
+		args = append(args, "--from", "PIN-before", "--to", "PIN-after")
+	default:
+		if c.positional != "" {
+			value := "example"
+			switch c.positional {
+			case "<Table>":
+				value = "SpellName"
+			case "<term>":
+				value = "GetBuildInfo"
+			case "<operation-id>", "<session-id>":
+				value = "CON-example"
+			case "<capture-id>":
+				value = "CAP-example"
+			}
+			args = append(args, value)
+		}
+		values := map[string]string{"--product": "forever", "--source": "wow-ui-source", "--region": "cn", "--locale": "zhCN", "--snapshot": "PIN-example", "--session": "CON-example", "--request": "inspect-1", "--budget-seconds": "10", "--pid": "1234", "--installation": "C:/Games/WoW/_forever_", "--file": "input.json", "--name": "inspect", "--path": "C:/Tools/lycheedev", "--output": "C:/Recovery/example", "--field": "Name_lang", "--query": "example", "--table": "SpellName", "--limit": "10", "--value": "1", "--spell-id": "441776", "--item-id": "19019", "--file-data-id": "134400", "--journal-encounter-id": "1"}
+		for _, name := range requiredFlags(c.Path) {
+			args = append(args, name, values[name])
+		}
+		if c.projectSelection() {
+			args = append(args, "--snapshot", "PIN-example")
+		}
+		if _, ok := c.flag("--cdn"); ok {
+			args = append(args, "--cdn")
+		}
+		switch c.Path {
+		case "data hotfix":
+			args = []string{"data", "hotfix", "--source", "dbcache", "--snapshot", "PIN-example", "--dbcache", "DBCache.bin"}
+		case "data creature display":
+			args = append(args, "--display-id", "1")
+		case "data decor get":
+			args = append(args, "--id", "1")
+		case "source inspect":
+			args = append(args, "--path", "Example.lua")
+		case "source validate":
+			args = append(args, "--path", "C:/AddOns/Example", "--toc", "Example.toc")
+		case "skill install":
+			args = append(args, "--release", "C:/Release", "--path", "C:/Skills/lycheedev")
+		case "addon install":
+			args = append(args, "--release", "C:/Release", "--installation", "C:/Games/WoW/_forever_")
+		case "addon status":
+			args = append(args, "--installation", "C:/Games/WoW/_forever_")
+		case "asset inspect":
+			args = append(args, "--file-id", "134400")
+		case "asset export":
+			args = append(args, "--file-id", "134400", "--output", "C:/Exports/icon.blp")
+		case "asset demux":
+			args = append(args, "--file-id", "134400", "--output", "C:/Exports/media")
+		case "asset search":
+			args = append(args, "--listfile", "community-csv", "--query", "icon")
+		case "evidence bundle":
+			args = append(args, "--ids", "CAP-example", "--output", "C:/Exports/evidence.zip")
+		}
+	}
+	if c.Path == "data db2 stream" {
+		args = append(args, "--format", "jsonl")
+		return [][]string{args}
+	}
+
+	if strings.HasPrefix(c.Path, "publish ") {
+		args = append(args, "--file", "input.json", "--plan")
+	}
+	args = append(args, "--format", "json")
+	return [][]string{args}
+}
+
+func (c commandContract) commandAliases() []string {
+	if c.Path == "data db2" || strings.HasPrefix(c.Path, "data db2 ") {
+		return []string{strings.Replace(c.Path, "data db2", "data table", 1)}
+	}
+	return nil
+}
+
+func canonicalCommandWords(words []string) []string {
+	result := append([]string(nil), words...)
+	if len(result) >= 2 && result[0] == "data" && result[1] == "table" {
+		result[1] = "db2"
+	}
+	return result
+}
+
+func requiredFlags(route string) []string {
+	if publishRequestRequired(route) {
+		return []string{"--request"}
+	}
+	switch route {
+	case "publish curseforge plugin upload":
+		return []string{"--request"}
+	case "project init":
+		return []string{"--product"}
+	case "project lock":
+		return []string{"--snapshot"}
+	case "source sync":
+		return []string{"--source", "--product"}
+	case "source diff":
+		return []string{"--from", "--to"}
+	case "source prune":
+		return []string{"--target-bytes"}
+	case "target add":
+		return []string{"--product", "--region", "--locale"}
+	case "target available":
+		return []string{"--region"}
+	case "live probe put":
+		return []string{"--name", "--file"}
+	case "live execute":
+		return []string{"--session", "--request", "--budget-seconds"}
+	case "live reload", "live bugs":
+		return []string{"--session", "--request"}
+	case "live reload fallback":
+		return []string{"--installation", "--pid", "--request"}
+	case "data hotfix":
+		return []string{"--source"}
+	case "data db2":
+		return []string{"--table"}
+	case "data db2 search":
+		return []string{"--field", "--query", "--limit"}
+	case "data db2 foreign-key":
+		return []string{"--field", "--value", "--limit"}
+	case "data db2 stream", "data decor list":
+		return []string{"--limit"}
+	case "data spell info", "data spell auras", "data spell summons":
+		return []string{"--spell-id"}
+	case "data item get", "data item models", "data item geosets", "data item textures":
+		return []string{"--item-id"}
+	case "data creature model":
+		return []string{"--file-data-id"}
+	case "data encounter get":
+		return []string{"--journal-encounter-id"}
+	case "skill status":
+		return []string{"--path"}
+	case "skill remove":
+		return []string{"--path", "--output"}
+	case "addon remove":
+		return []string{"--installation", "--output"}
+	}
+	return nil
+}
+
+func curseForgeCommand(action string, mutates bool) commandContract {
+	flags := []flagSpec{{name: "--file", display: "--file <input.json>", value: true}, {name: "--stdin", display: "--stdin"}, {name: "--plan", display: "--plan (local validation; no credentials or network)"}}
+	if action == "plugin upload" {
+		flags = append(flags, flagSpec{name: "--request", display: "--request <original-upload-id>", value: true})
+	}
+	return commandContract{Definition: Definition{Path: "publish curseforge " + action, Summary: "CurseForge " + action + "; JSON fields and dynamic options are exposed by schema; omitted input is {}", Mutates: mutates}, flags: flags, allowsHome: true}
+}
+
+func helpDefinitions(words []string) ([]Definition, error) {
+	if len(words) == 0 {
+		return definitions, nil
+	}
+	c, _, err := findCommandContract(words)
+	if err == nil && c != nil {
+		return []Definition{c.publicDefinition()}, nil
+	}
+	prefix := strings.Join(canonicalCommandWords(words), " ") + " "
+	var matches []Definition
+	for _, candidate := range commandContracts {
+		if strings.HasPrefix(candidate.Path, prefix) {
+			matches = append(matches, candidate.publicDefinition())
+		}
+	}
+	if len(matches) > 0 {
+		return matches, nil
+	}
+	return nil, err
+}
+
+func platformPublishContracts() []commandContract {
+	var result []commandContract
+	add := func(platform string, actions []string) {
+		for _, action := range actions {
+			route := "publish " + platform + " " + action
+			flags := []flagSpec{{name: "--file", display: "--file <input.json>", value: true}, {name: "--stdin", display: "--stdin"}, {name: "--plan", display: "--plan (local validation; no credentials or network)"}}
+			if publishRequestRequired(route) {
+				flags = append(flags, flagSpec{name: "--request", display: "--request <original-operation-id>", value: true})
+			}
+			result = append(result, commandContract{Definition: Definition{Path: route, Summary: platform + " " + action + "; schema exposes nested input, dynamic options, effects and recovery", Mutates: publishMutates(platform, action)}, flags: flags, allowsHome: true})
+		}
+	}
+	add("newbee", publish.NewBeeActions())
+	add("modus", publish.ModusActions())
+	add("blackbox", publish.BlackboxActions())
+	add("dd", []string{
+		"session doctor", "session start", "session status", "session close",
+		"options life-types", "options game-types", "options game-versions", "options vip-levels", "options channels", "options associated-acts",
+		"plugin list", "plugin get", "plugin categories", "plugin versions", "plugin create", "plugin update", "plugin edit", "plugin delete", "plugin upload",
+		"config list", "config get", "config create", "config update", "config edit", "config delete", "config upload",
+		"wa list", "wa get", "wa categories", "wa parse", "wa create", "wa update", "wa edit", "wa delete", "wa upload",
+		"backup list", "backup get", "backup scan", "backup generate", "backup upload", "backup rename", "backup delete", "backup delete-preview", "backup delete-many",
+		"operation status", "operation verify", "operation resume",
+	})
+	return result
 }

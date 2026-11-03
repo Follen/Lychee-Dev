@@ -3,9 +3,9 @@ package records
 import (
 	"context"
 	"fmt"
-	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"regexp"
 	"strconv"
@@ -170,10 +170,10 @@ func semanticFields(code string, maximum int) []string {
 // SemanticSource supplies pinned enum/flags metadata as meta.TableName SQL
 // rows. Raw DB2 columns remain unchanged. A missing mapping is an empty catalog,
 // not a claim that all possible values/flags are known.
-func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table string, offline bool) (relational.Source, SemanticBundle, error) {
+func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table string, offline bool) (sqlengine.Source, SemanticBundle, error) {
 	definition, err := d.Prepare(ctx, commit, table, offline)
 	if err != nil {
-		return relational.Source{}, SemanticBundle{}, err
+		return sqlengine.Source{}, SemanticBundle{}, err
 	}
 	table = definition.Identity.Name
 	base := "https://raw.githubusercontent.com/wowdev/WoWDBDefs/" + commit + "/meta/"
@@ -185,7 +185,7 @@ func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table s
 		return err
 	})
 	if err != nil {
-		return relational.Source{}, bundle, err
+		return sqlengine.Source{}, bundle, err
 	}
 	all := [][]any{}
 	cache := map[string][][]any{}
@@ -198,7 +198,7 @@ func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table s
 		values, ok := cache[path]
 		if !ok {
 			if len(cache) >= 128 {
-				return relational.Source{}, bundle, ErrMetadataLimit
+				return sqlengine.Source{}, bundle, ErrMetadataLimit
 			}
 			ref, err := d.load(ctx, base+path, offline, func(raw []byte) error {
 				var err error
@@ -206,26 +206,26 @@ func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table s
 				return err
 			})
 			if err != nil {
-				return relational.Source{}, bundle, fmt.Errorf("metadata %s: %w", path, err)
+				return sqlengine.Source{}, bundle, fmt.Errorf("metadata %s: %w", path, err)
 			}
 			retained += ref.Bytes
 			if retained > 16<<20 {
-				return relational.Source{}, bundle, ErrMetadataLimit
+				return sqlengine.Source{}, bundle, ErrMetadataLimit
 			}
 			bundle.Definitions[path] = ref
 			cache[path] = values
 		}
 		for _, value := range values {
 			if err := d.budget.Charge(resource.Cost{RetainedBytes: 256, MetadataBytes: 256, DecodeWork: 1}); err != nil {
-				return relational.Source{}, bundle, err
+				return sqlengine.Source{}, bundle, err
 			}
 			all = append(all, []any{m.field, m.kind, m.name, value[0], value[1], value[2], m.conditionField, m.conditionValue})
 			if len(all) > 100000 {
-				return relational.Source{}, bundle, ErrMetadataLimit
+				return sqlengine.Source{}, bundle, ErrMetadataLimit
 			}
 		}
 	}
-	return relational.Source{Columns: []string{"Field", "Kind", "Definition", "Value", "Name", "Comment", "ConditionField", "ConditionValue"}, Scan: func(ctx context.Context, y func([]any) error) error {
+	return sqlengine.Source{Columns: []string{"Field", "Kind", "Definition", "Value", "Name", "Comment", "ConditionField", "ConditionValue"}, Types: []sqlengine.Kind{sqlengine.Text, sqlengine.Text, sqlengine.Text, sqlengine.WideInteger, sqlengine.Text, sqlengine.Text, sqlengine.Text, sqlengine.Text}, Scan: func(ctx context.Context, y func([]any) error) error {
 		for _, row := range all {
 			if err := ctx.Err(); err != nil {
 				return err

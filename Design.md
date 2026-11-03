@@ -2,19 +2,22 @@
 
 本文描述 3.2.7 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
+当前业务架构、Cobra/CLI、Skill、Data/SQL、Source、Publish、正式Forever支持、CI减负及新子Agent循环审计建议见[整改计划](docs/rectification-plan.md)。该计划记录整改方案与阶段状态；本文区分现有实现和目标架构。
+
 ## 组成与职责
 
 产品交付 Go CLI、Lua addon、Agent Skill 和 npm 包，平台为 Windows amd64。Source、Data 和资源调查独立于游戏进程；Live 负责实际客户端执行和观察。
 
 | 模块 | 职责 |
 | --- | --- |
-| `cmd/lycheedev`、`internal/command` | 命令合同、参数解析、选择与编排、结果和退出码 |
+| `cmd/lycheedev`、`internal/command` | 唯一命令合同构建 Cobra 命令树，离线 discover/schema/help、输入绑定、选择与编排、结果和退出码 |
 | `internal/selection` | 产品目录、安装身份、Source/Data/Changes pin |
 | `internal/codebase`、`internal/addoncheck` | Git 快照、索引、搜索、关系、上下文、LuaLS，以及独立的 addon 静态解析与 API 审查 |
 | `internal/records` | CASC/CDN、DB2/SQL、Hotfix、关联记录和资源导出 |
 | `internal/live/channel`、`internal/live/memory` | Native 连接、恢复日志、运行时定位和 Mailbox 读取 |
 | `internal/bridge` | Go/Lua 共享信封、记录和协议类型 |
 | `internal/delivery` | 受管安装、升级、槽发布与迁移 |
+| `internal/publish` | 作者平台账号、资源、上传、备份、读回和原操作恢复；平台实现与本机受管安装分开 |
 | `internal/desktop` | 固定窗口身份、进程核验与输入 |
 | `internal/evidence`、`internal/vault` | 证据、缓存、预算和持久化 |
 | `addon/` | 启动、兼容层、Live bridge、工作台与共享 UI |
@@ -32,13 +35,12 @@
 | classic | wow_classic | _classic_ | classic | 50504 |
 | classic-era | wow_classic_era | _classic_era_ | classic_era | 11509 |
 | titan | wow_classic_titan | _classic_titan_ | classic_titan | 38002 |
-| forever-asia-beta | wow_classic_beta | _classic_beta_ | forever | 16001 |
-| forever-cn-beta | wow_cn_beta | _cn_beta_ | forever | 16001 |
+| forever | wowf | _forever_ | forever | 16001 |
 | anniversary | wow_anniversary | _anniversary_ | classic_anniversary | 20506 |
 
-安装身份从 `.flavor.info`、`version.txt`、`.build.info` 等元数据解析；明确选中的客户端路径保持原选择。两个 Forever beta 共享源码家族，但独立固定地区、产品和构建配置。
+安装身份从 `.flavor.info`、`version.txt`、`.build.info` 等元数据解析；明确选中的客户端路径保持原选择。新目标中的无限服/国服无限服为正式 `forever`，版本系列 `1.60.1.*`，程序 `Wow.exe`。历史两个 Forever beta 的固定 PIN、CAP 与恢复记录保持原产品、地区和配置；历史读取与原连接恢复不把旧安装升级为正式服身份。
 
-Data pin 固定 product、build、BuildConfig、CDNConfig、region、locale 和 DBD 来源。同版本号不代表相同内容。主 addon 与 500 个 LoD 槽采用一致的多 Interface 声明，声明更新通过受管安装迁移。
+Data pin 固定 product、build、BuildConfig、CDNConfig、region、locale 和 DBD 来源。新正式 Forever PIN 额外固定 `productCode=wowf`，历史 PIN 的序列化和哈希保持原状。同版本号不代表相同内容。主 addon 与 500 个 LoD 槽采用一致的多 Interface 声明，声明更新通过受管安装迁移。
 
 Retail 12.1.5.70391 对应 `live` 固定提交 `18c6d677b605b312f3d813d498404631fb941977`、Interface 120105；保留12.1.0的120100基线。同一产品的安装选择按实际构建系列匹配，不取该产品的第一条基线。
 
@@ -47,6 +49,8 @@ Retail 12.1.5.70391 对应 `live` 固定提交 `18c6d677b605b312f3d813d498404631
 ## Source
 
 `source sync` 固定仓库与提交，index 生成结构事实；query、refs、context、flow 和 diff 在固定快照上运行。第三方 addon 的 API 环境同样固定，避免读取时隐式换成另一个客户端。
+
+第三方源码保留其仓库 track，并显式指定客户端 environment；Blizzard 源码拒绝冲突的 environment。加载闭包解析 TOC/XML 条件与 `[Family]`/`[Game]`，未知条件保留 partial。Context 汇总全部请求阶段的 coverage，分页绑定有效语义上下文身份。测试源码也通过真实 Git fixture 的 sync/index/read，不在生产读取路径注入合成 PIN。
 
 精确查询按 exact、prefix、索引文本、正文的顺序查找。已命中时停止向低层扫描；声明索引按需生成，请求内复用查找表、Git 文档与 API 环境。
 
@@ -64,9 +68,29 @@ Retail 12.1.5.70391 对应 `live` 固定提交 `18c6d677b605b312f3d813d498404631
 
 Windows Data查询在获得工作区slot后读取可用物理内存与进程提交/虚拟地址余量，取最小值的一半按并发容量分配本次上限。retained/scratch与metadata预算按实际计费扩容，每次扩容重读可用内存；同一查询的天花板保持不变，网络/工作量、单文件和SQL执行器限制独立。预算是保守逻辑计费，不是进程RSS限制。SQL和导航结果的memoryBudget报告模式、当前额度、天花板、扩容次数和scratch峰值。
 
+SQL由 `internal/records/sqlengine` 中的 DuckDB 2.0.0 负责解析、绑定、执行和优化；旧 `relational` 包已删除，不保留方言转换、引擎开关或失败回退。参数采用原生 `$name`，整数和DECIMAL输出保持精确JSON数值；分数字面参数用binary64，需要精确十进制时传字符串并显式CAST。EXPLAIN输出原生计划文本，scans单列Data实际供行与索引查找次数。
+
+每次请求使用独立内存数据库、单线程、64 MiB引擎缓冲限制、16 MiB结果和千万行供行上限，禁止磁盘spill、外部文件/网络和扩展加载。Go reader预算、原生内存和进程峰值分别解释。固定Data表以投影表函数流式供行；简单单表ID等值/IN从DuckDB语法树提取索引范围，完整谓词仍由DuckDB计算，复杂查询使用同一表源。DB2/DBD、CASC/CDN、Hotfix effective、PIN、coverage和证据链保持原边界；历史PIN/CAP不重写。
+
+Windows amd64发行固定官方Go驱动/原生库和GCC14.2，使用CGO静态链接。原生依赖与编译器分别由go.mod/go.sum和release/tools/mingw.json固定；构建流程见[开发指南](docs/development.md)，实际迁移验证见[计划](docs/rectification-plan.md#7-duckdb-接入与-sql-迁移)。
+
 DB2、SQL、关联记录和资源导出共用固定数据身份。Hotfix 记录 provider、build、locale、过滤及分页范围。缺密钥、缺定义、截断或部分解码显式返回；原始内容和派生资源分别记录完整性。
 
+现代 Hotfix v7/v8/v9 的 NotPublic 保留先前 patch 或基础行；copy 行的 Common 覆盖按逻辑目标 ID 读取。DBCD 对照固定源码提交、输入摘要和完整字段摘要，CI 消费五表及十二项 Hotfix 差分的实际终态。DBD 选择保留显式 layout 优先，冲突矩阵记录其与 DBCD 的有意差异。
+
 Wago 的 coverage.complete 表示当前窗口耗尽，本地 snapshot 保留完整快照语义；统一的 fullQueryComplete 表示从第一页无 cursor 开始并完整到末尾。完整本地缓存查询不代表完整服务端覆盖。DB2 JSONL 先完成来源复核与归档，再发唯一 end；后置失败发 error，不发成功 end。
+
+## Publish 与 CLI 合同
+
+`internal/command/command_contract.go` 是唯一命令目录。Cobra 从合同构建解析树；`discover`、`schema`、`help` 只读静态合同与产品目录，不初始化项目、账号或工作目录。嵌套 Publish 输入由所属平台的 InputSpec 同时提供准入、schema、动态选项和示例。Skill 保留调查与证据解释，命令细节由安装的 CLI 提供。
+
+Publish 包含 CurseForge、NewBee 官方/Creator、网易 DD、小黑盒和 ModUs 主客户端/Creator。业务、HTTP、归档和恢复在 Go 中实现；NewBee 官方通道调用已安装官方 CLI，DD 与 NewBee Creator 的厂商能力使用窄运行时适配。各通道账号独立，不隐式切换来源。当前实现已完成离线验收和修复后的独立复审，真实平台写入待验范围见 todo。
+
+远端写入先保存原请求、账号、目标、必要产物摘要与阶段；未收到确定回执时沿原操作读回，不重放写入。上传、登记、元数据、公开字节和审核分别表达。ModUs Creator 项目详情没有图片字节接口，项目图片修改保持待核验；备份 storage 登记缺少查询接口时保留原 pending 阶段。选择性备份保留原产物，各平台在删除前按其公开关系检查引用。备份目录允许跨卷，按解析后的目录路径检查输出不落入所选游戏目录，包含 Windows 目录联接。
+
+原操作 `status` 成功读取时返回退出码0，结果中的 `complete`、`submission`、`verification` 仍描述原操作；缺失或损坏的收据照常失败。执行、核验和续走的未知结果返回6，明确拒绝返回5，不再建议继续核验已拒绝的操作。
+
+`--plan` 不读取账号或提交请求，返回本地输入准入与远端待验证条件。纯本地扫描/生成、会话登录、资源写入各自声明实际影响；最终业务结果继续使用 `lycheedev.result.v1`。
 
 ## Native Live
 

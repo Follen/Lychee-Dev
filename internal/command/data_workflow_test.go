@@ -21,7 +21,7 @@ func TestDataNameDiscoveryWorkflow(t *testing.T) {
 	})
 	query := func(args ...string) map[string]any {
 		t.Helper()
-		got, code := invoke(t, append(args, dataArgs(pin, root, "--format=json")...)...)
+		got, code := invokeSQL(t, append(args, dataArgs(pin, root, "--format=json")...)...)
 		if code != 0 || !got.OK || got.Context["snapshot"] != pin || len(got.Captures) == 0 {
 			t.Fatalf("%v: exit=%d envelope=%+v", args, code, got)
 		}
@@ -47,7 +47,7 @@ func TestDataNameDiscoveryWorkflow(t *testing.T) {
 	var ids []int
 	after := 0
 	for page := 0; page < 3; page++ {
-		result := query("data", "sql", "--sql", "SELECT ID FROM SpellName WHERE Name_lang=:name AND ID>:after ORDER BY ID LIMIT 1", "--param", `name="Claw"`, "--param", fmt.Sprintf("after=%d", after))
+		result := query("data", "sql", "--sql", "SELECT ID FROM SpellName WHERE Name_lang=$name AND ID>$after ORDER BY ID LIMIT 1", "--param", `name="Claw"`, "--param", fmt.Sprintf("after=%d", after))
 		rows := result["result"].(map[string]any)["rows"].([]any)
 		if len(rows) == 0 {
 			break

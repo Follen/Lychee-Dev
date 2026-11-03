@@ -106,11 +106,6 @@ func ParseHotfixTime(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("%w: time must be RFC3339 or 2006-01-02 15:04:05", ErrHotfixQuery)
 }
 
-// HotfixUint32, HotfixInt32 and HotfixUint8 build explicit filter values.
-func HotfixUint32(value uint32) *uint32 { return &value }
-func HotfixInt32(value int32) *int32    { return &value }
-func HotfixUint8(value uint8) *uint8    { return &value }
-
 // hotfixBuildNumber extracts the DBCache build number from an exact four
 // segment build such as 12.0.7.68974.
 func hotfixBuildNumber(fullBuild string) (uint32, error) {

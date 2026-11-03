@@ -250,7 +250,7 @@ func (v *View) Row(ctx context.Context, id uint32, textBytes int) (map[string]an
 				}
 				program.storage.BitOffset = uint16(cursor % 8)
 				decoder := Columns{programs: []columnProgram{program}}
-				values, err = decoder.Values(ctx, row.Data[cursor/8:], row.OriginID, 0, field.Elements)
+				values, err = decoder.Values(ctx, row.Data[cursor/8:], row.ID, 0, field.Elements)
 				if err != nil {
 					return nil, err
 				}
@@ -259,7 +259,7 @@ func (v *View) Row(ctx context.Context, id uint32, textBytes int) (map[string]an
 				}
 			}
 		} else {
-			values, err = v.records.columns.Values(ctx, row.Data, row.OriginID, column, field.Elements)
+			values, err = v.records.columns.Values(ctx, row.Data, row.ID, column, field.Elements)
 			if err != nil {
 				return nil, err
 			}

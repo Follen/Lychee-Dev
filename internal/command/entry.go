@@ -13,8 +13,8 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/journal"
+	"github.com/follenfang/lycheedev/internal/publish"
 	"github.com/follenfang/lycheedev/internal/records"
-	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"io"
@@ -28,13 +28,12 @@ import (
 const Version = buildinfo.Version
 
 type Fault struct {
-	Details           any            `json:"details,omitempty"`
-	Code              string         `json:"code"`
-	Message           string         `json:"message"`
-	Stage             string         `json:"stage"`
-	Retryable         bool           `json:"retryable"`
-	ResumeOperationID string         `json:"resumeOperationId"`
-	Location          *QueryLocation `json:"location,omitempty"`
+	Details           any    `json:"details,omitempty"`
+	Code              string `json:"code"`
+	Message           string `json:"message"`
+	Stage             string `json:"stage"`
+	Retryable         bool   `json:"retryable"`
+	ResumeOperationID string `json:"resumeOperationId"`
 }
 
 type Envelope struct {
@@ -148,7 +147,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "--internal-luals-broker" {
 		return SourceBrokerMain(ctx, args)
 	}
-	opts, parseErr := parseOptions(args)
+	opts, parseErr := parseCommand(ctx, args)
 	response := Envelope{Schema: "lycheedev.result.v1", Context: map[string]any{}, Captures: []any{}, Warnings: []string{}}
 	var err error
 	code := 0
@@ -157,11 +156,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	} else if opts.help {
 		if len(opts.words) == 0 {
 			response.Result = map[string]any{"commands": definitions, "flags": []string{"--home <root>", "--format text|json|jsonl", "--help"}}
-		} else if contract, _, contractErr := findCommandContract(opts.words); contractErr != nil {
-			err, code = contractErr, 2
+		} else if matches, helpErr := helpDefinitions(opts.words); helpErr != nil {
+			err, code = helpErr, 2
 		} else {
-			definition := contract.publicDefinition()
-			response.Result = map[string]any{"commands": []Definition{definition}, "flags": append(definition.Flags, "--help")}
+			response.Result = map[string]any{"commands": matches, "next": "lycheedev schema <command...>"}
+			if contract, _, e := findCommandContract(opts.words); e == nil && contract != nil {
+				definition := contract.publicDefinition()
+				response.Result = map[string]any{"commands": []Definition{definition}, "flags": append(definition.Flags, "--help"), "schema": contract.schema()}
+			}
 		}
 	} else {
 		contract, route, _ := findCommandContract(opts.words)
@@ -186,11 +188,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				response.Context["project"], response.Context["snapshot"] = project.Directory, project.Lock.Selection.ID
 			}
 		}
-		handledChannel := false
+		handled := false
 		if err == nil {
-			handledChannel, code, err = runChannelCommand(ctx, route, argument, opts, &response)
+			if strings.HasPrefix(route, "publish ") {
+				code, err = runPublishCommand(ctx, route, opts, &response)
+				handled = true
+			} else {
+				handled, code, err = runChannelCommand(ctx, route, argument, opts, &response)
+			}
 		}
-		if err == nil && !handledChannel {
+		if err == nil && !handled {
 			switch route {
 			case "update":
 				response.Result, err, code = updateToolkit(ctx, opts)
@@ -466,6 +473,19 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "version":
 				response.Result = buildinfo.Current()
+			case "discover":
+				response.Result = discoverCommands(strings.Join(opts.words[1:], " "))
+			case "schema":
+				var contract *commandContract
+				contract, _, err = findCommandContract(opts.words[1:])
+				if err == nil && (contract == nil || strings.Join(canonicalCommandWords(opts.words[1:]), " ") != contract.Path) {
+					err = errors.New("schema requires an exact command path; use discover")
+				}
+				if err != nil {
+					code = 2
+				} else {
+					response.Result = contract.schema()
+				}
 			case "describe":
 				response.Result = map[string]any{"commands": definitions, "formats": []string{"text", "json", "jsonl"}, "development": strings.Contains(Version, "-")}
 			case "init":
@@ -526,14 +546,6 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			case "source validate":
 				if opts.release != "" && !opts.semantic {
 					err, code = errors.New("source validate --release requires --semantic"), 2
-					break
-				}
-				if opts.environmentSnapshot != "" && !opts.semantic {
-					err, code = errors.New("source validate --environment requires --semantic"), 2
-					break
-				}
-				if opts.environmentSnapshot != "" && opts.matrix != "" {
-					err, code = errors.New("source validate --environment applies to one pinned source; matrix targets require their own client source"), 2
 					break
 				}
 				if opts.matrix != "" && (opts.snapshot != "" || opts.path != "" || opts.toc != "") || opts.matrix == "" && (opts.snapshot == "" || opts.path == "" || opts.toc == "") {
@@ -871,6 +883,19 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			code, faultCode, stage = 2, "records.export_options", "export"
 		}
 		response.Error = &Fault{Code: faultCode, Message: err.Error(), Stage: stage}
+		var publishErr *publish.Error
+		if errors.As(err, &publishErr) {
+			code = publishErr.Exit
+			response.Error.Code = publishErr.Code
+			response.Error.Stage = "publish"
+			response.Error.Details = map[string]any{"field": publishErr.Path, "details": publishErr.Details, "next": "lycheedev schema " + strings.Join(opts.words, " ")}
+		}
+		if code == 2 {
+			var field *inputFieldError
+			if errors.As(err, &field) {
+				response.Error.Details = map[string]any{"field": field.Field, "command": field.Command, "next": "lycheedev schema " + field.Command}
+			}
+		}
 		if response.Context["transport"] == "Lycheedev mailbox protocol v1" && code == 6 {
 			response.Error.Retryable = true
 		}
@@ -880,14 +905,6 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				response.Error.ResumeOperationID = response.OperationID
 				response.Error.Retryable = errors.Is(err, journal.ErrBusy) || code == 6
 			}
-		}
-		var diagnostic *relational.Diagnostic
-		var binding *relational.BindingDiagnostic
-		if errors.As(err, &binding) {
-			response.Error.Details = binding
-		}
-		if errors.As(err, &diagnostic) {
-			response.Error.Location = &QueryLocation{Offset: diagnostic.Offset, Line: diagnostic.Line, Column: diagnostic.Column}
 		}
 		var installationChoice *records.InstallationSelectionError
 		if errors.As(err, &installationChoice) {
@@ -905,577 +922,504 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return code
 }
 
-func parseOptions(args []string) (Options, error) {
-	opts := Options{format: "text", line: 1, count: 80, limit: 50, maxBytes: 128 << 20, sourceDepth: 1, sourceMaxLines: 120}
-	// Find output format even if an earlier argument is invalid, so errors obey
-	// machine callers' requested encoding. Invalid formats fall back to JSON.
-	for i, arg := range args {
-		if arg == "--format" && i+1 < len(args) {
-			opts.format = args[i+1]
-		}
-		if strings.HasPrefix(arg, "--format=") {
-			opts.format = strings.TrimPrefix(arg, "--format=")
-		}
-	}
-	if opts.format != "text" && opts.format != "json" && opts.format != "jsonl" {
-		opts.format = "json"
-		return opts, errors.New("format must be text, json, or jsonl")
-	}
-	words, err := collectCommandWords(args)
-	if err != nil {
-		return opts, err
-	}
-	opts.words = words
-	contract, route, err := findCommandContract(opts.words)
-	if err != nil {
-		return opts, err
-	}
-	if route == "asset search" {
-		// The public community listfile exceeds 128 MiB. Keep a bounded
-		// route-specific default and allow callers to choose a smaller budget.
-		opts.maxBytes = 256 << 20
-	}
-	if route == "source context" {
-		opts.maxBytes = 16 << 10
-	}
-	for _, arg := range args {
-		if arg == "--help" || arg == "-h" {
-			opts.help = true
-			break
-		}
-	}
-	if !opts.help && contract != nil && contract.positional != "" && len(opts.words) == len(strings.Fields(route)) {
-		return opts, fmt.Errorf("missing required argument %s", contract.positional)
-	}
-	seen := map[string]bool{}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if spec, known := commandFlag(contract, arg); known && !spec.value {
-			if seen[arg] {
-				return opts, fmt.Errorf("repeated flag %s", arg)
-			}
-			seen[arg] = true
-			switch arg {
-			case "--fix":
-				opts.fix = true
-			case "--hard-reset":
-				opts.hardReset = true
-			case "--stdin":
-				opts.stdin = true
-			case "--passive":
-				// Discovery is always passive; this flag selects no separate mode.
-			case "--no-cache":
-				// Compatibility flag: native reads always use the same guarded lookup.
-			case "--semantic":
-				opts.semantic = true
-			case "--session-reuse":
-				opts.sessionReuse = true
-			case "--static-only":
-				opts.staticOnly = true
-			case "--flow":
-				opts.sourceFlow = true
-			case "--allow-partial":
-				opts.allowPartial = true
-			case "--overwrite":
-				opts.overwrite = true
-			case "--cdn":
-				opts.cdn = true
-			case "--offline":
-				opts.offline = true
-			case "--latest":
-				opts.latest = true
-			case "--scan":
-				opts.scan = true
-			case "--resume":
-				opts.resume = true
-			case "--remote":
-				opts.remote = true
-			case "--replace":
-				opts.replace = true
-			case "--uncommitted":
-				opts.uncommitted = true
-			case "--dry-run":
-				opts.dryRun = true
-			case "--plan":
-				opts.plan = true
-			case "--fresh":
-				opts.fresh = true
-			case "--include-removed":
-				opts.includeRemoved = true
-			default:
-				return opts, fmt.Errorf("flag %s has no option handler", arg)
-			}
-			continue
-		}
-		if arg == "--help" || arg == "-h" {
-			opts.help = true
-			continue
-		}
-		if !strings.HasPrefix(arg, "-") {
-			continue
-		}
-		key, value, inline := strings.Cut(arg, "=")
-		spec, known := commandFlag(contract, key)
-		if !known {
-			return opts, unsupportedRouteFlag(route, key)
-		}
-		if !spec.value {
-			return opts, fmt.Errorf("unknown flag %s", key)
-		}
-		if seen[key] && key != "--param" && !(route == "update" && (key == "--path" || key == "--installation")) {
-			return opts, fmt.Errorf("repeated flag %s", key)
-		}
-		seen[key] = true
-		if !inline {
-			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
-				return opts, fmt.Errorf("missing value for %s", key)
-			}
-			i++
-			value = args[i]
-		}
-		if value == "" {
-			return opts, fmt.Errorf("empty value for %s", key)
-		}
-		if route == "update" {
-			if key == "--path" {
-				opts.updatePaths = append(opts.updatePaths, value)
-			}
-			if key == "--installation" {
-				opts.updateInstallations = append(opts.updateInstallations, value)
-			}
-		}
-		if key == "--home" {
-			opts.home = value
-		}
-		if key == "--file" {
-			opts.file = value
+// bindOption converts one Cobra-parsed value using the existing business types.
+func bindOption(opts *Options, route, key, value string, boolean bool) error {
+	if boolean {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for %s: %w", key, err)
 		}
 		switch key {
-		case "--encoding":
-			if value == "csv" {
-				if route != "data hotfix" && route != "data sql" {
-					return opts, errors.New("--encoding csv is only supported by data hotfix and data sql")
-				}
-				opts.encoding = value
-				break
-			}
-			if route == "data sql" {
-				return opts, errors.New("data sql --encoding must be csv")
-			}
-			if value != "raw" && value != "png" && value != "webp" {
-				return opts, errors.New("--encoding must be raw, png, or webp")
-			}
-			opts.encoding = value
-		case "--channels":
-			opts.channels = value
-		case "--mipmap":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 || n > 15 {
-				return opts, errors.New("--mipmap must be between 0 and 15")
-			}
-			opts.mipmap = n
-		case "--max-pixels":
-			n, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || n < 1 || n > 64<<20 {
-				return opts, errors.New("--max-pixels must be between 1 and 67108864")
-			}
-			opts.maxPixels = n
-		case "--project":
-			opts.project = value
-		case "--target":
-			opts.target = value
-		case "--ids":
-			opts.ids = value
-		case "--session":
-			opts.session = value
-		case "--probe":
-			opts.probe = value
-		case "--request":
-			opts.request = value
-		case "--budget-seconds":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 1 || n > 120 {
-				return opts, errors.New("--budget-seconds must be between 1 and 120")
-			}
-			opts.budgetSeconds = n
-		case "--pid":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil || n == 0 {
-				return opts, errors.New("invalid --pid")
-			}
-			opts.pid = uint32(n)
-		case "--character":
-			opts.character = value
-		case "--realm":
-			opts.realm = value
-		case "--region":
-			opts.dataRegion = value
-		case "--locale":
-			opts.locale = value
-		case "--definitions":
-			opts.definitionRef = value
-		case "--release":
-			opts.release = value
-		case "--output":
-			opts.output = value
-		case "--table-hash":
-			if len(value) != 8 {
-				return opts, errors.New("--table-hash requires eight hexadecimal digits")
-			}
-			n, err := strconv.ParseUint(value, 16, 32)
-			if err != nil {
-				return opts, errors.New("invalid --table-hash")
-			}
-			v := uint32(n)
-			opts.tableHash = &v
-		case "--after-index":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return opts, errors.New("invalid --after-index")
-			}
-			v := uint32(n)
-			opts.afterIndex = &v
-		case "--after-id":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return opts, errors.New("invalid --after-id")
-			}
-			value := uint32(n)
-			opts.afterID = &value
-		case "--table":
-			opts.table = value
-		case "--id":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return opts, errors.New("invalid --id")
-			}
-			opts.recordID, opts.recordIDSet = uint32(n), true
-		case "--record":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return opts, errors.New("invalid --record")
-			}
-			opts.recordID, opts.recordIDSet = uint32(n), true
-		case "--installation":
-			opts.installation = value
-		case "--wait-seconds":
-			n, e := strconv.Atoi(value)
-			if e != nil || n < 1 || n > 600 {
-				return opts, errors.New("--wait-seconds must be between 1 and 600")
-			}
-			opts.waitSeconds = n
-		case "--timeout-seconds":
-			n, e := strconv.Atoi(value)
-			if e != nil || n < 1 || n > 3600 {
-				return opts, errors.New("--timeout-seconds must be between 1 and 3600")
-			}
-			opts.dataTimeoutSeconds = n
-		case "--policy":
-			if value != "observation" && value != "opaque" {
-				return opts, errors.New("--policy must be observation or opaque")
-			}
-			opts.recoveryPolicy = value
-		case "--key-file":
-			opts.keyFile = value
-		case "--content-variant":
-			if value != "standard" && value != "low-violence" {
-				return opts, errors.New("--content-variant must be standard or low-violence")
-			}
-			opts.contentVariant = value
-		case "--file-id":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil || n == 0 {
-				return opts, errors.New("invalid --file-id")
-			}
-			opts.fileID = uint32(n)
-		case "--max-bytes":
-			n, err := strconv.ParseInt(value, 10, 64)
-			if route == "source context" && (err != nil || n < 1 || n > 1<<20) {
-				return opts, errors.New("source context --max-bytes must be between 1 and 1048576")
-			}
-			if err != nil || n < 1 || n > 512<<20 {
-				return opts, errors.New("--max-bytes must be between 1 and 536870912")
-			}
-			opts.maxBytes = n
-		case "--max-lines":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 1 || n > 2000 {
-				return opts, errors.New("--max-lines must be between 1 and 2000")
-			}
-			opts.sourceMaxLines = n
-		case "--depth":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 || n > 4 {
-				return opts, errors.New("--depth must be between 0 and 4")
-			}
-			opts.sourceDepth = n
-		case "--source":
-			if route == "data hotfix" && value != "wago" && value != "dbcache" && value != "raidbots" {
-				return opts, errors.New("--source must be wago, dbcache, or raidbots")
-			}
-			opts.source = value
-		case "--product":
-			opts.product = value
-		case "--build":
-			opts.fullBuild = value
-		case "--ref":
-			opts.ref = value
-		case "--snapshot":
-			opts.snapshot = value
-		case "--path":
-			opts.path = value
-		case "--symbol":
-			opts.symbol = value
-		case "--symbol-id":
-			opts.symbolID = value
-		case "--direction":
-			if value != "incoming" && value != "outgoing" && value != "both" {
-				return opts, errors.New("--direction must be incoming, outgoing, or both")
-			}
-			opts.direction = value
-		case "--environment":
-			opts.environmentSnapshot = value
-		case "--target-path":
-			opts.targetPath = value
-		case "--toc":
-			opts.toc = value
-		case "--matrix":
-			opts.matrix = value
-		case "--mode":
-			if value != "precise" && value != "exploratory" {
-				return opts, errors.New("--mode must be precise or exploratory")
-			}
-			opts.searchMode = value
-		case "--topic":
-			if value != "api" && value != "lua" && value != "xml" && value != "toc" && value != "asset" {
-				return opts, errors.New("--topic must be api, lua, xml, toc, or asset")
-			}
-			opts.topic = value
-		case "--listfile":
-			if value != string(records.ListfileCommunityCSV) && value != string(records.ListfileWowExportText) && value != string(records.ListfileWowExportBinary) {
-				return opts, errors.New("invalid --listfile source")
-			}
-			opts.listfile = value
-		case "--extension":
-			opts.extension = value
-		case "--name":
-			if route == "live probe put" {
-				opts.name = value
-			} else {
-				opts.fileName = value
-			}
-		case "--sql":
-			opts.sql = value
-		case "--param":
-			name, raw, found := strings.Cut(value, "=")
-			if !found || name == "" || len(name) > 128 {
-				return opts, errors.New("--param requires name=scalar")
-			}
-			if opts.parameters == nil {
-				opts.parameters = map[string]any{}
-			}
-			if _, exists := opts.parameters[name]; exists {
-				return opts, fmt.Errorf("duplicate --param %s", name)
-			}
-			opts.parameters[name] = parseQueryScalar(raw)
-		case "--max-frames":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 1 || n > 1000000 {
-				return opts, errors.New("--max-frames must be between 1 and 1000000")
-			}
-			opts.maxFrames = n
-		case "--from":
-			opts.from = value
-		case "--to":
-			opts.to = value
-		case "--line", "--count", "--limit":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 1 || key == "--count" && n > 2000 || key == "--limit" && n > dataLimitCeiling(route) {
-				return opts, fmt.Errorf("invalid %s", key)
-			}
-			if key == "--line" {
-				opts.line = n
-			} else {
-				if key == "--count" {
-					opts.count = n
-				} else {
-					opts.limit, opts.limitSet = n, true
-				}
-			}
-		case "--spell-id", "--item-id", "--npc-id", "--display-id", "--journal-encounter-id":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil || key != "--npc-id" && n == 0 {
-				return opts, fmt.Errorf("invalid %s", key)
-			}
-			switch key {
-			case "--spell-id":
-				opts.spellID = uint32(n)
-			case "--item-id":
-				opts.itemID, opts.itemIDSet = uint32(n), true
-			case "--npc-id":
-				opts.npcID = uint32(n)
-			case "--display-id":
-				opts.displayID = uint32(n)
-			case "--journal-encounter-id":
-				opts.journalEncounterID = uint32(n)
-			}
-		case "--file-data-id", "--model-file-data-id":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil || n == 0 {
-				return opts, fmt.Errorf("invalid %s", key)
-			}
-			if key == "--file-data-id" {
-				opts.fileDataID = uint32Set{value: uint32(n), set: true}
-			} else {
-				opts.modelFileDataID = uint32Set{value: uint32(n), set: true}
-			}
-		case "--race-id", "--gender", "--max-depth":
-			n, err := strconv.Atoi(value)
-			if err != nil || key == "--max-depth" && n < 0 {
-				return opts, fmt.Errorf("invalid %s", key)
-			}
-			switch key {
-			case "--race-id":
-				opts.raceID = n
-			case "--gender":
-				opts.gender = n
-			case "--max-depth":
-				opts.maxDepth = n
-			}
-		case "--field":
-			opts.field = value
-		case "--query":
-			opts.queryText = value
-		case "--filter":
-			opts.filter = value
-		case "--fields":
-			opts.fieldList = strings.Split(value, ",")
-		case "--value":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return opts, errors.New("invalid --value")
-			}
-			opts.value = uint32Set{value: uint32(n), set: true}
-		case "--dbcache":
-			opts.dbcache = value
-		case "--raidbots":
-			opts.raidbots = value
-		case "--cursor":
-			opts.cursor = value
-		case "--search":
-			opts.search = value
-		case "--push":
-			n, err := strconv.ParseInt(value, 10, 32)
-			if err != nil {
-				return opts, errors.New("invalid --push")
-			}
-			opts.push, opts.pushSet = n, true
-		case "--status":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 || n > 255 {
-				return opts, errors.New("--status must be between 0 and 255")
-			}
-			opts.status, opts.statusSet = n, true
-		case "--region-id":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return opts, errors.New("invalid --region-id")
-			}
-			opts.regionID, opts.regionIDSet = uint32(n), true
-		case "--page":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 {
-				return opts, errors.New("invalid --page")
-			}
-			opts.page = n
-		case "--max-pages":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 1 || n > 2048 {
-				return opts, errors.New("--max-pages must be between 1 and 2048")
-			}
-			opts.maxPages = n
-		case "--max-requests":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 1 {
-				return opts, errors.New("--max-requests must be at least 1")
-			}
-			opts.maxRequests = n
-		case "--target-bytes":
-			n, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || n < 0 || n > vault.MaxCacheMaxBytes {
-				return opts, fmt.Errorf("--target-bytes must be between 0 and %d", vault.MaxCacheMaxBytes)
-			}
-			opts.targetBytes = n
-		case "--max-objects":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 {
-				return opts, errors.New("--max-objects must be a non-negative count")
-			}
-			opts.maxObjects = n
-		case "--cache-max-bytes":
-			n, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || n < 0 || n > vault.MaxCacheMaxBytes {
-				return opts, fmt.Errorf("--cache-max-bytes must be between 0 and %d", vault.MaxCacheMaxBytes)
-			}
-			opts.cacheMaxBytes, opts.cacheMaxBytesSet = n, true
-		case "--download-workers":
-			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 || n > vault.MaxDownloadWorkers {
-				return opts, fmt.Errorf("--download-workers must be between 0 and %d", vault.MaxDownloadWorkers)
-			}
-			opts.downloadWorkers, opts.downloadWorkersSet = n, true
+		case "--fix":
+			opts.fix = enabled
+		case "--hard-reset":
+			opts.hardReset = enabled
+		case "--stdin":
+			opts.stdin = enabled
+		case "--semantic":
+			opts.semantic = enabled
+		case "--session-reuse":
+			opts.sessionReuse = enabled
+		case "--static-only":
+			opts.staticOnly = enabled
+		case "--flow":
+			opts.sourceFlow = enabled
+		case "--allow-partial":
+			opts.allowPartial = enabled
+		case "--overwrite":
+			opts.overwrite = enabled
+		case "--cdn":
+			opts.cdn = enabled
+		case "--offline":
+			opts.offline = enabled
+		case "--latest":
+			opts.latest = enabled
+		case "--scan":
+			opts.scan = enabled
+		case "--resume":
+			opts.resume = enabled
+		case "--remote":
+			opts.remote = enabled
+		case "--replace":
+			opts.replace = enabled
+		case "--uncommitted":
+			opts.uncommitted = enabled
+		case "--dry-run":
+			opts.dryRun = enabled
+		case "--plan":
+			opts.plan = enabled
+		case "--fresh":
+			opts.fresh = enabled
+		case "--include-removed":
+			opts.includeRemoved = enabled
+		default:
+			return fmt.Errorf("flag %s has no option handler", key)
+		}
+		return nil
+	}
+	if value == "" {
+		return fmt.Errorf("empty value for %s", key)
+	}
+	if route == "update" {
+		if key == "--path" {
+			opts.updatePaths = append(opts.updatePaths, value)
+		}
+		if key == "--installation" {
+			opts.updateInstallations = append(opts.updateInstallations, value)
 		}
 	}
-	if len(opts.words) == 0 {
-		opts.help = true
+	if key == "--home" {
+		opts.home = value
 	}
+	if key == "--file" {
+		opts.file = value
+	}
+	switch key {
+	case "--encoding":
+		if value == "csv" {
+			if route != "data hotfix" && route != "data sql" {
+				return errors.New("--encoding csv is only supported by data hotfix and data sql")
+			}
+			opts.encoding = value
+			break
+		}
+		if route == "data sql" {
+			return errors.New("data sql --encoding must be csv")
+		}
+		if value != "raw" && value != "png" && value != "webp" {
+			return errors.New("--encoding must be raw, png, or webp")
+		}
+		opts.encoding = value
+	case "--channels":
+		opts.channels = value
+	case "--mipmap":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 || n > 15 {
+			return errors.New("--mipmap must be between 0 and 15")
+		}
+		opts.mipmap = n
+	case "--max-pixels":
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || n < 1 || n > 64<<20 {
+			return errors.New("--max-pixels must be between 1 and 67108864")
+		}
+		opts.maxPixels = n
+	case "--project":
+		opts.project = value
+	case "--target":
+		opts.target = value
+	case "--ids":
+		opts.ids = value
+	case "--session":
+		opts.session = value
+	case "--probe":
+		opts.probe = value
+	case "--request":
+		opts.request = value
+	case "--budget-seconds":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 120 {
+			return errors.New("--budget-seconds must be between 1 and 120")
+		}
+		opts.budgetSeconds = n
+	case "--pid":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || n == 0 {
+			return errors.New("invalid --pid")
+		}
+		opts.pid = uint32(n)
+	case "--character":
+		opts.character = value
+	case "--realm":
+		opts.realm = value
+	case "--region":
+		opts.dataRegion = value
+	case "--locale":
+		opts.locale = value
+	case "--definitions":
+		opts.definitionRef = value
+	case "--release":
+		opts.release = value
+	case "--output":
+		opts.output = value
+	case "--table-hash":
+		if len(value) != 8 {
+			return errors.New("--table-hash requires eight hexadecimal digits")
+		}
+		n, err := strconv.ParseUint(value, 16, 32)
+		if err != nil {
+			return errors.New("invalid --table-hash")
+		}
+		v := uint32(n)
+		opts.tableHash = &v
+	case "--after-index":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return errors.New("invalid --after-index")
+		}
+		v := uint32(n)
+		opts.afterIndex = &v
+	case "--after-id":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return errors.New("invalid --after-id")
+		}
+		value := uint32(n)
+		opts.afterID = &value
+	case "--table":
+		opts.table = value
+	case "--id":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return errors.New("invalid --id")
+		}
+		opts.recordID, opts.recordIDSet = uint32(n), true
+	case "--record":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return errors.New("invalid --record")
+		}
+		opts.recordID, opts.recordIDSet = uint32(n), true
+	case "--installation":
+		opts.installation = value
+	case "--wait-seconds":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 1 || n > 600 {
+			return errors.New("--wait-seconds must be between 1 and 600")
+		}
+		opts.waitSeconds = n
+	case "--timeout-seconds":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 1 || n > 3600 {
+			return errors.New("--timeout-seconds must be between 1 and 3600")
+		}
+		opts.dataTimeoutSeconds = n
+	case "--policy":
+		if value != "observation" && value != "opaque" {
+			return errors.New("--policy must be observation or opaque")
+		}
+		opts.recoveryPolicy = value
+	case "--key-file":
+		opts.keyFile = value
+	case "--content-variant":
+		if value != "standard" && value != "low-violence" {
+			return errors.New("--content-variant must be standard or low-violence")
+		}
+		opts.contentVariant = value
+	case "--file-id":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || n == 0 {
+			return errors.New("invalid --file-id")
+		}
+		opts.fileID = uint32(n)
+	case "--max-bytes":
+		n, err := strconv.ParseInt(value, 10, 64)
+		if route == "source context" && (err != nil || n < 1 || n > 1<<20) {
+			return errors.New("source context --max-bytes must be between 1 and 1048576")
+		}
+		if err != nil || n < 1 || n > 512<<20 {
+			return errors.New("--max-bytes must be between 1 and 536870912")
+		}
+		opts.maxBytes = n
+	case "--max-lines":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 2000 {
+			return errors.New("--max-lines must be between 1 and 2000")
+		}
+		opts.sourceMaxLines = n
+	case "--depth":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 || n > 4 {
+			return errors.New("--depth must be between 0 and 4")
+		}
+		opts.sourceDepth = n
+	case "--source":
+		if route == "data hotfix" && value != "wago" && value != "dbcache" && value != "raidbots" {
+			return errors.New("--source must be wago, dbcache, or raidbots")
+		}
+		opts.source = value
+	case "--product":
+		opts.product = value
+	case "--build":
+		opts.fullBuild = value
+	case "--ref":
+		opts.ref = value
+	case "--snapshot":
+		opts.snapshot = value
+	case "--path":
+		opts.path = value
+	case "--symbol":
+		opts.symbol = value
+	case "--symbol-id":
+		opts.symbolID = value
+	case "--direction":
+		if value != "incoming" && value != "outgoing" && value != "both" {
+			return errors.New("--direction must be incoming, outgoing, or both")
+		}
+		opts.direction = value
+	case "--environment":
+		opts.environmentSnapshot = value
+	case "--target-path":
+		opts.targetPath = value
+	case "--toc":
+		opts.toc = value
+	case "--matrix":
+		opts.matrix = value
+	case "--mode":
+		if value != "precise" && value != "exploratory" {
+			return errors.New("--mode must be precise or exploratory")
+		}
+		opts.searchMode = value
+	case "--topic":
+		if value != "api" && value != "lua" && value != "xml" && value != "toc" && value != "asset" {
+			return errors.New("--topic must be api, lua, xml, toc, or asset")
+		}
+		opts.topic = value
+	case "--listfile":
+		if value != string(records.ListfileCommunityCSV) && value != string(records.ListfileWowExportText) && value != string(records.ListfileWowExportBinary) {
+			return errors.New("invalid --listfile source")
+		}
+		opts.listfile = value
+	case "--extension":
+		opts.extension = value
+	case "--name":
+		if route == "live probe put" {
+			opts.name = value
+		} else {
+			opts.fileName = value
+		}
+	case "--sql":
+		opts.sql = value
+	case "--param":
+		name, raw, found := strings.Cut(value, "=")
+		if !found || name == "" || len(name) > 128 {
+			return errors.New("--param requires name=scalar")
+		}
+		if opts.parameters == nil {
+			opts.parameters = map[string]any{}
+		}
+		if _, exists := opts.parameters[name]; exists {
+			return fmt.Errorf("duplicate --param %s", name)
+		}
+		opts.parameters[name] = parseQueryScalar(raw)
+	case "--max-frames":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 1000000 {
+			return errors.New("--max-frames must be between 1 and 1000000")
+		}
+		opts.maxFrames = n
+	case "--from":
+		opts.from = value
+	case "--to":
+		opts.to = value
+	case "--line", "--count", "--limit":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || key == "--count" && n > 2000 || key == "--limit" && n > dataLimitCeiling(route) {
+			return fmt.Errorf("invalid %s", key)
+		}
+		if key == "--line" {
+			opts.line = n
+		} else {
+			if key == "--count" {
+				opts.count = n
+			} else {
+				opts.limit, opts.limitSet = n, true
+			}
+		}
+	case "--spell-id", "--item-id", "--npc-id", "--display-id", "--journal-encounter-id":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || key != "--npc-id" && n == 0 {
+			return fmt.Errorf("invalid %s", key)
+		}
+		switch key {
+		case "--spell-id":
+			opts.spellID = uint32(n)
+		case "--item-id":
+			opts.itemID, opts.itemIDSet = uint32(n), true
+		case "--npc-id":
+			opts.npcID = uint32(n)
+		case "--display-id":
+			opts.displayID = uint32(n)
+		case "--journal-encounter-id":
+			opts.journalEncounterID = uint32(n)
+		}
+	case "--file-data-id", "--model-file-data-id":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || n == 0 {
+			return fmt.Errorf("invalid %s", key)
+		}
+		if key == "--file-data-id" {
+			opts.fileDataID = uint32Set{value: uint32(n), set: true}
+		} else {
+			opts.modelFileDataID = uint32Set{value: uint32(n), set: true}
+		}
+	case "--race-id", "--gender", "--max-depth":
+		n, err := strconv.Atoi(value)
+		if err != nil || key == "--max-depth" && n < 0 {
+			return fmt.Errorf("invalid %s", key)
+		}
+		switch key {
+		case "--race-id":
+			opts.raceID = n
+		case "--gender":
+			opts.gender = n
+		case "--max-depth":
+			opts.maxDepth = n
+		}
+	case "--field":
+		opts.field = value
+	case "--query":
+		opts.queryText = value
+	case "--filter":
+		opts.filter = value
+	case "--fields":
+		opts.fieldList = strings.Split(value, ",")
+	case "--value":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return errors.New("invalid --value")
+		}
+		opts.value = uint32Set{value: uint32(n), set: true}
+	case "--dbcache":
+		opts.dbcache = value
+	case "--raidbots":
+		opts.raidbots = value
+	case "--cursor":
+		opts.cursor = value
+	case "--search":
+		opts.search = value
+	case "--push":
+		n, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			return errors.New("invalid --push")
+		}
+		opts.push, opts.pushSet = n, true
+	case "--status":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 || n > 255 {
+			return errors.New("--status must be between 0 and 255")
+		}
+		opts.status, opts.statusSet = n, true
+	case "--region-id":
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return errors.New("invalid --region-id")
+		}
+		opts.regionID, opts.regionIDSet = uint32(n), true
+	case "--page":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return errors.New("invalid --page")
+		}
+		opts.page = n
+	case "--max-pages":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 2048 {
+			return errors.New("--max-pages must be between 1 and 2048")
+		}
+		opts.maxPages = n
+	case "--max-requests":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return errors.New("--max-requests must be at least 1")
+		}
+		opts.maxRequests = n
+	case "--target-bytes":
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || n < 0 || n > vault.MaxCacheMaxBytes {
+			return fmt.Errorf("--target-bytes must be between 0 and %d", vault.MaxCacheMaxBytes)
+		}
+		opts.targetBytes = n
+	case "--max-objects":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return errors.New("--max-objects must be a non-negative count")
+		}
+		opts.maxObjects = n
+	case "--cache-max-bytes":
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || n < 0 || n > vault.MaxCacheMaxBytes {
+			return fmt.Errorf("--cache-max-bytes must be between 0 and %d", vault.MaxCacheMaxBytes)
+		}
+		opts.cacheMaxBytes, opts.cacheMaxBytesSet = n, true
+	case "--download-workers":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 || n > vault.MaxDownloadWorkers {
+			return fmt.Errorf("--download-workers must be between 0 and %d", vault.MaxDownloadWorkers)
+		}
+		opts.downloadWorkers, opts.downloadWorkersSet = n, true
+	}
+	return nil
+}
+
+func validateOptions(opts Options, route string, seen map[string]bool) error {
 	if route == "addon status" && seen["--installation"] && seen["--path"] {
-		return opts, errors.New("addon status accepts --installation or --path, not both")
+		return errors.New("addon status accepts --installation or --path, not both")
 	}
 	if route == "target resolve" && seen["--file"] {
 		for _, flag := range []string{"--target", "--installation", "--product", "--build", "--region", "--locale", "--definitions", "--from", "--offline"} {
 			if seen[flag] {
-				return opts, fmt.Errorf("target resolve --file cannot be combined with %s", flag)
+				return fmt.Errorf("target resolve --file cannot be combined with %s", flag)
 			}
 		}
 	}
 	if route == "target resolve" && seen["--target"] {
 		for _, flag := range []string{"--file", "--installation", "--product", "--build", "--region", "--locale"} {
 			if seen[flag] {
-				return opts, fmt.Errorf("target resolve --target cannot be combined with %s", flag)
+				return fmt.Errorf("target resolve --target cannot be combined with %s", flag)
 			}
 		}
 	}
 	if route == "target resolve" && seen["--build"] && !seen["--product"] {
-		return opts, errors.New("target resolve --build requires --product")
+		return errors.New("target resolve --build requires --product")
 	}
 	if route == "target add" && !opts.help && opts.remote == (opts.installation != "") {
-		return opts, errors.New("target add requires exactly one of --installation or --remote")
+		return errors.New("target add requires exactly one of --installation or --remote")
 	}
 	if route == "config set" && !opts.help && !seen["--cache-max-bytes"] && !seen["--download-workers"] {
-		return opts, errors.New("config set requires --cache-max-bytes or --download-workers")
+		return errors.New("config set requires --cache-max-bytes or --download-workers")
 	}
 	if route == "source prune" && !opts.help && !seen["--target-bytes"] {
-		return opts, errors.New("source prune requires --target-bytes")
+		return errors.New("source prune requires --target-bytes")
 	}
 	if route == "init" && !opts.help {
 		selected := 0
-		for _, flag := range []string{"--plan", "--fresh", "--resume"} {
-			if seen[flag] {
+		for _, enabled := range []bool{opts.plan, opts.fresh, opts.resume} {
+			if enabled {
 				selected++
 			}
 		}
 		if selected > 1 {
-			return opts, errors.New("init accepts at most one of --plan, --fresh, --resume")
+			return errors.New("init accepts at most one of --plan, --fresh, --resume")
 		}
 	}
 	if route == "data db2" && seen["--id"] && (seen["--after-id"] || seen["--limit"]) {
-		return opts, errors.New("--id cannot be combined with --after-id or --limit")
+		return errors.New("--id cannot be combined with --after-id or --limit")
 	}
-	if seen["--cdn"] && seen["--installation"] {
-		return opts, errors.New("choose either --cdn or --installation, not both")
+	if opts.cdn && seen["--installation"] {
+		return errors.New("choose either --cdn or --installation, not both")
 	}
-	return opts, nil
+	return nil
 }
 
 func boolCount(values ...bool) int {

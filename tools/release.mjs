@@ -7,8 +7,7 @@
 //                       native archive + addon ZIP + ONE npm pack + whitelist
 //                       audit
 //   dev-package         local dirty-checkout install rehearsal; never release
-//   verify-cgo          pre-step proving capture/decode still work with
-//                       CGO_ENABLED=0 before the release build claims it
+//   verify-cgo          fixed CGO toolchain and packaged SQL/capture/decode check
 //   seal                fold test report digests into the external sealed
 //                       manifest + SHA256SUMS after verification
 //   verify-sealed       recompute every sealed digest right before publish
@@ -33,6 +32,7 @@ import { readZip, writeZip } from './zip.mjs';
 import { writeTarGz } from './tar.mjs';
 import { synchronizeVersion } from './version.mjs';
 import { stageLuaLS, generateGoIdentity } from './luals.mjs';
+import { nativeBuildEnv, nativeToolchain } from './native-toolchain.mjs';
 
 export const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const REPOSITORY_URL = 'https://github.com/Follen/Lychee-Dev';
@@ -208,15 +208,14 @@ function stagePayload(stage, resources) {
   }
 }
 
-function buildBinaries(stage, { cgo }) {
-  const env = { ...process.env };
+function buildBinaries(stage) {
+  const env = nativeBuildEnv();
   delete env.GOFLAGS;
-  if (cgo === 'zero') env.CGO_ENABLED = '0'; else delete env.CGO_ENABLED;
   const built = {};
   for (const entry of TARGETS) {
     const output = join(stage, 'native', entry.target, entry.target.startsWith('windows') ? 'lycheedev.exe' : 'lycheedev');
     mkdirSync(dirname(output), { recursive: true });
-    runOk('go', ['build', '-trimpath', '-buildvcs=true', '-o', output, './cmd/lycheedev'], {
+    runOk('go', ['build', '-trimpath', '-ldflags=-buildid=', '-buildvcs=true', '-o', output, './cmd/lycheedev'], {
       cwd: repository,
       env: { ...env, GOOS: entry.goos, GOARCH: entry.goarch },
     });
@@ -315,14 +314,14 @@ export function verifySourceInputs(commit = 'HEAD', requiredPaths = SOURCE_REQUI
 }
 
 export function buildCorrespondingSource({
-  commit, version, tag, outDirectory, cgo = 'zero',
+  commit, version, tag, outDirectory,
   buildPackage = './cmd/lycheedev', requiredPaths,
 }) {
   return buildCorrespondingSourceArchive(...arguments);
 }
 
 async function buildCorrespondingSourceArchive({
-  commit, version, tag, outDirectory, cgo = 'zero',
+  commit, version, tag, outDirectory,
   buildPackage = './cmd/lycheedev', requiredPaths,
 }) {
   const archiveName = `lycheedev-${version}-corresponding-source.tar.gz`;
@@ -351,10 +350,11 @@ async function buildCorrespondingSourceArchive({
     // GOSUMDB=off cannot re-authenticate a toolchain module and
     // GOTOOLCHAIN=local would silently fall back to the older base compiler.
     const goBinary = join(runOk('go', ['env', 'GOROOT']).trim(), 'bin', `go${process.platform === 'win32' ? '.exe' : ''}`);
-    const buildEnv = { ...process.env, GOPROXY: 'off', GOSUMDB: 'off', GOFLAGS: '-mod=vendor', GOTOOLCHAIN: 'local' };
-    if (cgo === 'zero') buildEnv.CGO_ENABLED = '0'; else delete buildEnv.CGO_ENABLED;
+    const buildEnv = { ...nativeBuildEnv(), GOPROXY: 'off', GOSUMDB: 'off', GOFLAGS: '-mod=vendor', GOTOOLCHAIN: 'local' };
     const archiveBuild = join(scratch, 'build-from-archive');
-    runOk(goBinary, ['build', '-trimpath', '-buildvcs=false', '-o', archiveBuild, buildPackage], { cwd: tree, env: buildEnv });
+    runOk(goBinary, ['build', '-trimpath', '-ldflags=-buildid=', '-buildvcs=false', '-o', archiveBuild, buildPackage], { cwd: tree, env: buildEnv });
+    // CGO's link action ID embeds the absolute vendored library search path.
+    // Omit that cache marker; VCS metadata and artifact SHA256 remain verified.
     // Rebuild-compare: the vendored archive must reproduce the checkout's own
     // un-stamped binary byte for byte (VCS stamps are compared separately).
     // Both sides build identically vendored: `-mod=vendor` embeds dependency
@@ -369,11 +369,11 @@ async function buildCorrespondingSourceArchive({
     exportSourceIndex(indexTree);
     const indexBuild = join(scratch, 'build-from-index');
     runOk(goBinary, ['mod', 'vendor'], { cwd: indexTree });
-    runOk(goBinary, ['build', '-trimpath', '-buildvcs=false', '-o', indexBuild, buildPackage], { cwd: indexTree, env: buildEnv });
+    runOk(goBinary, ['build', '-trimpath', '-ldflags=-buildid=', '-buildvcs=false', '-o', indexBuild, buildPackage], { cwd: indexTree, env: buildEnv });
     const rebuildVerified = sha256(readFileSync(archiveBuild)) === sha256(readFileSync(indexBuild));
     if (!rebuildVerified) throw new Error(`release.source_rebuild_mismatch: archive sha256 ${sha256(readFileSync(archiveBuild))} != index-export sha256 ${sha256(readFileSync(indexBuild))}`);
 
-    const entries = walkFiles(tree).map(file => ({ name: `${prefix}${file.name}`, bytes: readFileSync(file.path), mode: 0o644 }));
+    const entries = walkFiles(tree).map(file => ({ name: `${prefix}${file.name}`, path: file.path, mode: 0o644 }));
     const target = join(outDirectory, archiveName);
     await writeTarGz(entries, target);
     const bytes = readFileSync(target);
@@ -405,8 +405,7 @@ async function assembleCommand(argv) {
   const options = parseOptions(argv);
   const out = resolve(requiredOption(options, '--out'));
   const npmCli = resolve(requiredOption(options, '--npm-cli'));
-  const cgo = requiredOption(options, '--cgo');
-  if (!['zero', 'default'].includes(cgo)) throw new Error('release.invalid_cgo: use zero|default');
+  if (options['--cgo'] !== undefined) throw new Error('release.obsolete_option: CGO is required; remove --cgo');
   const packageRoot = join(repository, 'packages', 'npm', 'lycheedev');
   const { version } = synchronizeVersion(repository, false); // REL-01
   const policy = policyFor(version);
@@ -434,10 +433,10 @@ async function assembleCommand(argv) {
   const resources = [];
   stagePayload(stage, resources);
   await stageLuaLS(stage, resources, { archivePath: options['--luals-archive'] });
-  const binaries = buildBinaries(stage, { cgo });
+  const binaries = buildBinaries(stage);
   const binaryIdentity = verifyBinaryIdentity(stage, { commit: id.commit, dirty: id.dirty, version });
   const source = await buildCorrespondingSource({
-    commit: id.commit, version, tag: wantTag, outDirectory: out, cgo,
+    commit: id.commit, version, tag: wantTag, outDirectory: out,
   });
   writeJson(join(stage, 'release.json'), releaseJson({
     version, commit: id.commit, binaries, resources, correspondingSource: source.correspondingSource,
@@ -519,7 +518,8 @@ async function assembleCommand(argv) {
     identity: { workspaceDirty: id.dirty, verified: !id.dirty && id.tagVerified },
     toolchain: {
       go: goVersion, node: process.version, npm: npmVersion,
-      cgo: cgo === 'zero' ? 'CGO_ENABLED=0' : 'toolchain default (CGO_ENABLED=0 not claimed)',
+      cgo: 'CGO_ENABLED=1',
+      native: nativeToolchain,
       targets: TARGETS.map(entry => entry.target),
     },
     binaries,
@@ -531,7 +531,6 @@ async function assembleCommand(argv) {
     artifacts,
     testReports: {},
     deviations: [
-      ...(cgo === 'zero' ? [] : ['CGO_ENABLED=0 not claimed: capture/decode pre-step unavailable (verify-cgo)']),
       ...(id.developmentEscape ? ['development escape: dirty worktree accepted; NOT release-eligible'] : []),
       ...(id.tagVerified ? [] : [`git tag ${wantTag} not verified against the commit in this assembly`]),
       ...(policy.development ? [`development version ${version}: npm private=true, not publishable`] : []),
@@ -570,7 +569,7 @@ async function devPackageCommand(argv) {
   const resources=[];
   stagePayload(stage,resources);
   await stageLuaLS(stage,resources,{archivePath});
-  const binaries=buildBinaries(stage,{cgo:'zero'});
+  const binaries=buildBinaries(stage);
   verifyBinaryIdentity(stage,{commit:id.commit,dirty:id.dirty,version});
   writeJson(join(stage,'release.json'),releaseJson({version,commit:id.commit,binaries,resources}));
   const pack=run(process.execPath,[npmCli,'pack','--json','--pack-destination',out,
@@ -978,25 +977,31 @@ function verifyCgoCommand(argv) {
   const scratch = mkdtempSync(join(tmpdir(), 'lycheedev-cgo-'));
   try {
     const binary = join(scratch, process.platform === 'win32' ? 'lycheedev-probe.exe' : 'lycheedev-probe');
-    runOk('go', ['build', '-trimpath', '-buildvcs=true', '-o', binary, './cmd/lycheedev'], {
-      cwd: repository, env: { ...process.env, CGO_ENABLED: '0' },
+    runOk('go', ['build', '-trimpath', '-ldflags=-buildid=', '-buildvcs=true', '-o', binary, './cmd/lycheedev'], {
+      cwd: repository, env: nativeBuildEnv(),
     });
-    const evidence = { status: 'passed', binary, cgo: 'CGO_ENABLED=0', tests: [] };
-    // Capture ingestion and decode must survive a pure-Go build before the
-    // release assembly is allowed to claim CGO_ENABLED=0.
+    const evidence = { status: 'passed', binary, cgo: 'CGO_ENABLED=1', native: nativeToolchain, tests: [] };
+    // The static executable must load without a compiler or development DLLs
+    // on PATH. Windows system libraries remain available through SystemRoot.
+    const standaloneEnv = { ...process.env, PATH: `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}` };
+    const standalone = JSON.parse(runOk(binary, ['version', '--format=json'], {env: standaloneEnv}));
+    if (!standalone.ok) throw new Error('release.native_standalone_failed');
+    evidence.standalone = {status: 'passed', path: 'Windows system directories only'};
+    // Exercise SQL and capture/decode through the binary that will ship.
     for (const [name, pattern, envPrefix] of [
+      ['DuckDB SQL', '^(TestSQLCSVExportFromPinnedFixture|TestDataNameDiscoveryWorkflow)$', 'LYCHEEDEV_QUERY'],
       ['hotfix capture decode', '^TestHotfixNamedTableAndLatestCLI$', 'LYCHEEDEV_HOTFIX'],
       ['asset export decode', '^(TestAssetExportProjectOffline|TestAssetImageExport(ProjectOffline|FailuresPreserveOutput))$', 'LYCHEEDEV_ASSET'],
     ]) {
-      // LYCHEEDEV_*_LAUNCHER alone makes the tests execute the native CGO=0
+      // LYCHEEDEV_*_LAUNCHER alone makes the tests execute the native CGO=1
       // binary directly; adding _NODE would route through node and try to
       // parse the executable as JavaScript.
-      const output = runOk('go', ['test', '-count=1', '-run', pattern, '-v', './internal/command'], {
+      const output = runOk('go', ['test', '-p=2', '-parallel=4', '-timeout=0', '-count=1', '-run', pattern, '-v', './internal/command'], {
         cwd: repository,
-        env: { ...process.env, [`${envPrefix}_LAUNCHER`]: binary },
+        env: { ...nativeBuildEnv(), [`${envPrefix}_LAUNCHER`]: binary },
       });
       if (!output.includes('using installed') || !output.includes('--- PASS:')) {
-        throw new Error(`release.cgo_pre_step_failed: ${name} did not pass through the CGO_ENABLED=0 binary`);
+        throw new Error(`release.cgo_pre_step_failed: ${name} did not pass through the CGO_ENABLED=1 binary`);
       }
       evidence.tests.push({ name, pattern, output: output.split('\n').filter(line => line.includes('PASS') || line.includes('using installed')).join('\n') });
     }

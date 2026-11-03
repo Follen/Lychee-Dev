@@ -120,7 +120,7 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 	}
 	mode := "static"
 	if opt.Semantic != nil {
-		mode = opt.Semantic.Identity.Version + ":" + opt.Semantic.Identity.SHA256
+		mode = opt.Semantic.Identity.Version + ":" + opt.Semantic.Identity.SHA256 + ":" + opt.Semantic.ContextIdentity()
 	}
 	identity := strings.Join([]string{pin.Repository, pin.Product, pin.ExactCommit, query.SymbolID, query.Symbol, strconv.Itoa(limit), strconv.Itoa(query.MaxBytes), strconv.Itoa(query.MaxLines), strconv.Itoa(query.Depth), opt.EnvironmentSnapshot, strconv.FormatBool(opt.Flow), mode}, "\x00")
 	identityHash := sha256.Sum256([]byte(identity))
@@ -397,6 +397,9 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 						break
 					}
 					data, _, readErr := cache.document(ctx, name)
+					if readErr != nil && ctx.Err() != nil {
+						return result, ctx.Err()
+					}
 					if readErr != nil || len(data) > 1<<20 || flowBytes+len(data) > 32<<20 {
 						flowOmitted = true
 						result.Coverage.Reasons = append(result.Coverage.Reasons, "flow closure omitted a file: "+name)
@@ -405,21 +408,25 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 					files[name] = data
 					flowBytes += len(data)
 				}
-				analysis, flowErr := flow.Analyze(ctx, flow.Request{Files: files, Target: flow.Target{Path: result.Symbol.Path, Line: result.Symbol.Line, Symbol: result.Symbol.Name}, Rules: rules, Budget: flow.Budget{MaxFiles: 32, MaxDepth: max(1, query.Depth), MaxOutputBytes: max(2048, min(query.MaxBytes, 64<<10))}})
-				if flowErr != nil {
-					return result, flowErr
-				}
-				result.Flow = &analysis
-				result.Coverage.Flow = analysis.Coverage.State
-				if analysis.Truncated || flowOmitted {
-					result.Truncated = result.Truncated || analysis.Truncated
+				if _, present := files[result.Symbol.Path]; !present {
 					result.Coverage.Flow = "partial"
+				} else {
+					analysis, flowErr := flow.Analyze(ctx, flow.Request{Files: files, Target: flow.Target{Path: result.Symbol.Path, Line: result.Symbol.Line, Symbol: result.Symbol.Name}, Rules: rules, Budget: flow.Budget{MaxFiles: 32, MaxDepth: max(1, query.Depth), MaxOutputBytes: max(2048, min(query.MaxBytes, 64<<10))}})
+					if flowErr != nil {
+						return result, flowErr
+					}
+					result.Flow = &analysis
+					result.Coverage.Flow = analysis.Coverage.State
+					if analysis.Truncated || flowOmitted {
+						result.Truncated = result.Truncated || analysis.Truncated
+						result.Coverage.Flow = "partial"
+					}
 				}
 			}
 		}
 	}
 	result.Complete = related.Complete && !result.Truncated && result.Coverage.State != "partial" && (!opt.Flow || result.Coverage.Flow == "bounded_complete")
-	if result.Truncated {
+	if result.Truncated || opt.Flow && result.Coverage.Flow != "bounded_complete" {
 		result.Coverage.State = "partial"
 	}
 	return result, nil

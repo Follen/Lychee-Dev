@@ -24,15 +24,32 @@ Distributed notices cover the following components and their applicable licenses
 | Component | License |
 | --- | --- |
 | Microsoft/go-winio | MIT |
+| DuckDB engine, duckdb-go and duckdb-go-bindings | MIT; bundled native component notices retained |
+| go-viper/mapstructure/v2 | MIT |
+| google/uuid | BSD-3-Clause |
 | HugoSmits86/nativewebp | MIT |
 | yuin/gopher-lua | MIT |
+| spf13/cobra, inconshreveable/mousetrap | Apache-2.0 |
+| spf13/pflag, golang/snappy, google/go-querystring | BSD-3-Clause |
+| gorilla/websocket | BSD-2-Clause |
+| tencentyun/cos-go-sdk-v5, clbanning/mxj, mitchellh/mapstructure, mozillazg/go-httpheader | MIT |
 | dustin/go-humanize, mattn/go-isatty, ncruces/go-strftime | MIT |
 | remyoudompheng/bigfft | BSD-3-Clause |
-| golang.org/x/exp, image, sys | BSD-3-Clause |
+| golang.org/x/exp, image, net, sys | BSD-3-Clause; applicable patent grant retained |
 | modernc.org/libc, mathutil, memory | BSD-3-Clause and applicable bundled notices |
 | modernc.org/sqlite | BSD-3-Clause; SQLite core is public domain |
 
 `golang.org/x/image` is used by ordinary nativewebp builds. The release source bundle and dependency inventory are generated from the actual build.
+
+DuckDB 2.0.0 is statically linked through the pinned official Windows module.
+Its source is `d54cbbe3df17e8e5ce68312f483b4155836112aa`; upstream library
+provenance is retained in the source bundle. Bundled native components,
+Unicode data and TPC generators keep their upstream notices in the npm file.
+GCC 14.2 runtime libraries carry GPLv3 with the GCC Runtime Library Exception
+3.1; the MinGW-w64 and winpthreads notices are retained as well. The compiler
+is a build input, not part of the application payload. The Arrow modules in
+go.mod are dependencies of the optional driver build tag and are absent from
+the shipped CLI's runtime dependency graph.
 
 The Lua 5.1.5 test interpreter is built from the official Lua source under its
 MIT license and is not distributed as a product component. Test-only fixtures

@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/follenfang/lycheedev/internal/records/relational"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 	"github.com/follenfang/lycheedev/internal/records/table"
 	"github.com/follenfang/lycheedev/internal/selection"
 )
@@ -60,9 +60,9 @@ func (r *Reader) PrepareTable(ctx context.Context, pin selection.DataPin, q File
 
 // TableSource exposes DB2 arrays as scalar columns Name[0], Name[1], ...;
 // quote these identifiers in SQL. Original named arrays remain in data db2.
-func TableSource(view *table.View, indexBytes int64) (relational.Source, error) {
+func TableSource(view *table.View, indexBytes int64) (sqlengine.Source, error) {
 	if view == nil || indexBytes < 0 {
-		return relational.Source{}, table.ErrLimit
+		return sqlengine.Source{}, table.ErrLimit
 	}
 	type cell struct {
 		name  string
@@ -70,6 +70,7 @@ func TableSource(view *table.View, indexBytes int64) (relational.Source, error) 
 	}
 	var cells []cell
 	var columns []string
+	var types []sqlengine.Kind
 	identity := ""
 	var count uint64
 	for _, field := range view.Definition().Fields {
@@ -79,29 +80,44 @@ func TableSource(view *table.View, indexBytes int64) (relational.Source, error) 
 			count++
 		}
 		if count > 4096 {
-			return relational.Source{}, table.ErrLimit
+			return sqlengine.Source{}, table.ErrLimit
 		}
 	}
 	if err := view.ReserveMetadata(int64(count) * 128); err != nil {
-		return relational.Source{}, err
+		return sqlengine.Source{}, err
 	}
 	cells = make([]cell, 0, int(count))
 	columns = make([]string, 0, int(count))
 	for _, field := range view.Definition().Fields {
+		kind := sqlengine.Unsigned
+		switch field.Kind {
+		case "int":
+			if field.Signed && !field.Identity {
+				kind = sqlengine.Signed
+			}
+		case "float":
+			kind = sqlengine.Real
+		case "string", "locstring":
+			kind = sqlengine.Text
+		default:
+			return sqlengine.Source{}, table.ErrFormat
+		}
 		if field.Identity {
 			identity = field.Name
 		}
 		if field.Array {
 			for i := uint32(0); i < field.Elements; i++ {
 				columns = append(columns, fmt.Sprintf("%s[%d]", field.Name, i))
+				types = append(types, kind)
 				cells = append(cells, cell{field.Name, int(i)})
 			}
 		} else {
 			columns = append(columns, field.Name)
+			types = append(types, kind)
 			cells = append(cells, cell{field.Name, -1})
 		}
 		if len(columns) > 4096 {
-			return relational.Source{}, table.ErrLimit
+			return sqlengine.Source{}, table.ErrLimit
 		}
 	}
 	flatten := func(row map[string]any, selected map[int]bool, yield func([]any) error) error {
@@ -134,14 +150,14 @@ func TableSource(view *table.View, indexBytes int64) (relational.Source, error) 
 		}
 		return yield(values)
 	}
-	return relational.Source{Columns: columns, Scan: func(ctx context.Context, yield func([]any) error) error {
+	return sqlengine.Source{Columns: columns, Types: types, Identity: identity, Scan: func(ctx context.Context, yield func([]any) error) error {
 		return view.Scan(ctx, indexBytes, 1<<20, func(row map[string]any) error { return flatten(row, nil, yield) })
 	}, ScanSelected: func(ctx context.Context, indices []int, yield func([]any) error) error {
 		selected := map[int]bool{}
 		names := []string{}
 		for _, i := range indices {
 			if i < 0 || i >= len(cells) {
-				return relational.ErrBinding
+				return sqlengine.ErrBinding
 			}
 			selected[i] = true
 			names = append(names, cells[i].name)
@@ -171,14 +187,14 @@ func TableSource(view *table.View, indexBytes int64) (relational.Source, error) 
 			id = uint32(v)
 		case float64:
 			if math.IsNaN(v) || math.IsInf(v, 0) {
-				return true, relational.ErrNumericRange
+				return true, sqlengine.ErrNumericRange
 			}
 			if v < 0 || v > math.MaxUint32 || v != math.Trunc(v) {
 				return true, nil
 			}
 			id = uint32(v)
 		default:
-			return true, relational.ErrType
+			return true, sqlengine.ErrType
 		}
 		row, err := view.Row(ctx, id, 1<<20)
 		if errors.Is(err, table.ErrRecordMissing) {

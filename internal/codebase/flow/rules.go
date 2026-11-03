@@ -1,27 +1,12 @@
 package flow
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/follenfang/lycheedev/internal/codebase/environment"
 )
-
-// DigestDocuments binds both source paths and exact bytes to a rule identity.
-// It uses the same framing as environment.Build's input manifest.
-func DigestDocuments(documents map[string][]byte) string {
-	names := sortedPaths(documents)
-	h := sha256.New()
-	for _, name := range names {
-		fmt.Fprintf(h, "%d:%s:%d:", len(name), name, len(documents[name]))
-		_, _ = h.Write(documents[name])
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
 
 func sortedPaths(documents map[string][]byte) []string {
 	names := make([]string, 0, len(documents))
@@ -30,21 +15,6 @@ func sortedPaths(documents map[string][]byte) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// ExtractRules is a convenience for callers that do not already have the
-// fixed environment result. The same parser supplies both LuaLS definitions
-// and flow facts; generated documentation is never executed.
-func ExtractRules(ctx context.Context, clientID, apiCommit, metadataDigest, ruleVersion string, documents map[string][]byte) (RuleSet, error) {
-	identity := RuleIdentity{Client: clientID, APICommit: apiCommit, MetadataDigest: metadataDigest, Version: ruleVersion}
-	if clientID == "" || apiCommit == "" || ruleVersion == "" || metadataDigest == "" || len(documents) == 0 || metadataDigest != DigestDocuments(documents) {
-		return RuleSet{}, fmt.Errorf("%w: rule identity or metadata digest", ErrInput)
-	}
-	parsed, err := environment.Build(ctx, environment.Identity{Repository: "Blizzard_APIDocumentationGenerated", Commit: apiCommit, Client: clientID, GeneratorVersion: environment.GeneratorVersion}, documents, environment.Limits{MaxDocuments: 2048, MaxFileBytes: 1 << 20, MaxTotalBytes: 32 << 20})
-	if err != nil {
-		return RuleSet{}, err
-	}
-	return RulesFromFacts(identity, parsed)
 }
 
 // RulesFromFacts translates a single verified metadata result into bounded

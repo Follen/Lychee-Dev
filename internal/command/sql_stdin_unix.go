@@ -14,7 +14,7 @@ import (
 // Inherited stdin is not necessarily registered with Go's poller, so neither
 // SetReadDeadline nor closing it reliably interrupts Read. Read nonblocking on
 // an owned descriptor instead; there is no background reader to leave behind.
-func readSQLStdin(ctx context.Context, input *os.File) (raw []byte, err error) {
+func readBoundedStdin(ctx context.Context, input *os.File, limit int) (raw []byte, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -54,11 +54,11 @@ func readSQLStdin(ctx context.Context, input *os.File) (raw []byte, err error) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	var buf [32 << 10]byte
-	for len(raw) < (1<<20)+1 {
+	for len(raw) < limit+1 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		remaining := min(len(buf), (1<<20)+1-len(raw))
+		remaining := min(len(buf), limit+1-len(raw))
 		n, readErr := unix.Read(fd, buf[:remaining])
 		if n > 0 {
 			raw = append(raw, buf[:n]...)
@@ -82,4 +82,8 @@ func readSQLStdin(ctx context.Context, input *os.File) (raw []byte, err error) {
 		}
 	}
 	return raw, ctx.Err()
+}
+
+func readSQLStdin(ctx context.Context, input *os.File) ([]byte, error) {
+	return readBoundedStdin(ctx, input, 1<<20)
 }

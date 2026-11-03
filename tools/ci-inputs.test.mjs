@@ -24,7 +24,7 @@ test('CI required integrations are existing tests and retain all release LuaLS g
       names.add(name);
     }
   }
-  assert.equal(names.size, 15);
+  assert.equal(names.size, 16);
   const release = readFileSync(join(repository, '.github/workflows/toolkit-release.yml'), 'utf8');
   const releaseNames = release.match(/\$required = @\(([^\n]+)\)/)[1].matchAll(/'(Test[^']+)'/g);
   for (const [, name] of releaseNames) assert.ok(names.has(name), `release gate missing from PR CI: ${name}`);

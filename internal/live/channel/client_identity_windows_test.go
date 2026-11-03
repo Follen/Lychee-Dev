@@ -11,6 +11,7 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/records"
+	"github.com/follenfang/lycheedev/internal/selection"
 )
 
 func TestLegacyConnectionTargetRetainsObservedSlotIdentity(t *testing.T) {
@@ -37,7 +38,7 @@ func TestLegacyConnectionTargetRetainsObservedSlotIdentity(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			current, err := records.InspectClientInstallation(ctx, directory)
+			current, err := records.InspectRetainedClientInstallation(ctx, selection.ClientInstallation{Directory: directory, Product: "forever", ProductCode: "wow_forever", FullBuild: "1.60.1.70124", Interface: 16001, TOC: selection.MainTOC, IdentitySource: "version.txt"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,7 +92,7 @@ func TestConnectionTargetCompatibilityRejectsIdentityChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	current, err := records.InspectClientInstallation(context.Background(), directory)
+	current, err := records.InspectRetainedClientInstallation(context.Background(), selection.ClientInstallation{Directory: directory, Product: "forever", ProductCode: "wow_forever", FullBuild: "1.60.1.70124", Interface: 16001, TOC: selection.MainTOC, IdentitySource: "version.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}

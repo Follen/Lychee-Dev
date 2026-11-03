@@ -8,22 +8,13 @@ import (
 
 var ErrDataProductBuild = errors.New("selection.data_product_build_mismatch")
 
-// ValidateDataRelease guards reusable publishing slots using the verified
-// series. Stable product endpoints can advance independently of this baseline.
+// ValidateDataRelease admits current targets and guards the known Forever series.
 func ValidateDataRelease(product, fullBuild string) error {
 	if profile, ok := dataProductProfile(product); ok {
-		if profile.ReusedSlot && (!build(fullBuild) || !strings.HasPrefix(fullBuild, profile.BuildSeries+".")) {
+		if product == "forever" && (!build(fullBuild) || !strings.HasPrefix(fullBuild, profile.BuildSeries+".")) {
 			return fmt.Errorf("%w: %s slot %s serves %s; verified series is %s", ErrDataProductBuild, product, profile.ProductCode, fullBuild, profile.BuildSeries)
 		}
 		return nil
-	}
-	for _, baseline := range VerifiedClientBaselines() {
-		if baseline.Product == product {
-			if baseline.DataSlot != "" && (!build(fullBuild) || !strings.HasPrefix(fullBuild, baseline.BuildSeries+".")) {
-				return fmt.Errorf("%w: %s slot %s serves %s; verified series is %s", ErrDataProductBuild, product, baseline.DataSlot, fullBuild, baseline.BuildSeries)
-			}
-			return nil
-		}
 	}
 	return errors.New("selection.unsupported_data_product")
 }
@@ -35,44 +26,44 @@ func DataIdentity(pin DataPin) (product string, locale uint32, err error) {
 	if err = validatePins(SelectionSpec{Data: &pin}); err != nil {
 		return
 	}
-	if err = ValidateDataRelease(pin.Product, pin.FullBuild); err != nil {
-		return
+	if pin.ProductCode != "" {
+		product, err = DataProduct(pin.Product)
+		if err != nil {
+			return
+		}
+		if pin.ProductCode != product {
+			return "", 0, errors.New("selection.data_product_code_mismatch")
+		}
+	} else {
+		switch pin.Product {
+		case "forever":
+			product = "wow_forever"
+		case "forever-asia-beta":
+			product = "wow_classic_beta"
+		case "forever-cn-beta":
+			product = "wow_cn_beta"
+		default:
+			product, err = DataProduct(pin.Product)
+		}
+		if err != nil {
+			return
+		}
 	}
-	product, err = DataProduct(pin.Product)
-	if err != nil {
-		return "", 0, err
+	if SourceProductFamily(pin.Product) == "forever" && !strings.HasPrefix(pin.FullBuild, "1.60.1.") {
+		return "", 0, ErrDataProductBuild
 	}
 	locale, err = DataLocale(pin.Region, pin.Language)
 	return
 }
 
-// DataProductSlot returns the versions-manifest slot a track's data is
-// published under. The installation flavor code and the data slot differ for
-// tracks that reuse another product's slot (Forever on wow_classic_beta).
-func DataProductSlot(product string) (string, error) {
-	if profile, ok := dataProductProfile(product); ok {
-		return profile.ProductCode, nil
-	}
-	for _, baseline := range VerifiedClientBaselines() {
-		if baseline.Product == product {
-			if baseline.DataSlot != "" {
-				return baseline.DataSlot, nil
-			}
-			return baseline.ProductCode, nil
-		}
-	}
-	return "", errors.New("selection.unsupported_data_product")
-}
+// DataProductSlot names the current remote catalog. Historical pins use
+// PinnedDataProductSlot instead.
+func DataProductSlot(product string) (string, error) { return DataProduct(product) }
 
 // DataProduct translates a toolkit track without deriving identity from a path.
 func DataProduct(product string) (string, error) {
 	if profile, ok := dataProductProfile(product); ok {
 		return profile.ProductCode, nil
-	}
-	for _, baseline := range VerifiedClientBaselines() {
-		if baseline.Product == product {
-			return baseline.ProductCode, nil
-		}
 	}
 	return "", errors.New("selection.unsupported_data_product")
 }
@@ -116,4 +107,49 @@ func DataLocale(region, language string) (locale uint32, err error) {
 		return 0, errors.New("selection.unsupported_data_region")
 	}
 	return
+}
+
+// PinnedDataProductSlot preserves the endpoint recorded by an immutable pin.
+func PinnedDataProductSlot(pin DataPin) (string, error) {
+	product, _, err := DataIdentity(pin)
+	if err != nil {
+		return "", err
+	}
+	if product == "wow_forever" {
+		return "wow_classic_beta", nil
+	}
+	return product, nil
+}
+
+// ValidateNewSelection applies current target admission without rewriting historical pins.
+func ValidateNewSelection(spec SelectionSpec) error {
+	if spec.Data != nil {
+		product, err := DataProduct(spec.Data.Product)
+		if err != nil {
+			return err
+		}
+		if spec.Data.Product == "forever" && spec.Data.ProductCode != product {
+			return errors.New("selection.formal_forever_requires_wowf_identity")
+		}
+		if spec.Data.ProductCode != "" && spec.Data.ProductCode != product {
+			return errors.New("selection.data_product_code_mismatch")
+		}
+		if _, _, err := DataIdentity(*spec.Data); err != nil {
+			return err
+		}
+	}
+	if spec.Changes != nil {
+		if err := ValidateDataRelease(spec.Changes.Product, spec.Changes.FullBuild); err != nil {
+			return err
+		}
+	}
+	return validatePins(spec)
+}
+
+// NewDataProductCode records the product discriminator where legacy pins are ambiguous.
+func NewDataProductCode(product string) string {
+	if product == "forever" {
+		return "wowf"
+	}
+	return ""
 }

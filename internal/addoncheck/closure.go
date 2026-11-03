@@ -17,7 +17,10 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-type AddonInput struct{ Root, Manifest string }
+type AddonInput struct {
+	Root, Manifest string
+	Context        LoadContext
+}
 type ValidationIssue struct {
 	Severity  string `json:"severity"`
 	Code      string `json:"code"`
@@ -48,6 +51,8 @@ type LoadAssessment struct {
 	Steps                 []LoadStep        `json:"steps"`
 	Issues                []ValidationIssue `json:"issues"`
 	LoadValid             bool              `json:"loadValid"`
+	LoadComplete          bool              `json:"loadComplete"`
+	Context               LoadContext       `json:"context"`
 	CompatibilityComplete bool              `json:"compatibilityComplete"`
 }
 
@@ -61,7 +66,7 @@ func InspectLocalLoad(ctx context.Context, input AddonInput) (LoadAssessment, er
 // InspectLoad shares the parser and ordered closure walker between installation
 // validation and source research, with each caller's existing document budget.
 func InspectLoad(ctx context.Context, input AddonInput, store *vault.Store, documentBytes int64) (LoadAssessment, error) {
-	result := LoadAssessment{Documents: []LoadedDocument{}, Steps: []LoadStep{}, Issues: []ValidationIssue{}, LoadValid: true}
+	result := LoadAssessment{Documents: []LoadedDocument{}, Steps: []LoadStep{}, Issues: []ValidationIssue{}, LoadValid: true, LoadComplete: true, Context: input.Context}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -256,12 +261,49 @@ func (w *closureWalk) load(name, from string, line, depth int, kind string, mani
 	for _, warning := range facts.Warnings {
 		w.issue("warning", "source_encoding", name, warning.Line, "", warning.Message)
 	}
+	if manifest {
+		unknown := false
+		for _, header := range facts.Headers {
+			key := strings.ToLower(header.Key)
+			if !strings.HasPrefix(key, "allowload") && !strings.HasPrefix(key, "excludeload") {
+				continue
+			}
+			value, applies, resolved := w.result.Context.target(header.Value)
+			if !applies {
+				continue
+			}
+			if !resolved {
+				unknown = true
+				continue
+			}
+			allow, known := w.result.Context.condition(header.Key, value)
+			if known && !allow {
+				w.issue("error", "load_manifest_excluded", name, header.Line, header.Value, "manifest excludes the selected client or in-world load phase")
+				return nil
+			}
+			unknown = unknown || !known
+		}
+		if unknown {
+			w.result.LoadComplete = false
+			w.issue("warning", "load_condition_unavailable", name, 0, "", "manifest loading condition is unresolved for the selected client")
+			return nil
+		}
+	}
 	for _, load := range facts.Loads {
 		w.references++
 		if w.references > 20000 {
 			return errors.New("codebase.closure_reference_budget")
 		}
-		child, err := w.resolve(name, load.Path)
+		target, include, known := w.result.Context.target(load.Path)
+		if !include {
+			continue
+		}
+		if !known {
+			w.result.LoadComplete = false
+			w.issue("warning", "load_condition_unavailable", name, load.Line, load.Path, "load condition or path token is unresolved for the selected client")
+			continue
+		}
+		child, err := w.resolve(name, target)
 		if err != nil {
 			if w.ctx.Err() != nil {
 				return w.ctx.Err()

@@ -1,7 +1,7 @@
 interface:
   display_name: "Lychee Dev Toolkit"
-  short_description: "WoW source, data, assets, validation and live recovery"
-  default_prompt: "Use $lycheedev to investigate this WoW addon question with the smallest sufficient fixed source, data or authorized live evidence."
+  short_description: "WoW research, live recovery and author publishing"
+  default_prompt: "Use $lycheedev to handle this WoW research or publishing task using the installed CLI contract."
 
 policy:
   allow_implicit_invocation: true

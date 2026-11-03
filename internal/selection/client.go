@@ -32,15 +32,9 @@ type ClientInstallation struct {
 
 var flavorWord = regexp.MustCompile(`\bwow[a-z0-9_]*\b`)
 
-// reusableSlots are manifest slots a product ID can reuse for a different
-// game. A flavor naming one of these is slot evidence, never a product;
-// unknown flavors still fail closed instead of falling back.
-var reusableSlots = map[string]bool{"wow_classic_beta": true, "wow_cn_beta": true}
-
-// InspectClient resolves only one explicitly selected client. Product evidence
-// outranks version evidence, then a known folder is the last fallback. A reused
-// test slot is never treated as Forever without a matching build and identity.
-// Unsupported or contradictory evidence fails; it does not select another client.
+// InspectClient resolves an explicitly selected client from flavor and build
+// catalog evidence. A directory locates a client; it never upgrades a retired
+// beta product into the formal Forever product.
 func InspectClient(ctx context.Context, directory string, active []ClientBuild) (ClientInstallation, error) {
 	var result ClientInstallation
 	absolute, err := filepath.Abs(directory)
@@ -56,7 +50,7 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 		return result, err
 	}
 	defer root.Close()
-	product, version, source, slot, flavorName := "", "", "", "", ""
+	product, version, source, flavorName := "", "", "", ""
 	for _, name := range []string{".flavor.info", "flavor.info"} {
 		text, err := clientText(ctx, root, name)
 		if err != nil {
@@ -73,12 +67,8 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 		break
 	}
 	result.ProductCode = product // Preserve observed flavor even on identity failure.
-	// A flavor may name a reusable manifest slot (wow_classic_beta currently
-	// carries Forever) instead of a baseline product. That is slot evidence,
-	// never a product: the build series below resolves the product. Unknown
-	// flavors still fail closed.
-	if reusableSlots[product] {
-		slot, product = product, ""
+	if product == "wow_forever" || product == "wow_classic_beta" || product == "wow_cn_beta" {
+		return result, fmt.Errorf("%w: retired Forever product %q; select wowf", ErrClientIdentity, product)
 	}
 	version, err = clientText(ctx, root, "version.txt")
 	if err != nil {
@@ -88,6 +78,9 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 		return result, fmt.Errorf("%w: invalid version.txt", ErrClientIdentity)
 	}
 	folder := strings.ToLower(filepath.Base(absolute))
+	if flavorName == "" && (folder == "_classic_beta_" || folder == "_cn_beta_") {
+		return result, fmt.Errorf("%w: retired slot requires explicit current flavor", ErrClientIdentity)
+	}
 	if product == "" && version != "" {
 		for _, baseline := range clientIdentityBaselines() {
 			if strings.HasPrefix(version, baseline.BuildSeries+".") {
@@ -95,49 +88,36 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 				break
 			}
 		}
-		// Reused Forever test slots require a verified Forever build series.
-		if (folder == "_classic_beta_" || folder == "_cn_beta_" || slot == "wow_cn_beta") && !strings.HasPrefix(version, "1.60.1.") {
-			return result, fmt.Errorf("%w: unsupported test track", ErrClientIdentity)
-		}
 		if product == "" {
 			return result, fmt.Errorf("%w: unsupported build", ErrClientIdentity)
 		}
 	}
-	if product == "" && version == "" && slot != "" {
-		// No version.txt: the launcher build catalog keyed by the observed
-		// slot resolves both the build and the product.
-		for _, candidate := range active {
-			if candidate.ProductCode != slot {
-				continue
-			}
-			for _, baseline := range clientIdentityBaselines() {
-				if strings.HasPrefix(candidate.FullBuild, baseline.BuildSeries+".") {
-					if product != "" && product != baseline.ProductCode {
-						return result, fmt.Errorf("%w: ambiguous active builds", ErrClientIdentity)
+	if product == "" {
+		for _, profile := range DataProducts() {
+			if profile.Folder == folder {
+				for _, candidate := range active {
+					if candidate.ProductCode == profile.ProductCode {
+						product, source = profile.ProductCode, "build-catalog"
 					}
-					product, version, source = baseline.ProductCode, candidate.FullBuild, flavorName+"+build-catalog"
 				}
 			}
-		}
-		if product == "" {
-			return result, fmt.Errorf("%w: unsupported build for slot %q", ErrClientIdentity, slot)
 		}
 	}
-	if product == "" {
-		if folder == "_forever_" {
-			product = "wow_forever"
-		} else {
-			for _, profile := range DataProducts() {
-				if profile.Folder == folder && !profile.ReusedSlot {
-					product = profile.ProductCode
-				}
+	// A family version alone cannot distinguish the old beta from formal wowf.
+	if product == "wowf" && flavorName == "" {
+		matched := false
+		for _, candidate := range active {
+			if candidate.ProductCode == "wowf" && (version == "" || candidate.FullBuild == version) {
+				matched = true
 			}
 		}
-		source = "folder"
+		if !matched {
+			return result, fmt.Errorf("%w: Forever requires wowf flavor or catalog evidence", ErrClientIdentity)
+		}
 	}
 	if version == "" {
 		for _, candidate := range active {
-			if candidate.ProductCode != product && candidate.ProductCode != slot {
+			if candidate.ProductCode != product {
 				continue
 			}
 			if version != "" && version != candidate.FullBuild {
@@ -166,11 +146,12 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 	if !build(version) || selected == nil {
 		return result, fmt.Errorf("%w: missing or unsupported product/build pair", ErrClientIdentity)
 	}
-	// Reused Forever test slots require a verified Forever build series.
-	if (folder == "_classic_beta_" || folder == "_cn_beta_" || slot == "wow_cn_beta") && !strings.HasPrefix(version, "1.60.1.") {
-		return result, fmt.Errorf("%w: unsupported test track", ErrClientIdentity)
+	for _, candidate := range active {
+		if candidate.ProductCode == product && candidate.FullBuild != version {
+			return result, fmt.Errorf("%w: version conflicts with active catalog", ErrClientIdentity)
+		}
 	}
-	return ClientInstallation{Directory: absolute, Product: selected.Product, ProductCode: product, CatalogProduct: slot, FullBuild: version, Interface: selected.Interface, TOC: selected.TOC, IdentitySource: source}, nil
+	return ClientInstallation{Directory: absolute, Product: selected.Product, ProductCode: product, FullBuild: version, Interface: selected.Interface, TOC: selected.TOC, IdentitySource: source}, nil
 }
 
 func clientText(ctx context.Context, root *os.Root, name string) (string, error) {

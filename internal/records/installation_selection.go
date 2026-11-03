@@ -170,13 +170,6 @@ func SelectClientInstallation(ctx context.Context, directory, product string) (s
 	conflict := false
 	for _, issue := range report.Issues {
 		relatedSlot := issue.ProductCode == slot
-		for _, baseline := range selection.VerifiedClientBaselines() {
-			if baseline.Product == product {
-				for _, localSlot := range baseline.LocalDataSlots {
-					relatedSlot = relatedSlot || issue.ProductCode == localSlot
-				}
-			}
-		}
 		if product == "" || issue.ProductCode == "" || issue.ProductCode == productCode || relatedSlot {
 			conflict = true
 		}

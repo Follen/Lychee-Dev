@@ -324,7 +324,7 @@ func TestWagoHotfixFilterEdges(t *testing.T) {
 	provider := &records.WagoHotfix{Root: hotfixTestWorkspace(t), BaseURL: server.URL, Client: server.Client()}
 
 	status := wagoTestQuery()
-	status.Status = records.HotfixUint8(3)
+	status.Status = hotfixUint8(3)
 	result, err := provider.QueryHotfix(context.Background(), status)
 	if err != nil {
 		t.Fatal(err)
@@ -336,7 +336,7 @@ func TestWagoHotfixFilterEdges(t *testing.T) {
 	region := wagoTestQuery()
 	region.Region = "cn"
 	region.Locale = "zhCN"
-	region.RegionID = records.HotfixUint32(196)
+	region.RegionID = hotfixUint32(196)
 	result, err = provider.QueryHotfix(context.Background(), region)
 	if err != nil {
 		t.Fatal(err)
@@ -500,7 +500,7 @@ func TestWagoHotfixRealFixtureQuery(t *testing.T) {
 	query := wagoTestQuery()
 	query.Table = "SpellEffect"
 	query.Search = "68974"
-	query.RegionID = records.HotfixUint32(71)
+	query.RegionID = hotfixUint32(71)
 	result, err := provider.QueryHotfix(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)

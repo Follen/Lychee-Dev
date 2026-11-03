@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -41,6 +41,19 @@ test('identical input yields byte-identical archives', async t => {
   assert.deepEqual(one, readFileSync(join(root, 'two.tar.gz')));
   await writeTarGz([...entries], join(root, 'three.tar.gz'));
   assert.deepEqual(one, readFileSync(join(root, 'three.tar.gz')));
+});
+
+test('file streams produce the same archive as in-memory inputs', async t => {
+  const root = fixture(t);
+  const bytes = Buffer.alloc(3 * 1024 * 1024 + 17);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31) % 251;
+  const path = join(root, 'library.a');
+  writeFileSync(path, bytes);
+  await writeTarGz([{name: 'vendor/native/library.a', path}, {name: 'empty', bytes: ''}], join(root, 'stream.tar.gz'));
+  await writeTarGz([['vendor/native/library.a', bytes], ['empty', '']], join(root, 'memory.tar.gz'));
+  const streamed = readFileSync(join(root, 'stream.tar.gz'));
+  assert.deepEqual(streamed, readFileSync(join(root, 'memory.tar.gz')));
+  assert.deepEqual(readTarGz(streamed).get('vendor/native/library.a'), bytes);
 });
 
 test('per-entry mode is recorded and content reads back unchanged', async t => {

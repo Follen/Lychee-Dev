@@ -84,6 +84,7 @@ func TestCDNDeadlineStopsRecovery(t *testing.T) {
 // alias keeps the Asia publishing slot even with a CN endpoint region.
 func TestCDNPrepareForeverUsesDataSlot(t *testing.T) {
 	for _, tc := range []struct{ product, region, slot string }{
+		{"forever", "us", "wowf"}, {"forever", "cn", "wowf"},
 		{"forever", "us", "wow_classic_beta"}, {"forever", "cn", "wow_classic_beta"},
 		{"forever-asia-beta", "us", "wow_classic_beta"}, {"forever-asia-beta", "cn", "wow_classic_beta"},
 		{"forever-cn-beta", "us", "wow_cn_beta"}, {"forever-cn-beta", "cn", "wow_cn_beta"},
@@ -102,6 +103,9 @@ func TestCDNPrepareForeverUsesDataSlot(t *testing.T) {
 			}
 			c := &cdnFiles{downloadWorkers: 8, ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
 			pin := selection.DataPin{Product: tc.product, Region: tc.region, Language: "enUS", FullBuild: "1.60.1.70009", BuildConfig: buildKey, CDNConfig: cdnKey, DefinitionCommit: definitionsTestCommit}
+			if tc.slot == "wowf" {
+				pin.ProductCode = "wowf"
+			}
 			meta, err := c.prepare(pin)
 			if err != nil {
 				t.Fatal(err)
@@ -124,6 +128,12 @@ func TestCDNPrepareForeverUsesDataSlot(t *testing.T) {
 				catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\n" + tc.region + "|tpr/wow|cdn.example.test\n")},
 			}
 			resolved, err := f.resolve(context.Background(), RemoteTargetRequest{Product: tc.product, Region: tc.region, Locale: "enUS", FullBuild: pin.FullBuild, Definitions: definitionsTestCommit})
+			if tc.slot != "wowf" {
+				if err == nil {
+					t.Fatal("legacy new target should not reuse its historical CDN identity")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

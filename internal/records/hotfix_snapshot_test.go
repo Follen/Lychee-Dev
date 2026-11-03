@@ -26,7 +26,7 @@ func writeHotfixSnapshotFile(t *testing.T, version uint32, fixtures ...cacheReco
 
 func snapshotTestQuery() records.HotfixQuery {
 	query := wagoTestQuery()
-	query.TableHash = records.HotfixUint32(0x11223344)
+	query.TableHash = hotfixUint32(0x11223344)
 	return query
 }
 
@@ -48,7 +48,7 @@ func TestSnapshotHotfixQueriesExplicitFile(t *testing.T) {
 		cacheRecordFixture{Region: 71, UniqueID: 7, Push: -3, Table: 0x11223344, Record: 55, Status: 1, Payload: []byte{0xde, 0xad}},
 		cacheRecordFixture{Region: 71, UniqueID: 8, Push: 4, Table: 0x55667788, Record: 56, Status: 2, Payload: nil},
 	)
-	source, err := records.DBCacheSnapshot(path, snapshotTestQuery())
+	source, err := records.OpenHotfixSnapshot(path, "dbcache", snapshotTestQuery(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestRaidbotsSnapshotStaleRefusal(t *testing.T) {
 	}
 	// The same stale file is fine for the live cache source, which has no
 	// staleness policy.
-	dbcache, err := records.DBCacheSnapshot(path, snapshotTestQuery())
+	dbcache, err := records.OpenHotfixSnapshot(path, "dbcache", snapshotTestQuery(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestSnapshotHotfixIdentityAndBuildChecks(t *testing.T) {
 	path, _ := writeHotfixSnapshotFile(t, 9,
 		cacheRecordFixture{Region: 71, Push: 1, Table: 0x11223344, Record: 55, Status: 1, Payload: []byte{1}},
 	)
-	source, err := records.DBCacheSnapshot(path, snapshotTestQuery())
+	source, err := records.OpenHotfixSnapshot(path, "dbcache", snapshotTestQuery(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestSnapshotHotfixIdentityAndBuildChecks(t *testing.T) {
 	if err := os.WriteFile(wrongBuild, makeCacheSnapshot(9, 12345, 9, cacheRecordFixture{Region: 71, Push: 1, Table: 0x11223344, Record: 55, Status: 1, Payload: []byte{1}}), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	other, err := records.DBCacheSnapshot(wrongBuild, snapshotTestQuery())
+	other, err := records.OpenHotfixSnapshot(wrongBuild, "dbcache", snapshotTestQuery(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestSnapshotHotfixFilterEdges(t *testing.T) {
 	path, _ := writeHotfixSnapshotFile(t, 8,
 		cacheRecordFixture{Push: 1, Table: 0x11223344, Record: 55, Status: 1, Payload: []byte{1}},
 	)
-	source, err := records.DBCacheSnapshot(path, snapshotTestQuery())
+	source, err := records.OpenHotfixSnapshot(path, "dbcache", snapshotTestQuery(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestSnapshotHotfixFilterEdges(t *testing.T) {
 		"to":       func(q records.HotfixQuery) records.HotfixQuery { q.To = &time.Time{}; return q },
 		"table":    func(q records.HotfixQuery) records.HotfixQuery { q.Table = "SpellEffect"; q.TableHash = nil; return q },
 		"page":     func(q records.HotfixQuery) records.HotfixQuery { q.Page = 2; return q },
-		"regionId": func(q records.HotfixQuery) records.HotfixQuery { q.RegionID = records.HotfixUint32(71); return q },
+		"regionId": func(q records.HotfixQuery) records.HotfixQuery { q.RegionID = hotfixUint32(71); return q },
 	}
 	for name, mutate := range cases {
 		_, err := source.QueryHotfix(context.Background(), mutate(snapshotTestQuery()))
@@ -182,12 +182,12 @@ func TestSnapshotHotfixFilterEdges(t *testing.T) {
 	v9, _ := writeHotfixSnapshotFile(t, 9,
 		cacheRecordFixture{Region: 71, Push: 1, Table: 0x11223344, Record: 55, Status: 1, Payload: []byte{1}},
 	)
-	regional, err := records.DBCacheSnapshot(v9, snapshotTestQuery())
+	regional, err := records.OpenHotfixSnapshot(v9, "dbcache", snapshotTestQuery(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	query := snapshotTestQuery()
-	query.RegionID = records.HotfixUint32(71)
+	query.RegionID = hotfixUint32(71)
 	result, err := regional.QueryHotfix(context.Background(), query)
 	if err != nil || len(result.Records) != 1 {
 		t.Fatalf("region filter = %+v err = %v", result.Records, err)
@@ -200,7 +200,7 @@ func TestSnapshotHotfixLatestBatchAndCursor(t *testing.T) {
 		cacheRecordFixture{Push: 5, Table: 0x11223344, Record: 56, Status: 1, Payload: []byte{2}},
 		cacheRecordFixture{Push: 3, Table: 0x11223344, Record: 57, Status: 1, Payload: []byte{3}},
 	)
-	source, err := records.DBCacheSnapshot(path, snapshotTestQuery())
+	source, err := records.OpenHotfixSnapshot(path, "dbcache", snapshotTestQuery(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestSnapshotHotfixDecodeStates(t *testing.T) {
 	query := snapshotTestQuery()
 	query.Definition = &definition
 	query.RecordID = nil
-	source, err := records.DBCacheSnapshot(path, query)
+	source, err := records.OpenHotfixSnapshot(path, "dbcache", query, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

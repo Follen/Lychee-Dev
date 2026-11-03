@@ -1,10 +1,12 @@
 // Deterministic tar.gz writer/reader. Zero dependencies; plain ustar headers
-// with fixed metadata (mtime/uid/gid 0, sorted entries) plus gzipSync's zero
+// with fixed metadata (mtime/uid/gid 0, sorted entries) plus gzip's zero
 // MTIME so identical input always produces identical archive bytes. Read
 // support covers regular files plus the name-override headers real tar
 // variants emit (ustar prefix splits, GNU long names, PAX path overrides).
-import { writeFile } from 'node:fs/promises';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { createReadStream, createWriteStream, statSync } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { createGzip, gunzipSync } from 'node:zlib';
 
 const BLOCK = 512;
 
@@ -54,34 +56,45 @@ function ustarHeader(prefix, name, size, mode) {
 
 /**
  * Write a deterministic gzip-compressed ustar archive of regular files.
- * @param {Map<string, Buffer|string>|Array<[string, Buffer|string]|{name: string, bytes: Buffer|string, mode?: number}>} entries
+ * Files supplied by path stream from disk; byte entries remain supported.
+ * @param {Map<string, Buffer|string>|Array<[string, Buffer|string]|{name: string, bytes?: Buffer|string, path?: string, mode?: number}>} entries
  * @param {string} outPath
  * @returns {Promise<string>} outPath
  */
 export async function writeTarGz(entries, outPath) {
-  const pairs = entries instanceof Map
-    ? [...entries.entries()]
-    : [...entries].map(entry => (Array.isArray(entry) ? entry : [entry.name, entry.bytes, entry.mode]));
-  const list = pairs.map(([name, value, mode]) => ({
-    name,
-    key: Buffer.from(name, 'utf8'),
-    bytes: Buffer.isBuffer(value) ? value : Buffer.from(value),
-    mode: mode ?? 0o644,
-  }));
+  const input = entries instanceof Map ? [...entries.entries()] : [...entries];
+  const list = input.map(item => {
+    const entry = Array.isArray(item) ? {name: item[0], bytes: item[1]} : item;
+    const bytes = entry.path ? null : Buffer.isBuffer(entry.bytes) ? entry.bytes : Buffer.from(entry.bytes);
+    return { ...entry, key: Buffer.from(entry.name, 'utf8'), bytes,
+      size: entry.path ? statSync(entry.path).size : bytes.length, mode: entry.mode ?? 0o644 };
+  });
   for (const entry of list) checkName(entry.name);
   list.sort((a, b) => Buffer.compare(a.key, b.key));
   for (let i = 1; i < list.length; i++) {
     if (Buffer.compare(list[i - 1].key, list[i].key) === 0) throw new Error(`tar.duplicate_entry: ${list[i].name}`);
   }
-  const blocks = [];
-  for (const entry of list) {
-    const [prefix, name] = splitName(entry.name);
-    blocks.push(ustarHeader(prefix, name, entry.bytes.length, entry.mode), entry.bytes);
-    const pad = (BLOCK - (entry.bytes.length % BLOCK)) % BLOCK;
-    if (pad) blocks.push(Buffer.alloc(pad));
+  async function* blocks() {
+    for (const entry of list) {
+      const [prefix, name] = splitName(entry.name);
+      yield ustarHeader(prefix, name, entry.size, entry.mode);
+      if (entry.path) {
+        let read = 0;
+        for await (const chunk of createReadStream(entry.path)) {
+          read += chunk.length;
+          if (read > entry.size) throw new Error(`tar.source_changed: ${entry.name}`);
+          yield chunk;
+        }
+        if (read !== entry.size) throw new Error(`tar.source_changed: ${entry.name}`);
+      } else {
+        yield entry.bytes;
+      }
+      const pad = (BLOCK - (entry.size % BLOCK)) % BLOCK;
+      if (pad) yield Buffer.alloc(pad);
+    }
+    yield Buffer.alloc(BLOCK * 2);
   }
-  blocks.push(Buffer.alloc(BLOCK * 2)); // end-of-archive marker
-  await writeFile(outPath, gzipSync(Buffer.concat(blocks), { level: 9 }));
+  await pipeline(Readable.from(blocks()), createGzip({level: 9}), createWriteStream(outPath));
   return outPath;
 }
 

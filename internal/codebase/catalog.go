@@ -18,20 +18,18 @@ var repositoryCatalog = []RepositorySpec{
 		Label: "World of Warcraft UI Source Mirror",
 		URL:   "https://github.com/Gethe/wow-ui-source.git",
 		Tracks: map[string]string{
-			"retail":            "live",
-			"ptr":               "ptr",
-			"ptr2":              "ptr2",
-			"beta":              "beta",
-			"classic":           "classic",
-			"classic-ptr":       "classic_ptr",
-			"classic-beta":      "classic_beta",
-			"classic-era":       "classic_era",
-			"classic-era-ptr":   "classic_era_ptr",
-			"anniversary":       "classic_anniversary",
-			"titan":             "classic_titan",
-			"forever":           "forever",
-			"forever-asia-beta": "forever",
-			"forever-cn-beta":   "forever",
+			"retail":          "live",
+			"ptr":             "ptr",
+			"ptr2":            "ptr2",
+			"beta":            "beta",
+			"classic":         "classic",
+			"classic-ptr":     "classic_ptr",
+			"classic-beta":    "classic_beta",
+			"classic-era":     "classic_era",
+			"classic-era-ptr": "classic_era_ptr",
+			"anniversary":     "classic_anniversary",
+			"titan":           "classic_titan",
+			"forever":         "forever",
 		},
 	},
 	{
@@ -71,6 +69,15 @@ var repositoryCatalog = []RepositorySpec{
 			"main": "main",
 		},
 	},
+}
+
+// Historical pins retain their original product identity after a track leaves
+// new selection. This predicate is only for fixed-commit reads, never prepare.
+func readableSourceTrack(repo RepositorySpec, product string) bool {
+	if _, ok := repo.Tracks[product]; ok {
+		return true
+	}
+	return repo.Key == "wow-ui-source" && (product == "forever-asia-beta" || product == "forever-cn-beta")
 }
 
 // Repositories returns an independent snapshot of the repository catalog.

@@ -1,7 +1,7 @@
 export const packageName = 'github.com/follenfang/lycheedev/internal/records/navigatetest';
 export const oracleCommit = '38a34665624b8775bb875274b36191b21c38d97b';
 export const benchmarkCases = ['offline-cdn', 'local-archive'].flatMap(physical =>
-  ['single', 'join', 'static-effective', 'hotfix-delete', 'spell-navigation'].flatMap(scenario =>
+  ['single', 'join', 'scalar-subquery', 'static-effective', 'hotfix-delete', 'spell-navigation'].flatMap(scenario =>
     ['cold-decoded', 'warm-decoded'].map(state => `BenchmarkDataPreparation/${physical}/${scenario}/${state}`)));
 const commonMetrics = ['ns/op', 'B/op', 'allocs/op', 'network-B/op', 'requests/op', 'charged-work/op',
   'charged-retained-B/op', 'charged-metadata-B/op'];

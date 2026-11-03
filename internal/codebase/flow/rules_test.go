@@ -7,7 +7,18 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/follenfang/lycheedev/internal/codebase/environment"
 )
+
+func ruleFacts(t *testing.T, client, commit string, documents map[string][]byte) (RuleIdentity, environment.Result) {
+	t.Helper()
+	parsed, err := environment.Build(context.Background(), environment.Identity{Repository: "Blizzard_APIDocumentationGenerated", Commit: commit, Client: client, GeneratorVersion: environment.GeneratorVersion}, documents, environment.Limits{MaxDocuments: 2048, MaxFileBytes: 1 << 20, MaxTotalBytes: 32 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return RuleIdentity{Client: client, APICommit: commit, MetadataDigest: parsed.Manifest.InputSHA256, Version: "1"}, parsed
+}
 
 func TestExtractRulesFromGeneratedLocalTable(t *testing.T) {
 	path := "Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua"
@@ -22,7 +33,8 @@ func TestExtractRulesFromGeneratedLocalTable(t *testing.T) {
 APIDocumentation:AddDocumentationTable(Unit)
 `)
 	documents := map[string][]byte{path: doc}
-	rules, err := ExtractRules(context.Background(), "retail", strings.Repeat("a", 40), DigestDocuments(documents), "1", documents)
+	identity, parsed := ruleFacts(t, "retail", strings.Repeat("a", 40), documents)
+	rules, err := RulesFromFacts(identity, parsed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +48,8 @@ APIDocumentation:AddDocumentationTable(Unit)
 	bad := append([]byte{}, doc...)
 	bad = append(bad, []byte("Unit = {}\n")...)
 	mutated := map[string][]byte{path: bad}
-	if _, err := ExtractRules(context.Background(), "retail", strings.Repeat("a", 40), DigestDocuments(documents), "1", mutated); err == nil {
+	_, changed := ruleFacts(t, "retail", strings.Repeat("a", 40), mutated)
+	if _, err := RulesFromFacts(identity, changed); err == nil {
 		t.Fatal("accepted changed metadata digest")
 	}
 }
@@ -63,7 +76,8 @@ func TestExtractPinnedUnitDocumentationWhenAvailable(t *testing.T) {
 			}
 			path := "Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua"
 			documents := map[string][]byte{path: raw}
-			rules, err := ExtractRules(context.Background(), variant.name, variant.commit, DigestDocuments(documents), "1", documents)
+			identity, parsed := ruleFacts(t, variant.name, variant.commit, documents)
+			rules, err := RulesFromFacts(identity, parsed)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,7 +105,8 @@ func TestEventRulesNeverBecomeCallableAndDuplicatesStayAmbiguous(t *testing.T) {
 APIDocumentation:AddDocumentationTable(API)
 `)
 	docs := map[string][]byte{path: doc}
-	rules, err := ExtractRules(context.Background(), "retail", strings.Repeat("a", 40), DigestDocuments(docs), "1", docs)
+	identity, parsed := ruleFacts(t, "retail", strings.Repeat("a", 40), docs)
+	rules, err := RulesFromFacts(identity, parsed)
 	if err != nil {
 		t.Fatal(err)
 	}

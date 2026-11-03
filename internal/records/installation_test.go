@@ -3,6 +3,7 @@ package records
 import (
 	"context"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/selection"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,13 +130,10 @@ func TestInstallationDiscoveryDoesNotInventOrOverrideClients(t *testing.T) {
 	}
 }
 
-func TestChinaAndInternationalForeverRemainSeparate(t *testing.T) {
+func TestFormalForeverDoesNotBorrowRetiredInstallations(t *testing.T) {
 	game := t.TempDir()
 	catalog := "Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\n"
-	for _, row := range []struct{ folder, flavor, build string }{
-		{"_cn_beta_", "wow_cn_beta", "1.60.1.70245"},
-		{"_classic_beta_", "wow_classic_beta", "1.60.1.70124"},
-	} {
+	for _, row := range []struct{ folder, flavor string }{{"_cn_beta_", "wow_cn_beta"}, {"_classic_beta_", "wow_classic_beta"}, {"_forever_", "wowf"}} {
 		client := filepath.Join(game, row.folder)
 		if err := os.Mkdir(client, 0700); err != nil {
 			t.Fatal(err)
@@ -143,30 +141,19 @@ func TestChinaAndInternationalForeverRemainSeparate(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(client, ".flavor.info"), []byte(row.flavor), 0600); err != nil {
 			t.Fatal(err)
 		}
-		catalog += row.flavor + "|" + row.build + "|" + strings.Repeat("a", 32) + "|" + strings.Repeat("b", 32) + "|1\n"
+		catalog += row.flavor + "|1.60.1.70658|" + strings.Repeat("a", 32) + "|" + strings.Repeat("b", 32) + "|1\n"
 	}
 	if err := os.WriteFile(filepath.Join(game, ".build.info"), []byte(catalog), 0600); err != nil {
 		t.Fatal(err)
 	}
+	client, err := SelectClientInstallation(context.Background(), game, "forever")
+	if err != nil || client.ProductCode != "wowf" || client.Directory != filepath.Join(game, "_forever_") {
+		t.Fatalf("%+v %v", client, err)
+	}
 	for _, folder := range []string{"_cn_beta_", "_classic_beta_"} {
-		client, err := InspectClientInstallation(context.Background(), filepath.Join(game, folder))
-		if err != nil || client.Product != "forever" || client.Directory != filepath.Join(game, folder) {
-			t.Fatalf("%+v %v", client, err)
+		if _, err := InspectClientInstallation(context.Background(), filepath.Join(game, folder)); err == nil {
+			t.Fatal("retired installation selected", folder)
 		}
-		root, slot, err := dataInstallationRoot(context.Background(), client.Directory, client.ProductCode, client.FullBuild)
-		if err != nil || root != game || slot != client.CatalogProduct {
-			t.Fatalf("data source lost regional slot: %s %s %v", root, slot, err)
-		}
-	}
-	if _, err := SelectClientInstallation(context.Background(), game, "forever"); !errors.Is(err, ErrInstallationAmbiguous) {
-		t.Fatalf("must choose a region directory: %v", err)
-	}
-	cn := filepath.Join(game, "_cn_beta_")
-	if err := os.WriteFile(filepath.Join(cn, "version.txt"), []byte("1.60.1.70000"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := InspectClientInstallation(context.Background(), cn); !errors.Is(err, ErrInstallationConflict) {
-		t.Fatalf("CN metadata conflict ignored: %v", err)
 	}
 }
 
@@ -186,7 +173,50 @@ func TestChinaForeverUnsupportedBuildBlocksProductSelection(t *testing.T) {
 			}
 		}
 	}
-	if _, err := SelectClientInstallation(context.Background(), game, "forever"); !errors.Is(err, ErrInstallationConflict) {
-		t.Fatalf("ignored CN slot issue and selected international: %v", err)
+	if _, err := SelectClientInstallation(context.Background(), game, "forever"); !errors.Is(err, ErrInstallationMissing) {
+		t.Fatalf("retired slots should not provide a current target: %v", err)
+	}
+}
+
+func TestRetainedForeverClientRechecksOriginalIdentity(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "_classic_beta_")
+	if err := os.Mkdir(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{".flavor.info": "wow_classic_beta", "version.txt": "1.60.1.70338"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expected := selection.ClientInstallation{Directory: directory, Product: "forever", ProductCode: "wow_forever", FullBuild: "1.60.1.70338", Interface: 16001, TOC: selection.MainTOC, IdentitySource: "version.txt"}
+	observed, err := InspectRetainedClientInstallation(context.Background(), expected)
+	if err != nil || observed.ProductCode != "wow_forever" || observed.CatalogProduct != "wow_classic_beta" {
+		t.Fatalf("%+v %v", observed, err)
+	}
+	if _, err := InspectClientInstallation(context.Background(), directory); err == nil {
+		t.Fatal("retained client admitted as new target")
+	}
+	for _, tc := range []struct {
+		flavor string
+		valid  bool
+	}{
+		{"product=wow_classic_beta", true},
+		{"WOW_CLASSIC_BETA", true},
+		{"wowf wow_classic_beta", false},
+		{"wow_classic_beta wow_unknown", false},
+	} {
+		if err := os.WriteFile(filepath.Join(directory, ".flavor.info"), []byte(tc.flavor), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := InspectRetainedClientInstallation(context.Background(), expected)
+		if (err == nil) != tc.valid {
+			t.Errorf("flavor %q: valid=%v err=%v", tc.flavor, tc.valid, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(directory, ".flavor.info"), []byte("wowf"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectRetainedClientInstallation(context.Background(), expected); err == nil {
+		t.Fatal("old connection retargeted to formal wowf")
 	}
 }

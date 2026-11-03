@@ -13,12 +13,12 @@ const env={...process.env};let args;
 const count=Number(options.count??'1');
 if(mode==='benchmark'){
  if(!Number.isSafeInteger(count)||count<1)throw new Error('count must be a positive integer');
- args=['test','-json','./internal/records/navigatetest','-run','^$','-bench','^BenchmarkDataPreparation$','-benchtime',options.benchtime??'3x','-count',String(count)];
+ args=['test','-json','-p=2','-parallel=4','-timeout=0','./internal/records/navigatetest','-run','^$','-bench','^BenchmarkDataPreparation$','-benchtime',options.benchtime??'3x','-count',String(count)];
 }
 if(mode==='fixture-oracle'){
  if(!options.oracle)throw new Error('fixture-oracle requires an explicitly built fixed oracle executable');
  env.LYCHEEDEV_CASC_ORACLE=path.resolve(options.oracle);
- args=['test','-json','./internal/records/navigatetest','-run','^TestCascLibRawFixtureOracle$','-count','1'];
+ args=['test','-json','-p=2','-parallel=4','-timeout=0','./internal/records/navigatetest','-run','^TestCascLibRawFixtureOracle$','-count','1'];
 }
 if(mode==='storage-oracle'){
  if(!options.oracle||!options.manifest)throw new Error('storage-oracle requires oracle and fixed manifest');

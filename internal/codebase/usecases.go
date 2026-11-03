@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 
 	"github.com/follenfang/lycheedev/internal/evidence"
@@ -143,10 +144,24 @@ func ValidateSourceMatrix(ctx context.Context, root, matrixFile string, resolve 
 		if err != nil {
 			return result, err
 		}
-		if err := browser.EnsureIndex(ctx, pin); err != nil {
+		identity := ValidationIdentity{ID: target.ID, Ref: target.Ref}
+		checkPin := pin
+		if pin.Repository != "wow-ui-source" && (len(options) == 0 || options[0].EnvironmentSnapshot == "") {
+			return result, fmt.Errorf("%w: codebase.client_environment_required", ErrInvalidQuery)
+		}
+		if len(options) > 0 && options[0].EnvironmentSnapshot != "" {
+			checkPin, _, err = researchEnvironmentPin(ctx, root, pin, options[0].EnvironmentSnapshot)
+			if err != nil {
+				return result, err
+			}
+			if checkPin != pin {
+				identity.Environment = &checkPin
+			}
+		}
+		if err := browser.EnsureIndex(ctx, checkPin); err != nil {
 			return result, err
 		}
-		value, err := browser.ValidateTOC(ctx, pin, "", AddonInput{Root: addonRoot, Manifest: target.TOC}, ValidationIdentity{ID: target.ID, Ref: target.Ref})
+		value, err := browser.ValidateTOC(ctx, pin, "", AddonInput{Root: addonRoot, Manifest: target.TOC}, identity)
 		if err != nil {
 			return result, err
 		}
@@ -180,39 +195,6 @@ func SourceSnapshotStatus(ctx context.Context, root, snapshot string) (SnapshotS
 		}
 		return OpenBrowser(s).SnapshotStatus(ctx, *pin.Source)
 	})
-}
-
-// FixtureIndexResult carries the deterministic fixture pin and its index.
-type FixtureIndexResult struct {
-	Pin      selection.SourcePin `json:"pin"`
-	Snapshot selection.PinnedSet `json:"snapshot"`
-	Summary  IndexSummary        `json:"summary"`
-}
-
-// IndexFixtureSource indexes a local fixture directory under its deterministic
-// synthetic commit and pins that identity, for tests and offline fixtures.
-func IndexFixtureSource(ctx context.Context, root, repository, product, sourcePath string) (FixtureIndexResult, error) {
-	absolute, err := filepath.Abs(sourcePath)
-	if err != nil {
-		return FixtureIndexResult{}, err
-	}
-	pin, err := FixtureSourcePin(repository, product, absolute)
-	if err != nil {
-		return FixtureIndexResult{}, err
-	}
-	result := FixtureIndexResult{Pin: pin}
-	s, err := vault.OpenStore(root)
-	if err != nil {
-		return result, err
-	}
-	result.Summary, err = OpenBrowser(s).IndexFixture(ctx, pin, absolute)
-	if err != nil {
-		return result, err
-	}
-	result.Snapshot, err = vault.WriteMetadata(ctx, root, func(_ *vault.Store, m *vault.Metadata) (selection.PinnedSet, error) {
-		return selection.OpenPinner(m).PinSelection(ctx, selection.SelectionSpec{Source: &pin})
-	})
-	return result, err
 }
 
 // CheckSourceMirror reports mirror health for one catalog repository product.

@@ -16,7 +16,7 @@ func TestAvailabilityRejectsReusedSlotAndExposesTruncation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range got.Products {
-		if strings.HasPrefix(p.Product, "forever-") && (len(p.Rows) != 0 || p.Error == "") {
+		if p.Product == "forever" && (len(p.Rows) != 0 || p.Error == "") {
 			t.Errorf("foreign slot build advertised as Forever: %+v", p)
 		}
 		if p.Product == "retail" {
@@ -46,7 +46,7 @@ func TestAvailabilityForeverRequestsPublishingSlot(t *testing.T) {
 	var requested []string
 	client := &http.Client{Transport: manifestTransportFunc(func(r *http.Request) (*http.Response, error) {
 		requested = append(requested, r.URL.String())
-		if r.URL.String() != "https://us.version.battle.net/wow_classic_beta/versions" {
+		if r.URL.String() != "https://us.version.battle.net/wowf/versions" {
 			return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Header: make(http.Header)}, nil
 		}
 		body := "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\nus|05215079e3905ef5922ae0b03ffefb73|7b0257bf0fe52d0f11cd8e7b71f7f832|70009|1.60.1.70009\n"
@@ -60,10 +60,10 @@ func TestAvailabilityForeverRequestsPublishingSlot(t *testing.T) {
 		t.Fatalf("unexpected request count: %v", requested)
 	}
 	for _, product := range got.Products {
-		if product.Product != "forever-asia-beta" {
+		if product.Product != "forever" {
 			continue
 		}
-		if product.ProductCode != "wow_classic_beta" || product.Locator != "https://us.version.battle.net/wow_classic_beta/versions" || product.Error != "" || len(product.Rows) != 1 || product.Rows[0].FullBuild != "1.60.1.70009" {
+		if product.ProductCode != "wowf" || product.Locator != "https://us.version.battle.net/wowf/versions" || product.Error != "" || len(product.Rows) != 1 || product.Rows[0].FullBuild != "1.60.1.70009" {
 			t.Fatalf("Forever discovery = %+v; actual requests = %v", product, requested)
 		}
 		return
@@ -97,7 +97,7 @@ func TestListRemoteAvailabilityParsesAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRemoteAvailability() error = %v", err)
 	}
-	if len(calls) != 7 {
+	if len(calls) != 6 {
 		t.Fatalf("bounded listing made %d fetches: %v", len(calls), calls)
 	}
 	wow := result.Products[0]

@@ -170,13 +170,13 @@ func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.Sou
 	}
 	runtimeKey := "static"
 	if opt.Semantic != nil {
-		runtimeKey = opt.Semantic.Identity.Version + ":" + opt.Semantic.Identity.SHA256
+		runtimeKey = opt.Semantic.Identity.Version + ":" + opt.Semantic.Identity.SHA256 + ":" + opt.Semantic.ContextIdentity()
 		runtime := opt.Semantic.Identity
 		result.SemanticRuntime = &runtime
 	}
 	envKey := envState
 	if result.EnvironmentManifest != nil {
-		envKey = env.Manifest.InputSHA256 + ":" + env.Manifest.DefinitionsSHA256
+		envKey = strings.Join([]string{env.Manifest.Identity.Repository, env.Manifest.Identity.Commit, env.Manifest.Identity.Client, env.Manifest.Identity.GeneratorVersion, env.Manifest.InputSHA256, env.Manifest.DefinitionsSHA256}, ":")
 	}
 	offset, cursorKey, err := researchCursor(pin, query.SymbolID+"\x00"+query.Symbol+"\x00"+direction+"\x00"+strconv.Itoa(limit)+"\x00"+runtimeKey+"\x00"+envKey+"\x00"+strconv.FormatBool(opt.Flow), query.Cursor)
 	if err != nil {

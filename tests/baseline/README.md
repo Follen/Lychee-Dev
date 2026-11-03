@@ -4,7 +4,7 @@
 
 ## 环境与运行
 
-需要 Lua 5.1，以及 release/tools/luals.json 固定的真实 LuaLS archive/runtime：
+先按[开发环境](../../docs/development.md#环境与运行)准备固定GCC14.2，并在当前终端设置CGO/CC/CXX。还需要Lua 5.1，以及release/tools/luals.json固定的真实LuaLS archive/runtime：
 
     node tools/baseline.mjs --lua51 "C:/path/to/lua.exe" --luals-archive "C:/path/to/pinned-luals.zip" --luals-runtime "C:/path/to/payload/tool/luals"
 

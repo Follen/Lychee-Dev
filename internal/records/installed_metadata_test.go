@@ -12,8 +12,8 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/container"
-	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/schema"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 	"github.com/follenfang/lycheedev/internal/records/table"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -277,9 +277,9 @@ func verifyInstalledTable(t *testing.T, ctx context.Context, raw []byte, name st
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolve := func(_ context.Context, use relational.TableUse) (relational.Source, error) {
+	resolve := func(_ context.Context, use sqlengine.TableUse) (sqlengine.Source, error) {
 		if use.Catalog != "static" || use.Name != name {
-			return relational.Source{}, relational.ErrBinding
+			return sqlengine.Source{}, sqlengine.ErrBinding
 		}
 		return tableSource, nil
 	}
@@ -288,11 +288,12 @@ func verifyInstalledTable(t *testing.T, ctx context.Context, raw []byte, name st
 		"SELECT COUNT(*) AS n, MIN(ID) AS firstID, MAX(ID) AS lastID FROM ChrClasses",
 		"SELECT COUNT(*) FROM ChrClasses a INNER JOIN ChrClasses b ON a.ID=b.ID",
 	} {
-		program, err := relational.Compile(ctx, sql)
+		program, err := sqlengine.Open(ctx, sql, nil, sqlengine.Limits{SourceRows: 1000000, MemoryBytes: 64 << 20, ResultBytes: 16 << 20})
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := program.Execute(ctx, resolve, nil, relational.Limits{Work: 1000000, MemoryBytes: 16 << 20})
+		result, err := program.Execute(ctx, resolve)
+		program.Close()
 		if err != nil {
 			t.Fatal(sql, err)
 		}

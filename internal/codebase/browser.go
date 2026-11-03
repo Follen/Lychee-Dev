@@ -56,7 +56,7 @@ func (b *Browser) ReadSpan(ctx context.Context, pin selection.SourcePin, query S
 	if err != nil {
 		return result, err
 	}
-	if _, ok := repo.Tracks[pin.Product]; !ok || !objectID(pin.ExactCommit) || pin.ParserRevision != ParserRevision {
+	if !readableSourceTrack(repo, pin.Product) || !objectID(pin.ExactCommit) || pin.ParserRevision != ParserRevision {
 		return result, errors.New("codebase.invalid_source_pin")
 	}
 	if !sourcePath(query.Path) || query.FirstLine < 1 || query.LineCount < 1 || query.LineCount > 2000 {

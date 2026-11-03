@@ -6,16 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/archive"
 	"github.com/follenfang/lycheedev/internal/records/container"
-	"github.com/follenfang/lycheedev/internal/records/relational"
+	"github.com/follenfang/lycheedev/internal/records/sqlengine"
 )
 
 func TestQueryJSONContract(t *testing.T) {
-	request, err := decodeDataQuery([]byte(`{"sql":"SELECT ID FROM t WHERE ID=:id","parameters":{"id":18446744073709551615}}`))
+	request, err := decodeDataQuery([]byte(`{"sql":"SELECT ID FROM t WHERE ID=$id","parameters":{"id":18446744073709551615}}`))
 	if err != nil || request.Parameters["id"] != json.Number("18446744073709551615") {
 		t.Fatal(request, err)
 	}
@@ -42,9 +43,9 @@ func TestQueryStructuredErrors(t *testing.T) {
 		{container.ErrLimit, 3, "container.resource_limit"},
 		{container.ErrMalformed, 4, "container.invalid_format"},
 		{container.ErrIntegrity, 4, "container.integrity_mismatch"},
-		{relational.ErrSyntax, 2, "query.invalid_syntax"}, {relational.ErrBinding, 2, "query.unresolved_binding"},
-		{relational.ErrUnsupported, 3, "query.unsupported_expression"}, {relational.ErrBudget, 3, "query.budget_exceeded"},
-		{relational.ErrType, 4, "query.type_mismatch"}, {relational.ErrNumericRange, 4, "query.numeric_range"}, {relational.ErrCardinality, 4, "query.invalid_cardinality"},
+		{sqlengine.ErrSyntax, 2, "query.invalid_syntax"}, {sqlengine.ErrBinding, 2, "query.unresolved_binding"},
+		{sqlengine.ErrUnsupported, 3, "query.unsupported_expression"}, {sqlengine.ErrBudget, 3, "query.budget_exceeded"},
+		{sqlengine.ErrType, 4, "query.type_mismatch"}, {sqlengine.ErrNumericRange, 4, "query.numeric_range"}, {sqlengine.ErrCardinality, 4, "query.invalid_cardinality"},
 	} {
 		exit, code, ok := queryFault(fmt.Errorf("wrapped: %w", test.cause))
 		if !ok || exit != test.exit || code != test.code {
@@ -56,7 +57,7 @@ func TestQueryStructuredErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, code := invoke(t, "data", "sql", "--snapshot", "unused", "--installation", "unused", "--file", path, "--home", filepath.Join(t.TempDir(), "unopened"), "--format=json")
-	if code != 2 || result.Error == nil || result.Error.Code != "query.invalid_syntax" || result.Error.Stage != "query" || result.Error.Location == nil || result.Error.Location.Line != 2 {
+	if code != 2 || result.Error == nil || result.Error.Code != "query.invalid_syntax" || result.Error.Stage != "query" || !strings.Contains(result.Error.Message, "SELECT clause without selection list") {
 		t.Fatal(result, code)
 	}
 }

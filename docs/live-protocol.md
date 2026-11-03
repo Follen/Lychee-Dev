@@ -1,6 +1,6 @@
 # Lycheedev mailbox protocol v1
 
-本协议定义 3.2.0 开发基线中 Go CLI 与游戏内 Lua addon 的 Native Live 行为。
+本协议定义 3.2.7 开发基线中 Go CLI 与游戏内 Lua addon 的 Native Live 行为。
 实现位于 `internal/bridge`、`internal/live/channel`、`internal/live/memory` 与 `addon/Bridge`。
 协议名称、schema 字段、transport 字段及槽 TOC 中的传输名称均使用同一个字面值：
 **Lycheedev mailbox protocol v1**。
@@ -226,9 +226,14 @@ doctor --fix 只对选定进程执行恢复；维护锁和原占用继续约束�
 
 ## 8. 支持范围
 
-交付目录和 Addon profile 均包含 Retail、Classic、Classic Era、Titan、两种 Forever beta 与 Anniversary 七产品；不能由 Source/Data 可用推断 Live 实机验收已通过。
-产品差异归入 Compat、产品目录和运行时定位配方；两个 Beta 的源码 track 都是 forever，
-数据与安装身份仍按地区产品隔离。
+当前交付目录包含 Retail、Classic、Classic Era、Titan、正式 Forever 与 Anniversary 六产品。
+正式 Forever 使用 `forever/wowf`；Addon profile 按运行中的 Interface 选择 API 家族，
+不用于区分正式服和历史测试服的安装身份。产品目录见 [设计](../Design.md#产品与来源)。
+
+两个 Forever beta 已退出新目标选择；历史 PIN、CAP 与原连接恢复保留原产品、地区和安装身份，
+不转为正式 Forever。两个 beta 的源码 track 仍共享 `forever`，Data 身份分别保留。
+产品差异归入 Compat、产品目录和运行时定位配方。历史七产品的实机结果保持原样本范围，
+正式 Forever 单独验收；Source/Data 可用不表示 Live 实机验收通过。
 
 离线验收覆盖：禁用与启用、绑定冲突与保存、启动失败诊断、编辑框透传、零 Esc、
 未知输入不重放、手动激活与取消、500 槽容量、跨语言记录和共享安装竞争。

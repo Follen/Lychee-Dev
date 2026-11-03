@@ -153,7 +153,7 @@ func resolveRemoteTarget(ctx context.Context, root string, request RemoteTargetR
 		if err != nil {
 			return result, err
 		}
-		pin, err := pinner.PinSelection(ctx, selection.SelectionSpec{Parent: request.Parent, Data: &selection.DataPin{Product: request.Product, Region: request.Region, Language: request.Locale, FullBuild: release.FullBuild, BuildConfig: release.BuildConfig, CDNConfig: release.CDNConfig, DefinitionCommit: commit}})
+		pin, err := pinner.PinCurrentSelection(ctx, selection.SelectionSpec{Parent: request.Parent, Data: &selection.DataPin{Product: request.Product, ProductCode: selection.NewDataProductCode(request.Product), Region: request.Region, Language: request.Locale, FullBuild: release.FullBuild, BuildConfig: release.BuildConfig, CDNConfig: release.CDNConfig, DefinitionCommit: commit}})
 		if err != nil {
 			return result, err
 		}

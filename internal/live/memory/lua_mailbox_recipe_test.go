@@ -17,6 +17,10 @@ import (
 	"testing"
 )
 
+func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA256 string, layout LuaRootImageLayout, readModule func(context.Context, uint64, []byte) (int, error)) (LuaRootBinding, error) {
+	return resolveLuaMailboxRoot(ctx, base, size, executableSHA256, layout, readModule, nil)
+}
+
 type rootRecipeFixture struct {
 	base, size, textRVA, dataRVA uint64
 	header, text, data           []byte

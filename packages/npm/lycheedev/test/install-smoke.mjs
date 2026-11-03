@@ -13,6 +13,8 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(packageRoot, '../../..');
 const npmCLI = process.argv[2];
 if (!npmCLI || !existsSync(npmCLI)) throw new Error('Pass the absolute npm-cli.js path; no shell or download fallback is used');
+const binary = process.argv[3] === '--bin' && process.argv.length === 5 ? resolve(process.argv[4]) : null;
+if (!binary || !existsSync(binary)) throw new Error('Pass --bin <prebuilt Windows amd64 CLI>; this consumer never rebuilds');
 // windows-amd64 is the only shipped target; the smoke builds and runs that
 // binary, so it only supports a Windows amd64 host.
 const target = `${process.platform === 'win32' ? 'windows' : process.platform}-${process.arch === 'x64' ? 'amd64' : process.arch}`;
@@ -47,7 +49,9 @@ run(process.execPath, ['tools/version.mjs', '--check'], repository);
 const commit = run('git', ['rev-parse', 'HEAD'], repository).trim();
 assert.match(commit, /^[a-f0-9]{40}$/);
 const workspaceDirty = run('git', ['status', '--porcelain'], repository).trim().length > 0;
-run('go', ['build', '-buildvcs=true', '-trimpath', '-o', join(stage, binaryPath), './cmd/lycheedev'], repository, { CGO_ENABLED: '0' });
+copyFileSync(binary, join(stage, binaryPath));
+const { verifyBinaryIdentity } = await import('../../../../tools/release.mjs');
+verifyBinaryIdentity(stage, { commit, dirty: workspaceDirty, version: sourceVersion });
 const binaryBytes = readFileSync(join(stage, binaryPath));
 const resources = [];
 function stageResources(source, relative) {
@@ -142,6 +146,13 @@ assert.equal(projectQuery.context.project, projectDirectory);
 assert.equal(projectQuery.result.page.entries[0].payloadHex, '00ff');
 for (const capture of projectQuery.captures) assert.equal(projectCLI(['evidence', 'verify', capture.id, '--home', home]).ok, true);
 const projectContext = { status: 'passed', snapshot: projectPin, query: projectQuery, scope: 'installed CLI project lock discovery and synthetic local Hotfix query' };
+const sqlOutput = run('go', ['test', '-p=2', '-parallel=4', '-timeout=0', '-count=1', '-run', '^(TestSQLCSVExportFromPinnedFixture|TestDataNameDiscoveryWorkflow)$', '-v', './internal/command'], repository, {
+  LYCHEEDEV_QUERY_NODE: process.execPath,
+  LYCHEEDEV_QUERY_LAUNCHER: launcher,
+});
+assert(sqlOutput.includes(`using installed SQL launcher: ${launcher}`), 'SQL query did not use installed package');
+for (const name of ['TestSQLCSVExportFromPinnedFixture', 'TestDataNameDiscoveryWorkflow']) assert(sqlOutput.includes(`--- PASS: ${name}`), `installed ${name} failed`);
+const sqlQuery = { status: 'passed', scope: 'installed DuckDB SQL over fixed offline DB2 input, exact-name pagination, parameter binding and CSV export', launcher, output: sqlOutput };
 const hotfixOutput = run('go', ['test', '-count=1', '-run', '^TestHotfixNamedTableAndLatestCLI$', '-v', './internal/command'], repository, {
   LYCHEEDEV_HOTFIX_NODE: process.execPath,
   LYCHEEDEV_HOTFIX_LAUNCHER: launcher,
@@ -257,7 +268,7 @@ writeFileSync(join(skillPath, 'SKILL.md'), skillOriginal);
 const skillRemove = cli('skill', 'remove', '--path', skillPath, '--output', join(root, 'removed-skill'));
 assert.equal(cli('skill', 'status', '--path', skillPath).result.state, 'absent');
 assert.equal(createHash('sha256').update(readFileSync(tgz)).digest('hex'), digest);
-const report = { scope: 'development host binary and current addon/skill payload; simulated deployment, not game or release acceptance', target, root, tgz, sha256: digest, commit, workspaceDirty, resources, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, ignoreScripts: true, version, shimVersion, initialized, describe, projectContext, hotfixQuery, assetExport, runAdmission, sessionFailure, skillInstall, skillUpgrade, skillResume, skillRemove, skillConflict, addonInstall, addonUpgrade, addonResume, addonRemove, addonConflict };
+const report = { scope: 'development host binary and current addon/skill payload; simulated deployment, not game or release acceptance', target, root, tgz, sha256: digest, commit, workspaceDirty, resources, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, ignoreScripts: true, version, shimVersion, initialized, describe, projectContext, sqlQuery, hotfixQuery, assetExport, runAdmission, sessionFailure, skillInstall, skillUpgrade, skillResume, skillRemove, skillConflict, addonInstall, addonUpgrade, addonResume, addonRemove, addonConflict };
 writeFileSync(join(root, 'report.json'), JSON.stringify(report, null, 2));
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `report=${join(root, 'report.json')}\n`);
 process.stdout.write(JSON.stringify({ root, target, sha256: digest, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, status: 'passed' }) + '\n');

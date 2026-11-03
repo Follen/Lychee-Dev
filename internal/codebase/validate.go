@@ -41,8 +41,9 @@ type Coverage struct {
 // ValidationIdentity labels one validated target inside a matrix. Ref is the
 // requested ref text; the evidence behind it is always a fixed commit.
 type ValidationIdentity struct {
-	ID  string
-	Ref string
+	ID          string
+	Ref         string
+	Environment *selection.SourcePin
 }
 
 // TOCValidation is the `source validate --toc` result. Field names keep the
@@ -55,6 +56,7 @@ type TOCValidation struct {
 	Valid          bool                   `json:"valid"`
 	Path           string                 `json:"path"`
 	SourceID       string                 `json:"sourceId"`
+	Environment    *selection.SourcePin   `json:"environment,omitempty"`
 	Product        string                 `json:"product"`
 	Ref            string                 `json:"ref"`
 	RequestedRef   string                 `json:"requestedRef"`
@@ -87,6 +89,12 @@ func (b *Browser) ValidateTOC(ctx context.Context, pin selection.SourcePin, snap
 	if b.store == nil {
 		return result, errors.New("codebase.archive_required")
 	}
+	evidencePin := pin
+	if identity.Environment != nil {
+		evidencePin = *identity.Environment
+		result.Environment = identity.Environment
+	}
+	input.Context.Family, input.Context.Game = selection.SourceLoadContext(evidencePin)
 	load, err := OpenChecker(b.store).InspectAddon(ctx, input)
 	if err != nil {
 		return result, err
@@ -103,7 +111,7 @@ func (b *Browser) ValidateTOC(ctx context.Context, pin selection.SourcePin, snap
 			}
 		}
 	}
-	db, summary, err := b.openIndex(ctx, pin)
+	db, summary, err := b.openIndex(ctx, evidencePin)
 	if err != nil {
 		return result, err
 	}
@@ -128,13 +136,16 @@ func (b *Browser) ValidateTOC(ctx context.Context, pin selection.SourcePin, snap
 		unresolved = append(unresolved, undecided...)
 	}
 	usages = dedupeUsages(usages)
-	facts, moreUnresolved, compatDiagnostics, err := lookupCompatibility(ctx, db, pin, snapshotID, usages, result.Interface)
+	facts, moreUnresolved, compatDiagnostics, err := lookupCompatibility(ctx, db, evidencePin, snapshotID, usages, result.Interface)
 	if err != nil {
 		return result, err
 	}
 	unresolved = append(unresolved, moreUnresolved...)
 	for _, issue := range load.Issues {
 		result.Diagnostics = append(result.Diagnostics, validationDiagnostic(issue))
+		if issue.Code == "load_condition_unavailable" {
+			unresolved = append(unresolved, UnresolvedItem{Kind: "load-condition", Expression: issue.Reference, File: issue.Path, Line: issue.Line, Reason: issue.Message})
+		}
 	}
 	result.Diagnostics = append(result.Diagnostics, compatDiagnostics...)
 	for _, doc := range load.Documents {

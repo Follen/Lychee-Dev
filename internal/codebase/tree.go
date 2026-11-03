@@ -9,9 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +39,7 @@ func (b *Browser) sourceTree(ctx context.Context, pin selection.SourcePin) ([]tr
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := repo.Tracks[pin.Product]; !ok || !objectID(pin.ExactCommit) || pin.ParserRevision != ParserRevision {
+	if !readableSourceTrack(repo, pin.Product) || !objectID(pin.ExactCommit) || pin.ParserRevision != ParserRevision {
 		return nil, errors.New("codebase.invalid_source_pin")
 	}
 	data, err := gitBytes(ctx, b.mirror(repo.Key), 32<<20, "ls-tree", "-r", "-l", "-z", "--full-tree", pin.ExactCommit)
@@ -100,100 +98,6 @@ func (b *Browser) sourceTree(ctx context.Context, pin selection.SourcePin) ([]tr
 // above the asset byte limit stay metadata-only rows.
 func treeNeedsRead(file treeFile) bool {
 	return !file.oversized && (!file.asset || file.size <= maxAssetBytes)
-}
-
-// directoryTree lists fixture-directory documents and assets with the same
-// admission rules as a pinned Git tree. Symbolic links are never followed.
-func directoryTree(root string) ([]treeFile, error) {
-	files := []treeFile{}
-	var documents, assets int
-	var readTotal int64
-	err := filepath.WalkDir(root, func(name string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		relative, err := filepath.Rel(root, name)
-		if err != nil {
-			return err
-		}
-		relative = filepath.ToSlash(relative)
-		extension := strings.ToLower(path.Ext(relative))
-		document := extension == ".lua" || extension == ".xml" || extension == ".toc"
-		asset := isAssetExtension(extension)
-		if !document && !asset {
-			return nil
-		}
-		size := info.Size()
-		if size < 0 || !sourcePath(relative) {
-			return errors.New("codebase.invalid_document_object")
-		}
-		file := treeFile{path: relative, size: size, asset: asset, oversized: document && size > maxSourceBytes}
-		if asset {
-			assets++
-			if assets > maxAssetEntries {
-				return errors.New("codebase.tree_budget")
-			}
-		} else {
-			documents++
-			if documents > maxDocumentEntries {
-				return errors.New("codebase.tree_budget")
-			}
-		}
-		if treeNeedsRead(file) {
-			readTotal += size
-			if readTotal > maxTreeReadBytes {
-				return errors.New("codebase.tree_budget")
-			}
-		}
-		files = append(files, file)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return files, nil
-}
-
-// visitDirectory reads fixture files in listing order with per-file budgets.
-func visitDirectory(ctx context.Context, root string, files []treeFile, visit func(treeFile, []byte) error) error {
-	for _, file := range files {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !treeNeedsRead(file) {
-			continue
-		}
-		handle, err := os.Open(filepath.Join(root, filepath.FromSlash(file.path)))
-		if err != nil {
-			return err
-		}
-		limit := maxSourceBytes
-		if file.asset {
-			limit = maxAssetBytes
-		}
-		data, readErr := io.ReadAll(io.LimitReader(handle, int64(limit)+1))
-		closeErr := handle.Close()
-		if readErr != nil || closeErr != nil {
-			return errors.Join(readErr, closeErr)
-		}
-		if int64(len(data)) != file.size || len(data) > limit {
-			return errors.New("codebase.invalid_document_object")
-		}
-		if err := visit(file, data); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // One Git process supplies an entire index, avoiding three subprocesses per

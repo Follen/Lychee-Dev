@@ -8,6 +8,14 @@ import (
 	"github.com/follenfang/lycheedev/internal/bridge"
 )
 
+func primaryInputBindings() *InputBindings {
+	return &InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}
+}
+
+func fallbackInputBindings() *InputBindings {
+	return &InputBindings{Wake: "ALT-CTRL-F10", Reload: "ALT-CTRL-F9"}
+}
+
 func TestInputBindingsRequiredExactProfiles(t *testing.T) {
 	blocked := false
 	e := bridge.SlotEnvelope{Runtime: strings.Repeat("1", 32), Owner: "owner", Fence: 1, Index: 1, GUID: "g", Build: "b"}

@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/records/table"
+	fielddigest "github.com/follenfang/lycheedev/tests/dbcd/digest"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -83,9 +85,18 @@ func run() error {
 		return err
 	}
 	digest := sha256.New()
+	fields, block := sha256.New(), sha256.New()
+	blocks := []string{}
+	count := 0
 	rows := []map[string]any{}
 	err = view.ScanWithIDs(ctx, 4<<20, 1<<20, func(id uint32, row map[string]any) error {
 		fmt.Fprintln(digest, id)
+		fielddigest.Row(io.MultiWriter(fields, block), id, row)
+		count++
+		if count%256 == 0 {
+			blocks = append(blocks, hex.EncodeToString(block.Sum(nil)))
+			block.Reset()
+		}
 		if *sample == "" && len(rows) < 200 || wanted[id] {
 			rows = append(rows, row)
 			delete(wanted, id)
@@ -94,6 +105,9 @@ func run() error {
 	})
 	if err != nil {
 		return err
+	}
+	if count%256 != 0 {
+		blocks = append(blocks, hex.EncodeToString(block.Sum(nil)))
 	}
 	if len(wanted) != 0 {
 		return fmt.Errorf("requested sampled IDs unavailable: %v", wanted)
@@ -108,7 +122,8 @@ func run() error {
 	for _, ids := range encrypted {
 		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	}
-	result := map[string]any{"count": view.LogicalCount(), "idDigest": hex.EncodeToString(digest.Sum(nil)), "encryptedIDs": encrypted, "rows": rows}
+	db2Hash, dbdHash := sha256.Sum256(raw), sha256.Sum256(definition)
+	result := map[string]any{"build": *build, "db2SHA256": hex.EncodeToString(db2Hash[:]), "dbdSHA256": hex.EncodeToString(dbdHash[:]), "hotfixSHA256": "", "count": view.LogicalCount(), "idDigest": hex.EncodeToString(digest.Sum(nil)), "fieldDigest": hex.EncodeToString(fields.Sum(nil)), "fieldBlocks": blocks, "encryptedIDs": encrypted, "rows": rows}
 	serialized, err := json.Marshal(result)
 	if err != nil {
 		return err

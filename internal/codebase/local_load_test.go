@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/addoncheck"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
@@ -15,7 +16,7 @@ func TestLocalLoadDoesNotClaimArchivedEvidence(t *testing.T) {
 	files := map[string][]byte{"Addon.toc": []byte("UI.xml\n"), "UI.xml": []byte(`<Ui><Script file="Core.lua" /></Ui>`), "Core.lua": []byte("local name, ns = ...\n")}
 	root := writeClosureFixture(t, files)
 	input := AddonInput{Root: root, Manifest: "Addon.toc"}
-	local, err := InspectLocalLoad(context.Background(), input)
+	local, err := addoncheck.InspectLocalLoad(context.Background(), input)
 	if err != nil || !local.LoadValid || local.CompatibilityComplete || len(local.Documents) != 3 {
 		t.Fatalf("%+v %v", local, err)
 	}

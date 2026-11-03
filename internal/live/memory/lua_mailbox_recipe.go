@@ -372,16 +372,12 @@ func readLuaRootImageLayout(reader io.ReaderAt, executableSHA256 string, moduleS
 	return LuaRootImageLayout{proof: &luaRootImageLayoutProof{executableSHA256, moduleSize, imageSize, sections, text, guards}}, nil
 }
 
-// ResolveLuaMailboxRoot reads an OS-sealed MEM_IMAGE/MEM_MAPPED main module.
+// resolveLuaMailboxRoot reads an OS-sealed MEM_IMAGE/MEM_MAPPED main module.
 // Process.ReadModule enforces mapping and process identity. A layout issued from
 // the same hashed executable supplies bounds; exact runtime locating metadata
 // and section table guards must match it. The digest selects a fast anchor
 // validation, never an old RVA shortcut. No heap discovery or layout inference
 // occurs, and unrelated protected runtime header fields are never normalized.
-func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA256 string, layout LuaRootImageLayout, readModule func(context.Context, uint64, []byte) (int, error)) (LuaRootBinding, error) {
-	return resolveLuaMailboxRoot(ctx, base, size, executableSHA256, layout, readModule, nil)
-}
-
 func resolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA256 string, layout LuaRootImageLayout, readModule func(context.Context, uint64, []byte) (int, error), choose func([]LuaRootBinding) (LuaRootBinding, error)) (result LuaRootBinding, resultErr error) {
 	var empty LuaRootBinding
 	digest, err := hex.DecodeString(executableSHA256)

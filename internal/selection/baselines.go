@@ -13,14 +13,8 @@ type ClientBaseline struct {
 	Interface    int    `json:"interface"`
 	SourceCommit string `json:"sourceCommit"`
 	ProductCode  string `json:"productCode"`
-	// DataSlot is the versions-manifest slot carrying this track's data;
-	// empty means the installation ProductCode is also the data slot. A
-	// product ID names a reusable slot, not a fixed game.
-	DataSlot string `json:"dataSlot,omitempty"`
-	// LocalDataSlots are additional launcher slots; they do not change CDN routing.
-	LocalDataSlots []string `json:"localDataSlots,omitempty"`
-	BuildSeries    string   `json:"buildSeries"`
-	TOC            string   `json:"toc"`
+	BuildSeries  string `json:"buildSeries"`
+	TOC          string `json:"toc"`
 }
 
 func VerifiedClientBaselines() []ClientBaseline {
@@ -33,9 +27,8 @@ func VerifiedClientBaselines() []ClientBaseline {
 		// engineSurveyPatch 20506. Runtime acceptance is tracked separately.
 		{Product: "anniversary", ProductCode: "wow_anniversary", BuildSeries: "2.5.6", TOC: MainTOC, Interface: 20506, SourceCommit: "2cfec7c00f0f24762d5ca35a4beb1e93c0cde328"},
 		{Product: "titan", ProductCode: "wow_classic_titan", BuildSeries: "3.80.2", TOC: MainTOC, Interface: 38002, SourceCommit: "825d29d3662b372f0bead725ee6abd339e4a77b5"},
-		// Forever installs report flavor wow_forever, but its data is published
-		// in the reusable wow_classic_beta manifest slot (1.60.x); the two codes differ.
-		{Product: "forever", ProductCode: "wow_forever", DataSlot: "wow_classic_beta", LocalDataSlots: []string{"wow_cn_beta"}, BuildSeries: "1.60.1", TOC: MainTOC, Interface: 16001, SourceCommit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069"},
+		// The formal Forever installation and remote catalog share wowf.
+		{Product: "forever", ProductCode: "wowf", BuildSeries: "1.60.1", TOC: MainTOC, Interface: 16001, SourceCommit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069"},
 	}
 }
 func SourceInterface(pin SourcePin) (int, bool) {

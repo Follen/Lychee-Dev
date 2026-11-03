@@ -20,7 +20,7 @@ func TestHotfixQueryValidationEdges(t *testing.T) {
 		"partial build":   func(q records.HotfixQuery) records.HotfixQuery { q.FullBuild = "1.2.3"; return q },
 		"table and hash": func(q records.HotfixQuery) records.HotfixQuery {
 			q.Table = "SpellEffect"
-			q.TableHash = records.HotfixUint32(1)
+			q.TableHash = hotfixUint32(1)
 			return q
 		},
 		"from after to": func(q records.HotfixQuery) records.HotfixQuery {
@@ -98,11 +98,15 @@ func TestCacheFilterFromQuery(t *testing.T) {
 		t.Fatal("search accepted for cache rows")
 	}
 	query = wagoTestQuery()
-	query.PushID = records.HotfixInt32(-3)
-	query.Status = records.HotfixUint8(2)
-	query.RegionID = records.HotfixUint32(71)
+	query.PushID = hotfixInt32(-3)
+	query.Status = hotfixUint8(2)
+	query.RegionID = hotfixUint32(71)
 	filter, err = records.CacheFilterFromQuery(query)
 	if err != nil || filter.Push == nil || *filter.Push != -3 || filter.Status == nil || *filter.Status != 2 || filter.Region == nil || *filter.Region != 71 {
 		t.Fatalf("filter = %+v err = %v", filter, err)
 	}
 }
+
+func hotfixUint32(value uint32) *uint32 { return &value }
+func hotfixInt32(value int32) *int32    { return &value }
+func hotfixUint8(value uint8) *uint8    { return &value }
