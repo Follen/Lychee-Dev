@@ -4,19 +4,20 @@
 
 ## 待办
 
+- [x] 3.2.9交付：提交、main及tag完整CI、来源重建、Windows运行验证、产物封存、npm integrity/provenance元数据及GitHub六资产读回均通过；latest=3.2.9、next=3.1.2。本机全局CLI、受管Skill及Skill启动脚本均验证3.2.9/提交`1f7810b482`。完整Lua必需Go套件3566通过事件/22项外部环境或helper skip/0失败，race和固定DBCD/CASC/LuaLS集成通过。[发行记录](https://github.com/Follen/Lychee-Dev/actions/runs/41967085049)。3.2.8候选因SDK选择故障未发npm，保留原tag；根global.json精确选择10.0.100后云端复验通过。
 - [x] BLACKBOX-CONTINUATION-TOTAL：复现[Fuploader PR #29](https://github.com/Follen/Fuploader/pull/29)同源问题，Go Publish的133/173/205条历史、get/versions共6组均在续页报`version count changed`。修复后6组通过，11组无效续页继续拒绝，删除验证明确检查续页仍存在的目标。build/vet及Publish整包388条通过事件/5项环境或helper skip/0失败；仅fixture HTTP回放，无平台上传或删除。
-- [x] FOREVER-FORMAL-LIVE：正式无限服`wowf/1.60.1.70790`、Interface 16001完成当前未发布源码的受管首次安装与实机验收：500/500槽启用，八个工作台页面功能激活、执行器/结果树、插件自有函数追踪、事件注册及异步回调通过；6份报告均`report.ok=true`、verified/released，自动reload后原CON重绑与绑定保留通过。两个进程分别处理，首次未加载进程的activation已取消，就绪进程最终disconnect，Live doctor全绿、0预约。根定位沿用现有Forever指令特征，无新增兼容分支。BugGrabber返回11条既有插件错误，未见Lychee Dev路径；不扩展为战斗、视觉、重登、容量轮换或其他产品验收。全局npm CLI仍为已发布版本，本次仅使用当前源码CLI验证，未提交或发布。
-- [x] DEEP-LOOP：强制循环深度审计收尾，修复三平台回执、DD/小黑盒备份清单、Source索引与prune清单、缓存删除额度共9处边界问题；关闭重试测试改用输入持久化后的确定性停点，75ms观察延迟下20轮通过。最终冻结1074文件哈希一致，完整Lua必需Go套件35包/3495条通过事件/48项环境或helper skip/0失败/exit0，十项关键回归、六客户端Lua、4组fuzz、SQL索引/扫描对照及导入合同通过。2026-11-05追加一轮CLI/Source/Data/Live/交付/Publish/npm边界复查，无新增可复现bug；16组原生SQL参数探针排除大小写候选，14包全新补验2023通过事件/28skip/0失败，Node合计99通过/1skip，当前CLI构建/全仓vet通过。完整35包套件仍为前轮证据；新增实机范围单列。改动未提交、推送或发布，临时材料按脚本清理。
-- [x] REPO-LOOP：全仓离线循环审计完成，修复Execute/Serializer字节上限、满输出隐藏运行错误及npm true/false参数分流共五处问题；最后一轮无新增可复现问题。build/vet、完整Lua必需Go套件35包/3468条通过事件/48项环境或helper skip/0失败、Node全套98通过/1平台skip及更新后的11项入口集成、8组fuzz、Skill/导入/版本合同通过。脚本清理本轮临时目录，代码未提交、推送或发布；实机覆盖保持单列。
-- [x] CLI-LOOP：三轮循环审计完成，前两轮修复Raidbots字节预算、source list/doctor显式项目选择、JSONL超时分类及目标选择输入分类五类问题，第三轮无新增可复现问题。build/vet、受影响四包1042条通过事件/13项环境skip/0失败、351命令原生help/schema共702次调用、Skill/导入/版本检查通过；未提交，未重跑全仓或实机套件。
-- [x] CLI-SCHEMA-02：追加复现并修复10个必填参数漏标、live bugs计数上限、Source批处理默认字段、SQL标量参数及Source条件选择说明；原业务行为保持，新增回归先红后绿。本轮改动未提交；build/vet、最终CLI整包247条通过事件/5项环境skip/0失败、原生参数拒绝及Skill/导入合同通过。
-- [x] 完成[业务整改计划](docs/rectification-plan.md)本次授权的代码与离线验收：Cobra/Agent自解释、Skill精简、DBCD/Data、Source、五平台Go Publish、正式Forever身份、CI去重及代码/测试清理。各范围最新全新Agent复审无新增可复核问题；完整Go/Lua35包通过，后续局部修复的Publish/CLI补验通过。已提交main `271b0c3a87`，未推送或发布。
+- [x] FOREVER-FORMAL-LIVE：正式无限服`wowf/1.60.1.70790`、Interface 16001完成发行前开发源码（实机版本3.2.7）的受管首次安装与实机验收：500/500槽启用，八个工作台页面功能激活、执行器/结果树、插件自有函数追踪、事件注册及异步回调通过；6份报告均`report.ok=true`、verified/released，自动reload后原CON重绑与绑定保留通过。两个进程分别处理，首次未加载进程的activation已取消，就绪进程最终disconnect，Live doctor全绿、0预约。根定位沿用现有Forever指令特征，无新增兼容分支。BugGrabber返回11条既有插件错误，未见Lychee Dev路径；不扩展为战斗、视觉、重登、容量轮换或其他产品验收。相关源码现随3.2.9发布；此后仅更新本机全局CLI与Skill至3.2.9，实机版本及范围保持上述记录。
+- [x] DEEP-LOOP：强制循环深度审计收尾，修复三平台回执、DD/小黑盒备份清单、Source索引与prune清单、缓存删除额度共9处边界问题；关闭重试测试改用输入持久化后的确定性停点，75ms观察延迟下20轮通过。最终冻结1074文件哈希一致，完整Lua必需Go套件35包/3495条通过事件/48项环境或helper skip/0失败/exit0，十项关键回归、六客户端Lua、4组fuzz、SQL索引/扫描对照及导入合同通过。2026-11-05追加一轮CLI/Source/Data/Live/交付/Publish/npm边界复查，该轮输入未新增可复现bug；后续PR回放发现并修复的分页问题见上条。16组原生SQL参数探针排除大小写候选，14包全新补验2023通过事件/28skip/0失败，Node合计99通过/1skip，当前CLI构建/全仓vet通过。完整35包套件仍为前轮证据；新增实机范围单列。改动随3.2.9交付，临时材料按脚本清理。
+- [x] REPO-LOOP：全仓离线循环审计完成，修复Execute/Serializer字节上限、满输出隐藏运行错误及npm true/false参数分流共五处问题；最后一轮无新增可复现问题。build/vet、完整Lua必需Go套件35包/3468条通过事件/48项环境或helper skip/0失败、Node全套98通过/1平台skip及更新后的11项入口集成、8组fuzz、Skill/导入/版本合同通过。脚本清理本轮临时目录，代码随3.2.9交付；实机覆盖保持单列。
+- [x] CLI-LOOP：三轮循环审计完成，前两轮修复Raidbots字节预算、source list/doctor显式项目选择、JSONL超时分类及目标选择输入分类五类问题，第三轮无新增可复现问题。build/vet、受影响四包1042条通过事件/13项环境skip/0失败、351命令原生help/schema共702次调用、Skill/导入/版本检查通过；修复随3.2.9交付，上述计数保持该轮局部验证范围。
+- [x] CLI-SCHEMA-02：追加复现并修复10个必填参数漏标、live bugs计数上限、Source批处理默认字段、SQL标量参数及Source条件选择说明；原业务行为保持，新增回归先红后绿。改动随3.2.9交付；build/vet、最终CLI整包247条通过事件/5项环境skip/0失败、原生参数拒绝及Skill/导入合同通过。
+- [x] 完成[业务整改计划](docs/rectification-plan.md)本次授权的代码与离线验收：Cobra/Agent自解释、Skill精简、DBCD/Data、Source、五平台Go Publish、正式Forever身份、CI去重及代码/测试清理。各范围最新全新Agent复审无新增可复核问题；完整Go/Lua35包通过，后续局部修复的Publish/CLI补验通过。提交`271b0c3a87`已随3.2.9推送发布。
 - [ ] AGENT-GUIDANCE：首轮三个隔离Agent完成CLI发布准备、固定Source与本机Data/CSV任务；修复初始化指引、发现/帮助、Source空结果建议、元数据格式、Hotfix导出准入、schema范围/默认值、CF plan和DD原会话恢复输入。最新全新Agent复验初始化、枚举查询、CSV和CF预检全部成功；358份元数据×7构建独立对照通过。build/vet、受影响五包、Skill合同通过；完整Lua必需Go套件35包、3446条测试通过事件、48项环境/helper skip、0失败、exit0。
 - [x] DuckDB接入与迁移实现：DuckDB 2.0.0直接替换旧引擎，旧relational的50个源码/测试文件已删除，无旧方言兼容、引擎开关或回退。Windows固定GCC14.2/CGO静态交付，原生SQL/CSV/Hotfix/资源导出、隔离npm安装及工作区快照vendored离线重建通过；build/vet、受影响Go测试、sqlengine race、98项Node检查和最终Skill/导入合同通过。完整Lua5.1必需Go套件35包、3455条通过事件、30项环境/helper skip、0失败、exit0；详见[迁移验收](docs/rectification-plan.md#77-实际迁移结果与后续验收)。
-- [ ] DuckDB真实输入与规模补验：已完成Retail 12.1.5.70688/zhCN固定PIN上的SpellName三ID、CSV一致性及ChrRaces数据/枚举查询，保留SpellName缺钥覆盖范围。六产品DBD/缺钥/Hotfix矩阵、真实联网冷CDN、迁移前后相同输入性能对照、大输入/多进程资源峰值仍待验。当前24项本地/离线CDN准备链基准使用1000行合成样本；原生CLI约140.5MB，含LuaLS的npm包约46.3MB。tag发行、云端runner和DuckDB C++源码重编译分别列后续范围。
-- [ ] 对本次Publish功能执行真实账号/平台写入与读回验收；运行云端CI并测量去重后的耗时和成本。当前离线fixture、SDK纯签名及本地打包结果分别保留，不扩大真实平台覆盖。
+- [ ] DuckDB真实输入与规模补验：已完成Retail 12.1.5.70688/zhCN固定PIN上的SpellName三ID、CSV一致性及ChrRaces数据/枚举查询，保留SpellName缺钥覆盖范围。六产品DBD/缺钥/Hotfix矩阵、真实联网冷CDN、迁移前后相同输入性能对照、大输入/多进程资源峰值仍待验。当前24项本地/离线CDN准备链基准使用1000行合成样本；原生CLI约140.5MB，含LuaLS的npm包约46.3MB。tag发行与云端runner验证已随3.2.9完成；规模/性能与DuckDB C++源码重编译仍列后续范围。
+- [ ] 对本次Publish功能执行真实账号/平台写入与读回验收，并测量去重后的耗时和成本；云端完整CI已通过。当前离线fixture、SDK纯签名及本地打包结果分别保留，不扩大真实平台覆盖。
 
-- [x] STARTUP-ACTOR-WAIT：登录前actor_unavailable改为loading并等待现有PLAYER_LOGIN重试；登录后持续失败及其他错误继续报告。离线回归先复现误报再通过，尚未发布或安装。
+- [x] STARTUP-ACTOR-WAIT：登录前actor_unavailable改为loading并等待现有PLAYER_LOGIN重试；登录后持续失败及其他错误继续报告。离线回归先复现误报再通过，代码随3.2.9发布；指定首次登录等待场景仍待单列实机复验。
 - [ ] STARTUP-ACTOR-WAIT：实机复验首次登录不再误报、登录完成后正常启动。
 
 - [x] RECEIVER-BINDING-SET：修复默认快捷键初始化对无效绑定方案直接保存的问题；先验证方案再写入，等待绑定事件重试并处理战斗切换、同步事件重入及手动重置。离线回归已先复现原错误再通过，3.2.7已推送GitHub并发布npm latest；CI完整复验通过，本机CLI、Skill和五个可识别客户端更新完成，两个旧测试服目录因安装身份冲突未更新。游戏等待后续reload，实机待验。
