@@ -4,15 +4,16 @@
 
 ## 分支与任务
 
-- 用户已授权提交、推送、发布并更新本机全局CLI与Skill；追加排查[Fuploader PR #29](https://github.com/Follen/Fuploader/pull/29)已确认Go Publish同源分页bug并修复。当前准备3.2.8/latest，next标签不变；先完成本地验证再提交、推送并跟进发行CI。
+- 用户已授权提交、推送、发布并更新本机全局CLI与Skill；追加排查[Fuploader PR #29](https://github.com/Follen/Fuploader/pull/29)已确认Go Publish同源分页bug并修复。3.2.8发行前CI发现SDK选择故障，当前修复后准备3.2.9/latest，next标签不变；先通过main完整CI，再创建新tag并跟进发行。
 - 正式无限服在线适配验证完成：`wowf/1.60.1.70790`、Interface 16001，当前源码CLI受管首次安装主插件及500槽。原PID 55328无运行时，activation连接`CON-12ca628ff5e242f5663712ce8d05bf73`已取消；用户新开PID 56184就绪，独立绑定`CON-019ad0cda62574d909beae9831304ab9`完成6份verified/released成功报告、八页面功能激活、执行/结果树/自有函数追踪/事件注册/异步回调、自动reload及原CON重绑。最终disconnect、Live doctor全绿、0预约，无新增产品代码。具体范围见todo的FOREVER-FORMAL-LIVE；全局npm和其他客户端未更新，未发布。
 - 用户追加的一轮全仓边界复查完成，无新增可复现bug或待复现候选；覆盖CLI/Source/Data/Live/交付/Publish/npm及存储与LuaLS边界。SQL参数大小写候选经16组原生执行排除。当前无新增产品代码；`.tmp/forever-live/project`完整保留已关闭连接与实机报告，其余部署和审计临时材料已按脚本清理。
-- 当前main，HEAD `9bc61af2b0`，领先origin/main三个既有提交；本次发布提交与tag尚未创建。远端npm latest仍为3.2.7，工作区版本源、渠道清单及生成文件已同步3.2.8。
+- `v3.2.8`固定在已推送的`10dd89aa4a6dbf77e6c5c77506e7426e7b8047fc`，不移动旧标签。[main CI 41964707801](https://github.com/Follen/Lychee-Dev/actions/runs/41964707801)在固定DBCD准备阶段报`DBCD SDK drift: 10.0.403`；[发行41964707824](https://github.com/Follen/Lychee-Dev/actions/runs/41964707824)已请求取消，未到npm发布。根目录缺少global.json使已安装的10.0.100未被选择，现新增精确SDK配置；工作区版本改为3.2.9，待提交及新main CI。
 - 用户要求全仓深度审计并强制循环到完整一轮无新增bug。本轮修复与复查完成，最后一轮无新增可复现问题、无待复现候选；所有改动保留未提交，未推送或发布。
 - 主Agent独立负责，已有worker停写，无交叉修改。保留无关`.zcodeignore`删除、`.worktrees/Rust-refactor`、`.tmp/toolchains`与活动项目。
 
 ## 当前未提交实现
 
+- CI-SDK-SELECTION：新增根global.json选择SDK 10.0.100、rollForward=disable，保留已有实际`dotnet --version`漂移检查。云端失败是修复前的真实回归信号；修复后由新main CI在并存SDK runner上验证，不用配置断言冒充实际SDK选择。
 - BLACKBOX-CONTINUATION-TOTAL：133/173/205条历史的get/versions共6组在旧代码均报`version count changed`。只允许已有正总数的续页独立`total: 0`占位；11组无效续页继续拒绝，删除回读检查续页仍存在目标。先红后绿，build/vet与Publish整包388通过事件/5skip/0失败/exit0。仅fixture HTTP回放，未上传或删除平台内容。
 - DEEP-LOOP共9处产品边界修复：DD/CF/NewBee回执完整JSON检查、NewBee状态指纹检查、DD备份清单完整JSON检查、缓存普通对象与暂存文件共享MaxObjects额度、小黑盒备份清单实际大小检查、Source索引及prune清单大小检查。公开入口或实际生成的清单/工作树回归均先红后绿；正常空白及恰好字节上限的对照继续通过。
 - doctor关闭重试测试原50ms整次调用假设在完整套件中失败；注入75ms观察延迟稳定复现“尚无输入、reload仍为intent”。测试改为在输入持久化后的可控观察超时点停止，保留原请求、原期限和不重放断言；20轮通过。产品输入/恢复逻辑未改。
@@ -32,5 +33,5 @@
 ## 收尾与后续
 
 - 上轮`.tmp/cli-loop`、`.tmp/repo-loop`已清理。本轮`.tmp/deep-loop`已在最终验证后按绝对路径、链接与文件白名单脚本清理；可复用回归留在原测试目录。
-- 当前无待修确认项；新PR回放补充确认了原追加审计未覆盖的分页占位场景，现已修复。无关`.zcodeignore`删除已单路径stash保全，身份记录在`.tmp/release-328/retained-stash.txt`；下一步提交推送固定源码、以tag发行3.2.8，等待发行CI与registry读回，然后显式更新本机CLI/Skill，最后恢复该删除。`.tmp/release-328`及`.tmp/blackbox-pagination`成功后脚本清理，完整Live项目保留。正式Forever实机已完成，完整产品矩阵、冷CDN和规模/性能仍列todo。
+- 新PR分页缺陷已修复；当前剩余SDK配置的云端实证。无关`.zcodeignore`删除已单路径stash保全，身份记录在`.tmp/release-328/retained-stash.txt`。下一步提交3.2.9修复并等待main完整CI，通过后打新tag发行；随后显式更新CLI与`.agents/skills/lycheedev`，记录结果、提交交接，恢复该删除。`.tmp/release-328`含两次发行准备材料，和`.tmp/blackbox-pagination`成功后脚本清理，完整Live项目保留。
 - ModUs图片字节无读回端点，图片修改保留待核验；未知storage登记缺少查询端点时保持pending、不重放。NewBee Creator缺少稳定账号ID，原会话绑定有效token摘要，token刷新暂停原pending续写。

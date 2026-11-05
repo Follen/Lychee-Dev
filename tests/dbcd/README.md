@@ -1,7 +1,10 @@
 # Pinned DBCD differential adapter
 
 Developer-only oracle, never a product runtime dependency. Build against clean
-wowdev/DBCD commit `c0aeb5f6be0e9fbffc8eadb4f8b9b4e36b42af7c` using .NET 10 SDK.
+wowdev/DBCD commit `c0aeb5f6be0e9fbffc8eadb4f8b9b4e36b42af7c` using .NET SDK 10.0.100.
+The repository-root [global.json](../../global.json) selects that exact SDK
+without roll-forward, including on runners with newer SDKs installed; see
+[SDK selection](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
 The project checks the actual Git HEAD and rejects modified/untracked inputs;
 the verified commit is embedded in the assembly. The comparator requires this
 exact identity before examining results.
