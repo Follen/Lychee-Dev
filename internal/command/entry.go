@@ -187,7 +187,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if contract.positional != "" && len(opts.words) > len(strings.Fields(route)) {
 			argument = opts.words[len(opts.words)-1]
 		}
-		if contract.projectSelection() && opts.snapshot == "" && route != "source list" && !(route == "source validate" && opts.matrix != "") && !(route == "asset demux" && opts.path != "") {
+		if contract.projectSelection() && opts.snapshot == "" && (route != "source list" || opts.project != "") && !(route == "source validate" && opts.matrix != "") && !(route == "asset demux" && opts.path != "") {
 			var project selection.ProjectStatus
 			project, err = selectProject(ctx, &opts)
 			if err == nil && project.Lock != nil {
@@ -1257,7 +1257,7 @@ func bindOption(opts *Options, route, key, value string, boolean bool) error {
 		opts.to = value
 	case "--line", "--count", "--limit":
 		n, err := strconv.Atoi(value)
-		if err != nil || n < 1 || key == "--count" && n > 2000 || key == "--limit" && n > dataLimitCeiling(route) {
+		if err != nil || n < 1 || key == "--count" && n > commandCountCeiling(route) || key == "--limit" && n > dataLimitCeiling(route) {
 			return fmt.Errorf("invalid %s", key)
 		}
 		if key == "--line" {
@@ -1473,6 +1473,13 @@ func unsupportedRouteFlag(route, flag string) error {
 		route = "the command"
 	}
 	return fmt.Errorf("%s is not supported by %s; use %s --help", flag, route, route)
+}
+
+func commandCountCeiling(route string) int {
+	if route == "live bugs" {
+		return 100
+	}
+	return 2000
 }
 
 // Share the domain bounds with parsing and schema discovery.

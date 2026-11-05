@@ -96,10 +96,13 @@ func (b *Browser) pruneWorktreesLocked(ctx context.Context, budgetBytes int64, e
 		if err != nil {
 			return err
 		}
-		raw, readErr := io.ReadAll(io.LimitReader(f, 64<<10))
+		raw, readErr := io.ReadAll(io.LimitReader(f, (64<<10)+1))
 		closeErr := f.Close()
 		if readErr != nil || closeErr != nil {
 			return errors.Join(readErr, closeErr)
+		}
+		if len(raw) > 64<<10 {
+			return fmt.Errorf("%w: codebase.source_manifest_limit", ErrSourceIntegrity)
 		}
 		var m worktreeManifest
 		if err := json.Unmarshal(raw, &m); err != nil {

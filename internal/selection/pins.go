@@ -80,26 +80,26 @@ func (p *Pinner) pinSelection(ctx context.Context, spec SelectionSpec, current b
 		if spec.Source == nil {
 			spec.Source = parent.Source
 		} else if parent.Source != nil && *spec.Source != *parent.Source {
-			return PinnedSet{}, errors.New("selection.fixed_source_conflict")
+			return PinnedSet{}, fmt.Errorf("%w: selection.fixed_source_conflict", ErrSpecFormat)
 		}
 		if spec.Data == nil {
 			spec.Data = parent.Data
 		} else if parent.Data != nil && *spec.Data != *parent.Data {
-			return PinnedSet{}, errors.New("selection.fixed_data_conflict")
+			return PinnedSet{}, fmt.Errorf("%w: selection.fixed_data_conflict", ErrSpecFormat)
 		}
 		if spec.Changes == nil {
 			spec.Changes = parent.Changes
 		} else if parent.Changes != nil && *spec.Changes != *parent.Changes {
-			return PinnedSet{}, errors.New("selection.fixed_changes_conflict")
+			return PinnedSet{}, fmt.Errorf("%w: selection.fixed_changes_conflict", ErrSpecFormat)
 		}
 	}
 	if current {
 		if err := ValidateNewSelection(spec); err != nil {
-			return PinnedSet{}, err
+			return PinnedSet{}, fmt.Errorf("%w: %w", ErrSpecFormat, err)
 		}
 	}
 	if err := validatePins(spec); err != nil {
-		return PinnedSet{}, err
+		return PinnedSet{}, fmt.Errorf("%w: %w", ErrSpecFormat, err)
 	}
 	pin := PinnedSet{Schema: "lycheedev.selection.v1", SelectionSpec: spec}
 	unsigned, err := json.Marshal(pin)

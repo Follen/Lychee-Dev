@@ -83,7 +83,11 @@ export async function update(root, args, nativePath) {
   }
   const npm = npmEntry();
   // Validate arguments and all existing targets before downloads or npm writes.
-  const plan = nativeResult(nativePath(root), [...args, '--plan', '--format=json']);
+  const planArgs = [...args];
+  const planIndex = planArgs.indexOf('--plan=false');
+  if (planIndex >= 0) planArgs[planIndex] = '--plan';
+  else planArgs.push('--plan');
+  const plan = nativeResult(nativePath(root), [...planArgs, '--format=json']);
   const directory = join(prefix, '.lycheedev-update');
   mkdirSync(directory, { recursive: true });
   if (lstatSync(directory).isSymbolicLink() || realpathSync(directory).toLowerCase() !== resolve(directory).toLowerCase()) throw new Error('update.redirected_state');

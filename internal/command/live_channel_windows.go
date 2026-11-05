@@ -45,7 +45,7 @@ func runChannelCommand(ctx context.Context, route, argument string, opts Options
 	var result channel.ProjectResult
 	switch route {
 	case "live bugs":
-		if opts.count < 1 || opts.count > 100 || channel.ValidateRequest(opts.request) != nil {
+		if opts.count < 1 || opts.count > commandCountCeiling(route) || channel.ValidateRequest(opts.request) != nil {
 			return true, 2, errors.New("live bugs requires --request and --count <1-100>")
 		}
 		code := fmt.Sprintf(`local snapshot, reason = LycheeDevInternal.Diagnostics.SnapshotRecentErrors(%d, "provider_storage")

@@ -88,3 +88,17 @@ test('executes the entry point through a linked installation path', t => {
     unlinkSync(alias);
   }
 });
+
+test('explicit true plan/help flags bypass the npm update workflow', { skip: process.platform !== 'win32' }, t => {
+  const f = fixture(t);
+  mkdirSync(join(f.root, 'bin'));
+  copyFileSync(new URL('../bin/lycheedev.mjs', import.meta.url), join(f.root, 'bin/lycheedev.mjs'));
+  writeFileSync(join(f.root, 'bin/update.mjs'), 'export async function update() { throw new Error("unexpected_npm_update"); }');
+  for (const flag of ['--plan=true', '--help=true']) {
+    const result = spawnSync(process.execPath, [join(f.root, 'bin/lycheedev.mjs'), 'update', flag, '--format=json'], { encoding: 'utf8' });
+    // The fixture executable is deliberately invalid; native dispatch must be
+    // attempted without ever entering the package replacement workflow.
+    assert.equal(result.status, 3);
+    assert.doesNotMatch(result.stdout + result.stderr, /unexpected_npm_update/);
+  }
+});

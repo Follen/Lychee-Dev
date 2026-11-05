@@ -68,7 +68,7 @@ func ddLoad(home, request string) (ddReceipt, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.UseNumber()
-	if len(b) > 4<<20 || d.Decode(&r) != nil || r.Schema != "lycheedev.publish.dd-operation.v1" || r.Request != request {
+	if len(b) > 4<<20 || d.Decode(&r) != nil || d.Decode(new(any)) != io.EOF || r.Schema != "lycheedev.publish.dd-operation.v1" || r.Request != request {
 		return r, failure("publish.dd_receipt", "invalid original DD operation receipt")
 	}
 	return r, nil

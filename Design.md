@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.7 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.8 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 当前业务架构、Cobra/CLI、Skill、Data/SQL、Source、Publish、正式Forever支持、CI减负及新子Agent循环审计建议见[整改计划](docs/rectification-plan.md)。该计划记录整改方案与阶段状态；本文区分现有实现和目标架构。
 

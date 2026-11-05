@@ -398,6 +398,9 @@ func readCFReceipt(home string, project int64, request string) (cfReceipt, error
 	if err = d.Decode(&r); err != nil {
 		return r, failure("publish.receipt_invalid", "invalid upload receipt")
 	}
+	if d.Decode(new(any)) != io.EOF {
+		return r, failure("publish.receipt_invalid", "upload receipt contains trailing data")
+	}
 	if r.Schema != "lycheedev.publish.curseforge-upload.v1" || r.ProjectID != project || r.Request != request {
 		return r, failure("publish.receipt_identity", "receipt identity differs from requested upload")
 	}

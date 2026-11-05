@@ -96,7 +96,7 @@ test('update performs real npm replacement in isolated prefixes, keeps both clie
   }
   const setup = await run(oldBinary, ['skill', 'install', '--release', install, '--path', skill, '--format=json'], env);
   assert.equal(setup.status, 0, setup.stdout + setup.stderr);
-  const arguments_ = ['update', '--path', skill, ...clients.flatMap(path => ['--installation', path]), '--home', join(root, 'workspace'), '--format=json'];
+  const arguments_ = ['update', '--plan=false', '--path', skill, ...clients.flatMap(path => ['--installation', path]), '--home', join(root, 'workspace'), '--format=json'];
   const launch = () => run(process.execPath, [join(install, 'bin/lycheedev.mjs'), ...arguments_], env);
 
   // Another updater owns the prefix: no registry request or replacement.

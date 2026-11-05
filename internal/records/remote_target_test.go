@@ -197,7 +197,7 @@ func TestRemoteTargetParentAndConcurrentReaders(t *testing.T) {
 		t.Fatal(derived, err)
 	}
 	r.Locale = "enUS"
-	if _, err := f.resolve(ctx, r); err == nil || err.Error() != "selection.fixed_data_conflict" {
+	if _, err := f.resolve(ctx, r); !errors.Is(err, selection.ErrSpecFormat) || !strings.Contains(err.Error(), "selection.fixed_data_conflict") {
 		t.Fatal(err)
 	}
 }

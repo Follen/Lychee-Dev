@@ -506,10 +506,13 @@ func (b *Browser) openIndex(ctx context.Context, pin selection.SourcePin) (*snap
 	if err != nil {
 		return nil, IndexSummary{}, err
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, 64<<10))
+	raw, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
 		return nil, IndexSummary{}, errors.Join(err, closeErr)
+	}
+	if len(raw) > 64<<10 {
+		return nil, IndexSummary{}, fmt.Errorf("%w: codebase.index_manifest_limit", ErrSourceIntegrity)
 	}
 	var m cacheManifest
 	if err := json.Unmarshal(raw, &m); err != nil {

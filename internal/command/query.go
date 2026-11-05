@@ -67,6 +67,8 @@ func queryFault(err error) (int, string, bool) {
 		{records.ErrInstallationProduct, 2, "selection.installation_product_mismatch"},
 		{records.ErrInstallationConflict, 4, "selection.installation_metadata_conflict"},
 		{selection.ErrDataProductBuild, 4, "selection.data_product_build_mismatch"},
+		{selection.ErrSpecFormat, 4, "selection.spec_format"},
+		{selection.ErrSpecLimit, 3, "selection.spec_limit"},
 		{selection.ErrTargetExists, 3, "selection.target_exists"},
 		{selection.ErrTargetAmbiguous, 2, "selection.target_ambiguous"},
 		{selection.ErrTargetInUse, 3, "selection.target_in_use"},

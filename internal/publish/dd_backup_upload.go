@@ -79,6 +79,9 @@ func ddLoadBundle(path string) (*ddBackupOpen, error) {
 	if err = d.Decode(&b); err != nil || b.Schema != "lycheedev.publish.dd-backup.v1" || ddGame(b.Manifest) <= 0 {
 		return nil, invalid("$.file", "invalid DD backup bundle")
 	}
+	if d.Decode(new(any)) != io.EOF {
+		return nil, invalid("$.file", "trailing DD backup bundle data")
+	}
 	opened := &ddBackupOpen{bundle: b, files: map[string]*os.File{}}
 	good := false
 	defer func() {

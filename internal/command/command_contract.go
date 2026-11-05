@@ -291,7 +291,7 @@ func (c commandContract) publicDefinition() Definition {
 	}
 	definition.Flags = c.acceptedFlagDisplays()
 	if c.projectSelection() {
-		definition.Summary += "; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins"
+		definition.Summary += "; required snapshots can come from --project or the nearest parent project lock; explicit snapshot wins"
 	}
 	return definition
 }
@@ -466,7 +466,7 @@ func commandConstraints(route string) []string {
 	case "source prune":
 		return []string{"--target-bytes is required; explicit zero requests maximal eligible cache reclamation."}
 	case "source validate":
-		return []string{"Choose a fixed snapshot or a local --path; --toc selects an addon manifest, --matrix selects explicit client contexts.", "--semantic uses the compatible pinned API environment; incomplete loading context remains partial."}
+		return []string{"Use --path and --toc together with a fixed --snapshot (or compatible project lock), or use --matrix alone for explicit client contexts.", "--semantic uses the compatible pinned API environment; incomplete loading context remains partial."}
 	case "source diff":
 		return []string{"--from and --to identify the two fixed source snapshots."}
 	case "live execute":
@@ -556,7 +556,7 @@ func commandExamples(c commandContract) [][]string {
 			}
 			args = append(args, value)
 		}
-		values := map[string]string{"--product": "forever", "--source": "wow-ui-source", "--region": "cn", "--locale": "zhCN", "--snapshot": "PIN-example", "--session": "CON-example", "--request": "inspect-1", "--budget-seconds": "10", "--pid": "1234", "--installation": "C:/Games/WoW/_forever_", "--file": "input.json", "--name": "inspect", "--path": "C:/Tools/lycheedev", "--output": "C:/Recovery/example", "--field": "Name_lang", "--query": "example", "--table": "SpellName", "--limit": "10", "--value": "1", "--spell-id": "441776", "--item-id": "19019", "--file-data-id": "134400", "--journal-encounter-id": "1"}
+		values := map[string]string{"--product": "forever", "--source": "wow-ui-source", "--region": "cn", "--locale": "zhCN", "--snapshot": "PIN-example", "--session": "CON-example", "--request": "inspect-1", "--budget-seconds": "10", "--pid": "1234", "--installation": "C:/Games/WoW/_forever_", "--file": "input.json", "--name": "inspect", "--path": "C:/Tools/lycheedev", "--output": "C:/Recovery/example", "--field": "Name_lang", "--query": "example", "--table": "SpellName", "--limit": "10", "--value": "1", "--spell-id": "441776", "--item-id": "19019", "--file-data-id": "134400", "--journal-encounter-id": "1", "--file-id": "134400", "--listfile": "community-csv", "--ids": "CAP-example"}
 		for _, name := range requiredFlags(c.Path) {
 			args = append(args, name, values[name])
 		}
@@ -577,22 +577,14 @@ func commandExamples(c commandContract) [][]string {
 			args = append(args, "--path", "Example.lua")
 		case "source validate":
 			args = append(args, "--path", "C:/AddOns/Example", "--toc", "Example.toc")
-		case "skill install":
-			args = append(args, "--release", "C:/Release", "--path", "C:/Skills/lycheedev")
-		case "addon install":
-			args = append(args, "--release", "C:/Release", "--installation", "C:/Games/WoW/_forever_")
+		case "skill install", "addon install":
+			args = append(args, "--release", "C:/Release")
 		case "addon status":
 			args = append(args, "--installation", "C:/Games/WoW/_forever_")
-		case "asset inspect":
-			args = append(args, "--file-id", "134400")
-		case "asset export":
-			args = append(args, "--file-id", "134400", "--output", "C:/Exports/icon.blp")
 		case "asset demux":
-			args = append(args, "--file-id", "134400", "--output", "C:/Exports/media")
+			args = append(args, "--file-id", "134400")
 		case "asset search":
-			args = append(args, "--listfile", "community-csv", "--query", "icon")
-		case "evidence bundle":
-			args = append(args, "--ids", "CAP-example", "--output", "C:/Exports/evidence.zip")
+			args = append(args, "--query", "icon")
 		}
 	}
 	if c.Path == "data db2 stream" {
@@ -635,6 +627,8 @@ func requiredFlags(route string) []string {
 		return []string{"--snapshot"}
 	case "source sync":
 		return []string{"--source", "--product"}
+	case "source batch":
+		return []string{"--file"}
 	case "source diff":
 		return []string{"--from", "--to"}
 	case "source prune":
@@ -669,8 +663,20 @@ func requiredFlags(route string) []string {
 		return []string{"--file-data-id"}
 	case "data encounter get":
 		return []string{"--journal-encounter-id"}
-	case "skill status":
+	case "asset search":
+		return []string{"--listfile"}
+	case "asset inspect":
+		return []string{"--file-id"}
+	case "asset export":
+		return []string{"--file-id", "--output"}
+	case "asset demux":
+		return []string{"--output"}
+	case "evidence bundle":
+		return []string{"--ids", "--output"}
+	case "skill status", "skill install":
 		return []string{"--path"}
+	case "addon install":
+		return []string{"--installation"}
 	case "skill remove":
 		return []string{"--path", "--output"}
 	case "addon remove":

@@ -515,8 +515,11 @@ func filterMatches(value any, want string) bool {
 
 // stableErrorCode presents a bounded failure with a module-qualified code.
 func stableErrorCode(err error) string {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
 		return "records.cancelled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "records.deadline"
 	}
 	for _, known := range []error{
 		ErrMetadataFormat, ErrMetadataLimit, ErrRecordNotFound, ErrRequestConflict,

@@ -197,6 +197,22 @@ func TestDDSelectiveBackupRoundTripAndTamper(t *testing.T) {
 		t.Fatal(bundle.bundle)
 	}
 	bundle.close()
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{" {}", " garbage"} {
+		if err = os.WriteFile(path, append(append([]byte(nil), original...), []byte(suffix)...), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if opened, e := ddLoadBundle(path); e == nil {
+			opened.close()
+			t.Errorf("trailing backup metadata accepted: %q", suffix)
+		}
+	}
+	if err = os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
 	artifact := filepath.Join(filepath.Dir(path), "unknown_addon.zip")
 	if err = os.WriteFile(artifact, []byte("changed"), 0600); err != nil {
 		t.Fatal(err)

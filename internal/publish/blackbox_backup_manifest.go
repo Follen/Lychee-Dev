@@ -70,6 +70,10 @@ func bbLoadBackupPackage(ctx context.Context, file string) (*bbBackupPackage, er
 		return nil, e
 	}
 	defer f.Close()
+	info, e := f.Stat()
+	if e != nil || info.Size() > 8<<20 {
+		return nil, invalid("$.file", "backup package JSON exceeds 8 MiB")
+	}
 	d := json.NewDecoder(io.LimitReader(f, 8<<20))
 	d.UseNumber()
 	d.DisallowUnknownFields()

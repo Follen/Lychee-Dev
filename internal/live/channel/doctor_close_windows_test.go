@@ -25,6 +25,28 @@ func (p *doctorSlotClosePeer) RetireReplacedRuntime(ctx context.Context, envelop
 	return p.retirement.RetireReplacedRuntime(ctx, envelope, proof)
 }
 
+type doctorSlotCloseTimeoutPeer struct{ *doctorSlotClosePeer }
+
+func (p *doctorSlotCloseTimeoutPeer) closeReloadRuntime(ctx context.Context, d *Driver) (bool, error) {
+	// End the invocation at the persisted input boundary, independent of disk speed.
+	if len(p.inputs) > 0 && p.retirement.proof == nil {
+		return false, context.DeadlineExceeded
+	}
+	return p.closingReloadPeer.closeReloadRuntime(ctx, d)
+}
+
+func (p *doctorSlotCloseTimeoutPeer) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64, capability string) (InputObservation, error) {
+	// A normal observation may outlast the old 50ms whole-invocation allowance.
+	timer := time.NewTimer(75 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return InputObservation{}, ctx.Err()
+	case <-timer.C:
+	}
+	return p.closingReloadPeer.ObserveInput(ctx, e, after, capability)
+}
+
 func TestDoctorSlotCloseReloadsOnceWithoutPublishingSlots(t *testing.T) {
 	d, peer := closingReloadFixture(t)
 	p := &doctorSlotClosePeer{peer}
@@ -69,15 +91,15 @@ func TestDoctorSlotCloseRetryRetainsReloadIntentAndDeadline(t *testing.T) {
 	for _, outcome := range []string{"submitted", "uncertain", "missing"} {
 		t.Run(outcome, func(t *testing.T) {
 			d, peer := closingReloadFixture(t)
-			p := &doctorSlotClosePeer{peer}
+			p := &doctorSlotCloseTimeoutPeer{&doctorSlotClosePeer{peer}}
 			d.Backend = p
 			proof := p.retirement.proof
 			p.retirement.proof = nil
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			err := d.closeSlotRepairWith(ctx, p, retirementTarget())
 			cancel()
 			if !errors.Is(err, ErrPending) || len(p.inputs) != 1 || d.State.Reload == nil || d.State.Reload.Phase != "input_attempted" {
-				t.Fatal("missing proof did not preserve reload", err)
+				t.Fatalf("missing proof: inputs=%d reload=%+v ctx=%v err=%v", len(p.inputs), d.State.Reload, ctx.Err(), err)
 			}
 			budget := *d.State.Reload.RecoveryBudget
 			request := d.State.Reload.Request
@@ -93,7 +115,7 @@ func TestDoctorSlotCloseRetryRetainsReloadIntentAndDeadline(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 			err = d.closeSlotRepairWith(ctx, p, retirementTarget())
 			cancel()
 			if !errors.Is(err, ErrPending) || len(p.inputs) != 1 || d.State.Reload.Request != request || d.State.Reload.RecoveryBudget.StartedAtMS != budget.StartedAtMS || d.State.Reload.RecoveryBudget.DeadlineMS != budget.DeadlineMS {

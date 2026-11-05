@@ -212,10 +212,11 @@ func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, erro
 	checks = append(checks, toolCheck)
 	liveChecks, liveReport, liveErr := doctorLive(ctx, opts, response)
 	checks = append(checks, liveChecks...)
-	// The mirror check joins only when the nearest project declares a product;
+	// The mirror check joins only when the selected project declares a product;
 	// doctor never invents a repository or a product default.
-	if directory, projectErr := projectDirectory(""); projectErr == nil {
+	if directory, projectErr := projectDirectory(opts.project); projectErr == nil {
 		if status, statusErr := selection.InspectProject(ctx, directory); statusErr == nil && status.Project.Product != "" {
+			response.Context["project"] = status.Directory
 			checks = append(checks, sourceMirrorCheck(ctx, root, status.Project.Product, opts.offline))
 		}
 	}

@@ -1,9 +1,7 @@
 package command
 
 import (
-	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/publish"
-	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"reflect"
@@ -88,7 +86,7 @@ func (c commandContract) schema() CommandSchema {
 		result.Effects = []string{"Static, offline: no workspace initialization, credentials, network, worker or game access."}
 	}
 	if c.projectSelection() {
-		result.Constraints = append(result.Constraints, "Omitted --snapshot resolves --project or the nearest project lock; it does not create a new pin.")
+		result.Constraints = append(result.Constraints, "When this operation requires a snapshot, omitted --snapshot resolves --project or the nearest project lock; it does not create a new pin.")
 	}
 	if strings.HasPrefix(c.Path, "source ") {
 		result.Effects = append(result.Effects, "Semantic research may prepare pinned source and start the packaged LuaLS worker. --static-only (where supported) requests bounded static evidence.")
@@ -121,10 +119,10 @@ func (c commandContract) schema() CommandSchema {
 		}
 	}
 	if c.Path == "data sql" {
-		result.Details["jsonInput"] = jsonTypeSchema(reflect.TypeFor[records.DataQuery](), map[reflect.Type]bool{})
+		result.Details["jsonInput"] = queryInputSchema()
 	}
 	if c.Path == "source batch" {
-		result.Details = map[string]any{"jsonInput": jsonTypeSchema(reflect.TypeFor[codebase.BatchRequest](), map[reflect.Type]bool{})}
+		result.Details = map[string]any{"jsonInput": sourceBatchInputSchema()}
 	}
 	if c.Path == "target resolve" {
 		result.Details = map[string]any{"selectionFile": jsonTypeSchema(reflect.TypeFor[selection.SelectionSpec](), map[reflect.Type]bool{})}
@@ -154,6 +152,14 @@ func describeFlag(route string, s flagSpec) FlagSchema {
 		for _, c := range commandContracts {
 			if c.Path == route && c.projectSelection() {
 				f.RequiredWhen = "No compatible project lock supplies the requested fixed identity"
+				switch route {
+				case "source list":
+					f.RequiredWhen = ""
+				case "asset demux":
+					f.RequiredWhen = "Using CASC input without --path, and no compatible project lock supplies the fixed identity"
+				case "source validate":
+					f.RequiredWhen = "Not using --matrix, and no compatible project lock supplies the fixed identity"
+				}
 			}
 		}
 	}
@@ -211,7 +217,7 @@ func describeFlag(route string, s flagSpec) FlagSchema {
 		bounds(1, 9223372036854775807)
 		f.Default = 1
 	case "--count":
-		bounds(1, 2000)
+		bounds(1, int64(commandCountCeiling(route)))
 		f.Default = 80
 	case "--limit":
 		bounds(1, int64(dataLimitCeiling(route)))

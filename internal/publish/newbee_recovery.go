@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +16,18 @@ import (
 )
 
 func newBeeDecodeStored(raw []byte, value any) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("null original request receipt")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	return decoder.Decode(value)
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return errors.New("original request receipt contains trailing data")
+	}
+	return nil
 }
 
 func newBeeOperationStatus(request Request) (Result, error) {
@@ -30,6 +41,10 @@ func newBeeOperationStatus(request Request) (Result, error) {
 	var receipt map[string]any
 	if newBeeDecodeStored(raw, &receipt) != nil {
 		return result, failure("publish.newbee_receipt", "invalid original request receipt")
+	}
+	fingerprint, err := hex.DecodeString(String(receipt, "fingerprint"))
+	if err != nil || len(fingerprint) != sha256.Size {
+		return result, failure("publish.newbee_receipt", "invalid original request fingerprint")
 	}
 	data := map[string]any{}
 	for _, key := range []string{"state", "stage", "uploaded", "id", "complete", "completed", "pending", "rejected", "result", "target"} {

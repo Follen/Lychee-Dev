@@ -103,7 +103,7 @@ func TestPublishOriginalStatusReadsDoNotBecomePending(t *testing.T) {
 					case "newbee operation status":
 						input = map[string]any{}
 						hash := sha256.Sum256([]byte(id))
-						record = map[string]any{"state": state, "complete": complete}
+						record = map[string]any{"fingerprint": emptyDigest, "state": state, "complete": complete}
 						path = filepath.Join(home, "publish", "newbee", hex.EncodeToString(hash[:])+".json")
 					}
 					var original []byte

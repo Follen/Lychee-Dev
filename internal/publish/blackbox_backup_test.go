@@ -104,6 +104,32 @@ func TestBlackboxBackupRejectsTamperedPackage(t *testing.T) {
 		})
 	}
 }
+
+func TestBlackboxBackupRejectsDataHiddenAfterJSONLimit(t *testing.T) {
+	in, _ := bbBackupFixture(t)
+	result, err := bbLocalBackup(context.Background(), "backup generate", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := String(result.(map[string]any), "file")
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounded := append(raw, []byte(strings.Repeat(" ", (8<<20)-len(raw)))...)
+	if err = os.WriteFile(file, bounded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = bbLoadBackupPackage(context.Background(), file); err != nil {
+		t.Fatalf("exact byte limit: %v", err)
+	}
+	if err = os.WriteFile(file, append(bounded, []byte("garbage")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = bbLoadBackupPackage(context.Background(), file); err == nil {
+		t.Fatal("trailing data beyond the JSON reader limit accepted")
+	}
+}
 func TestBlackboxBackupRejectsUnsafeSelection(t *testing.T) {
 	for _, mode := range []string{"parent", "duplicate", "all-addons", "empty-character", "inside-output"} {
 		t.Run(mode, func(t *testing.T) {

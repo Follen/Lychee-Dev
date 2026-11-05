@@ -2,7 +2,20 @@
 
 从当前开发基线开始记录功能变化；历史版本查阅 Git 标签与提交。
 
-## 未发布
+## 3.2.8 — 2026-11-05
+
+- 小黑盒插件版本分页兼容续页独立`total: 0`占位，沿用首屏已确认总数；133/173/205条版本历史完整返回，冲突计数、缺页、重复ID和越界仍报错，删除回读继续检查续页目标。
+
+- 发布回执读取拒绝尾随JSON或垃圾文本：覆盖DD、CurseForge与NewBee；NewBee状态读取还验证原请求指纹并拒绝null/空对象。DD备份清单在打开归档前拒绝尾随数据。
+- 小黑盒备份清单与Source索引/工作树清单拒绝超过读取上限的文件，避免把上限之后的垃圾隐藏成EOF；无效工作树清单在prune删除前被拒绝。
+- `cache prune --max-objects`统一限制普通缓存与`--uncommitted`暂存文件的总删除数，dry-run使用相同额度，未完成的清理保留truncated状态。
+- 修复Addon执行输出和普通序列化的截断提示突破44000字节上限；输出已满时仍保留运行错误原因，超长错误继续显式标记截断。
+- npm启动器识别`update --plan=true`、`--help=true`及`-h=true`，只读入口交给原生CLI；`--plan=false`执行更新时，内部预检替换该值，避免重复参数，原请求与恢复参数保持。
+- CLI循环审计修复Raidbots Hotfix未执行`--max-bytes`限制、`source list`忽略显式项目、doctor源码镜像检查错误使用当前目录项目的问题。
+- DB2 JSONL流区分查询超时与用户取消：超时返回exit 5/`records.deadline`，取消返回exit 7/`records.cancelled`；两者均以错误帧结束，不输出成功end帧。
+- 目标选择文件的JSON错误、空选择和无效身份返回exit 4/`selection.spec_format`，文件超限返回exit 3/`selection.spec_limit`，保留文件读取与存储故障原有分类。
+- 修正CLI schema中10个必填参数、Source无快照模式与validate组合条件；`live bugs --count`的schema、解析与执行统一为1–100，Source inspect仍保留2000行上限。
+- Source批处理输入不再把默认字段误标为必填；SQL输入schema明确标量参数及Hotfix数组范围，输入准入与结果序列化分别描述。
 
 - CLI首次访问未初始化工作区时返回环境错误和可执行的初始化参数；文本帮助按命令层级展示入口，发现结果标明产品别名命中并保留所选平台的原操作恢复链。Source空结果提示使用实际支持的参数，语义运行时缺失时说明结构查询入口。
 - 修复DBD元数据拒绝多词名称、遗漏BUILD版本预设和未按版本覆盖默认枚举值的问题；固定上游358份定义跨七个构建的独立对照通过。

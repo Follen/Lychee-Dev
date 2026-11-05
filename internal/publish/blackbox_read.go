@@ -118,6 +118,7 @@ func (c *bbClient) versions(ctx context.Context, id string) ([]map[string]any, a
 		if v, ok := r["strappidInfos"]; ok {
 			options = v
 		}
+		pageTotal, countFields := "", 0
 		for _, k := range []string{"totalCount", "total_count", "total", "count"} {
 			if v, ok := r[k]; ok {
 				n, ok := v.(json.Number)
@@ -125,11 +126,21 @@ func (c *bbClient) versions(ctx context.Context, id string) ([]map[string]any, a
 					return nil, nil, failure("publish.blackbox_shape", "invalid version count")
 				}
 				i, e := n.Int64()
-				if e != nil || i < 0 || (total != "" && total != string(n)) {
+				if e != nil || i < 0 || (pageTotal != "" && pageTotal != string(n)) {
 					return nil, nil, failure("publish.blackbox_shape", "version count changed")
 				}
-				total = string(n)
+				pageTotal = string(n)
+				countFields++
 			}
+		}
+		// Heybox can publish total=0 on nonempty continuation pages. Only
+		// this single-field placeholder preserves an established positive total.
+		placeholder := len(rows) > 0 && total != "" && total != "0" && pageTotal == "0" && countFields == 1 && r["total"] != nil
+		if pageTotal != "" && !placeholder {
+			if total != "" && total != pageTotal {
+				return nil, nil, failure("publish.blackbox_shape", "version count changed")
+			}
+			total = pageTotal
 		}
 		chunk, e := bbRows(r["versionList"], "id")
 		if e != nil {

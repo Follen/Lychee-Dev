@@ -599,6 +599,10 @@ func (c *CacheManager) Prune(ctx context.Context, policy PrunePolicy) (PruneRepo
 				report.Complete = false
 				return report, err
 			}
+			if policy.MaxObjects > 0 && report.RemovedObjects+report.RemovedUncommitted >= policy.MaxObjects {
+				report.Truncated = true
+				break
+			}
 			lease, err := TryAcquireLease(ctx, c.locksDir(), stageLeaseName(item.id))
 			if err != nil {
 				if errors.Is(err, ErrLeaseBusy) {

@@ -6,7 +6,7 @@
 
 [设计](Design.md) · [Live 协议](docs/live-protocol.md) · [开发指南](docs/development.md) · [更新记录](Changelog.md) · [待办与验证范围](todo.md)
 
-**当前发行版本为 3.2.7，npm 发行渠道为 `latest`。** 本仓库新增能力见[未发布变更](Changelog.md#未发布)。版本以 [release/version.json](release/version.json) 为准，发布产物见 [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases)。
+**当前发行版本为 3.2.8，npm 发行渠道为 `latest`。** 本版本变化见[更新记录](Changelog.md)。版本以 [release/version.json](release/version.json) 为准，发布产物见 [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases)。
 
 ## 功能
 

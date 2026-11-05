@@ -16,11 +16,12 @@ local function AddOutput(output, text)
     local prefix = #output.parts > 0 and "\n" or ""
     local remaining = MAX_CAPTURE_BYTES - output.length - #prefix
     if #text > remaining then
-        output.parts[#output.parts + 1] = prefix
+        local marker = "\n... <output truncated>"
+        local captured = table.concat(output.parts) .. prefix
             .. text:sub(1, math.max(0, remaining))
-            .. "\n... <output truncated>"
+        output.parts = { captured:sub(1, MAX_CAPTURE_BYTES - #marker) .. marker }
         output.truncated = true
-        output.length = output.length + #output.parts[#output.parts]
+        output.length = #output.parts[1]
         return
     end
 
@@ -99,7 +100,21 @@ function ns.Execute(code)
 
     local formatted, liveTree, storedTree = pcall(function()
         if not succeeded then
-            AddOutput(output, L.RUNTIME_ERROR .. tostring(packed[2]))
+            local diagnostic = L.RUNTIME_ERROR .. tostring(packed[2])
+            if #diagnostic >= MAX_CAPTURE_BYTES then
+                local marker = "\n... <output truncated>"
+                diagnostic = diagnostic:sub(1, MAX_CAPTURE_BYTES - 1 - #marker) .. marker
+            end
+            local captured = table.concat(output.parts)
+            if #captured + 1 + #diagnostic > MAX_CAPTURE_BYTES then
+                output.parts = { captured:sub(1, MAX_CAPTURE_BYTES - #diagnostic - 1)
+                    .. "\n" .. diagnostic }
+                output.length = #output.parts[1]
+            else
+                -- A previous truncation must not suppress the actual failure.
+                output.truncated = false
+                AddOutput(output, diagnostic)
+            end
             return
         end
         local values = { n = packed.n - 1 }

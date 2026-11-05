@@ -60,7 +60,7 @@ if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(
     }
     if (args[commandIndex] === 'update') args = ['update', ...args.slice(0, commandIndex), ...args.slice(commandIndex + 1)];
     activeArgs = args;
-    const managedUpdate = args[0] === 'update' && !args.some(arg => ['--help', '-h', '--plan', '--release'].includes(arg) || arg.startsWith('--release='));
+    const managedUpdate = args[0] === 'update' && !args.some(arg => ['--help', '-h', '--plan', '--help=true', '-h=true', '--plan=true', '--release'].includes(arg) || arg.startsWith('--release='));
     let result;
     if (managedUpdate) {
       const { update } = await import('./update.mjs');

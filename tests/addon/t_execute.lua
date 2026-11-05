@@ -72,14 +72,21 @@ assert(runtimeOk == false and runtimeResult:find(L.RUNTIME_ERROR, 1, true)
 -- The hard 44000-byte output cap bounds long prints.
 local floodOk, floodResult = ns.Execute('print(string.rep("x", 50000))')
 assert(floodOk, floodResult)
-assert(#floodResult < 45000 and floodResult:find("<output truncated>", 1, true),
+assert(#floodResult <= 44000 and floodResult:find("<output truncated>", 1, true),
     "runtime output was not bounded")
 
 -- The cap also bounds empty-print floods.
 local emptyFloodOk, emptyFloodResult = ns.Execute("for index = 1, 50000 do print() end")
 assert(emptyFloodOk, emptyFloodResult)
-assert(#emptyFloodResult < 45000 and emptyFloodResult:find("<output truncated>", 1, true),
+assert(#emptyFloodResult <= 44000 and emptyFloodResult:find("<output truncated>", 1, true),
     "empty output bypassed the limit")
+local failedFlood, failedFloodText = ns.Execute('print(string.rep("x", 50000)); error("failure after flood")')
+assert(not failedFlood and #failedFloodText <= 44000
+    and failedFloodText:find("failure after flood", 1, true),
+    "full captured output hid the runtime failure")
+local longErrorOK, longErrorText = ns.Execute('error(string.rep("z", 50000))')
+assert(not longErrorOK and #longErrorText <= 44000
+    and longErrorText:find("<output truncated>", 1, true), "long runtime error exceeded the cap or hid truncation")
 
 -- Runs without any output report completion explicitly.
 local silentOk, silentResult, _, silentTree = ns.Execute("local ignored = 1")

@@ -51,6 +51,9 @@ assert(wideIncomplete == true, "entry truncation was not reported")
 local floodText = S.Serialize(string.rep("x", 50000))
 assert(#floodText < 45000 and floodText:find("<output truncated>", 1, true),
     "output cap did not bound a large string")
+local nearLimit = S.Serialize({ string.rep("x", 43970), string.rep("y", 100) })
+assert(#nearLimit <= 44000 and nearLimit:find("<output truncated>", 1, true),
+    "truncation marker exceeded the serialization byte cap")
 
 -- Secrets: values render as <secret>, keys are counted and skipped.
 local secret = Env.MakeSecret()

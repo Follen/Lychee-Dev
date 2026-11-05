@@ -33,7 +33,11 @@ local function Append(state, text)
     end
 
     if state.length + #text > state.maxOutputBytes then
-        state.parts[#state.parts + 1] = "\n... <output truncated>"
+        local marker = "\n... <output truncated>"
+        local captured = table.concat(state.parts)
+        state.parts = { captured:sub(1, math.max(0, state.maxOutputBytes - #marker))
+            .. marker:sub(1, state.maxOutputBytes) }
+        state.length = #state.parts[1]
         state.truncated = true
         state.incomplete = true
         return

@@ -276,7 +276,7 @@ func runDataStream(ctx context.Context, argument string, opts Options, stdout io
 // streamFaultExit maps a failed stream onto the documented exit codes without
 // re-rendering an envelope over emitted frames.
 func streamFaultExit(err error) int {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
 		return 7
 	}
 	if exit, _, ok := queryFault(err); ok {
@@ -451,6 +451,7 @@ func runDataHotfixRemote(ctx context.Context, opts Options, response *Envelope, 
 		if err != nil {
 			return false, 2, err
 		}
+		snapshot.MaxBytes = opts.maxBytes
 		result, err = snapshot.QueryHotfix(ctx, query)
 		if err != nil {
 			return false, 0, err
