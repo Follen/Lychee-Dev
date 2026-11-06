@@ -154,8 +154,13 @@ func (c *snapshotCache) closeResources() error {
 }
 
 func (b *Browser) indexPath(pin selection.SourcePin) string {
-	key := sha256.Sum256([]byte(indexSchema + "\x00" + pin.Repository + "\x00" + pin.Product + "\x00" + pin.ExactCommit + "\x00" + pin.ParserRevision))
-	return filepath.Join(b.store.Root(), "source", "v1", "facts", "snapshots", hex.EncodeToString(key[:]))
+	key := sourceIndexKey(indexSchema, pin.Repository, pin.Product, pin.ExactCommit, pin.ParserRevision)
+	return filepath.Join(b.store.Root(), "source", "v1", "facts", "snapshots", key)
+}
+
+func sourceIndexKey(schema, repository, product, commit, parser string) string {
+	key := sha256.Sum256([]byte(strings.Join([]string{schema, repository, product, commit, parser}, "\x00")))
+	return hex.EncodeToString(key[:])
 }
 
 func (b *Browser) IndexSource(ctx context.Context, pin selection.SourcePin) (IndexSummary, error) {
@@ -206,6 +211,12 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 		return IndexSummary{}, err
 	}
 	defer os.RemoveAll(stage)
+	factsStage, err := os.MkdirTemp(filepath.Dir(destination), ".source-facts-")
+	if err != nil {
+		return IndexSummary{}, err
+	}
+	defer os.RemoveAll(factsStage)
+	fileFacts := stagedFileFacts{dir: factsStage, reserve: reserve}
 	f, err := os.Create(filepath.Join(stage, "records.jsonl"))
 	if err != nil {
 		return IndexSummary{}, err
@@ -272,7 +283,7 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 		if err := write(sourceRecord{Kind: "document", Path: file.path, Object: file.object, SHA256: digest, Bytes: file.size}); err != nil {
 			return err
 		}
-		facts, err := b.fileFacts(ctx, file.path, data, digest, reserve)
+		facts, err := b.fileFacts(ctx, file.path, data, digest, &fileFacts)
 		if err != nil {
 			return err
 		}
@@ -403,33 +414,57 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 	if err := os.Rename(stage, destination); err != nil {
 		return IndexSummary{}, err
 	}
+	b.publishFileFacts(ctx, factsStage)
 	return summary, nil
 }
 
-func (b *Browser) fileFacts(ctx context.Context, name string, data []byte, digest string, reserveCallbacks ...func(int64) error) (DocumentFacts, error) {
+type stagedFileFacts struct {
+	dir     string
+	reserve func(int64) error
+}
+
+func (b *Browser) fileFactsDir() string {
+	return filepath.Join(b.store.Root(), "source", "v1", "facts", "files", ParserRevision)
+}
+
+func (b *Browser) publishFileFacts(ctx context.Context, stage string) {
+	entries, err := os.ReadDir(stage)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	dest := b.fileFactsDir()
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return
+		}
+		// These files accelerate later builds. A sharing violation or failed
+		// move leaves the completed snapshot usable and preserves the old file.
+		_ = os.Rename(filepath.Join(stage, entry.Name()), filepath.Join(dest, entry.Name()))
+	}
+}
+
+func (b *Browser) fileFacts(ctx context.Context, name string, data []byte, digest string, stage *stagedFileFacts) (DocumentFacts, error) {
 	mode := strings.ToLower(path.Ext(name))
 	if mode == ".lua" && strings.Contains(name, "/Blizzard_APIDocumentationGenerated/") {
 		mode += ":generated-api"
 	}
 	key := sha256.Sum256([]byte(factSchema + "\x00" + ParserRevision + "\x00" + mode + "\x00" + digest))
-	file := filepath.Join(b.store.Root(), "source", "v1", "facts", "files", ParserRevision, hex.EncodeToString(key[:])+".json")
-	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:v1:fact:"+hex.EncodeToString(key[:]))
+	keyText := hex.EncodeToString(key[:])
+	file := keyText + ".json"
+	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:v1:fact:"+keyText)
 	if err != nil {
 		return DocumentFacts{}, err
 	}
 	defer lease.Close()
-	if f, err := os.Open(file); err == nil {
-		raw, readErr := io.ReadAll(io.LimitReader(f, maxFactCacheBytes+1))
-		closeErr := f.Close()
-		if readErr == nil && closeErr == nil && len(raw) <= maxFactCacheBytes {
-			var envelope factEnvelope
-			if json.Unmarshal(raw, &envelope) == nil && envelope.Schema == factSchema && envelope.Parser == ParserRevision && envelope.Mode == mode && envelope.InputSHA256 == digest {
-				payload, _ := json.Marshal(envelope.Facts)
-				sum := sha256.Sum256(payload)
-				if envelope.FactsSHA256 == hex.EncodeToString(sum[:]) {
-					return envelope.Facts, nil
-				}
-			}
+	if facts, ok := readFileFacts(filepath.Join(b.fileFactsDir(), file), mode, digest); ok {
+		return facts, nil
+	}
+	if stage != nil {
+		if facts, ok := readFileFacts(filepath.Join(stage.dir, file), mode, digest); ok {
+			return facts, nil
 		}
 	}
 	facts, err := AnalyzeDocument(ctx, name, data)
@@ -451,39 +486,53 @@ func (b *Browser) fileFacts(ctx context.Context, name string, data []byte, diges
 	// The index writer owns the source-capacity lease. Read-only standalone
 	// analysis may reuse an existing fact cache but must not publish new bytes
 	// while holding the fact-key lease without that shared reservation.
-	if len(reserveCallbacks) == 0 {
+	if stage == nil {
 		return facts, nil
 	}
-	if err := reserveCallbacks[0](int64(len(raw))); err != nil {
+	if err := stage.reserve(int64(len(raw))); err != nil {
 		return facts, err
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return facts, err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(file), ".fact-")
+	return facts, os.WriteFile(filepath.Join(stage.dir, file), raw, 0o600)
+}
+
+func readFileFacts(file, mode, digest string) (DocumentFacts, bool) {
+	f, err := os.Open(file)
 	if err != nil {
-		return facts, err
+		return DocumentFacts{}, false
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return facts, err
+	raw, readErr := io.ReadAll(io.LimitReader(f, maxFactCacheBytes+1))
+	closeErr := f.Close()
+	if readErr != nil || closeErr != nil || len(raw) > maxFactCacheBytes {
+		return DocumentFacts{}, false
 	}
-	if err := tmp.Close(); err != nil {
-		return facts, err
+	var envelope factEnvelope
+	if json.Unmarshal(raw, &envelope) != nil || envelope.Schema != factSchema || envelope.Parser != ParserRevision || envelope.Mode != mode || envelope.InputSHA256 != digest {
+		return DocumentFacts{}, false
 	}
-	if _, err := os.Stat(file); err == nil {
-		if err := os.Remove(file); err != nil {
-			return facts, err
-		}
-	}
-	if err := os.Rename(tmp.Name(), file); err != nil {
-		return facts, err
-	}
-	return facts, nil
+	payload, _ := json.Marshal(envelope.Facts)
+	sum := sha256.Sum256(payload)
+	return envelope.Facts, envelope.FactsSHA256 == hex.EncodeToString(sum[:])
 }
 
 var errIndexNotReady = errors.New("codebase.index_not_ready: run source index with the same snapshot")
+
+func readCacheManifest(dir string) (cacheManifest, error) {
+	f, err := os.Open(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return cacheManifest{}, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
+	closeErr := f.Close()
+	if err != nil || closeErr != nil {
+		return cacheManifest{}, errors.Join(err, closeErr)
+	}
+	if len(raw) > 64<<10 {
+		return cacheManifest{}, fmt.Errorf("%w: codebase.index_manifest_limit", ErrSourceIntegrity)
+	}
+	var manifest cacheManifest
+	err = json.Unmarshal(raw, &manifest)
+	return manifest, err
+}
 
 func (b *Browser) openIndex(ctx context.Context, pin selection.SourcePin) (*snapshotCache, IndexSummary, error) {
 	dir := b.indexPath(pin)
@@ -499,23 +548,11 @@ func (b *Browser) openIndex(ctx context.Context, pin selection.SourcePin) (*snap
 			return c, c.manifest.Summary, nil
 		}
 	}
-	f, err := os.Open(filepath.Join(dir, "manifest.json"))
+	m, err := readCacheManifest(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, IndexSummary{}, errIndexNotReady
 	}
 	if err != nil {
-		return nil, IndexSummary{}, err
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
-	closeErr := f.Close()
-	if err != nil || closeErr != nil {
-		return nil, IndexSummary{}, errors.Join(err, closeErr)
-	}
-	if len(raw) > 64<<10 {
-		return nil, IndexSummary{}, fmt.Errorf("%w: codebase.index_manifest_limit", ErrSourceIntegrity)
-	}
-	var m cacheManifest
-	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, IndexSummary{}, err
 	}
 	if m.Summary.Schema != indexSchema || m.Summary.Storage != "file-cache" || m.Summary.Repository != pin.Repository || m.Summary.Product != pin.Product || m.Summary.Commit != pin.ExactCommit || m.Summary.Parser != pin.ParserRevision {

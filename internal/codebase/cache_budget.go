@@ -220,6 +220,7 @@ type sourceCacheCandidate struct {
 	lock     string
 	kind     string
 	modified time.Time
+	bytes    int64
 }
 
 func (b *Browser) reclaimableSourceCaches(ctx context.Context, protected string) ([]sourceCacheCandidate, error) {
@@ -263,12 +264,75 @@ func (b *Browser) reclaimableSourceCaches(ctx context.Context, protected string)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].modified.Before(result[j].modified) })
-	return result, nil
+	offsets, err := sourceOffsetCandidates(ctx, filepath.Join(root, "facts", "snapshots"), protected)
+	return append(result, offsets...), err
+}
+
+// Offset sidecars duplicate data derived from verified records.jsonl. A
+// missing sidecar is already handled by rebuilding it in memory on read.
+func sourceOffsetCandidates(ctx context.Context, parent, protected string) ([]sourceCacheCandidate, error) {
+	entries, err := os.ReadDir(parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var legacy, current []sourceCacheCandidate
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !entry.IsDir() || !sourceCacheKey.MatchString(entry.Name()) {
+			continue
+		}
+		dir := filepath.Join(parent, entry.Name())
+		if strings.EqualFold(dir, filepath.Clean(protected)) {
+			continue
+		}
+		manifest, err := readCacheManifest(dir)
+		if err != nil {
+			continue
+		}
+		s := manifest.Summary
+		if (s.Schema != indexSchema && s.Schema != "lycheedev.source-map.v2") || s.Storage != "file-cache" ||
+			manifest.DerivedSchema != derivedSchema || manifest.DerivedState != "" || !sourceCacheKey.MatchString(manifest.DerivedHash) ||
+			!sourceCacheKey.MatchString(manifest.RecordsHash) || manifest.DerivedBytes <= 0 || manifest.DerivedBytes > maxDerivedBytes ||
+			sourceIndexKey(s.Schema, s.Repository, s.Product, s.Commit, s.Parser) != entry.Name() {
+			continue
+		}
+		records, err := os.Lstat(filepath.Join(dir, "records.jsonl"))
+		if err != nil || !records.Mode().IsRegular() || records.Size() != manifest.RecordBytes {
+			continue
+		}
+		file := filepath.Join(dir, "offsets.json")
+		info, err := os.Lstat(file)
+		if err != nil || !info.Mode().IsRegular() || info.Size() != manifest.DerivedBytes {
+			continue
+		}
+		candidate := sourceCacheCandidate{path: file, lock: "source:v1:map:" + s.Repository + ":" + s.Commit, kind: "offsets", modified: info.ModTime(), bytes: info.Size()}
+		if s.Schema == indexSchema {
+			current = append(current, candidate)
+		} else {
+			legacy = append(legacy, candidate)
+		}
+	}
+	sort.Slice(legacy, func(i, j int) bool { return legacy[i].modified.Before(legacy[j].modified) })
+	sort.Slice(current, func(i, j int) bool { return current[i].modified.Before(current[j].modified) })
+	return append(legacy, current...), nil
 }
 
 func reclaimSourceCache(ctx context.Context, candidate sourceCacheCandidate) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
+	}
+	if candidate.kind == "offsets" {
+		// A reader may hold an open handle on Windows. An unsuccessful removal
+		// reclaims nothing and leaves this optional cache in place.
+		if err := os.Remove(candidate.path); err != nil {
+			return 0, nil
+		}
+		return candidate.bytes, nil
 	}
 	if candidate.kind == "environments" {
 		entries, err := os.ReadDir(candidate.path)

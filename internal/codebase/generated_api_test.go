@@ -33,11 +33,11 @@ func TestFileFactsCacheSeparatesGeneratedAPIParserMode(t *testing.T) {
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
 	ctx := context.Background()
-	ordinary, err := b.fileFacts(ctx, "Other/Unit.lua", data, digest)
+	ordinary, err := b.fileFacts(ctx, "Other/Unit.lua", data, digest, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	generated, err := b.fileFacts(ctx, "Interface/AddOns/Blizzard_APIDocumentationGenerated/Unit.lua", data, digest)
+	generated, err := b.fileFacts(ctx, "Interface/AddOns/Blizzard_APIDocumentationGenerated/Unit.lua", data, digest, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -58,6 +58,8 @@ Retail 12.1.5.70391 对应 `live` 固定提交 `18c6d677b605b312f3d813d498404631
 
 `source batch` 接收至多 64 KiB 的文件，包含 1–32 项 query、refs 或 context。整批共享 90 秒期限和请求级 LuaLS worker，保留输入顺序；每项各自返回 coverage、complete、truncated 和 cursor。部分条目失败不能被当作整批成功。显式 `session-reuse` 才复用跨请求 worker。
 
+`source/v1` 的 4 GiB 容量上限按文件逻辑大小计入索引、逐文件事实、环境、语义缓存、检出目录和暂存写入。容量不足时可回收空闲的环境、语义缓存和可重建的偏移表，旧格式偏移表优先。索引发布成功后才共享本次新增的逐文件事实。Git 镜像、固定 PIN 和证据位于独立的存储范围。`source prune --target-bytes` 的统计和回收范围限于工作树。
+
 语义结果注明引擎及覆盖范围。`static-only` 保留静态证据；未知调用和条件传播不能证明 secret 值使用安全。
 
 ## Data、Hotfix 与资源
